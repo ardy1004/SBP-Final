@@ -145,6 +145,21 @@
 - `generateSeoSlug()` & `generateKodeListing()` belum diimplementasi — masuk Fase D saat form admin aktif
 - Enkripsi AES untuk `nik` owners — masuk Fase H (keamanan)
 
+### ⚠️ TODO PRODUKSI (wajib sebelum go-live)
+
+Langkah-langkah ini **belum** dilakukan dan harus diselesaikan sebelum deploy ke production:
+
+| # | Item | Perintah / Tindakan |
+|---|------|---------------------|
+| a | **Kunci CORS** dari `*` ke domain resmi | Edit `functions/_middleware.js`: ganti `'Access-Control-Allow-Origin': '*'` → `'https://salambumi.xyz'` (dan `Access-Control-Allow-Credentials: true`) |
+| b | **Set JWT_SECRET production** | `wrangler secret put JWT_SECRET` (isi dengan string acak ≥ 32 karakter, simpan di password manager) |
+| c | **Apply migrasi 0004 ke remote** | `wrangler d1 execute sbp-db --remote --file=migrations/0004_login_rate_limits.sql` |
+| d | **Ganti data dummy dengan data nyata** | Via Admin Dashboard (Fase G): tambah listing nyata, hapus/tandai dummy sebagai draft, upload foto asli ke R2 |
+| e | **Aktifkan flag `Secure` di cookie** | Edit `functions/api/_shared/jwt.js`: uncomment baris `'Secure'` di `makeSessionCookie()` |
+| f | **Ganti password admin seed** | Via `POST /api/admin/login` (baru ada endpoint-nya) → tambah endpoint `PUT /api/admin/password` di Fase G |
+
+---
+
 ### Fase-fase berikutnya setelah C:
 - **Fase D:** Ganti mock UI → real API (sambungkan komponen ke endpoint Workers)
 - **Fase E:** SSR/Edge Rendering (K1 — kritis untuk programmatic SEO)

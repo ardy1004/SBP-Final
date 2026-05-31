@@ -13,6 +13,15 @@ dist-ssr/
 !.env.example
 .dev.vars
 
+# File uji curl (curl -c / curl -b / body sementara)
+cookies.txt
+login.json
+login-bad.json
+lead.json
+lead-bad.json
+*-test.json
+*-bad.json
+
 # Cloudflare local development
 .wrangler/
 wrangler.toml.local
