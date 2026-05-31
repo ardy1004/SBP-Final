@@ -1,18 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router';
-import { MapPin, Eye, Calendar, Share2, Download, Heart, BedDouble, Bath, Maximize2, ChevronLeft, ChevronRight, X, MessageCircle, Star, TrendingUp, Clock, BarChart2 } from 'lucide-react';
+import { MapPin, Eye, Calendar, Share2, Heart, BedDouble, Bath, Maximize2, ChevronLeft, ChevronRight, X, MessageCircle, Star, TrendingUp, Clock, BarChart2, Home, Search } from 'lucide-react';
 import useEmblaCarousel from 'embla-carousel-react';
-import { PROPERTIES, formatRupiah, formatRupiahFull } from '../data/mockData';
+import {
+  getPropertyBySlug, getProperties, normalizeProperty, normalizePropertyDetail,
+  type NormalizedPropertyDetail, type NormalizedProperty, type InvestmentIntelligence,
+  formatRupiah, formatRupiahFull,
+} from '../../lib/api';
 import KPRCalculator from './KPRCalculator';
 import PropertyCard from './PropertyCard';
+import { Skeleton } from './ui/skeleton';
 
-function InvestmentPanel({ income, pengeluaran, harga }: { income: number; pengeluaran: number; harga: number }) {
-  const net = income - pengeluaran;
-  const yieldPct = (net * 12 / harga * 100).toFixed(1);
-  const payback = (harga / (net * 12)).toFixed(1);
-  const capRate = (income * 12 / harga * 100).toFixed(1);
-  const stars = parseFloat(yieldPct) > 8 ? 5 : parseFloat(yieldPct) > 6 ? 4 : parseFloat(yieldPct) > 4 ? 3 : 2;
-
+// ─────────────────────────────────────────────────────────────────────────────
+// Investment Intelligence Panel — pakai nilai pre-computed dari API
+// ─────────────────────────────────────────────────────────────────────────────
+function InvestmentPanel({ ii }: { ii: InvestmentIntelligence }) {
+  const stars = ii.skor_investasi;
   return (
     <div className="rounded-2xl p-6 my-6" style={{ background: 'linear-gradient(160deg, #0B2447 0%, #1565C0 100%)' }}>
       <div className="flex items-center justify-between mb-4">
@@ -25,9 +28,9 @@ function InvestmentPanel({ income, pengeluaran, harga }: { income: number; penge
       </div>
       <div className="grid grid-cols-3 gap-3 mb-5">
         {[
-          { label: 'YIELD/TAHUN', value: `${yieldPct}%`, color: '#F5A623' },
-          { label: 'PAYBACK', value: `~${payback} thn`, color: '#29B6F6' },
-          { label: 'CAP RATE', value: `${capRate}%`, color: '#10B981' },
+          { label: 'YIELD/TAHUN', value: `${ii.yield_persen.toFixed(1)}%`,   color: '#F5A623' },
+          { label: 'PAYBACK',     value: `~${ii.payback_tahun.toFixed(1)} thn`, color: '#29B6F6' },
+          { label: 'CAP RATE',   value: `${ii.cap_rate_persen.toFixed(1)}%`, color: '#10B981' },
         ].map(({ label, value, color }) => (
           <div key={label} className="text-center">
             <div className="text-xl font-bold font-display" style={{ color }}>{value}</div>
@@ -36,16 +39,16 @@ function InvestmentPanel({ income, pengeluaran, harga }: { income: number; penge
         ))}
       </div>
       <div className="text-xs text-white/70 mb-3">
-        Income bersih/bln: <span className="text-white font-semibold">{formatRupiah(net)}</span> ·
-        Income/tahun: <span className="text-white font-semibold">{formatRupiah(net * 12)}</span>
+        Income bersih/bln: <span className="text-white font-semibold">{formatRupiah(ii.income_bersih_per_bulan)}</span> ·
+        Income/tahun: <span className="text-white font-semibold">{formatRupiah(ii.income_bersih_per_tahun)}</span>
       </div>
       <div className="mb-1">
         <div className="text-xs text-white/50 mb-1">Yield vs Deposito (3%)</div>
         <div className="flex items-center gap-2">
           <div className="flex-1 bg-white/10 rounded-full h-2.5 overflow-hidden">
-            <div className="h-full bg-[#F5A623] rounded-full" style={{ width: `${Math.min(parseFloat(yieldPct) / 15 * 100, 100)}%` }} />
+            <div className="h-full bg-[#F5A623] rounded-full" style={{ width: `${Math.min(ii.yield_persen / 15 * 100, 100)}%` }} />
           </div>
-          <span className="text-[#F5A623] text-xs font-bold">{yieldPct}%</span>
+          <span className="text-[#F5A623] text-xs font-bold">{ii.yield_persen.toFixed(1)}%</span>
         </div>
       </div>
       <p className="text-[10px] text-white/40 mt-3">*Estimasi berdasarkan data yang diberikan pemilik, bukan jaminan imbal hasil.</p>
@@ -53,7 +56,11 @@ function InvestmentPanel({ income, pengeluaran, harga }: { income: number; penge
   );
 }
 
-function LeadForm({ property }: { property: typeof PROPERTIES[0] }) {
+// ─────────────────────────────────────────────────────────────────────────────
+// LeadForm — Tugas 4: tipe diperbarui ke NormalizedPropertyDetail.
+// K6 (POST /api/leads sebelum buka WA) dikerjakan di Tugas 5.
+// ─────────────────────────────────────────────────────────────────────────────
+function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
   const [tipe, setTipe] = useState('');
   const [nama, setNama] = useState('');
   const [asal, setAsal] = useState('');
@@ -65,7 +72,7 @@ function LeadForm({ property }: { property: typeof PROPERTIES[0] }) {
   const isValid = tipe && nama && asal && (tipe !== 'pembeli' || (budget && rencana));
 
   const buildWaMsg = () => {
-    const link = `https://salambumi.xyz/dijual/${property.jenis.toLowerCase()}/${property.slug}`;
+    const link = `https://salambumi.xyz/${property.tujuan === 'disewa' ? 'disewa' : 'dijual'}/${property.jenis.toLowerCase()}/${property.slug}`;
     if (tipe === 'pembeli') {
       return encodeURIComponent(
         `Halo Monica Vera S!\nSaya tertarik dengan properti: ${property.title}\n${link}\n\nSaya Adalah Calon Pembeli\nNama: ${nama}\nAsal Daerah: ${asal}\nEstimasi Budget: ${budget}\nRencana Pembayaran: ${rencana}\nPesan: ${pesan || '-'}\nMohon informasi lebih lanjut.`
@@ -77,8 +84,7 @@ function LeadForm({ property }: { property: typeof PROPERTIES[0] }) {
   const handleWA = () => {
     if (!isValid) return;
     setSubmitted(true);
-    const waNum = '6281391278889';
-    window.open(`https://wa.me/${waNum}?text=${buildWaMsg()}`, '_blank');
+    window.open(`https://wa.me/6281391278889?text=${buildWaMsg()}`, '_blank');
   };
 
   const inputClass = "w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0] transition-all";
@@ -104,7 +110,6 @@ function LeadForm({ property }: { property: typeof PROPERTIES[0] }) {
 
       <h4 className="font-semibold text-[#0F172A] mb-4 text-sm">Kirim Pesan ke Admin</h4>
 
-      {/* Tipe Dropdown */}
       <div className="mb-4">
         <label className="block text-xs font-semibold text-[#64748B] mb-1">Beritahu Kami Siapakah Anda?</label>
         <select value={tipe} onChange={e => setTipe(e.target.value)} className={inputClass}>
@@ -170,9 +175,7 @@ function LeadForm({ property }: { property: typeof PROPERTIES[0] }) {
         onClick={handleWA}
         disabled={!isValid}
         className={`w-full py-3.5 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all duration-200 ${
-          isValid
-            ? 'bg-[#10B981] hover:bg-[#059669] shadow-md'
-            : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+          isValid ? 'bg-[#10B981] hover:bg-[#059669] shadow-md' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
         }`}
       >
         <MessageCircle size={18} />
@@ -184,10 +187,91 @@ function LeadForm({ property }: { property: typeof PROPERTIES[0] }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Skeleton loading — mirip layout halaman detail
+// ─────────────────────────────────────────────────────────────────────────────
+function DetailSkeleton() {
+  return (
+    <div className="pt-16 min-h-screen" style={{ background: '#F0F4F8' }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <Skeleton className="h-4 w-80 mb-5" />
+        <div className="flex gap-6 flex-col lg:flex-row">
+          <div className="flex-1 min-w-0">
+            <Skeleton className="w-full rounded-2xl mb-5" style={{ paddingTop: '56.25%', display: 'block' }} />
+            <div className="flex gap-2 mb-4">
+              {[80, 60, 100, 90].map((w, i) => <Skeleton key={i} className="h-6 rounded-full" style={{ width: w }} />)}
+            </div>
+            <div className="bg-white rounded-2xl p-5 mb-5">
+              <Skeleton className="h-3 w-32 mb-2" />
+              <Skeleton className="h-7 w-full mb-1" />
+              <Skeleton className="h-7 w-3/4 mb-4" />
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {[1,2,3,4,5].map(i => <Skeleton key={i} className="h-16 rounded-xl" />)}
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl p-5 mb-5">
+              <Skeleton className="h-5 w-40 mb-3" />
+              <Skeleton className="h-4 w-full mb-2" />
+              <Skeleton className="h-4 w-full mb-2" />
+              <Skeleton className="h-4 w-3/4" />
+            </div>
+          </div>
+          <div className="w-full lg:w-80 xl:w-96 flex-shrink-0">
+            <div className="bg-white rounded-2xl p-5 mb-4">
+              <Skeleton className="h-9 w-48 mb-2" />
+              <Skeleton className="h-4 w-24 mb-4" />
+              <Skeleton className="h-12 w-full rounded-xl" />
+            </div>
+            <div className="bg-white rounded-2xl p-5">
+              <Skeleton className="h-14 w-full rounded-xl mb-4" />
+              <Skeleton className="h-10 w-full rounded-xl mb-3" />
+              <Skeleton className="h-10 w-full rounded-xl mb-3" />
+              <Skeleton className="h-12 w-full rounded-xl" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 404 inline — slug tidak ditemukan di DB
+// ─────────────────────────────────────────────────────────────────────────────
+function PropertyNotFound() {
+  return (
+    <div className="pt-16 min-h-screen flex items-center justify-center px-4" style={{ background: '#F0F4F8' }}>
+      <div className="text-center max-w-md">
+        <div className="text-8xl font-bold font-display text-[#E2E8F0] mb-2">404</div>
+        <div className="text-5xl mb-4">🏚️</div>
+        <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Properti Tidak Ditemukan</h1>
+        <p className="text-[#64748B] mb-8 leading-relaxed">
+          Properti yang Anda cari tidak tersedia atau sudah tidak tayang. Mungkin sudah terjual atau URL berubah.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+          <Link to="/" className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-white"
+            style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+            <Home size={16} /> Ke Beranda
+          </Link>
+          <Link to="/properties" className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-[#1565C0] border border-[#1565C0] hover:bg-[#E3F2FD] transition-colors">
+            <Search size={16} /> Lihat Properti
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main Component
+// ─────────────────────────────────────────────────────────────────────────────
 export default function PropertyDetailPage() {
-  const params = useParams();
-  const slug = params.slug;
-  const property = PROPERTIES.find(p => p.slug === slug) || PROPERTIES[0];
+  const { slug } = useParams<{ slug: string }>();
+
+  const [property, setProperty] = useState<NormalizedPropertyDetail | null>(null);
+  const [similar, setSimilar] = useState<NormalizedProperty[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
 
   const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true });
   const [currentImg, setCurrentImg] = useState(0);
@@ -196,37 +280,70 @@ export default function PropertyDetailPage() {
   const formRef = useRef<HTMLDivElement>(null);
   const [showStickyBar, setShowStickyBar] = useState(true);
 
+  // Sync carousel index
   useEffect(() => {
     if (!emblaApi) return;
     emblaApi.on('select', () => setCurrentImg(emblaApi.selectedScrollSnap()));
   }, [emblaApi]);
 
+  // Sticky bar — hide when form is visible
   useEffect(() => {
     const observer = new IntersectionObserver(([e]) => setShowStickyBar(!e.isIntersecting), { threshold: 0.3 });
     if (formRef.current) observer.observe(formRef.current);
     return () => observer.disconnect();
-  }, []);
+  }, [property]); // re-attach after property loads
 
-  const similar = PROPERTIES.filter(p => p.id !== property.id &&
-    (p.kabupaten === property.kabupaten || p.jenis === property.jenis) &&
-    !p.status_sold
-  ).slice(0, 4);
+  // Fetch detail + similar
+  useEffect(() => {
+    if (!slug) { setNotFound(true); setLoading(false); return; }
+    setLoading(true);
+    setNotFound(false);
+    setProperty(null);
+    setSimilar([]);
 
-  const hargaPerM2 = property.luas_tanah ? Math.round(property.harga / property.luas_tanah) : null;
+    getPropertyBySlug(slug).then(res => {
+      if (res.success && res.data) {
+        const normalized = normalizePropertyDetail(res.data);
+        setProperty(normalized);
+
+        // Ambil properti serupa berdasarkan kabupaten (non-blocking)
+        getProperties({ kabupaten: normalized.kabupaten, limit: 5 })
+          .then(simRes => {
+            if (simRes.success && simRes.data) {
+              setSimilar(
+                simRes.data.items
+                  .map(normalizeProperty)
+                  .filter(p => p.id !== normalized.id)
+                  .slice(0, 4)
+              );
+            }
+          });
+      } else {
+        setNotFound(true);
+      }
+    }).catch(() => setNotFound(true))
+      .finally(() => setLoading(false));
+  }, [slug]);
+
+  if (loading) return <DetailSkeleton />;
+  if (notFound || !property) return <PropertyNotFound />;
+
+  const images = property.images.length > 0 ? property.images : [''];
+  const hargaPerM2 = property.harga_per_m2 ?? (property.luas_tanah ? Math.round(property.harga / property.luas_tanah) : null);
 
   const breadcrumbParts = [
     { label: 'Home', href: '/' },
     { label: 'Properties', href: '/properties' },
     { label: property.jenis, href: `/properties?jenis=${property.jenis.toLowerCase()}` },
-    { label: property.provinsi, href: `/properties?provinsi=${property.provinsi}` },
-    { label: property.kabupaten, href: `/properties?kabupaten=${property.kabupaten}` },
-    { label: property.kecamatan, href: `/properties?kecamatan=${property.kecamatan}` },
+    { label: property.kabupaten, href: `/properties?kabupaten=${encodeURIComponent(property.kabupaten)}` },
+    { label: property.kecamatan, href: `/properties?kecamatan=${encodeURIComponent(property.kecamatan)}` },
     { label: property.title, href: '' },
   ];
 
   return (
     <div className="pt-16 min-h-screen" style={{ background: '#F0F4F8' }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
         {/* Breadcrumb */}
         <nav className="flex items-center gap-1 text-xs text-[#64748B] mb-5 flex-wrap">
           {breadcrumbParts.map((part, i) => (
@@ -242,31 +359,46 @@ export default function PropertyDetailPage() {
         </nav>
 
         <div className="flex gap-6 items-start flex-col lg:flex-row">
-          {/* Main Content */}
+
+          {/* ── Main Content ── */}
           <div className="flex-1 min-w-0">
+
             {/* Gallery */}
             <div className="bg-white rounded-2xl overflow-hidden shadow-sm mb-5 relative">
               <div ref={emblaRef} className="overflow-hidden">
                 <div className="flex">
-                  {property.images.map((img, i) => (
-                    <div key={i} className="flex-none w-full relative cursor-zoom-in" style={{ paddingTop: '56.25%' }} onClick={() => { setCurrentImg(i); setLightbox(true); }}>
-                      <img src={img} alt={`${property.title} ${i + 1}`} className="absolute inset-0 w-full h-full object-cover"
-                        onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80'; }} />
+                  {images.map((img, i) => (
+                    <div
+                      key={i}
+                      className="flex-none w-full relative cursor-zoom-in"
+                      style={{ paddingTop: '56.25%' }}
+                      onClick={() => { setCurrentImg(i); setLightbox(true); }}
+                    >
+                      <img
+                        src={img}
+                        alt={`${property.title} ${i + 1}`}
+                        className="absolute inset-0 w-full h-full object-cover"
+                        onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80'; }}
+                      />
                     </div>
                   ))}
                 </div>
               </div>
-              <button onClick={() => emblaApi?.scrollPrev()} className="absolute left-3 top-1/2 -translate-y-1/2 p-2 bg-black/40 text-white rounded-full hover:bg-black/60">
-                <ChevronLeft size={16} />
-              </button>
-              <button onClick={() => emblaApi?.scrollNext()} className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-black/40 text-white rounded-full hover:bg-black/60">
-                <ChevronRight size={16} />
-              </button>
-              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
-                {property.images.map((_, i) => (
-                  <div key={i} className={`h-1.5 rounded-full transition-all ${i === currentImg ? 'w-5 bg-white' : 'w-1.5 bg-white/50'}`} />
-                ))}
-              </div>
+              {images.length > 1 && (
+                <>
+                  <button onClick={() => emblaApi?.scrollPrev()} className="absolute left-3 top-1/2 -translate-y-1/2 p-2 bg-black/40 text-white rounded-full hover:bg-black/60">
+                    <ChevronLeft size={16} />
+                  </button>
+                  <button onClick={() => emblaApi?.scrollNext()} className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-black/40 text-white rounded-full hover:bg-black/60">
+                    <ChevronRight size={16} />
+                  </button>
+                  <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
+                    {images.map((_, i) => (
+                      <div key={i} className={`h-1.5 rounded-full transition-all ${i === currentImg ? 'w-5 bg-white' : 'w-1.5 bg-white/50'}`} />
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Badge Row */}
@@ -290,11 +422,11 @@ export default function PropertyDetailPage() {
               {/* Quick Specs */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {[
-                  property.luas_tanah ? { icon: Maximize2, label: 'Luas Tanah', value: `${property.luas_tanah} m²` } : null,
+                  property.luas_tanah    ? { icon: Maximize2, label: 'Luas Tanah',    value: `${property.luas_tanah} m²`    } : null,
                   property.luas_bangunan ? { icon: Maximize2, label: 'Luas Bangunan', value: `${property.luas_bangunan} m²` } : null,
-                  property.kamar_tidur ? { icon: BedDouble, label: 'Kamar Tidur', value: `${property.kamar_tidur} kamar` } : null,
-                  property.kamar_mandi ? { icon: Bath, label: 'Kamar Mandi', value: `${property.kamar_mandi} kamar` } : null,
-                  property.lantai ? { icon: BarChart2, label: 'Lantai', value: `${property.lantai} lantai` } : null,
+                  property.kamar_tidur   ? { icon: BedDouble, label: 'Kamar Tidur',   value: `${property.kamar_tidur} kamar`  } : null,
+                  property.kamar_mandi   ? { icon: Bath,      label: 'Kamar Mandi',   value: `${property.kamar_mandi} kamar`  } : null,
+                  property.lantai        ? { icon: BarChart2, label: 'Lantai',         value: `${property.lantai} lantai`      } : null,
                 ].filter(Boolean).map((spec) => spec && (
                   <div key={spec.label} className="bg-[#F0F4F8] rounded-xl p-3 flex items-center gap-2">
                     <spec.icon size={16} className="text-[#1565C0] flex-shrink-0" />
@@ -318,16 +450,16 @@ export default function PropertyDetailPage() {
               <div className="mt-4 p-4 bg-[#F0F4F8] rounded-xl">
                 <p className="text-sm text-[#64748B] leading-relaxed">
                   Properti {property.jenis.toLowerCase()} ini berlokasi di {property.kecamatan}, {property.kabupaten}, salah satu kawasan strategis di {property.provinsi}.
-                  {property.luas_tanah && ` Dengan luas tanah ${property.luas_tanah} m²`}
-                  {property.kamar_tidur && ` dan ${property.kamar_tidur} kamar tidur`}, properti ini {property.tujuan === 'dijual' ? 'dijual' : property.tujuan === 'disewa' ? 'disewakan' : 'dijual dan disewakan'} dengan harga {formatRupiah(property.harga)}.
-                  {property.income_per_bulan && ` Sangat cocok untuk investasi dengan income potensial ${formatRupiah(property.income_per_bulan)} per bulan.`}
+                  {property.luas_tanah ? ` Dengan luas tanah ${property.luas_tanah} m²` : ''}
+                  {property.kamar_tidur ? ` dan ${property.kamar_tidur} kamar tidur` : ''}, properti ini {property.tujuan === 'dijual' ? 'dijual' : property.tujuan === 'disewa' ? 'disewakan' : 'dijual dan disewakan'} dengan harga {formatRupiah(property.harga)}.
+                  {property.income_per_bulan ? ` Sangat cocok untuk investasi dengan income potensial ${formatRupiah(property.income_per_bulan)} per bulan.` : ''}
                 </p>
               </div>
             </div>
 
-            {/* Investment Intelligence */}
-            {property.income_per_bulan && property.pengeluaran_per_bulan && (
-              <InvestmentPanel income={property.income_per_bulan} pengeluaran={property.pengeluaran_per_bulan} harga={property.harga} />
+            {/* Investment Intelligence — dari API */}
+            {property.investment_intelligence && (
+              <InvestmentPanel ii={property.investment_intelligence} />
             )}
 
             {/* KPR Calculator */}
@@ -337,20 +469,26 @@ export default function PropertyDetailPage() {
               </div>
             )}
 
-            {/* Location Map Placeholder */}
+            {/* Lokasi — lat/lng dari API */}
             <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm">
               <h2 className="font-display font-bold text-[#0F172A] mb-3">📍 Lokasi Properti</h2>
               <div className="bg-[#E3F2FD] rounded-xl h-48 flex flex-col items-center justify-center gap-2">
                 <MapPin size={32} className="text-[#1565C0]" />
                 <p className="text-[#1565C0] font-semibold text-sm">{property.kecamatan}, {property.kabupaten}</p>
-                <a href={`https://maps.google.com?q=${property.latitude},${property.longitude}`} target="_blank" rel="noopener noreferrer"
-                  className="text-xs text-[#1565C0] underline hover:text-[#1E88E5]">
-                  Buka di Google Maps ↗
-                </a>
+                {(property.latitude || property.gmaps_link) && (
+                  <a
+                    href={property.gmaps_link ?? `https://maps.google.com?q=${property.latitude},${property.longitude}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-[#1565C0] underline hover:text-[#1E88E5]"
+                  >
+                    Buka di Google Maps ↗
+                  </a>
+                )}
               </div>
             </div>
 
-            {/* Video */}
+            {/* Video YouTube jika ada */}
             {property.video_youtube && (
               <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm">
                 <h2 className="font-display font-bold text-[#0F172A] mb-3">🎬 Video Properti</h2>
@@ -360,14 +498,15 @@ export default function PropertyDetailPage() {
               </div>
             )}
 
-            {/* Mobile Form */}
+            {/* Lead Form — Mobile */}
             <div className="lg:hidden mb-6" ref={formRef}>
               <LeadForm property={property} />
             </div>
           </div>
 
-          {/* SIDEBAR RIGHT */}
+          {/* ── Sidebar Kanan ── */}
           <aside className="w-full lg:w-80 xl:w-96 flex-shrink-0 lg:sticky lg:top-20">
+
             {/* Harga Box */}
             <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 mb-4">
               <div className="flex items-start justify-between mb-1">
@@ -380,11 +519,16 @@ export default function PropertyDetailPage() {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => setFavorited(!favorited)} className={`p-2 rounded-xl border transition-colors ${favorited ? 'bg-red-50 border-red-200 text-red-500' : 'border-gray-200 text-gray-400 hover:text-red-500'}`}>
+                  <button
+                    onClick={() => setFavorited(!favorited)}
+                    className={`p-2 rounded-xl border transition-colors ${favorited ? 'bg-red-50 border-red-200 text-red-500' : 'border-gray-200 text-gray-400 hover:text-red-500'}`}
+                  >
                     <Heart size={16} fill={favorited ? 'currentColor' : 'none'} />
                   </button>
-                  <button onClick={() => { if (navigator.share) navigator.share({ title: property.title, url: window.location.href }); }}
-                    className="p-2 rounded-xl border border-gray-200 text-gray-400 hover:text-[#1565C0] transition-colors">
+                  <button
+                    onClick={() => { if (navigator.share) navigator.share({ title: property.title, url: window.location.href }); }}
+                    className="p-2 rounded-xl border border-gray-200 text-gray-400 hover:text-[#1565C0] transition-colors"
+                  >
                     <Share2 size={16} />
                   </button>
                 </div>
@@ -396,31 +540,30 @@ export default function PropertyDetailPage() {
               </div>
               <div className="flex items-center justify-between text-xs text-gray-400 pt-3 border-t border-gray-100">
                 <div className="flex items-center gap-1"><Eye size={12} /> Dilihat {property.views_count.toLocaleString()} kali</div>
-                <div className="flex items-center gap-1"><Calendar size={12} /> {property.updated_at}</div>
+                <div className="flex items-center gap-1"><Calendar size={12} /> {property.updated_at?.slice(0, 10) ?? ''}</div>
               </div>
             </div>
 
-            {/* Lead Form - Desktop */}
+            {/* Lead Form — Desktop */}
             <div className="hidden lg:block" ref={formRef}>
               <LeadForm property={property} />
             </div>
           </aside>
         </div>
 
-        {/* Smart Suggestion */}
+        {/* Smart Suggestion — properti serupa dari API */}
         {similar.length > 0 && (
           <section className="mt-12 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-12 rounded-2xl" style={{ background: '#E3F2FD' }}>
             <div className="text-center mb-8">
               <span className="text-xs text-[#1565C0] font-semibold block mb-2">🔍 REKOMENDASI CERDAS</span>
               <h2 className="font-display text-2xl font-bold text-[#0F172A]">Properti Serupa yang Mungkin Anda Suka</h2>
-              <p className="text-[#64748B] text-sm mt-1">Dipilih otomatis berdasarkan lokasi, harga, dan jenis properti yang serupa</p>
+              <p className="text-[#64748B] text-sm mt-1">Dipilih otomatis berdasarkan lokasi dan jenis properti yang serupa</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
               {similar.map(p => {
-                let reason = '🏠 Jenis Sama';
-                if (p.kecamatan === property.kecamatan) reason = '🏘️ Kecamatan Sama';
-                else if (p.kabupaten === property.kabupaten) reason = '📍 Kabupaten Sama';
-                else if (Math.abs(p.harga - property.harga) / property.harga <= 0.2) reason = '💰 Harga Serupa';
+                const reason = p.kecamatan === property.kecamatan ? '🏘️ Kecamatan Sama'
+                  : p.kabupaten === property.kabupaten ? '📍 Kabupaten Sama'
+                  : '🏠 Jenis Sama';
                 return (
                   <div key={p.id} className="relative">
                     <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
@@ -428,7 +571,7 @@ export default function PropertyDetailPage() {
                         {reason}
                       </span>
                     </div>
-                    <PropertyCard property={p} className="mt-3" />
+                    <PropertyCard property={p as any} className="mt-3" />
                   </div>
                 );
               })}
@@ -437,7 +580,7 @@ export default function PropertyDetailPage() {
         )}
       </div>
 
-      {/* STICKY BOTTOM BAR (Mobile) */}
+      {/* Sticky Bottom Bar (Mobile) */}
       {showStickyBar && (
         <div className="sticky-bottom-bar fixed bottom-0 left-0 right-0 z-40 lg:hidden bg-white border-t border-gray-200 shadow-lg px-4 py-3">
           <div className="flex items-center justify-between max-w-lg mx-auto">
@@ -461,7 +604,7 @@ export default function PropertyDetailPage() {
           <button onClick={() => setLightbox(false)} className="absolute top-4 right-4 p-2 text-white hover:text-gray-300">
             <X size={24} />
           </button>
-          <img src={property.images[currentImg]} alt="" className="max-w-full max-h-full object-contain rounded-xl" />
+          <img src={images[currentImg]} alt="" className="max-w-full max-h-full object-contain rounded-xl" />
         </div>
       )}
     </div>
