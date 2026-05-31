@@ -2,8 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router';
 import { Search, ChevronDown, ChevronLeft, ChevronRight, Star, ArrowRight, Shield, CheckCircle, Scale, Handshake, TrendingUp, Clock, BarChart2, AlertCircle, RefreshCw } from 'lucide-react';
 import useEmblaCarousel from 'embla-carousel-react';
-import { TESTIMONIALS, BLOG_POSTS, LOCATION_HIERARCHY } from '../data/mockData';
-import { getProperties, normalizeProperty, type NormalizedProperty, formatRupiah } from '../../lib/api';
+import { LOCATION_HIERARCHY } from '../data/mockData';
+import {
+  getProperties, normalizeProperty, type NormalizedProperty, formatRupiah,
+  getTestimonials, type ApiTestimonial,
+  getBlogPosts, type ApiBlogPost,
+} from '../../lib/api';
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
 
@@ -198,8 +202,40 @@ function FeaturedBanner({ items }: { items: NormalizedProperty[] }) {
   );
 }
 
+/* ── SKELETON: TESTIMONI ── */
+function SkeletonTestimonials() {
+  return (
+    <section style={{ background: 'linear-gradient(180deg, #E3F2FD 0%, #F0F9FF 100%)' }} className="py-16">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center mb-10">
+          <Skeleton className="h-5 w-28 mx-auto mb-3 rounded-full" />
+          <Skeleton className="h-8 w-56 mx-auto" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="bg-white rounded-2xl p-7">
+              <div className="flex items-center gap-3 mb-4">
+                <Skeleton className="w-12 h-12 rounded-full flex-shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
+              </div>
+              <Skeleton className="h-3 w-24 mb-3" />
+              <Skeleton className="h-3 w-full mb-1" />
+              <Skeleton className="h-3 w-full mb-1" />
+              <Skeleton className="h-3 w-4/5 mb-4" />
+              <Skeleton className="h-6 w-28 rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ── TESTIMONIALS ── */
-function TestimonialsSection() {
+function TestimonialsSection({ items }: { items: ApiTestimonial[] }) {
   const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true, align: 'start' });
   const [current, setCurrent] = useState(0);
 
@@ -210,6 +246,16 @@ function TestimonialsSection() {
     const timer = setInterval(() => emblaApi.scrollNext(), 5000);
     return () => { clearInterval(timer); emblaApi.off('select', onSelect); };
   }, [emblaApi]);
+
+  if (items.length === 0) {
+    return (
+      <section style={{ background: 'linear-gradient(180deg, #E3F2FD 0%, #F0F9FF 100%)' }} className="py-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <p className="text-[#64748B]">Belum ada testimoni.</p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section style={{ background: 'linear-gradient(180deg, #E3F2FD 0%, #F0F9FF 100%)' }} className="py-16">
@@ -223,19 +269,19 @@ function TestimonialsSection() {
 
         <div className="overflow-hidden" ref={emblaRef}>
           <div className="flex gap-5">
-            {TESTIMONIALS.map((t) => (
+            {items.map((t) => (
               <div key={t.id} className="flex-none w-full sm:w-[calc(50%-10px)] lg:w-[calc(33.33%-14px)]">
                 <div className="bg-white rounded-2xl p-7 shadow-sm h-full relative" style={{ boxShadow: '0 4px 20px rgba(11,36,71,0.08)' }}>
                   <span className="absolute top-4 left-5 text-7xl font-serif text-[#29B6F6] opacity-20 leading-none select-none">"</span>
                   <div className="flex items-center gap-3 mb-4 relative z-10">
                     <img
-                      src={t.foto}
-                      alt={t.nama}
+                      src={t.foto_url ?? ''}
+                      alt={t.nama_klien}
                       className="w-12 h-12 rounded-full object-cover border-2 border-[#1565C0]"
                       onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&q=80'; }}
                     />
                     <div>
-                      <div className="font-semibold text-[#0F172A] text-sm">{t.nama}</div>
+                      <div className="font-semibold text-[#0F172A] text-sm">{t.nama_klien}</div>
                       <div className="text-[#64748B] text-xs">{t.lokasi}</div>
                     </div>
                   </div>
@@ -244,7 +290,7 @@ function TestimonialsSection() {
                       <Star key={i} size={14} fill="#F5A623" className="text-[#F5A623]" />
                     ))}
                   </div>
-                  <p className="text-[#0F172A] text-sm italic leading-relaxed mb-4">"{t.isi}"</p>
+                  <p className="text-[#0F172A] text-sm italic leading-relaxed mb-4">"{t.isi_testimoni}"</p>
                   <span className="inline-block px-3 py-1 bg-[#E3F2FD] text-[#1565C0] text-xs rounded-full font-medium">
                     {t.jenis_transaksi}
                   </span>
@@ -261,7 +307,7 @@ function TestimonialsSection() {
           >
             <ChevronLeft size={18} />
           </button>
-          {TESTIMONIALS.map((_, i) => (
+          {items.map((_, i) => (
             <button
               key={i}
               onClick={() => emblaApi?.scrollTo(i)}
@@ -418,6 +464,12 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [testimonials, setTestimonials] = useState<ApiTestimonial[]>([]);
+  const [testimonialsLoading, setTestimonialsLoading] = useState(true);
+
+  const [blogPosts, setBlogPosts] = useState<ApiBlogPost[]>([]);
+  const [blogLoading, setBlogLoading] = useState(true);
+
   const fetchProperties = () => {
     setLoading(true);
     setError(null);
@@ -433,7 +485,17 @@ export default function HomePage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchProperties(); }, []);
+  useEffect(() => {
+    fetchProperties();
+
+    getTestimonials()
+      .then(res => { if (res.success && res.data) setTestimonials(res.data.items); })
+      .finally(() => setTestimonialsLoading(false));
+
+    getBlogPosts({ limit: 3 })
+      .then(res => { if (res.success && res.data) setBlogPosts(res.data.items); })
+      .finally(() => setBlogLoading(false));
+  }, []);
 
   // Turunan dari data yang sudah di-fetch
   const featuredItems = properties.filter(p => p.properti_pilihan);
@@ -631,8 +693,11 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* TESTIMONIALS — masih mock, akan diganti Tugas 2 */}
-      <TestimonialsSection />
+      {/* TESTIMONIALS — data dari GET /api/testimonials */}
+      {testimonialsLoading
+        ? <SkeletonTestimonials />
+        : <TestimonialsSection items={testimonials} />
+      }
 
       {/* TRUST STRIP */}
       <section className="py-8 bg-white border-y border-[#E2E8F0]">
@@ -653,7 +718,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* BLOG SPILL — masih mock, akan diganti Tugas 2 */}
+      {/* BLOG SPILL — data dari GET /api/blog?limit=3 */}
       <section className="py-16 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-end justify-between mb-10">
@@ -668,46 +733,68 @@ export default function HomePage() {
               Lihat Semua <ArrowRight size={16} />
             </Link>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {BLOG_POSTS.slice(0, 3).map(post => (
-              <Link
-                key={post.id}
-                to={`/blog/${post.slug}`}
-                className="group bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm hover:shadow-lg transition-all duration-200 hover:-translate-y-1"
-              >
-                <div className="relative overflow-hidden" style={{ paddingTop: '56.25%' }}>
-                  <img
-                    src={post.cover}
-                    alt={post.judul}
-                    className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    loading="lazy"
-                    onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=600&q=80'; }}
-                  />
-                </div>
-                <div className="p-5">
-                  <span className="inline-block px-3 py-1 bg-[#E3F2FD] text-[#1565C0] text-xs rounded-full font-medium mb-3">
-                    {post.kategori}
-                  </span>
-                  <h3 className="font-display font-bold text-[#0F172A] text-base mb-2 line-clamp-2 group-hover:text-[#1565C0] transition-colors">
-                    {post.judul}
-                  </h3>
-                  <p className="text-[#64748B] text-sm line-clamp-2 mb-4">{post.excerpt}</p>
-                  <div className="flex items-center gap-3 text-xs text-[#64748B]">
-                    <div className="flex items-center gap-1">
-                      <div className="w-5 h-5 rounded-full bg-[#1565C0] flex items-center justify-center text-white text-[8px] font-bold">
-                        {post.author.charAt(0)}
-                      </div>
-                      <span>{post.author}</span>
-                    </div>
-                    <span>·</span>
-                    <span>{post.tanggal}</span>
-                    <span>·</span>
-                    <span>{post.reading_time} mnt baca</span>
+
+          {blogLoading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="bg-white rounded-2xl overflow-hidden border border-gray-100">
+                  <Skeleton className="w-full" style={{ paddingTop: '56.25%', display: 'block' }} />
+                  <div className="p-5 space-y-3">
+                    <Skeleton className="h-5 w-16 rounded-full" />
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-3 w-full" />
+                    <Skeleton className="h-3 w-5/6" />
+                    <Skeleton className="h-3 w-48" />
                   </div>
                 </div>
-              </Link>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : blogPosts.length === 0 ? (
+            <p className="text-center text-[#64748B] py-12">Belum ada artikel tersedia.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {blogPosts.map(post => (
+                <Link
+                  key={post.id}
+                  to={`/blog/${post.slug}`}
+                  className="group bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm hover:shadow-lg transition-all duration-200 hover:-translate-y-1"
+                >
+                  <div className="relative overflow-hidden" style={{ paddingTop: '56.25%' }}>
+                    <img
+                      src={post.cover ?? ''}
+                      alt={post.judul}
+                      className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      loading="lazy"
+                      onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=600&q=80'; }}
+                    />
+                  </div>
+                  <div className="p-5">
+                    <span className="inline-block px-3 py-1 bg-[#E3F2FD] text-[#1565C0] text-xs rounded-full font-medium mb-3">
+                      {post.kategori}
+                    </span>
+                    <h3 className="font-display font-bold text-[#0F172A] text-base mb-2 line-clamp-2 group-hover:text-[#1565C0] transition-colors">
+                      {post.judul}
+                    </h3>
+                    <p className="text-[#64748B] text-sm line-clamp-2 mb-4">{post.excerpt}</p>
+                    <div className="flex items-center gap-3 text-xs text-[#64748B]">
+                      <div className="flex items-center gap-1">
+                        <div className="w-5 h-5 rounded-full bg-[#1565C0] flex items-center justify-center text-white text-[8px] font-bold">
+                          {post.author ? post.author.charAt(0) : 'S'}
+                        </div>
+                        <span>{post.author ?? 'SBP'}</span>
+                      </div>
+                      <span>·</span>
+                      <span>{post.published_at ? post.published_at.slice(0, 10) : ''}</span>
+                      <span>·</span>
+                      <span>{post.reading_time_menit} mnt baca</span>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+
           <div className="sm:hidden text-center mt-8">
             <Link to="/blog" className="inline-flex items-center gap-2 text-[#1565C0] font-semibold">
               Lihat Semua Artikel <ArrowRight size={16} />

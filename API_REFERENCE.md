@@ -6,6 +6,83 @@
 
 ---
 
+## GET /api/testimonials
+
+Ambil semua testimoni yang aktif (`tampilkan = 1`), diurutkan berdasarkan kolom `urutan` ASC.
+
+**Tidak butuh auth. Tidak ada query params.**
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": 1,
+        "nama_klien": "Budi Santoso",
+        "foto_url": "https://...",
+        "lokasi": "Jakarta",
+        "rating": 5,
+        "isi_testimoni": "Proses pembelian rumah sangat mudah...",
+        "jenis_transaksi": "Pembeli Rumah",
+        "tanggal": "2024-04-15"
+      }
+    ],
+    "total": 2
+  }
+}
+```
+
+**Error:** `500` — gagal query DB.
+
+---
+
+## GET /api/blog
+
+List artikel blog yang sudah published, diurutkan terbaru dulu. JOIN ke `admins` untuk nama penulis.
+
+**Query params:**
+
+| Param | Tipe | Default | Keterangan |
+|-------|------|---------|------------|
+| `limit` | integer | `10` | max 50 |
+| `page` | integer | `1` | |
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": 1,
+        "judul": "Panduan Lengkap KPR untuk Pembeli Rumah Pertama di Jogja",
+        "slug": "panduan-kpr-pembeli-rumah-pertama-jogja",
+        "cover": null,
+        "excerpt": "Memiliki rumah pertama adalah impian...",
+        "kategori": "KPR",
+        "tags": ["KPR","Panduan","Rumah Pertama"],
+        "reading_time_menit": 7,
+        "published_at": "2024-05-20T08:00:00.000Z",
+        "author": "Monica Vera S"
+      }
+    ],
+    "pagination": {
+      "total": 3, "page": 1, "limit": 10,
+      "total_pages": 1, "has_next": false, "has_prev": false
+    }
+  }
+}
+```
+
+> `cover` bisa `null` jika belum diupload — tampilkan fallback image di frontend.  
+> `tags` adalah array (di-parse dari JSON string di DB).
+
+**Error:** `500` — gagal query DB.
+
+---
+
 ## GET /api/health
 
 Verifikasi koneksi D1 database. Tidak butuh auth.

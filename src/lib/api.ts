@@ -120,6 +120,40 @@ export interface ApiLocationsData {
   total: number;
 }
 
+export interface ApiTestimonial {
+  id: number;
+  nama_klien: string;
+  foto_url: string | null;
+  lokasi: string | null;
+  rating: number;
+  isi_testimoni: string;
+  jenis_transaksi: string | null;
+  tanggal: string | null;
+}
+
+export interface ApiTestimonialsData {
+  items: ApiTestimonial[];
+  total: number;
+}
+
+export interface ApiBlogPost {
+  id: number;
+  judul: string;
+  slug: string;
+  cover: string | null;
+  excerpt: string | null;
+  kategori: string | null;
+  tags: string[];
+  reading_time_menit: number | null;
+  published_at: string;
+  author: string | null;
+}
+
+export interface ApiBlogData {
+  items: ApiBlogPost[];
+  pagination: ApiPagination;
+}
+
 export interface ApiLeadRequest {
   nama: string;
   no_wa: string;
@@ -322,6 +356,20 @@ export async function adminLogout() {
 /** GET /api/admin/me */
 export async function getAdminMe() {
   return apiFetch<{ sub: number; email: string; nama: string; role: string }>('/admin/me');
+}
+
+/** GET /api/testimonials */
+export async function getTestimonials() {
+  return apiFetch<ApiTestimonialsData>('/testimonials');
+}
+
+/** GET /api/blog */
+export async function getBlogPosts(params: { limit?: number; page?: number } = {}) {
+  const q = new URLSearchParams();
+  if (params.limit) q.set('limit', String(params.limit));
+  if (params.page)  q.set('page',  String(params.page));
+  const qs = q.toString() ? `?${q.toString()}` : '';
+  return apiFetch<ApiBlogData>(`/blog${qs}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
