@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+dist-ssr/
+.output/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Cloudflare local development
+.wrangler/
+wrangler.toml.local
+
+# Editor / OS artifacts
+.DS_Store
+Thumbs.db
+*.local
+.vscode/settings.json
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*

@@ -1,0 +1,469 @@
+import { useState, useEffect, useRef } from 'react';
+import { useParams, Link } from 'react-router';
+import { MapPin, Eye, Calendar, Share2, Download, Heart, BedDouble, Bath, Maximize2, ChevronLeft, ChevronRight, X, MessageCircle, Star, TrendingUp, Clock, BarChart2 } from 'lucide-react';
+import useEmblaCarousel from 'embla-carousel-react';
+import { PROPERTIES, formatRupiah, formatRupiahFull } from '../data/mockData';
+import KPRCalculator from './KPRCalculator';
+import PropertyCard from './PropertyCard';
+
+function InvestmentPanel({ income, pengeluaran, harga }: { income: number; pengeluaran: number; harga: number }) {
+  const net = income - pengeluaran;
+  const yieldPct = (net * 12 / harga * 100).toFixed(1);
+  const payback = (harga / (net * 12)).toFixed(1);
+  const capRate = (income * 12 / harga * 100).toFixed(1);
+  const stars = parseFloat(yieldPct) > 8 ? 5 : parseFloat(yieldPct) > 6 ? 4 : parseFloat(yieldPct) > 4 ? 3 : 2;
+
+  return (
+    <div className="rounded-2xl p-6 my-6" style={{ background: 'linear-gradient(160deg, #0B2447 0%, #1565C0 100%)' }}>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-display font-bold text-white flex items-center gap-2">💡 Analisis Investasi</h3>
+        <div className="flex gap-0.5">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Star key={i} size={14} fill={i < stars ? '#F5A623' : 'transparent'} className={i < stars ? 'text-[#F5A623]' : 'text-white/30'} />
+          ))}
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3 mb-5">
+        {[
+          { label: 'YIELD/TAHUN', value: `${yieldPct}%`, color: '#F5A623' },
+          { label: 'PAYBACK', value: `~${payback} thn`, color: '#29B6F6' },
+          { label: 'CAP RATE', value: `${capRate}%`, color: '#10B981' },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="text-center">
+            <div className="text-xl font-bold font-display" style={{ color }}>{value}</div>
+            <div className="text-white/50 text-[10px] mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+      <div className="text-xs text-white/70 mb-3">
+        Income bersih/bln: <span className="text-white font-semibold">{formatRupiah(net)}</span> ·
+        Income/tahun: <span className="text-white font-semibold">{formatRupiah(net * 12)}</span>
+      </div>
+      <div className="mb-1">
+        <div className="text-xs text-white/50 mb-1">Yield vs Deposito (3%)</div>
+        <div className="flex items-center gap-2">
+          <div className="flex-1 bg-white/10 rounded-full h-2.5 overflow-hidden">
+            <div className="h-full bg-[#F5A623] rounded-full" style={{ width: `${Math.min(parseFloat(yieldPct) / 15 * 100, 100)}%` }} />
+          </div>
+          <span className="text-[#F5A623] text-xs font-bold">{yieldPct}%</span>
+        </div>
+      </div>
+      <p className="text-[10px] text-white/40 mt-3">*Estimasi berdasarkan data yang diberikan pemilik, bukan jaminan imbal hasil.</p>
+    </div>
+  );
+}
+
+function LeadForm({ property }: { property: typeof PROPERTIES[0] }) {
+  const [tipe, setTipe] = useState('');
+  const [nama, setNama] = useState('');
+  const [asal, setAsal] = useState('');
+  const [budget, setBudget] = useState('');
+  const [rencana, setRencana] = useState('');
+  const [pesan, setPesan] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+
+  const isValid = tipe && nama && asal && (tipe !== 'pembeli' || (budget && rencana));
+
+  const buildWaMsg = () => {
+    const link = `https://salambumi.xyz/dijual/${property.jenis.toLowerCase()}/${property.slug}`;
+    if (tipe === 'pembeli') {
+      return encodeURIComponent(
+        `Halo Monica Vera S!\nSaya tertarik dengan properti: ${property.title}\n${link}\n\nSaya Adalah Calon Pembeli\nNama: ${nama}\nAsal Daerah: ${asal}\nEstimasi Budget: ${budget}\nRencana Pembayaran: ${rencana}\nPesan: ${pesan || '-'}\nMohon informasi lebih lanjut.`
+      );
+    }
+    return encodeURIComponent(`Halo Monica Vera S!\nNama: ${nama}\nAsal: ${asal}\nTipe: ${tipe}\nProperti: ${property.title}\n${link}\n\nPesan: ${pesan}`);
+  };
+
+  const handleWA = () => {
+    if (!isValid) return;
+    setSubmitted(true);
+    const waNum = '6281391278889';
+    window.open(`https://wa.me/${waNum}?text=${buildWaMsg()}`, '_blank');
+  };
+
+  const inputClass = "w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0] transition-all";
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+      {/* Agent */}
+      <div className="flex items-center gap-3 mb-5 pb-4 border-b border-gray-100">
+        <img
+          src="https://images.salambumi.xyz/monic%20sbp.webp"
+          alt="Monica Vera S"
+          className="w-14 h-14 rounded-full object-cover border-2 border-[#1565C0]"
+          onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&q=80'; }}
+        />
+        <div>
+          <div className="font-semibold text-[#0F172A]">Monica Vera S</div>
+          <div className="text-xs text-[#64748B]">Admin/Agent Properti</div>
+          <div className="flex gap-0.5 mt-1">
+            {Array.from({ length: 5 }).map((_, i) => <Star key={i} size={10} fill="#F5A623" className="text-[#F5A623]" />)}
+          </div>
+        </div>
+      </div>
+
+      <h4 className="font-semibold text-[#0F172A] mb-4 text-sm">Kirim Pesan ke Admin</h4>
+
+      {/* Tipe Dropdown */}
+      <div className="mb-4">
+        <label className="block text-xs font-semibold text-[#64748B] mb-1">Beritahu Kami Siapakah Anda?</label>
+        <select value={tipe} onChange={e => setTipe(e.target.value)} className={inputClass}>
+          <option value="">-- Pilih --</option>
+          <option value="pembeli">Calon Pembeli</option>
+          <option value="penjual">Penjual/Pemilik</option>
+          <option value="broker">Broker/Agent</option>
+        </select>
+      </div>
+
+      {tipe && (
+        <>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="block text-xs font-semibold text-[#64748B] mb-1">Nama *</label>
+              <input value={nama} onChange={e => setNama(e.target.value)} placeholder="Nama lengkap" className={inputClass} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-[#64748B] mb-1">Asal Daerah *</label>
+              <input value={asal} onChange={e => setAsal(e.target.value)} placeholder="Jakarta, dll" className={inputClass} />
+            </div>
+          </div>
+
+          {tipe === 'pembeli' && (
+            <>
+              <div className="mb-3">
+                <label className="block text-xs font-semibold text-[#64748B] mb-1">Estimasi Budget *</label>
+                <select value={budget} onChange={e => setBudget(e.target.value)} className={inputClass}>
+                  <option value="">-- Pilih Budget --</option>
+                  {['< 500 Jt', '500 Jt – 1 M', '1 M – 2 M', '2 M – 3 M', '3 M – 5 M', '> 5 M'].map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="mb-3">
+                <label className="block text-xs font-semibold text-[#64748B] mb-1">Rencana Pembayaran *</label>
+                <div className="flex gap-2">
+                  {['Hard Cash', 'Soft Cash', 'KPR'].map(r => (
+                    <button key={r} onClick={() => setRencana(r)}
+                      className={`flex-1 py-2 rounded-xl text-xs font-medium border transition-all ${rencana === r ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'border-gray-200 text-gray-600 hover:border-[#1565C0]'}`}>
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          <div className="mb-4">
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">Pesan Tambahan</label>
+            <textarea value={pesan} onChange={e => setPesan(e.target.value)} rows={3}
+              placeholder="Tulis pesan Anda..."
+              className={`${inputClass} resize-none`} />
+          </div>
+        </>
+      )}
+
+      {!isValid && tipe && (
+        <p className="text-xs text-[#64748B] text-center mb-3">Lengkapi form untuk menghubungi via WhatsApp</p>
+      )}
+
+      <button
+        onClick={handleWA}
+        disabled={!isValid}
+        className={`w-full py-3.5 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all duration-200 ${
+          isValid
+            ? 'bg-[#10B981] hover:bg-[#059669] shadow-md'
+            : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+        }`}
+      >
+        <MessageCircle size={18} />
+        {isValid ? 'Hubungi via WhatsApp' : 'Lengkapi Form Terlebih Dahulu'}
+      </button>
+
+      {submitted && <p className="text-xs text-[#10B981] text-center mt-2">✅ Pesan terkirim! WhatsApp dibuka...</p>}
+    </div>
+  );
+}
+
+export default function PropertyDetailPage() {
+  const params = useParams();
+  const slug = params.slug;
+  const property = PROPERTIES.find(p => p.slug === slug) || PROPERTIES[0];
+
+  const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true });
+  const [currentImg, setCurrentImg] = useState(0);
+  const [lightbox, setLightbox] = useState(false);
+  const [favorited, setFavorited] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null);
+  const [showStickyBar, setShowStickyBar] = useState(true);
+
+  useEffect(() => {
+    if (!emblaApi) return;
+    emblaApi.on('select', () => setCurrentImg(emblaApi.selectedScrollSnap()));
+  }, [emblaApi]);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(([e]) => setShowStickyBar(!e.isIntersecting), { threshold: 0.3 });
+    if (formRef.current) observer.observe(formRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const similar = PROPERTIES.filter(p => p.id !== property.id &&
+    (p.kabupaten === property.kabupaten || p.jenis === property.jenis) &&
+    !p.status_sold
+  ).slice(0, 4);
+
+  const hargaPerM2 = property.luas_tanah ? Math.round(property.harga / property.luas_tanah) : null;
+
+  const breadcrumbParts = [
+    { label: 'Home', href: '/' },
+    { label: 'Properties', href: '/properties' },
+    { label: property.jenis, href: `/properties?jenis=${property.jenis.toLowerCase()}` },
+    { label: property.provinsi, href: `/properties?provinsi=${property.provinsi}` },
+    { label: property.kabupaten, href: `/properties?kabupaten=${property.kabupaten}` },
+    { label: property.kecamatan, href: `/properties?kecamatan=${property.kecamatan}` },
+    { label: property.title, href: '' },
+  ];
+
+  return (
+    <div className="pt-16 min-h-screen" style={{ background: '#F0F4F8' }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-1 text-xs text-[#64748B] mb-5 flex-wrap">
+          {breadcrumbParts.map((part, i) => (
+            <span key={i} className="flex items-center gap-1">
+              {i > 0 && <ChevronRight size={12} />}
+              {part.href ? (
+                <Link to={part.href} className="hover:text-[#1565C0] transition-colors">{part.label}</Link>
+              ) : (
+                <span className="text-[#0F172A] font-semibold line-clamp-1 max-w-32">{part.label}</span>
+              )}
+            </span>
+          ))}
+        </nav>
+
+        <div className="flex gap-6 items-start flex-col lg:flex-row">
+          {/* Main Content */}
+          <div className="flex-1 min-w-0">
+            {/* Gallery */}
+            <div className="bg-white rounded-2xl overflow-hidden shadow-sm mb-5 relative">
+              <div ref={emblaRef} className="overflow-hidden">
+                <div className="flex">
+                  {property.images.map((img, i) => (
+                    <div key={i} className="flex-none w-full relative cursor-zoom-in" style={{ paddingTop: '56.25%' }} onClick={() => { setCurrentImg(i); setLightbox(true); }}>
+                      <img src={img} alt={`${property.title} ${i + 1}`} className="absolute inset-0 w-full h-full object-cover"
+                        onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80'; }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <button onClick={() => emblaApi?.scrollPrev()} className="absolute left-3 top-1/2 -translate-y-1/2 p-2 bg-black/40 text-white rounded-full hover:bg-black/60">
+                <ChevronLeft size={16} />
+              </button>
+              <button onClick={() => emblaApi?.scrollNext()} className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-black/40 text-white rounded-full hover:bg-black/60">
+                <ChevronRight size={16} />
+              </button>
+              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
+                {property.images.map((_, i) => (
+                  <div key={i} className={`h-1.5 rounded-full transition-all ${i === currentImg ? 'w-5 bg-white' : 'w-1.5 bg-white/50'}`} />
+                ))}
+              </div>
+            </div>
+
+            {/* Badge Row */}
+            <div className="flex flex-wrap gap-2 mb-4">
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-[#1565C0] text-white">{property.jenisEmoji} {property.jenis}</span>
+              {(property.tujuan === 'dijual' || property.tujuan === 'dijual_disewa') && <span className="px-3 py-1 rounded-full text-xs font-bold bg-[#10B981] text-white">Dijual</span>}
+              {(property.tujuan === 'disewa' || property.tujuan === 'dijual_disewa') && <span className="px-3 py-1 rounded-full text-xs font-bold bg-[#29B6F6] text-white">Disewa</span>}
+              {property.verified && <span className="px-3 py-1 rounded-full text-xs font-bold bg-[#10B981]/10 text-[#10B981] border border-[#10B981]">✅ Terverifikasi SBP</span>}
+              {property.badge_premium && <span className="px-3 py-1 rounded-full text-xs font-bold" style={{ background: 'linear-gradient(135deg, #F5A623, #FFD54F)', color: '#461B00' }}>⭐ PREMIUM</span>}
+            </div>
+
+            {/* Title + Meta */}
+            <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm">
+              <p className="text-xs text-gray-400 font-mono mb-1">{property.kode}</p>
+              <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-2">{property.title}</h1>
+              <div className="flex items-center gap-2 text-[#64748B] text-sm mb-4">
+                <MapPin size={14} />
+                <span>{property.kecamatan}, {property.kabupaten}, {property.provinsi}</span>
+              </div>
+
+              {/* Quick Specs */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {[
+                  property.luas_tanah ? { icon: Maximize2, label: 'Luas Tanah', value: `${property.luas_tanah} m²` } : null,
+                  property.luas_bangunan ? { icon: Maximize2, label: 'Luas Bangunan', value: `${property.luas_bangunan} m²` } : null,
+                  property.kamar_tidur ? { icon: BedDouble, label: 'Kamar Tidur', value: `${property.kamar_tidur} kamar` } : null,
+                  property.kamar_mandi ? { icon: Bath, label: 'Kamar Mandi', value: `${property.kamar_mandi} kamar` } : null,
+                  property.lantai ? { icon: BarChart2, label: 'Lantai', value: `${property.lantai} lantai` } : null,
+                ].filter(Boolean).map((spec) => spec && (
+                  <div key={spec.label} className="bg-[#F0F4F8] rounded-xl p-3 flex items-center gap-2">
+                    <spec.icon size={16} className="text-[#1565C0] flex-shrink-0" />
+                    <div>
+                      <div className="text-[10px] text-[#64748B]">{spec.label}</div>
+                      <div className="text-sm font-semibold text-[#0F172A]">{spec.value}</div>
+                    </div>
+                  </div>
+                ))}
+                <div className="bg-[#F0F4F8] rounded-xl p-3">
+                  <div className="text-[10px] text-[#64748B]">Legalitas</div>
+                  <div className="text-xs font-semibold text-[#0F172A]">{property.legalitas}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Description */}
+            <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm">
+              <h2 className="font-display font-bold text-[#0F172A] mb-3">Deskripsi Properti</h2>
+              <p className="text-[#64748B] text-sm leading-relaxed">{property.deskripsi}</p>
+              <div className="mt-4 p-4 bg-[#F0F4F8] rounded-xl">
+                <p className="text-sm text-[#64748B] leading-relaxed">
+                  Properti {property.jenis.toLowerCase()} ini berlokasi di {property.kecamatan}, {property.kabupaten}, salah satu kawasan strategis di {property.provinsi}.
+                  {property.luas_tanah && ` Dengan luas tanah ${property.luas_tanah} m²`}
+                  {property.kamar_tidur && ` dan ${property.kamar_tidur} kamar tidur`}, properti ini {property.tujuan === 'dijual' ? 'dijual' : property.tujuan === 'disewa' ? 'disewakan' : 'dijual dan disewakan'} dengan harga {formatRupiah(property.harga)}.
+                  {property.income_per_bulan && ` Sangat cocok untuk investasi dengan income potensial ${formatRupiah(property.income_per_bulan)} per bulan.`}
+                </p>
+              </div>
+            </div>
+
+            {/* Investment Intelligence */}
+            {property.income_per_bulan && property.pengeluaran_per_bulan && (
+              <InvestmentPanel income={property.income_per_bulan} pengeluaran={property.pengeluaran_per_bulan} harga={property.harga} />
+            )}
+
+            {/* KPR Calculator */}
+            {(property.tujuan === 'dijual' || property.tujuan === 'dijual_disewa') && (
+              <div className="mb-5">
+                <KPRCalculator defaultHarga={property.harga} />
+              </div>
+            )}
+
+            {/* Location Map Placeholder */}
+            <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm">
+              <h2 className="font-display font-bold text-[#0F172A] mb-3">📍 Lokasi Properti</h2>
+              <div className="bg-[#E3F2FD] rounded-xl h-48 flex flex-col items-center justify-center gap-2">
+                <MapPin size={32} className="text-[#1565C0]" />
+                <p className="text-[#1565C0] font-semibold text-sm">{property.kecamatan}, {property.kabupaten}</p>
+                <a href={`https://maps.google.com?q=${property.latitude},${property.longitude}`} target="_blank" rel="noopener noreferrer"
+                  className="text-xs text-[#1565C0] underline hover:text-[#1E88E5]">
+                  Buka di Google Maps ↗
+                </a>
+              </div>
+            </div>
+
+            {/* Video */}
+            {property.video_youtube && (
+              <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm">
+                <h2 className="font-display font-bold text-[#0F172A] mb-3">🎬 Video Properti</h2>
+                <div className="relative" style={{ paddingTop: '56.25%' }}>
+                  <iframe src={property.video_youtube} className="absolute inset-0 w-full h-full rounded-xl" allowFullScreen title="Video Properti" />
+                </div>
+              </div>
+            )}
+
+            {/* Mobile Form */}
+            <div className="lg:hidden mb-6" ref={formRef}>
+              <LeadForm property={property} />
+            </div>
+          </div>
+
+          {/* SIDEBAR RIGHT */}
+          <aside className="w-full lg:w-80 xl:w-96 flex-shrink-0 lg:sticky lg:top-20">
+            {/* Harga Box */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 mb-4">
+              <div className="flex items-start justify-between mb-1">
+                <div>
+                  {property.harga_lama && (
+                    <div className="text-sm text-gray-400 line-through">{formatRupiah(property.harga_lama)}</div>
+                  )}
+                  <div className="text-3xl font-bold font-display text-[#1565C0]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {formatRupiah(property.harga)}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setFavorited(!favorited)} className={`p-2 rounded-xl border transition-colors ${favorited ? 'bg-red-50 border-red-200 text-red-500' : 'border-gray-200 text-gray-400 hover:text-red-500'}`}>
+                    <Heart size={16} fill={favorited ? 'currentColor' : 'none'} />
+                  </button>
+                  <button onClick={() => { if (navigator.share) navigator.share({ title: property.title, url: window.location.href }); }}
+                    className="p-2 rounded-xl border border-gray-200 text-gray-400 hover:text-[#1565C0] transition-colors">
+                    <Share2 size={16} />
+                  </button>
+                </div>
+              </div>
+              {hargaPerM2 && <div className="text-xs text-gray-400 mb-2">~{formatRupiah(hargaPerM2)}/m²</div>}
+              <div className="flex gap-2 mb-3">
+                {property.nego && <span className="px-2 py-0.5 rounded-full text-xs bg-orange-50 text-orange-600 border border-orange-200">Nego</span>}
+                {property.nett && <span className="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-[#1565C0] border border-blue-200">Nett</span>}
+              </div>
+              <div className="flex items-center justify-between text-xs text-gray-400 pt-3 border-t border-gray-100">
+                <div className="flex items-center gap-1"><Eye size={12} /> Dilihat {property.views_count.toLocaleString()} kali</div>
+                <div className="flex items-center gap-1"><Calendar size={12} /> {property.updated_at}</div>
+              </div>
+            </div>
+
+            {/* Lead Form - Desktop */}
+            <div className="hidden lg:block" ref={formRef}>
+              <LeadForm property={property} />
+            </div>
+          </aside>
+        </div>
+
+        {/* Smart Suggestion */}
+        {similar.length > 0 && (
+          <section className="mt-12 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-12 rounded-2xl" style={{ background: '#E3F2FD' }}>
+            <div className="text-center mb-8">
+              <span className="text-xs text-[#1565C0] font-semibold block mb-2">🔍 REKOMENDASI CERDAS</span>
+              <h2 className="font-display text-2xl font-bold text-[#0F172A]">Properti Serupa yang Mungkin Anda Suka</h2>
+              <p className="text-[#64748B] text-sm mt-1">Dipilih otomatis berdasarkan lokasi, harga, dan jenis properti yang serupa</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              {similar.map(p => {
+                let reason = '🏠 Jenis Sama';
+                if (p.kecamatan === property.kecamatan) reason = '🏘️ Kecamatan Sama';
+                else if (p.kabupaten === property.kabupaten) reason = '📍 Kabupaten Sama';
+                else if (Math.abs(p.harga - property.harga) / property.harga <= 0.2) reason = '💰 Harga Serupa';
+                return (
+                  <div key={p.id} className="relative">
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
+                      <span className="bg-white border border-[#1565C0] text-[#1565C0] text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap">
+                        {reason}
+                      </span>
+                    </div>
+                    <PropertyCard property={p} className="mt-3" />
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+      </div>
+
+      {/* STICKY BOTTOM BAR (Mobile) */}
+      {showStickyBar && (
+        <div className="sticky-bottom-bar fixed bottom-0 left-0 right-0 z-40 lg:hidden bg-white border-t border-gray-200 shadow-lg px-4 py-3">
+          <div className="flex items-center justify-between max-w-lg mx-auto">
+            <div>
+              <div className="font-bold text-[#1565C0] font-display">{formatRupiah(property.harga)}</div>
+              <div className="text-xs text-gray-500">{property.jenis} · {property.kecamatan}</div>
+            </div>
+            <button
+              onClick={() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-white bg-[#10B981] hover:bg-[#059669] transition-colors"
+            >
+              <MessageCircle size={16} /> Hubungi via WA
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Lightbox */}
+      {lightbox && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
+          <button onClick={() => setLightbox(false)} className="absolute top-4 right-4 p-2 text-white hover:text-gray-300">
+            <X size={24} />
+          </button>
+          <img src={property.images[currentImg]} alt="" className="max-w-full max-h-full object-contain rounded-xl" />
+        </div>
+      )}
+    </div>
+  );
+}

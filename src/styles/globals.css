@@ -1,0 +1,183 @@
+/* ===== SBP DESIGN TOKENS ===== */
+:root {
+  --navy-deep: #061B35;
+  --navy: #0B2447;
+  --blue: #1565C0;
+  --blue-medium: #1E88E5;
+  --sky: #29B6F6;
+  --sky-pale: #E3F2FD;
+  --gold: #F5A623;
+  --gold-glow: #FFD54F;
+  --emerald: #10B981;
+  --coral: #EF4444;
+  --bg: #F0F4F8;
+  --ink: #0F172A;
+  --muted-color: #64748B;
+  --border-color: #E2E8F0;
+
+  /* Gradients */
+  --gradient-blue-cta: linear-gradient(135deg, #1565C0 0%, #29B6F6 100%);
+  --gradient-navy-section: linear-gradient(160deg, #0B2447 0%, #1565C0 100%);
+  --gradient-sky-section: linear-gradient(180deg, #E3F2FD 0%, #F0F9FF 100%);
+  --gradient-hero-overlay: linear-gradient(135deg, rgba(6,27,53,0.92) 0%, rgba(11,36,71,0.72) 45%, rgba(6,27,53,0.88) 100%);
+  --gradient-card-hover: linear-gradient(180deg, rgba(11,36,71,0) 50%, rgba(6,27,53,0.7) 100%);
+}
+
+/* ===== FONT FAMILIES ===== */
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg);
+  color: var(--ink);
+}
+
+.font-display {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+
+/* ===== HERO BREATHING ANIMATION ===== */
+@keyframes heroBreath {
+  0%   { transform: scale(1.00); }
+  100% { transform: scale(1.09); }
+}
+@keyframes floatOrb1 {
+  0%   { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-40px, -50px) scale(1.12); }
+}
+@keyframes floatOrb2 {
+  0%   { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(30px, 40px) scale(1.08); }
+}
+@keyframes floatOrb3 {
+  0%   { transform: translate(0, 0); }
+  100% { transform: translate(20px, -25px); }
+}
+@keyframes goldPulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(245,166,35,0.4); }
+  50%      { box-shadow: 0 0 0 8px rgba(245,166,35,0); }
+}
+@keyframes skeletonSweep {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(30px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(30px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.hero-bg-img {
+  animation: heroBreath 9s ease-in-out infinite alternate;
+  will-change: transform;
+}
+.hero-orb-1 {
+  animation: floatOrb1 12s ease-in-out infinite alternate;
+}
+.hero-orb-2 {
+  animation: floatOrb2 15s ease-in-out infinite alternate;
+}
+.hero-orb-3 {
+  animation: floatOrb3 10s ease-in-out infinite alternate;
+}
+.premium-pulse {
+  animation: goldPulse 2.5s infinite;
+}
+.skeleton-shimmer {
+  background: linear-gradient(90deg, #E3F2FD 25%, #EFF6FF 50%, #E3F2FD 75%);
+  background-size: 200% 100%;
+  animation: skeletonSweep 1.5s infinite;
+}
+.fade-in-up {
+  animation: fadeInUp 0.5s ease-out forwards;
+}
+
+/* ===== GLASSMORPHISM ===== */
+.glass-card {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.50);
+  border-radius: 20px;
+  box-shadow: 0 8px 32px rgba(11, 36, 71, 0.18);
+}
+.glass-dark {
+  background: rgba(11, 36, 71, 0.72);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: white;
+}
+
+/* ===== PROPERTY CARD HOVER ===== */
+.property-card {
+  transition: transform 220ms ease, box-shadow 220ms ease;
+}
+.property-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 20px 40px rgba(11, 36, 71, 0.14);
+}
+
+/* ===== SCROLLBAR ===== */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #f0f4f8; }
+::-webkit-scrollbar-thumb { background: #1565C0; border-radius: 3px; }
+
+/* ===== BADGE SOLD DIAGONAL ===== */
+.sold-overlay {
+  position: absolute;
+  top: 0; right: 0;
+  width: 100px; height: 100px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.sold-overlay::after {
+  content: 'TERJUAL';
+  position: absolute;
+  top: 22px; right: -28px;
+  background: #EF4444;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 30px;
+  transform: rotate(45deg);
+  letter-spacing: 0.05em;
+}
+
+/* ===== ADMIN SIDEBAR ===== */
+.admin-sidebar {
+  background: var(--navy);
+  min-height: 100vh;
+  transition: width 300ms ease;
+}
+
+/* ===== GRADIENT TEXT ===== */
+.gradient-text-blue {
+  background: var(--gradient-blue-cta);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ===== STICKY BOTTOM BAR ANIMATION ===== */
+@keyframes slideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+.sticky-bottom-bar {
+  animation: slideUp 0.3s ease-out;
+}
+
+/* ===== KANBAN CARD ===== */
+.kanban-card {
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+.kanban-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(11,36,71,0.12);
+}
