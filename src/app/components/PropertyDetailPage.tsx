@@ -4,6 +4,7 @@ import { MapPin, Eye, Calendar, Share2, Heart, BedDouble, Bath, Maximize2, Chevr
 import useEmblaCarousel from 'embla-carousel-react';
 import {
   getPropertyBySlug, getProperties, normalizeProperty, normalizePropertyDetail,
+  postLead,
   type NormalizedPropertyDetail, type NormalizedProperty, type InvestmentIntelligence,
   formatRupiah, formatRupiahFull,
 } from '../../lib/api';
@@ -60,31 +61,54 @@ function InvestmentPanel({ ii }: { ii: InvestmentIntelligence }) {
 // LeadForm — Tugas 4: tipe diperbarui ke NormalizedPropertyDetail.
 // K6 (POST /api/leads sebelum buka WA) dikerjakan di Tugas 5.
 // ─────────────────────────────────────────────────────────────────────────────
+// Mapping label rencana pembayaran → nilai enum API
+const RENCANA_MAP: Record<string, 'hard_cash' | 'soft_cash' | 'kpr'> = {
+  'Hard Cash': 'hard_cash',
+  'Soft Cash': 'soft_cash',
+  'KPR': 'kpr',
+};
+
 function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
   const [tipe, setTipe] = useState('');
   const [nama, setNama] = useState('');
+  const [no_wa, setNoWa] = useState('');
   const [asal, setAsal] = useState('');
   const [budget, setBudget] = useState('');
   const [rencana, setRencana] = useState('');
   const [pesan, setPesan] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
-  const isValid = tipe && nama && asal && (tipe !== 'pembeli' || (budget && rencana));
+  const isValid = Boolean(tipe && nama && no_wa.trim() && asal && (tipe !== 'pembeli' || (budget && rencana)));
 
-  const buildWaMsg = () => {
-    const link = `https://salambumi.xyz/${property.tujuan === 'disewa' ? 'disewa' : 'dijual'}/${property.jenis.toLowerCase()}/${property.slug}`;
-    if (tipe === 'pembeli') {
-      return encodeURIComponent(
-        `Halo Monica Vera S!\nSaya tertarik dengan properti: ${property.title}\n${link}\n\nSaya Adalah Calon Pembeli\nNama: ${nama}\nAsal Daerah: ${asal}\nEstimasi Budget: ${budget}\nRencana Pembayaran: ${rencana}\nPesan: ${pesan || '-'}\nMohon informasi lebih lanjut.`
-      );
+  // K6 KRITIS: POST /api/leads dulu → simpan lead ke DB → baru buka wa_url dari response
+  const handleWA = async () => {
+    if (!isValid || sending) return;
+    setSending(true);
+    setApiError(null);
+
+    const res = await postLead({
+      nama,
+      no_wa: no_wa.trim(),
+      tipe_pengirim: tipe as 'pembeli' | 'penjual' | 'broker',
+      source_page: window.location.href,
+      property_id: property.id,
+      asal_daerah: asal || undefined,
+      budget: budget || undefined,
+      rencana_pembayaran: RENCANA_MAP[rencana] ?? undefined,
+      pesan: pesan || undefined,
+    });
+
+    setSending(false);
+
+    if (res.success && res.data) {
+      setSubmitted(true);
+      // wa_url sudah mengandung pesan terformat dari Worker
+      window.open(res.data.wa_url, '_blank');
+    } else {
+      setApiError(res.error ?? 'Gagal menyimpan pesan. Coba lagi.');
     }
-    return encodeURIComponent(`Halo Monica Vera S!\nNama: ${nama}\nAsal: ${asal}\nTipe: ${tipe}\nProperti: ${property.title}\n${link}\n\nPesan: ${pesan}`);
-  };
-
-  const handleWA = () => {
-    if (!isValid) return;
-    setSubmitted(true);
-    window.open(`https://wa.me/6281391278889?text=${buildWaMsg()}`, '_blank');
   };
 
   const inputClass = "w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0] transition-all";
@@ -133,6 +157,19 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
             </div>
           </div>
 
+          <div className="mb-3">
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">No. WhatsApp *</label>
+            <input
+              value={no_wa}
+              onChange={e => setNoWa(e.target.value)}
+              placeholder="08xx / 628xx"
+              type="tel"
+              inputMode="numeric"
+              className={inputClass}
+            />
+            <p className="text-[10px] text-[#64748B] mt-0.5">Format: 08xx, 628xx, atau +628xx</p>
+          </div>
+
           {tipe === 'pembeli' && (
             <>
               <div className="mb-3">
@@ -168,21 +205,29 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
       )}
 
       {!isValid && tipe && (
-        <p className="text-xs text-[#64748B] text-center mb-3">Lengkapi form untuk menghubungi via WhatsApp</p>
+        <p className="text-xs text-[#64748B] text-center mb-3">Lengkapi semua field wajib (*) untuk menghubungi via WhatsApp</p>
+      )}
+
+      {apiError && (
+        <p className="text-xs text-[#EF4444] text-center mb-3 bg-red-50 rounded-xl px-3 py-2">⚠️ {apiError}</p>
       )}
 
       <button
         onClick={handleWA}
-        disabled={!isValid}
+        disabled={!isValid || sending}
         className={`w-full py-3.5 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all duration-200 ${
-          isValid ? 'bg-[#10B981] hover:bg-[#059669] shadow-md' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+          isValid && !sending ? 'bg-[#10B981] hover:bg-[#059669] shadow-md' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
         }`}
       >
         <MessageCircle size={18} />
-        {isValid ? 'Hubungi via WhatsApp' : 'Lengkapi Form Terlebih Dahulu'}
+        {sending
+          ? 'Menyimpan data...'
+          : isValid
+          ? 'Hubungi via WhatsApp'
+          : 'Lengkapi Form Terlebih Dahulu'}
       </button>
 
-      {submitted && <p className="text-xs text-[#10B981] text-center mt-2">✅ Pesan terkirim! WhatsApp dibuka...</p>}
+      {submitted && <p className="text-xs text-[#10B981] text-center mt-2">✅ Lead tersimpan! WhatsApp dibuka...</p>}
     </div>
   );
 }
