@@ -31,6 +31,16 @@ export default defineConfig({
     },
   },
 
+  // Proxy /api/* → Worker di :8787 saat dev tanpa wrangler pages dev
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8787',
+        changeOrigin: false,
+      },
+    },
+  },
+
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
 })
