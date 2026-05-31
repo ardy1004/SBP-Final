@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router';
-import { Search, ChevronDown, ChevronLeft, ChevronRight, Star, ArrowRight, Shield, CheckCircle, Scale, Handshake, TrendingUp, Clock, BarChart2 } from 'lucide-react';
+import { Search, ChevronDown, ChevronLeft, ChevronRight, Star, ArrowRight, Shield, CheckCircle, Scale, Handshake, TrendingUp, Clock, BarChart2, AlertCircle, RefreshCw } from 'lucide-react';
 import useEmblaCarousel from 'embla-carousel-react';
-import { PROPERTIES, FEATURED_PROPERTIES, TESTIMONIALS, BLOG_POSTS, LOCATION_HIERARCHY, formatRupiah } from '../data/mockData';
+import { TESTIMONIALS, BLOG_POSTS, LOCATION_HIERARCHY } from '../data/mockData';
+import { getProperties, normalizeProperty, type NormalizedProperty, formatRupiah } from '../../lib/api';
 import PropertyCard from './PropertyCard';
+import { Skeleton } from './ui/skeleton';
 
 /* ── STATS STRIP ── */
 function StatsStrip() {
@@ -56,8 +58,65 @@ function StatsStrip() {
   );
 }
 
+/* ── SKELETON: BANNER ── */
+function SkeletonBanner() {
+  return (
+    <section style={{ background: 'linear-gradient(180deg, #E3F2FD 0%, #F0F9FF 100%)' }} className="py-16">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="text-center mb-10">
+          <Skeleton className="h-5 w-36 mx-auto mb-3 rounded-full" />
+          <Skeleton className="h-9 w-80 mx-auto mb-2" />
+          <Skeleton className="h-4 w-64 mx-auto" />
+        </div>
+        <Skeleton className="w-full rounded-3xl" style={{ minHeight: 480 }} />
+      </div>
+    </section>
+  );
+}
+
+/* ── SKELETON: PROPERTY CARDS (6 kartu) ── */
+function SkeletonCards() {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="bg-white rounded-2xl overflow-hidden border border-gray-100">
+          <Skeleton className="w-full" style={{ paddingTop: '66.67%', display: 'block' }} />
+          <div className="p-4 space-y-3">
+            <Skeleton className="h-3 w-32" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-6 w-40" />
+            <div className="grid grid-cols-2 gap-2">
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-full" />
+            </div>
+            <Skeleton className="h-10 w-full rounded-xl" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── ERROR STATE ── */
+function ErrorBlock({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center">
+      <AlertCircle size={40} className="text-[#EF4444] mb-3" />
+      <p className="text-[#64748B] mb-4">{message}</p>
+      <button
+        onClick={onRetry}
+        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
+        style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
+      >
+        <RefreshCw size={14} /> Coba Lagi
+      </button>
+    </div>
+  );
+}
+
 /* ── BANNER CAROUSEL ── */
-function FeaturedBanner() {
+function FeaturedBanner({ items }: { items: NormalizedProperty[] }) {
   const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true });
   const [current, setCurrent] = useState(0);
 
@@ -68,6 +127,16 @@ function FeaturedBanner() {
     const timer = setInterval(() => emblaApi.scrollNext(), 5000);
     return () => { clearInterval(timer); emblaApi.off('select', onSelect); };
   }, [emblaApi]);
+
+  if (items.length === 0) {
+    return (
+      <section style={{ background: 'linear-gradient(180deg, #E3F2FD 0%, #F0F9FF 100%)' }} className="py-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <p className="text-[#64748B]">Belum ada properti pilihan.</p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section style={{ background: 'linear-gradient(180deg, #E3F2FD 0%, #F0F9FF 100%)' }} className="py-16">
@@ -82,10 +151,10 @@ function FeaturedBanner() {
 
         <div className="relative overflow-hidden rounded-3xl shadow-2xl" ref={emblaRef}>
           <div className="flex">
-            {FEATURED_PROPERTIES.map((prop) => (
+            {items.map((prop) => (
               <div key={prop.id} className="flex-none w-full relative" style={{ minHeight: '480px' }}>
                 <img
-                  src={prop.images[0]}
+                  src={prop.images[0] ?? ''}
                   alt={prop.title}
                   className="absolute inset-0 w-full h-full object-cover"
                   onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80'; }}
@@ -101,7 +170,7 @@ function FeaturedBanner() {
                     <div className="text-white/70 text-sm mb-3">📍 {prop.kecamatan}, {prop.kabupaten}</div>
                     <div className="text-2xl font-bold font-display text-[#29B6F6] mb-4">{formatRupiah(prop.harga)}</div>
                     <Link
-                      to={`/dijual/${prop.jenis.toLowerCase()}/${prop.provinsi.toLowerCase().replace(/\s+/g, '-')}/${prop.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${prop.kecamatan.toLowerCase().replace(/\s+/g, '-')}/${prop.slug}`}
+                      to={`/${prop.tujuan === 'disewa' ? 'disewa' : 'dijual'}/${prop.jenis.toLowerCase()}/${prop.provinsi.toLowerCase().replace(/\s+/g, '-')}/${prop.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${prop.kecamatan.toLowerCase().replace(/\s+/g, '-')}/${prop.slug}`}
                       className="inline-block px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
                       style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
                     >
@@ -116,7 +185,7 @@ function FeaturedBanner() {
 
         {/* Dots */}
         <div className="flex justify-center gap-2 mt-6">
-          {FEATURED_PROPERTIES.map((_, i) => (
+          {items.map((_, i) => (
             <button
               key={i}
               onClick={() => emblaApi?.scrollTo(i)}
@@ -345,6 +414,32 @@ function HeroFilter() {
 
 /* ── MAIN HOMEPAGE ── */
 export default function HomePage() {
+  const [properties, setProperties] = useState<NormalizedProperty[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchProperties = () => {
+    setLoading(true);
+    setError(null);
+    getProperties({ sort: 'terbaru', limit: 10 })
+      .then(res => {
+        if (res.success && res.data) {
+          setProperties(res.data.items.map(normalizeProperty));
+        } else {
+          setError(res.error ?? 'Gagal memuat data properti');
+        }
+      })
+      .catch(() => setError('Koneksi ke server gagal'))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { fetchProperties(); }, []);
+
+  // Turunan dari data yang sudah di-fetch
+  const featuredItems = properties.filter(p => p.properti_pilihan);
+  const cardItems = properties.slice(0, 6);
+  const investProp = properties.find(p => p.income_per_bulan && p.badge_premium);
+
   return (
     <>
       {/* HERO */}
@@ -398,10 +493,20 @@ export default function HomePage() {
       {/* STATS STRIP */}
       <StatsStrip />
 
-      {/* BANNER CAROUSEL */}
-      <FeaturedBanner />
+      {/* BANNER CAROUSEL — properti_pilihan dari API */}
+      {loading ? (
+        <SkeletonBanner />
+      ) : error ? (
+        <section style={{ background: 'linear-gradient(180deg, #E3F2FD 0%, #F0F9FF 100%)' }} className="py-16">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <ErrorBlock message={error} onRetry={fetchProperties} />
+          </div>
+        </section>
+      ) : (
+        <FeaturedBanner items={featuredItems} />
+      )}
 
-      {/* PRODUCT CARDS SECTION */}
+      {/* PRODUCT CARDS SECTION — 6 properti terbaru dari API */}
       <section className="py-16 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-end justify-between mb-10">
@@ -416,11 +521,21 @@ export default function HomePage() {
               Lihat Semua <ArrowRight size={16} />
             </Link>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {PROPERTIES.slice(0, 6).map(p => (
-              <PropertyCard key={p.id} property={p} />
-            ))}
-          </div>
+
+          {loading ? (
+            <SkeletonCards />
+          ) : error ? (
+            <ErrorBlock message={error} onRetry={fetchProperties} />
+          ) : cardItems.length === 0 ? (
+            <p className="text-center text-[#64748B] py-12">Belum ada properti tersedia.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {cardItems.map(p => (
+                <PropertyCard key={p.id} property={p as any} />
+              ))}
+            </div>
+          )}
+
           <div className="text-center mt-10">
             <Link
               to="/properties"
@@ -467,10 +582,8 @@ export default function HomePage() {
               </Link>
             </div>
 
-            {/* Investment Preview Card */}
-            {(() => {
-              const investProp = PROPERTIES.find(p => p.income_per_bulan && p.badge_premium);
-              if (!investProp || !investProp.income_per_bulan || !investProp.pengeluaran_per_bulan) return null;
+            {/* Investment Preview Card — tampilkan jika ada properti premium dengan income */}
+            {investProp && investProp.income_per_bulan && investProp.pengeluaran_per_bulan ? (() => {
               const netIncome = investProp.income_per_bulan - investProp.pengeluaran_per_bulan;
               const yieldPct = ((netIncome * 12) / investProp.harga * 100).toFixed(1);
               const payback = (investProp.harga / (netIncome * 12)).toFixed(1);
@@ -506,19 +619,19 @@ export default function HomePage() {
                     <span className="text-[#F5A623] text-xs font-bold">{yieldPct}%</span>
                   </div>
                   <Link
-                    to={`/dijual/${investProp.jenis.toLowerCase()}/${investProp.provinsi.toLowerCase().replace(/\s+/g, '-')}/${investProp.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${investProp.kecamatan.toLowerCase().replace(/\s+/g, '-')}/${investProp.slug}`}
+                    to={`/${investProp.tujuan === 'disewa' ? 'disewa' : 'dijual'}/${investProp.jenis.toLowerCase()}/${investProp.provinsi.toLowerCase().replace(/\s+/g, '-')}/${investProp.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${investProp.kecamatan.toLowerCase().replace(/\s+/g, '-')}/${investProp.slug}`}
                     className="mt-4 block w-full text-center py-2 rounded-xl text-sm font-semibold text-[#0B2447] bg-[#29B6F6] hover:bg-[#1E88E5] transition-colors"
                   >
                     Lihat Detail →
                   </Link>
                 </div>
               );
-            })()}
+            })() : null}
           </div>
         </div>
       </section>
 
-      {/* TESTIMONIALS */}
+      {/* TESTIMONIALS — masih mock, akan diganti Tugas 2 */}
       <TestimonialsSection />
 
       {/* TRUST STRIP */}
@@ -540,7 +653,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* BLOG SPILL */}
+      {/* BLOG SPILL — masih mock, akan diganti Tugas 2 */}
       <section className="py-16 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-end justify-between mb-10">
