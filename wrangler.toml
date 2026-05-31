@@ -1,0 +1,55 @@
+# wrangler.toml — Konfigurasi Cloudflare untuk Salam Bumi Property (SBP)
+# Arsitektur: Cloudflare Pages (React/Vite frontend) + Workers (API + SSR) + D1 (database) + R2 (media)
+
+name = "sbp-website"
+account_id = "f1bac4af6572062bfcf88549ed59c823"
+
+# compatibility_date: versi runtime Cloudflare. Gunakan tanggal terbaru yang stabil.
+# nodejs_compat: aktifkan API Node.js (path, crypto, dll.) di Workers — diperlukan untuk bcrypt, UUID, dll.
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Direktori output build Vite — dipakai saat deploy ke Cloudflare Pages
+pages_build_output_dir = "./dist"
+
+# Folder migrasi D1 — Wrangler akan membaca file SQL dari sini secara urut
+# [migrations_dir dideklarasikan per-binding di bawah]
+
+# =============================================================================
+# D1 DATABASE — sbp-db
+# Binding "DB" = nama variabel yang diakses di Worker: env.DB
+# database_id: diisi setelah menjalankan 'wrangler d1 create sbp-db' (Tugas 3)
+# =============================================================================
+[[d1_databases]]
+binding = "DB"
+database_name = "sbp-db"
+database_id = "76019082-43b7-41b0-81c1-9f652ef7ac45"
+migrations_dir = "migrations"
+
+# =============================================================================
+# R2 BUCKET — sbp-media
+# Binding "MEDIA" = nama variabel di Worker: env.MEDIA
+# Menyimpan: foto properti (webp), brosur PDF, arsip kontrak, tanda tangan
+# =============================================================================
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "sbp-media"
+
+# =============================================================================
+# ENVIRONMENT VARIABLES (non-secret, safe untuk commit)
+# Secret seperti API key / JWT secret -> simpan via 'wrangler secret put'
+# =============================================================================
+[vars]
+ENVIRONMENT = "development"
+APP_URL = "https://salambumi.xyz"
+WA_ADMIN = "6281391278889"
+ADMIN_EMAIL = "salambumiproperty@gmail.com"
+
+# =============================================================================
+# PREVIEW / LOCAL DEVELOPMENT
+# Remote = false  -> gunakan database D1 lokal (file SQLite di .wrangler/)
+# Remote = true   -> gunakan D1 di Cloudflare cloud (untuk staging test)
+# =============================================================================
+[dev]
+port = 8787
+local_protocol = "http"
