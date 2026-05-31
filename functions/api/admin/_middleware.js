@@ -1,0 +1,51 @@
+import { verifyJWT, SESSION_COOKIE_NAME } from '../_shared/jwt.js';
+import { jsonError } from '../_shared/response.js';
+
+// Route yang TIDAK membutuhkan auth (whitelist)
+const PUBLIC_PATHS = ['/api/admin/login', '/api/admin/logout'];
+
+export async function onRequest(context) {
+  const { request, env, next } = context;
+
+  // Lewati auth untuk route publik (login, logout)
+  const url = new URL(request.url);
+  if (PUBLIC_PATHS.some(p => url.pathname === p)) {
+    return next();
+  }
+
+  // Preflight OPTIONS — tidak perlu auth
+  if (request.method === 'OPTIONS') {
+    return next();
+  }
+
+  // Tidak ada JWT_SECRET → konfigurasi server salah
+  if (!env.JWT_SECRET) {
+    return jsonError('Konfigurasi server tidak lengkap', 503);
+  }
+
+  // Baca token dari cookie httpOnly
+  const cookieName = SESSION_COOKIE_NAME();
+  const cookieHeader = request.headers.get('Cookie') ?? '';
+  const cookieMatch  = cookieHeader.match(new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`));
+  const token = cookieMatch?.[1] ?? null;
+
+  // Fallback: Bearer token di Authorization header (untuk klien non-browser / testing)
+  const authHeader = request.headers.get('Authorization') ?? '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  const rawToken = token ?? bearerToken;
+
+  if (!rawToken) {
+    return jsonError('Sesi tidak ditemukan. Silakan login kembali.', 401);
+  }
+
+  const payload = await verifyJWT(rawToken, env.JWT_SECRET);
+  if (!payload) {
+    return jsonError('Sesi tidak valid atau sudah kedaluwarsa. Silakan login kembali.', 401);
+  }
+
+  // Attach data admin ke context — dapat dibaca oleh handler di bawahnya
+  context.data.admin = payload;
+
+  return next();
+}

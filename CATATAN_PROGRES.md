@@ -5,7 +5,7 @@
 
 ---
 
-## STATUS SAAT INI: Fase B Selesai ✅
+## STATUS SAAT INI: Fase C Selesai ✅
 
 ---
 
@@ -91,28 +91,59 @@
 
 ---
 
-## FASE C — Cloudflare Workers API (BERIKUTNYA)
+## FASE C — Cloudflare Workers API ✅ SELESAI
 
-### Target:
-Membangun lapisan API edge (Cloudflare Workers) yang menghubungkan D1 ke frontend.
+**Tanggal:** 1 Juni 2026
 
-### Endpoint prioritas (sesuai spec section 1):
-```
-GET  /api/properties            → list + filter + pagination
-GET  /api/properties/:slug      → detail + increment views
-GET  /api/locations?parent_id=  → cascading dropdown
-POST /api/leads                 → simpan lead (K6) sebelum redirect WA
-GET  /api/sitemap.xml           → SSR/edge generated
-```
+### Arsitektur yang dipilih:
+**Cloudflare Pages Functions** (`/functions/`) — file-system routing, deploy satu perintah bersama frontend, binding D1/R2 otomatis dari `wrangler.toml`.
 
-### Yang perlu disiapkan di Fase C:
-- [ ] Setup Cloudflare Workers / Pages Functions
-- [ ] Koneksi D1 via `env.DB` binding
-- [ ] Implementasi `generateSeoSlug()` (spec 3.2)
-- [ ] Implementasi `generateKodeListing()` (format SBP-YYYYMMDD-XXXX)
-- [ ] Implementasi `harga_per_m2` calculation saat INSERT/UPDATE
-- [ ] Admin auth: session JWT + bcrypt verify (hapus hardcode di AdminLoginPage)
-- [ ] Enkripsi AES untuk kolom `nik` di tabel `owners`
+### File yang dibuat:
+
+| File | Endpoint | Status |
+|------|----------|--------|
+| `functions/_middleware.js` | CORS global | ✅ |
+| `functions/api/_shared/response.js` | Helper `jsonOk/jsonError` | ✅ |
+| `functions/api/_shared/jwt.js` | JWT sign/verify (Web Crypto) + cookie helper | ✅ |
+| `functions/api/health.js` | `GET /api/health` | ✅ |
+| `functions/api/locations.js` | `GET /api/locations?parent_id=` | ✅ |
+| `functions/api/properties/index.js` | `GET /api/properties` | ✅ |
+| `functions/api/properties/[slug].js` | `GET /api/properties/:slug` | ✅ |
+| `functions/api/leads.js` | `POST /api/leads` | ✅ |
+| `functions/api/admin/_middleware.js` | JWT auth guard `/api/admin/*` | ✅ |
+| `functions/api/admin/login.js` | `POST /api/admin/login` | ✅ |
+| `functions/api/admin/logout.js` | `POST /api/admin/logout` | ✅ |
+| `functions/api/admin/me.js` | `GET /api/admin/me` | ✅ |
+| `migrations/0004_login_rate_limits.sql` | Rate limit table | ✅ |
+| `API_REFERENCE.md` | Dokumentasi endpoint lengkap | ✅ |
+
+### Fitur per endpoint:
+
+**`GET /api/health`** — query COUNT locations, kembalikan status DB + jumlah baris.
+
+**`GET /api/locations`** — cascading dropdown 4 level via `parent_id`. Validasi + 404 bila parent tidak ada.
+
+**`GET /api/properties`** — filter: tujuan (dijual/disewa/dijual_disewa), jenis (multi comma-separated), lokasi 4 level (case-insensitive), rentang harga (price-field-aware untuk disewa), KT/KM min. Sort: terbaru (badge-priority) / termurah / termahal / luas / yield. Pagination: page+limit (default 20, max 50). Privasi: `alamat` tidak disertakan.
+
+**`GET /api/properties/:slug`** — detail lengkap + array `images` (urutan) + `details` JSON ter-parse + `investment_intelligence` (yield, payback, cap rate, skor bintang) bila ada `income_per_bulan`. Increment `views_count` non-blocking via `context.waitUntil()`.
+
+**`POST /api/leads`** — K6 kritis: INSERT ke DB SEBELUM response. Sanitasi HTML + normalisasi no_wa (08xx→628xx). Validasi 422 per-field. Response: `lead_id` + `wa_url` + `wa_pesan` terformat (spec 8.8).
+
+**`POST /api/admin/login`** — bcryptjs verify + rate limit 5x/15mnt via D1. JWT HS256 (Web Crypto, tanpa library). Cookie: `sbp_session` httpOnly SameSite=Strict 8 jam. Pesan error generik (tidak bocorkan email exists).
+
+**`POST /api/admin/logout`** — clear cookie (`Max-Age=0`).
+
+**`GET /api/admin/me`** — kembalikan payload JWT (sub, email, nama, role). Dilindungi middleware.
+
+### Migration tambahan:
+`migrations/0004_login_rate_limits.sql` — perlu diapply (lihat perintah di bawah).
+
+### Catatan teknis:
+- JWT_SECRET wajib dikonfigurasi sebagai secret (`.dev.vars` lokal, `wrangler secret put` produksi)
+- `bcryptjs` dipindah ke `dependencies` (runtime, bukan devOnly)
+- UI login React (`AdminLoginPage.tsx`) belum diubah — disambungkan di Fase D
+- `generateSeoSlug()` & `generateKodeListing()` belum diimplementasi — masuk Fase D saat form admin aktif
+- Enkripsi AES untuk `nik` owners — masuk Fase H (keamanan)
 
 ### Fase-fase berikutnya setelah C:
 - **Fase D:** Ganti mock UI → real API (sambungkan komponen ke endpoint Workers)

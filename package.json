@@ -10,6 +10,7 @@
     "api:build-dev": "npm run build && wrangler pages dev dist --port=8787"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
     "@mui/icons-material": "7.3.5",
@@ -69,7 +70,6 @@
   "devDependencies": {
     "@tailwindcss/vite": "4.1.12",
     "@vitejs/plugin-react": "4.7.0",
-    "bcryptjs": "^3.0.3",
     "tailwindcss": "4.1.12",
     "vite": "6.3.5",
     "wrangler": "^4.0.0"
