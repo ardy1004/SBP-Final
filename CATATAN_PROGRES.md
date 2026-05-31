@@ -5,7 +5,7 @@
 
 ---
 
-## STATUS SAAT INI: Fase C Selesai ✅
+## STATUS SAAT INI: Fase D Selesai ✅
 
 ---
 
@@ -160,14 +160,83 @@ Langkah-langkah ini **belum** dilakukan dan harus diselesaikan sebelum deploy ke
 
 ---
 
-### Fase-fase berikutnya setelah C:
-- **Fase D:** Ganti mock UI → real API (sambungkan komponen ke endpoint Workers)
+## FASE D — Integrasi Frontend React ↔ Workers API ✅ SELESAI
+
+**Tanggal:** 1 Juni 2026
+
+### Tujuan:
+Mengganti semua data mock di frontend dengan data nyata dari Workers API. UI/desain tidak berubah — hanya sumber data yang diganti.
+
+### Commits Fase D:
+
+| Hash | Task | Keterangan |
+|------|------|------------|
+| `2db6bba` | Task 0 | `src/lib/api.ts` terpusat + Vite proxy `/api → :8787` |
+| `e02b289` | Task 1 | Homepage Banner & Cards dari `GET /api/properties` |
+| `3f06b53` | Task 2 | Endpoint baru `/api/testimonials` + `/api/blog`; sambung ke homepage |
+| `81f7945` | Task 3 | PropertiesPage: filter+sort+pagination server-side via API; lokasi cascade via `GET /api/locations` |
+| `1fbc09b` | Task 4 | PropertyDetailPage: galeri, spesifikasi, Investment Intelligence, peta, 404 inline |
+| `4a5e879` | Task 5 | LeadForm K6: `POST /api/leads` → simpan DB → buka `wa_url` dari response |
+
+### File baru yang dibuat:
+
+| File | Keterangan |
+|------|------------|
+| `src/lib/api.ts` | Lapisan API client terpusat: tipe TS, `normalizeProperty()`, `normalizePropertyDetail()`, semua fungsi fetch |
+| `functions/api/testimonials.js` | `GET /api/testimonials` — tampilkan=1, ORDER BY urutan |
+| `functions/api/blog.js` | `GET /api/blog?limit=&page=` — published, JOIN admins, tags JSON parse |
+
+### Status Data per Halaman/Komponen:
+
+| Halaman / Komponen | Status | Sumber Data |
+|--------------------|--------|-------------|
+| Homepage — Banner Properti Pilihan | ✅ Live | `GET /api/properties?sort=terbaru&limit=10` |
+| Homepage — 6 Kartu Properti | ✅ Live | Sama (slice 6 pertama) |
+| Homepage — Investment Teaser | ✅ Live | Sama (find premium+income) |
+| Homepage — Testimoni Slider | ✅ Live | `GET /api/testimonials` |
+| Homepage — Blog Spill (3 artikel) | ✅ Live | `GET /api/blog?limit=3` |
+| PropertiesPage — listing + filter + sort | ✅ Live | `GET /api/properties?{params}` server-side |
+| PropertiesPage — lokasi cascade | ✅ Live | `GET /api/locations` → prov → kab → kec |
+| PropertyDetailPage — semua field | ✅ Live | `GET /api/properties/:slug` |
+| PropertyDetailPage — galeri | ✅ Live | `images[].url_webp` dari detail API |
+| PropertyDetailPage — Investment Intelligence | ✅ Live | Objek `investment_intelligence` pre-computed API |
+| PropertyDetailPage — peta | ✅ Live | `latitude`, `longitude`, `gmaps_link` dari API |
+| PropertyDetailPage — properti serupa | ✅ Live | `GET /api/properties?kabupaten={kab}&limit=5` |
+| Form Kontak / LeadForm (K6) | ✅ Live | `POST /api/leads` → `wa_url` dari response |
+| **Homepage — HeroFilter cascade** | ⚠️ Mock | `LOCATION_HIERARCHY` statis dari mockData (data sudah cukup untuk UX) |
+| **BlogPage** (list + detail) | ⚠️ Mock | `BLOG_POSTS` dari mockData — endpoint `/api/blog/:slug` belum ada |
+| **PortfolioPage** | ⚠️ Mock | `PORTFOLIO_ITEMS` dari mockData |
+| **FAQPage** | ⚠️ Statis | `FAQ_DATA` konten statis — tidak perlu API |
+| **Admin Dashboard** | 🔲 Menyusul | Fase G |
+
+### Endpoint API yang ditambah di Fase D:
+
+| Endpoint | File | Catatan |
+|----------|------|---------|
+| `GET /api/testimonials` | `functions/api/testimonials.js` | Baru di Fase D |
+| `GET /api/blog` | `functions/api/blog.js` | Baru di Fase D |
+
+### Pola loading & error state (semua halaman live):
+- **Loading:** `<Skeleton />` (shadcn/ui) — placeholder shape sesuai konten
+- **Error:** `AlertCircle` + pesan + tombol "Coba Lagi" (retry fetch)
+- **Empty:** Pesan + tombol Reset Filter (PropertiesPage)
+- **404:** Inline `PropertyNotFound` (PropertyDetailPage)
+
+### Catatan teknis:
+- `src/lib/api.ts` → `normalizeProperty()` dan `normalizePropertyDetail()` mengadaptasi field API (integer 0/1 → boolean, `jenis_properti` → `jenis`, `jumlah_kamar_tidur` → `kamar_tidur`, dll.) agar komponen UI yang sudah ada tidak perlu diubah
+- `PropertyCard` tetap menerima tipe lama via `as any` cast — refactor tipe resmi di Fase H
+- `mockData.ts` tidak dihapus — masih dipakai HeroFilter, BlogPage, FAQPage, PortfolioPage
+- Dev workflow: `npm run dev` (:5173) + `npm run api:dev` (:8787) — atau cukup `:8787` sebagai main URL
+
+---
+
+### Fase-fase berikutnya setelah D:
 - **Fase E:** SSR/Edge Rendering (K1 — kritis untuk programmatic SEO)
 - **Fase F:** Alur Titip Jual + Tanda Tangan Digital
-- **Fase G:** Admin Dashboard lengkap (13 modul)
-- **Fase H:** Keamanan & compliance (hapus hardcode, enkripsi, UU PDP)
+- **Fase G:** Admin Dashboard lengkap (13 modul) — sambungkan juga BlogPage, PortfolioPage ke API
+- **Fase H:** Keamanan & compliance (hapus hardcode, enkripsi UU PDP, refactor tipe PropertyCard)
 - **Fase I:** SEO Engine (sitemap, schema JSON-LD, halaman programmatic)
-- **Fase J:** Diferensiasi (Investment Intelligence, Proximity Engine, AI content)
+- **Fase J:** Diferensiasi (Investment Intelligence lanjutan, Proximity Engine, AI content)
 
 ---
 
