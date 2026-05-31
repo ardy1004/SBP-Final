@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev": "vite"
+    "dev": "vite",
+    "api:dev": "wrangler pages dev --proxy=5173 --port=8787",
+    "api:build-dev": "npm run build && wrangler pages dev dist --port=8787"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -69,7 +71,8 @@
     "@vitejs/plugin-react": "4.7.0",
     "bcryptjs": "^3.0.3",
     "tailwindcss": "4.1.12",
-    "vite": "6.3.5"
+    "vite": "6.3.5",
+    "wrangler": "^4.0.0"
   },
   "peerDependencies": {
     "react": "18.3.1",
