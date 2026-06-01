@@ -7,8 +7,8 @@ export default [
 
     // Halaman publik — belum ada loader, render loading-state server-side (aman, hydrate client)
     route("properties", "./components/PropertiesPage.tsx", { id: "properties-page" }),
-    route("dijual/:jenis/:provinsi/:kabupaten/:kecamatan/:slug", "./components/PropertyDetailPage.tsx", { id: "dijual-detail" }),
-    route("disewa/:jenis/:provinsi/:kabupaten/:kecamatan/:slug", "./components/PropertyDetailPage.tsx", { id: "disewa-detail" }),
+    route("dijual/:jenis/:provinsi/:kabupaten/:kecamatan/:slug", "./routes/property-detail.tsx", { id: "dijual-detail" }),
+    route("disewa/:jenis/:provinsi/:kabupaten/:kecamatan/:slug", "./routes/property-detail.tsx", { id: "disewa-detail" }),
     route(":slug", "./components/PropertiesPage.tsx", { id: "programmatic-seo" }),   // /rumah-dijual-jogja
     route("about", "./components/AboutPage.tsx"),
     route("portfolio", "./components/PortfolioPage.tsx"),

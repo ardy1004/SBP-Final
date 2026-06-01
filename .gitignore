@@ -26,6 +26,9 @@ lead-bad.json
 .wrangler/
 wrangler.toml.local
 
+# React Router generated files
+.react-router/
+
 # Editor / OS artifacts
 .DS_Store
 Thumbs.db

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type ComponentType } from 'react';
 import { useParams, Link } from 'react-router';
 import { MapPin, Eye, Calendar, Share2, Heart, BedDouble, Bath, Maximize2, ChevronLeft, ChevronRight, X, MessageCircle, Star, TrendingUp, Clock, BarChart2, Home, Search } from 'lucide-react';
 import useEmblaCarousel from 'embla-carousel-react';
@@ -9,7 +9,19 @@ import {
   formatRupiah, formatRupiahFull,
 } from '../../lib/api';
 import { formatRibuan } from '../../lib/format';
-import KPRCalculator from './KPRCalculator';
+// KPRCalculator dimuat hanya di klien — recharts akses window saat import, crash SSR.
+// Pola mounted-flag: server & render-klien-pertama tampilkan placeholder identik → no hydration mismatch.
+function KPRCalculatorClient({ defaultHarga }: { defaultHarga: number }) {
+  type KPRComp = ComponentType<{ defaultHarga: number }>;
+  const [Comp, setComp] = useState<KPRComp | null>(null);
+  useEffect(() => {
+    let alive = true;
+    import('./KPRCalculator').then((m) => { if (alive) setComp(() => m.default as KPRComp); });
+    return () => { alive = false; };
+  }, []);
+  if (!Comp) return <div className="bg-white rounded-2xl p-5 shadow-sm h-40 animate-pulse" />;
+  return <Comp defaultHarga={defaultHarga} />;
+}
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
 
@@ -311,12 +323,17 @@ function PropertyNotFound() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Component
 // ─────────────────────────────────────────────────────────────────────────────
-export default function PropertyDetailPage() {
-  const { slug } = useParams<{ slug: string }>();
+interface PropertyDetailPageProps {
+  ssrProperty?: NormalizedPropertyDetail;
+}
 
-  const [property, setProperty] = useState<NormalizedPropertyDetail | null>(null);
+export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPageProps) {
+  const { slug } = useParams<{ slug: string }>();
+  const hasSSR = ssrProperty !== undefined;
+
+  const [property, setProperty] = useState<NormalizedPropertyDetail | null>(ssrProperty ?? null);
   const [similar, setSimilar] = useState<NormalizedProperty[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!hasSSR);
   const [notFound, setNotFound] = useState(false);
 
   const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true });
@@ -342,10 +359,31 @@ export default function PropertyDetailPage() {
   // Fetch detail + similar
   useEffect(() => {
     if (!slug) { setNotFound(true); setLoading(false); return; }
-    setLoading(true);
+
     setNotFound(false);
-    setProperty(null);
     setSimilar([]);
+
+    if (ssrProperty && ssrProperty.slug === slug) {
+      // Data dari SSR loader tersedia — skip fetch utama, ambil properti serupa saja
+      setProperty(ssrProperty);
+      setLoading(false);
+      getProperties({ kabupaten: ssrProperty.kabupaten, limit: 5 })
+        .then(simRes => {
+          if (simRes.success && simRes.data) {
+            setSimilar(
+              simRes.data.items
+                .map(normalizeProperty)
+                .filter(p => p.id !== ssrProperty.id)
+                .slice(0, 4)
+            );
+          }
+        });
+      return;
+    }
+
+    // CSR fallback — saat SSR data tidak tersedia atau slug tidak cocok
+    setLoading(true);
+    setProperty(null);
 
     getPropertyBySlug(slug).then(res => {
       if (res.success && res.data) {
@@ -369,7 +407,8 @@ export default function PropertyDetailPage() {
       }
     }).catch(() => setNotFound(true))
       .finally(() => setLoading(false));
-  }, [slug]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug, ssrProperty]);
 
   if (loading) return <DetailSkeleton />;
   if (notFound || !property) return <PropertyNotFound />;
@@ -508,10 +547,10 @@ export default function PropertyDetailPage() {
               <InvestmentPanel ii={property.investment_intelligence} />
             )}
 
-            {/* KPR Calculator */}
+            {/* KPR Calculator — client-only via KPRCalculatorClient (mounted-flag pattern) */}
             {(property.tujuan === 'dijual' || property.tujuan === 'dijual_disewa') && (
               <div className="mb-5">
-                <KPRCalculator defaultHarga={property.harga} />
+                <KPRCalculatorClient defaultHarga={property.harga} />
               </div>
             )}
 
