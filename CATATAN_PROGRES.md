@@ -5,7 +5,7 @@
 
 ---
 
-## STATUS SAAT INI: Fase E — Task 3 Selesai ✅
+## STATUS SAAT INI: Fase F — F1 Backend Agreements Selesai ✅
 
 ---
 
@@ -325,12 +325,81 @@ Pakai **dynamic import dalam useEffect** (mounted-flag), BUKAN `React.lazy`.
 ---
 
 ### Fase-fase berikutnya setelah D:
-- **Fase E:** SSR/Edge Rendering (K1 — kritis untuk programmatic SEO)
-- **Fase F:** Alur Titip Jual + Tanda Tangan Digital
+- **Fase E:** SSR/Edge Rendering (K1 — kritis untuk programmatic SEO) ✅
+- **Fase F:** Alur Titip Jual + Tanda Tangan Digital (F1 backend selesai ✅)
 - **Fase G:** Admin Dashboard lengkap (13 modul) — sambungkan juga BlogPage, PortfolioPage ke API
 - **Fase H:** Keamanan & compliance (hapus hardcode, enkripsi UU PDP, refactor tipe PropertyCard)
 - **Fase I:** SEO Engine (sitemap, schema JSON-LD, halaman programmatic)
 - **Fase J:** Diferensiasi (Investment Intelligence lanjutan, Proximity Engine, AI content)
+
+---
+
+---
+
+## FASE F — Alur Titip Jual + Tanda Tangan Digital
+
+**Branch:** `feat/fase-f-agreements`
+
+### F1 — Backend Agreements ✅ SELESAI (2 Juni 2026)
+
+#### Migrasi database:
+`migrations/0005_agreements_owners.sql` — 4 perubahan:
+1. `ALTER TABLE owners RENAME COLUMN nik TO nik_encrypted` — nama kolom mempertegas isinya ciphertext
+2. `ALTER TABLE owners ADD COLUMN updated_at` — kolom yang hilang di skema awal
+3. `CREATE INDEX idx_agreements_status` — filter dashboard admin per status
+4. `CREATE INDEX idx_owners_property_id` — lookup owner dari property
+
+#### File yang dibuat:
+
+| File | Keterangan |
+|------|------------|
+| `functions/_lib/crypto.js` | Helper enkripsi/dekripsi NIK: AES-256-GCM via Web Crypto. Passphrase → SHA-256 → 32-byte key. Format: `base64(iv):base64(ciphertext)`. |
+| `functions/api/titip-jual.js` | `POST /api/titip-jual` — form titip jual publik: validasi 422, enkripsi NIK, insert 3 tabel atomik (property draft + owner + agreement draft) |
+| `functions/api/admin/agreements/[id]/configure.js` | `POST /api/admin/agreements/:id/configure` — admin set jenis_listing/fee/durasi, generate sign_token UUID + expiry 72 jam, status → menunggu_ttd |
+| `functions/api/sign/[token].js` | `GET` — validasi token, dekripsi NIK untuk ditampilkan, kembalikan pasal-pasal; `POST` — upload TTD PNG ke R2, atomic UPDATE agreements (token_used=1, status=signed, audit_ip, audit_hash), auto-publish properti |
+
+#### Alur lengkap yang teruji:
+
+```
+Pemilik → POST /api/titip-jual                 [NIK terenkripsi AES-GCM, 3 INSERT atomik]
+Admin   → POST /api/admin/agreements/:id/configure [sign_token + link TTD]
+Pemilik → GET  /api/sign/:token                 [dokumen + pasal ditampilkan]
+Pemilik → POST /api/sign/:token {signature PNG}  [R2 upload + DB atomic update + auto-publish]
+```
+
+**Bukti R2:** `signatures/SBP-AGR-20260601-001-7e8ceb99-998f-4898-ba33-ecbc746a6be1.png` (PNG valid, 70 bytes) tersimpan di bucket lokal `sbp-media`. Verifikasi: `wrangler r2 object get sbp-media/signatures/... --local` → Download complete ✅.
+
+**Bukti enkripsi:** `POST /api/titip-jual` → `"status": "draft"` 201 OK setelah NIK_ENC_KEY dipindah dari `wrangler.toml` ke `.dev.vars` saja.
+
+**Properti auto-publish:** setelah POST sign berhasil, `UPDATE properties SET status_publish='published'` berjalan non-blocking.
+
+---
+
+### ⚠️ GOTCHA Fase F1 — WAJIB DIBACA
+
+**[a] `.dev.vars` — nilai dengan `=` (base64 padding) gagal ter-inject:**
+Wrangler Pages dev pernah gagal menginjeksi env var dari `.dev.vars` jika nilai mengandung karakter `=` (mis. base64 key seperti `abc123==`). Solusi: gunakan passphrase biasa tanpa `=` sebagai `NIK_ENC_KEY`, lalu derive AES key via SHA-256 di dalam `crypto.js` → tidak ada ketergantungan pada karakter tertentu.
+
+**[b] NIK_ENC_KEY JANGAN masuk `wrangler.toml`:**
+Kunci enkripsi adalah rahasia. Wrangler.toml di-commit ke Git → kunci masuk riwayat forever.
+- Dev lokal: set di `.dev.vars` (gitignored)
+- Produksi: `wrangler secret put NIK_ENC_KEY`
+- Wrangler.toml hanya boleh punya komentar pengingat, TIDAK nilai kunci.
+
+**[c] `wrangler r2 object list` tidak tersedia di wrangler 4.x:**
+Gunakan `wrangler r2 object get <bucket>/<key> --local` untuk verifikasi manual.
+
+---
+
+### ⚠️ TODO PRODUKSI Fase F1 (wajib sebelum go-live)
+
+| # | Item | Perintah / Tindakan |
+|---|------|---------------------|
+| a | **Set NIK_ENC_KEY production** | `wrangler secret put NIK_ENC_KEY` (isi passphrase acak kuat ≥ 32 char, simpan di password manager) |
+| b | **Apply migrasi 0005 ke remote** | `wrangler d1 execute sbp-db --remote --file=migrations/0005_agreements_owners.sql` |
+| c | **Endpoint GET /api/admin/agreements** | Tambahkan di Fase G (Admin Dashboard) untuk list semua agreement + filter status |
+| d | **Notifikasi WhatsApp** | Setelah POST sign berhasil, kirim WA ke admin via nomor `WA_ADMIN` (Fase F2) |
+| e | **Generate PDF arsip** | `TODO F4` di sign handler — simpan ke `pdf_url` di D1 (Fase F3/F4) |
 
 ---
 
