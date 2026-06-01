@@ -5,7 +5,7 @@
 
 ---
 
-## STATUS SAAT INI: Fase F — F1 Backend Agreements Selesai ✅
+## STATUS SAAT INI: Fase F — F2 Frontend Titip Jual Selesai ✅
 
 ---
 
@@ -400,6 +400,67 @@ Gunakan `wrangler r2 object get <bucket>/<key> --local` untuk verifikasi manual.
 | c | **Endpoint GET /api/admin/agreements** | Tambahkan di Fase G (Admin Dashboard) untuk list semua agreement + filter status |
 | d | **Notifikasi WhatsApp** | Setelah POST sign berhasil, kirim WA ke admin via nomor `WA_ADMIN` (Fase F2) |
 | e | **Generate PDF arsip** | `TODO F4` di sign handler — simpan ke `pdf_url` di D1 (Fase F3/F4) |
+
+---
+
+---
+
+### F2 — Frontend Titip Jual ✅ SELESAI (2 Juni 2026)
+
+#### File yang dimodifikasi:
+
+| File | Keterangan |
+|------|------------|
+| `src/app/components/TitipJualPage.tsx` | Form 2 langkah: Langkah 1 = Data Diri, Langkah 2 = Info Properti + Foto |
+| `functions/api/titip-jual.js` | Diperluas: terima array foto base64 → upload ke R2 + INSERT property_images |
+
+#### Fitur yang terimplementasi:
+
+- **Form 2 langkah (wizard):** Langkah 1 — Data Diri (nama, NIK, telp, email, bertindak_sebagai); Langkah 2 — Info Properti + Upload Foto. Navigasi Lanjut / Kembali antar langkah.
+- **Endpoint diperluas:** `POST /api/titip-jual` kini terima `photos[]` (base64 + mimeType + filename) → upload ke R2 path `property-photos/<propertyId>/<filename>`, INSERT ke `property_images`; foto pertama otomatis jadi cover (`is_cover=1`).
+- **Field ahli waris kondisional:** field `nama_pewaris` & `hubungan_pewaris` hanya muncul saat `bertindak_sebagai = ahli_waris`.
+- **Cascade lokasi:** Provinsi → Kota/Kab → Kecamatan → Kelurahan/Desa → Jalan via `/api/locations?type=...&parent_id=...`.
+- **Consent PDP wajib:** checkbox persetujuan pengolahan data pribadi (Pasal 4 UU 27/2022) harus dicentang sebelum submit bisa aktif.
+- **Validasi foto:** max 8 MB per file, tipe image/* saja, tampilkan preview thumbnail + tombol hapus.
+- **Halaman sukses:** setelah submit berhasil, tampilkan pesan "Pengajuan Diterima — Tunggu konfirmasi via WhatsApp".
+- **4 tabel terisi atomik:** `properties` (status=draft) + `owners` (NIK terenkripsi AES-GCM) + `agreements` (status=draft) + `property_images`.
+
+#### Alur lengkap yang teruji di browser (wrangler port 8790):
+
+```
+Pengguna isi Langkah 1 (Data Diri) → Lanjut →
+Pengguna isi Langkah 2 (Info Properti + Foto) → Submit →
+POST /api/titip-jual { ...formData, photos: [{base64, mimeType, filename}] } →
+  ↳ INSERT properties (draft)
+  ↳ INSERT owners (NIK terenkripsi)
+  ↳ INSERT agreements (draft)
+  ↳ FOREACH photo: R2.put(property-photos/<id>/<filename>) + INSERT property_images
+→ 201 { status: "draft", propertyId, agreementId } →
+Halaman sukses "Tunggu WA"
+```
+
+---
+
+### ⚠️ GOTCHA Fase F2 — WAJIB DIBACA
+
+**[a] NODE ZOMBIE menumpuk di Windows:**
+Wrangler dev / `wrangler pages dev` sering meninggalkan proses Node yang tetap berjalan di background setelah Ctrl+C. Gejala: server tampak "Ready" tapi koneksi menggantung / timeout / tidak merespons.
+Solusi: `Get-Process node | Stop-Process -Force` lalu restart wrangler bersih. Cek berkala: `Get-Process node`.
+
+**[b] JANGAN uji endpoint `/api/*` di `npm run dev` (Vite port 5173):**
+Vite dev server TIDAK menjalankan Cloudflare Functions maupun D1. Semua request ke `/api/*` akan 404 atau 500.
+Uji API HANYA di mode wrangler: `wrangler pages dev dist/client` (port 8790 atau konfigurasikan sendiri).
+
+**[c] Setiap perubahan komponen/route WAJIB clean build + restart wrangler bersih + hard reload browser:**
+Urutan wajib:
+1. Hapus `dist/` dan `.react-router/` (`Remove-Item -Recurse -Force dist, .react-router`)
+2. Build ulang (`npm run build`)
+3. Restart wrangler (setelah kill semua zombie Node)
+4. Browser: Empty Cache and Hard Reload (Ctrl+Shift+R atau DevTools)
+Jika langkah ini dilewati → 404 aset hash-basi atau hydration error React #418/#421/#423 dari HTML cache lama.
+
+**[d] Jangan jalankan `curl` di terminal yang sama dengan wrangler:**
+Curl yang tidak selesai / connection hang di terminal wrangler menyebabkan wrangler hang dan tidak merespons request berikutnya. Pisahkan terminal: satu untuk wrangler, satu untuk curl/testing.
 
 ---
 
