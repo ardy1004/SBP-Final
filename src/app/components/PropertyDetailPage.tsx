@@ -8,6 +8,7 @@ import {
   type NormalizedPropertyDetail, type NormalizedProperty, type InvestmentIntelligence,
   formatRupiah, formatRupiahFull,
 } from '../../lib/api';
+import { formatRibuan } from '../../lib/format';
 import KPRCalculator from './KPRCalculator';
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
@@ -584,7 +585,7 @@ export default function PropertyDetailPage() {
                 {property.nett && <span className="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-[#1565C0] border border-blue-200">Nett</span>}
               </div>
               <div className="flex items-center justify-between text-xs text-gray-400 pt-3 border-t border-gray-100">
-                <div className="flex items-center gap-1"><Eye size={12} /> Dilihat {property.views_count.toLocaleString()} kali</div>
+                <div className="flex items-center gap-1"><Eye size={12} /> Dilihat {formatRibuan(property.views_count)} kali</div>
                 <div className="flex items-center gap-1"><Calendar size={12} /> {property.updated_at?.slice(0, 10) ?? ''}</div>
               </div>
             </div>

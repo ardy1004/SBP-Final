@@ -15,7 +15,22 @@ import * as build from "../dist/server/index.js";
 
 const handler = createRequestHandler(build, "production");
 
+const STATIC_EXT = [
+  ".js", ".mjs", ".css", ".map",
+  ".webp", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
+  ".woff", ".woff2", ".ttf", ".eot",
+  ".json", ".txt", ".xml", ".pdf",
+];
+
 export async function onRequest(context) {
+  const url = new URL(context.request.url);
+  if (
+    url.pathname.startsWith("/assets/") ||
+    STATIC_EXT.some((ext) => url.pathname.toLowerCase().endsWith(ext))
+  ) {
+    return context.next();
+  }
+
   const { request, env, waitUntil } = context;
   return handler(request, {
     cloudflare: {
