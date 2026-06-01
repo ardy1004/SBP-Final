@@ -14,16 +14,29 @@ export async function loader({ context }: LoaderFunctionArgs) {
     const db = env.DB as D1Database;
 
     const [propsRes, testimRes, blogRes] = await Promise.all([
+      // Query identik dengan GET /api/properties — kolom dan filter sama persis
       db.prepare(`
-        SELECT id, kode_listing, title, slug, jenis_properti, tujuan,
-               harga, harga_lama, luas_tanah, luas_bangunan,
-               jumlah_kamar_tidur, jumlah_kamar_mandi,
-               kota_kabupaten, kecamatan, provinsi,
-               is_pilihan, is_premium, status,
-               income_per_bulan, views_count
-        FROM properties
-        WHERE status = 'aktif' AND published_at IS NOT NULL
-        ORDER BY is_pilihan DESC, published_at DESC
+        SELECT
+          p.id, p.kode_listing, p.title, p.slug,
+          p.jenis_properti, p.tujuan,
+          p.harga, p.harga_lama, p.harga_sewa_tahun,
+          p.nego, p.nett, p.harga_per_m2,
+          p.jumlah_kamar_tidur, p.jumlah_kamar_mandi,
+          p.luas_tanah, p.luas_bangunan, p.lebar_depan, p.lantai,
+          p.legalitas, p.furnished,
+          p.kecamatan, p.kabupaten, p.provinsi,
+          p.badge_premium, p.badge_featured, p.badge_hot,
+          p.status_sold, p.properti_pilihan, p.verified,
+          p.income_per_bulan, p.pengeluaran_per_bulan,
+          p.views_count, p.published_at, p.updated_at,
+          (SELECT url_webp FROM property_images
+             WHERE property_id = p.id AND is_cover = 1 LIMIT 1) AS cover_url,
+          (SELECT alt_text  FROM property_images
+             WHERE property_id = p.id AND is_cover = 1 LIMIT 1) AS cover_alt
+        FROM properties p
+        WHERE p.status_publish = 'published'
+        ORDER BY p.properti_pilihan DESC, p.badge_premium DESC,
+                 p.badge_featured DESC, p.badge_hot DESC, p.published_at DESC
         LIMIT 10
       `).all(),
 
@@ -37,8 +50,8 @@ export async function loader({ context }: LoaderFunctionArgs) {
 
       db.prepare(`
         SELECT bp.id, bp.judul, bp.slug, bp.excerpt,
-               bp.cover_image_url AS cover, bp.tags, bp.published_at,
-               NULL AS kategori, NULL AS reading_time_menit,
+               bp.cover, bp.tags, bp.published_at,
+               bp.kategori, bp.reading_time_menit,
                a.nama AS author
         FROM blog_posts bp
         LEFT JOIN admins a ON bp.author_id = a.id
