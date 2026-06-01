@@ -458,17 +458,25 @@ function HeroFilter() {
   );
 }
 
+interface HomePageProps {
+  ssrProperties?: NormalizedProperty[];
+  ssrTestimonials?: ApiTestimonial[];
+  ssrBlogPosts?: ApiBlogPost[];
+}
+
 /* ── MAIN HOMEPAGE ── */
-export default function HomePage() {
-  const [properties, setProperties] = useState<NormalizedProperty[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts }: HomePageProps) {
+  const hasSSR = ssrProperties !== undefined;
+
+  const [properties, setProperties] = useState<NormalizedProperty[]>(ssrProperties ?? []);
+  const [loading, setLoading] = useState(!hasSSR);
   const [error, setError] = useState<string | null>(null);
 
-  const [testimonials, setTestimonials] = useState<ApiTestimonial[]>([]);
-  const [testimonialsLoading, setTestimonialsLoading] = useState(true);
+  const [testimonials, setTestimonials] = useState<ApiTestimonial[]>(ssrTestimonials ?? []);
+  const [testimonialsLoading, setTestimonialsLoading] = useState(!hasSSR);
 
-  const [blogPosts, setBlogPosts] = useState<ApiBlogPost[]>([]);
-  const [blogLoading, setBlogLoading] = useState(true);
+  const [blogPosts, setBlogPosts] = useState<ApiBlogPost[]>(ssrBlogPosts ?? []);
+  const [blogLoading, setBlogLoading] = useState(!hasSSR);
 
   const fetchProperties = () => {
     setLoading(true);
@@ -486,6 +494,9 @@ export default function HomePage() {
   };
 
   useEffect(() => {
+    // Skip client-side fetch jika data sudah di-render server-side
+    if (hasSSR) return;
+
     fetchProperties();
 
     getTestimonials()

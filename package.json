@@ -4,13 +4,12 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "dev": "vite",
+    "build": "react-router build",
+    "dev": "react-router dev",
     "api:dev": "wrangler pages dev --proxy=5173 --port=8787",
-    "api:build-dev": "npm run build && wrangler pages dev dist --port=8787"
+    "api:build-dev": "npm run build && wrangler pages dev dist/client --port=8787"
   },
   "dependencies": {
-    "bcryptjs": "^3.0.3",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
     "@mui/icons-material": "7.3.5",
@@ -42,6 +41,9 @@
     "@radix-ui/react-toggle": "1.1.2",
     "@radix-ui/react-toggle-group": "1.1.2",
     "@radix-ui/react-tooltip": "1.1.8",
+    "@react-router/cloudflare": "^7.16.0",
+    "@react-router/dev": "^7.16.0",
+    "bcryptjs": "^3.0.3",
     "canvas-confetti": "1.9.4",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
@@ -59,7 +61,7 @@
     "react-popper": "2.3.0",
     "react-resizable-panels": "2.1.7",
     "react-responsive-masonry": "2.7.1",
-    "react-router": "7.13.0",
+    "react-router": "^7.16.0",
     "react-slick": "0.31.0",
     "recharts": "2.15.2",
     "sonner": "2.0.3",

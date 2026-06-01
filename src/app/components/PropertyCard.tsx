@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import { MapPin, Maximize2, BedDouble, Bath, Star, Eye } from 'lucide-react';
 import { type Property, formatRupiah } from '../data/mockData';
+import { formatRibuan } from '../../lib/format';
 
 interface Props {
   property: Property;
@@ -149,7 +150,7 @@ export default function PropertyCard({ property, className = '' }: Props) {
         </div>
         <div className="text-[10px] text-gray-400 flex items-center justify-between mb-3">
           <span>📋 {property.legalitas}</span>
-          <span className="flex items-center gap-1"><Eye size={10} /> {property.views_count.toLocaleString()}</span>
+          <span className="flex items-center gap-1"><Eye size={10} /> {formatRibuan(property.views_count)}</span>
         </div>
 
         {/* CTA */}

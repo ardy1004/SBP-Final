@@ -5,7 +5,7 @@
 
 ---
 
-## STATUS SAAT INI: Fase D Selesai ✅
+## STATUS SAAT INI: Fase E — Task 3 Selesai ✅
 
 ---
 
@@ -227,6 +227,100 @@ Mengganti semua data mock di frontend dengan data nyata dari Workers API. UI/des
 - `PropertyCard` tetap menerima tipe lama via `as any` cast — refactor tipe resmi di Fase H
 - `mockData.ts` tidak dihapus — masih dipakai HeroFilter, BlogPage, FAQPage, PortfolioPage
 - Dev workflow: `npm run dev` (:5173) + `npm run api:dev` (:8787) — atau cukup `:8787` sebagai main URL
+
+---
+
+---
+
+## FASE E — SSR / Edge Rendering 🔄 IN PROGRESS
+
+**Branch:** `feat/ssr-migration`
+
+### Tujuan:
+Migrasi dari CSR murni ke SSR via React Router v7 framework mode. Setiap halaman utama mendapat loader D1 server-side, meta dinamis, dan JSON-LD untuk SEO.
+
+### Commits Fase E:
+
+| Hash | Task | Keterangan |
+|------|------|------------|
+| `6c34643` | Task 1 | Fondasi SSR: react-router.config.ts framework mode, entry.server.tsx, cloudflareDevProxy. Homepage pilot: loader D1 → props SSR, meta + JSON-LD WebSite+LocalBusiness |
+| `11e431c` | Task 2 | Fix: exclude static assets dari catch-all route; fix number-format hydration mismatch (`formatRibuan` locale-agnostic) |
+| *(pending)* | Task 3 | SSR PropertyDetailPage: loader D1 by slug, meta dinamis, JSON-LD RealEstateListing+BreadcrumbList, HTTP 404, KPRCalculator client-only |
+
+### Task 3 — SSR PropertyDetailPage (selesai, belum commit):
+
+**File baru/diubah:**
+
+| File | Perubahan |
+|------|-----------|
+| `src/app/routes/property-detail.tsx` | Baru: loader D1 + meta dinamis + JSON-LD + komponen wrapper |
+| `src/app/routes.ts` | Diubah: route dijual-detail & disewa-detail → `./routes/property-detail.tsx` |
+| `src/app/components/PropertyDetailPage.tsx` | Diubah: terima `ssrProperty?` prop, skip fetch useEffect jika SSR ada; KPRCalculatorClient mounted-flag |
+| `.gitignore` | Tambah `.react-router/` |
+
+**Fitur yang diimplementasi:**
+- Loader SSR: query D1 by slug (identik dengan `GET /api/properties/:slug`), hitung `investment_intelligence` server-side, throw `Response(null, {status: 404})` jika slug tidak ditemukan
+- Meta dinamis per properti: `<title>`, `description` (<160 char), `og:title`, `og:description`, `og:image` (cover properti), `og:url` canonical, `robots: index,follow`
+- JSON-LD server-side: `RealEstateListing` (nama, harga IDR, gambar, area kecamatan/kabupaten — tanpa alamat persis sesuai K7) + `BreadcrumbList` (5 level: Home → Dijual/Disewa → Jenis → Kabupaten → Properti)
+- HTTP status 404 benar untuk slug tidak valid (bukan 200 fallback)
+- HTML awal berisi judul, harga, deskripsi, spesifikasi (terlihat tanpa JS)
+
+**Verifikasi (wrangler pages dev :8787):**
+```
+curl judul → "Kost Eksklusif Putri 20 Kamar Dekat UNY..." ✅
+curl RealEstateListing → FOUND ✅
+curl <title> → dinamis sesuai properti ✅
+curl 404 → HTTP 404 ✅
+BreadcrumbList → FOUND ✅
+Harga (Rp...) → FOUND di HTML body ✅
+Deskripsi Properti section → FOUND ✅
+Console browser → bersih (hanya favicon.ico 404 kosmetik) ✅
+```
+
+**KPRCalculator client-only — pola mounted-flag:**
+
+```tsx
+// BENAR — dynamic import dalam useEffect (tidak jalan saat SSR)
+function KPRCalculatorClient({ defaultHarga }) {
+  const [Comp, setComp] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    import('./KPRCalculator').then((m) => { if (alive) setComp(() => m.default); });
+    return () => { alive = false; };
+  }, []);
+  if (!Comp) return <div className="h-40 animate-pulse" />;
+  return <Comp defaultHarga={defaultHarga} />;
+}
+
+// SALAH — React.lazy + Suspense → server render fallback, client render komponen → mismatch #421
+// const KPRCalculator = lazy(() => import('./KPRCalculator'));
+```
+
+### ⚠️ GOTCHA Fase E — WAJIB DIBACA sebelum lanjut:
+
+**[a] Clean build wajib setelah perubahan route/file:**
+Setiap menambah atau menghapus file yang di-bundle SSR, hash manifest server-client bisa tidak sinkron → muncul 404 aset dengan hash lama. Selalu jalankan clean build:
+```powershell
+# Windows
+Remove-Item -Recurse -Force dist, .react-router
+npm run build
+```
+```bash
+# Bash/Linux
+rm -rf dist .react-router && npm run build
+```
+
+**[b] Wrangler zombie di Windows:**
+Wrangler bisa jadi zombie menahan port walau sudah Ctrl+C. Cek dan matikan:
+```powershell
+Get-NetTCPConnection -LocalPort 8787 | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force }
+# Atau pakai port lain: wrangler pages dev dist/client --port=8788
+```
+
+**[c] Komponen ber-window (recharts/leaflet) di SSR:**
+Pakai **dynamic import dalam useEffect** (mounted-flag), BUKAN `React.lazy`.
+- `React.lazy` → server render fallback Suspense, client render asli → **hydration mismatch error #421**
+- Mounted-flag → server & client-pertama render placeholder identik → **tidak ada mismatch**
 
 ---
 

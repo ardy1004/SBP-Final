@@ -9,8 +9,8 @@ account_id = "f1bac4af6572062bfcf88549ed59c823"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Direktori output build Vite — dipakai saat deploy ke Cloudflare Pages
-pages_build_output_dir = "./dist"
+# Direktori output build React Router v7 — client assets (SSR server bundle di dist/server/)
+pages_build_output_dir = "dist/client"
 
 # Folder migrasi D1 — Wrangler akan membaca file SQL dari sini secara urut
 # [migrations_dir dideklarasikan per-binding di bawah]

@@ -1,7 +1,8 @@
 import { defineConfig } from 'vite'
 import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
-import react from '@vitejs/plugin-react'
+import { reactRouter } from '@react-router/dev/vite'
+import { cloudflareDevProxy } from '@react-router/dev/vite/cloudflare'
 
 
 function figmaAssetResolver() {
@@ -18,20 +19,18 @@ function figmaAssetResolver() {
 
 export default defineConfig({
   plugins: [
+    cloudflareDevProxy(),   // provides CF bindings (D1, R2) in SSR loaders during dev
     figmaAssetResolver(),
-    // The React and Tailwind plugins are both required for Make, even if
-    // Tailwind is not being actively used – do not remove them
-    react(),
+    reactRouter(),          // replaces @vitejs/plugin-react — handles SSR + hydration
     tailwindcss(),
   ],
   resolve: {
     alias: {
-      // Alias @ to the src directory
       '@': path.resolve(__dirname, './src'),
     },
   },
 
-  // Proxy /api/* → Worker di :8787 saat dev tanpa wrangler pages dev
+  // Proxy /api/* ke Worker saat dev tanpa wrangler pages dev
   server: {
     proxy: {
       '/api': {
