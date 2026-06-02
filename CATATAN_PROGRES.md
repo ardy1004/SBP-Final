@@ -5,7 +5,7 @@
 
 ---
 
-## STATUS SAAT INI: Fase G — G2 Modul Agreements Selesai ✅
+## STATUS SAAT INI: Fase G — G3a Modul Properti (kelola+edit+status) Selesai ✅
 
 ---
 
@@ -751,6 +751,97 @@ Buka /sign/:token            → SignPage tampil dokumen perjanjian (end-to-end 
 #### Temuan non-bug (dicatat agar tidak dikira bug):
 
 - **Foto kotak hijau di dev:** foto properti tampil sebagai kotak hijau di mode dev — ini bukan bug, melainkan R2 emulation lokal wrangler kosong (tidak ada file foto sebenarnya diupload di local). Di produksi dengan R2 berisi foto nyata, foto tampil normal.
+
+---
+
+### G3a — Modul Admin Properti ✅ SELESAI (3 Juni 2026)
+
+#### Tujuan:
+Mengganti placeholder "Segera hadir" Properti dengan modul admin properti lengkap: list semua status + filter, detail/edit 37 field, galeri foto (set cover / hapus), dan manajemen status termasuk soft-delete (archived).
+
+#### Migrasi database:
+
+| File | Isi |
+|------|-----|
+| `migrations/0006_expand_property_status.sql` | Expand CHECK `status_publish` dari 2 nilai (`draft`/`published`) menjadi 4 (`draft`/`published`/`sold`/`archived`). Recreate tabel karena SQLite tidak support `ALTER COLUMN`. |
+| `migrations/0007_restore_property_images.sql` | Restore baris `property_images` yang ikut terhapus saat `DROP TABLE properties` di 0006 (CASCADE DELETE terpicu). 3 seed foto + 6 foto dari sesi uji titip-jual. |
+
+#### Endpoint baru:
+
+| Endpoint | File | Keterangan |
+|----------|------|------------|
+| `GET /api/admin/properties` | `functions/api/admin/properties/index.js` | List semua properti SEMUA status (draft/published/sold/archived), filter `status`, `q` (cari judul/kode), pagination. Tidak ada filter `status_publish='published'` — khusus admin. |
+| `GET /api/admin/properties/:id` | `functions/api/admin/properties/[id]/index.js` | Detail satu properti: semua 37 field + array foto (`property_images` ORDER BY urutan). |
+| `PATCH /api/admin/properties/:id` | `functions/api/admin/properties/[id]/index.js` | Update field properti (37 field). Fix NOT NULL: pisah `notNullTextFields` (string kosong `''` dikirim apa adanya) vs `nullableTextFields` (string kosong dikonversi ke `null`). |
+| `PATCH /api/admin/properties/:id/status` | `functions/api/admin/properties/[id]/status.js` | Ubah `status_publish`: `draft` / `published` / `sold` / `archived`. Archived = soft-delete (properti tidak dihapus, owner dan agreement tetap utuh). |
+| `PATCH /api/admin/properties/:id/photos/:imageId/cover` | `functions/api/admin/properties/[id]/photos/[imageId]/cover.js` | Set foto sebagai cover (`is_cover=1`), reset foto lain di properti yang sama ke `is_cover=0`. |
+| `DELETE /api/admin/properties/:id/photos/:imageId` | `functions/api/admin/properties/[id]/photos/[imageId]/index.js` | Hapus satu foto: DELETE dari `property_images`, hapus objek dari R2 (non-fatal jika R2 gagal). |
+
+#### File yang dibuat/dimodifikasi:
+
+| File | Perubahan |
+|------|-----------|
+| `functions/api/admin/properties/index.js` | **Baru.** GET list semua status + filter |
+| `functions/api/admin/properties/[id]/index.js` | **Baru.** GET detail + PATCH update 37 field |
+| `functions/api/admin/properties/[id]/status.js` | **Baru.** PATCH ubah status_publish |
+| `functions/api/admin/properties/[id]/photos/[imageId]/cover.js` | **Baru.** PATCH set cover foto |
+| `functions/api/admin/properties/[id]/photos/[imageId]/index.js` | **Baru.** DELETE hapus foto |
+| `src/app/components/admin/AdminPropertyDetailPage.tsx` | **Baru.** Halaman detail/edit properti admin: 37 field dalam form section-based, galeri foto (set cover badge/hapus, placeholder tombol upload untuk G3b), badge status + dropdown ubah status. |
+| `src/app/components/admin/AdminListingPage.tsx` | **Dimodifikasi.** Repurpose menjadi list properti admin: filter status (semua/draft/published/sold/archived), badge warna per status, klik baris → navigasi ke AdminPropertyDetailPage. |
+| `src/app/routes.ts` | Tambah route `/admin/properties` dan `/admin/properties/:id`. |
+| `migrations/0006_expand_property_status.sql` | **Baru.** Expand status CHECK + recreate table. |
+| `migrations/0007_restore_property_images.sql` | **Baru.** Restore baris property_images yang hilang. |
+
+#### Fitur yang terimplementasi:
+
+- **List properti admin (`/admin/properties`):**
+  - Tabel semua properti SEMUA status (draft, published, sold, archived) — tidak ada filter status_publish='published' seperti endpoint publik
+  - Filter dropdown: semua / draft / published / sold / archived
+  - Badge warna per status (draft=abu / published=hijau / sold=biru / archived=merah)
+  - Pencarian judul/kode listing (`q` query param)
+  - Klik baris → navigasi ke halaman detail/edit
+
+- **Detail/edit properti (`/admin/properties/:id`):**
+  - Form 37 field dalam section: Info Dasar, Harga, Spesifikasi, Lokasi, Deskripsi, SEO/Meta, Investment
+  - Badge status + dropdown ubah status (draft/published/sold/archived) dengan konfirmasi
+  - Galeri foto: thumbnail, badge "Cover", tombol "Jadikan Cover" + "Hapus" per foto
+  - Placeholder tombol "Upload Foto Baru" (diimplementasikan di G3b)
+  - Tombol Simpan → PATCH ke endpoint update field
+  - Tombol Kembali ke list
+
+- **Soft-delete via status `archived`:**
+  - Status `archived` = properti disembunyikan dari semua tampilan publik
+  - Data properti, owner, dan agreement TIDAK dihapus dari DB — aman untuk audit trail
+  - Properti `archived` tidak muncul di `GET /api/properties` (publik)
+
+- **Manajemen foto:**
+  - Set cover: PATCH `/photos/:imageId/cover` → `is_cover=1`, semua foto lain di properti itu `is_cover=0`
+  - Hapus foto: DELETE `/photos/:imageId` → hapus baris DB + hapus objek R2 (non-fatal)
+
+#### Bug yang ditemukan dan diperbaiki:
+
+**NOT NULL error saat update field kosong (kecamatan/kabupaten/provinsi):**
+- Gejala: `PATCH /api/admin/properties/:id` dengan field `kecamatan`, `kabupaten`, atau `provinsi` yang dikosongkan → DB reject `NOT NULL constraint failed` → HTTP 500.
+- Root cause: semua text field di-handle sama — string kosong `''` dikonversi ke `null` sebelum dimasukkan ke SQL. Tapi kolom lokasi (provinsi/kabupaten/kecamatan/kelurahan) di schema adalah `NOT NULL DEFAULT ''`, sehingga `null` ditolak DB.
+- Fix: pisah dua grup field:
+  - `notNullTextFields` (provinsi, kabupaten, kecamatan, kelurahan, dll.) → nilai `''` dikirim apa adanya ke DB, tidak dikonversi ke `null`
+  - `nullableTextFields` (alamat, deskripsi, gmaps_link, dll.) → `''` dikonversi ke `null` (diperbolehkan DB)
+
+#### Verifikasi keamanan — privasi data publik LULUS:
+
+```
+GET /api/properties (publik)         → 7 properti published saja ✅
+Properti status=draft                 → TIDAK muncul di endpoint publik ✅
+Properti status=archived              → TIDAK muncul di endpoint publik ✅
+GET /api/admin/properties (admin)     → semua status tampil (termasuk draft+archived) ✅
+```
+
+#### TODO:
+
+| # | Item | Fase |
+|---|------|------|
+| 1 | Upload foto baru + reorder urutan | G3b |
+| 2 | DATA UJI ngawur perlu diarsipkan/dibersihkan sebelum produksi: id=7 (harga 433M / 435 kamar), properti `verified=0` dari sesi uji — ubah status ke `archived` via dashboard atau hapus manual dari D1 sebelum go-live | Sebelum produksi |
 
 ---
 
