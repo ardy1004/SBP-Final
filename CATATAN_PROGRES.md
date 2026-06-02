@@ -5,7 +5,7 @@
 
 ---
 
-## STATUS SAAT INI: Fase F — F2 Frontend Titip Jual Selesai ✅
+## STATUS SAAT INI: Fase F — F3 Halaman Tanda Tangan /sign Selesai ✅
 
 ---
 
@@ -461,6 +461,71 @@ Jika langkah ini dilewati → 404 aset hash-basi atau hydration error React #418
 
 **[d] Jangan jalankan `curl` di terminal yang sama dengan wrangler:**
 Curl yang tidak selesai / connection hang di terminal wrangler menyebabkan wrangler hang dan tidak merespons request berikutnya. Pisahkan terminal: satu untuk wrangler, satu untuk curl/testing.
+
+---
+
+### F3 — Halaman /sign Tanda Tangan ✅ SELESAI (2 Juni 2026)
+
+#### File yang dimodifikasi:
+
+| File | Keterangan |
+|------|------------|
+| `src/app/components/SignPage.tsx` | Ditulis ulang sepenuhnya — konsumsi API nyata GET/POST /api/sign/:token |
+
+#### Fitur yang terimplementasi:
+
+- **State machine token (6 kondisi):**
+  - `loading` → skeleton spinner
+  - `not_found` / token 404 → "Link Tidak Valid" + tombol WA `wa.me/6281391278889`
+  - `kedaluwarsa` / `belum_dikonfigurasi` → "Link Sudah Tidak Berlaku" + tombol WA
+  - `sudah_ditandatangani` → "Perjanjian Sudah Ditandatangani" + link ke properti
+  - `valid` → dokumen perjanjian + signature pad (alur utama)
+  - `success` → halaman sukses 🚀 + "Lihat Properti Saya →" (link properti dari `slug_properti`)
+- **Dokumen perjanjian (read-only, scrollable `max-h-[70vh]`):** header "PERJANJIAN JASA PEMASARAN — SALAM BUMI PROPERTY", jenis/nomor/tanggal, Pihak Pertama (CV SBP, data tetap), Pihak Kedua (nama_ktp, NIK, alamat dari API), Pasal 1-7 dari `pasal[]` API, area TTD dua kolom (Ardy kiri, materai+placeholder kanan).
+- **Signature pad canvas (mouse + touch):** container `position: relative`, materai `<img>` absolute centered `opacity: 0.55`, `<canvas>` absolute `z-index: 1` transparan di atasnya → goresan TTD tampak menimpa materai (Opsi A visual). Area besar `height: 220px`, buffer `800×220`. Tombol "Hapus" (clearRect). Deteksi non-kosong: `hasSigned` state.
+- **Logika tombol "Kirim Perjanjian":** aktif HANYA jika `hasSigned === true` AND `agreed === true`. Disabled abu-abu jika salah satu belum terpenuhi. Petunjuk teks konditional muncul di bawah signature pad.
+- **Submit flow:** `canvas.toDataURL('image/png')` → `POST /api/sign/:token { signature, persetujuan: true }` → TTD ke R2 + audit hash + `token_used=1` + properti `auto-publish` → state `success` + link properti dari `buildPropertyUrl(data.properti)`.
+- **Stepper dekoratif:** ✓ Data Diri › ✓ Info Properti › ● Tanda Tangan.
+- **Checkbox persetujuan** teks persis sesuai spec 12.4.
+
+#### Bug yang diperbaiki selama implementasi:
+
+**isDrawing `useState` → `useRef` (stale closure):**
+`draw` di-memoize dengan `useCallback([isDrawing, getPos])`. Saat `startDraw` memanggil `setIsDrawing(true)`, React menjadwalkan re-render secara async. Sebelum re-render selesai, event `mousemove` sudah muncul dan `draw` (closure lama) masih melihat `isDrawing=false` → return early → `setHasSigned(true)` tidak pernah dipanggil → tombol selamanya disabled. Fix: `isDrawingRef = useRef(false)`, diupdate synchronously di `startDraw`/`endDraw`, dicek langsung di `draw` tanpa closure dependency.
+
+#### Alur yang terverifikasi via Playwright Chromium (port 8790):
+
+```
+GET /sign/{token-valid}  → dokumen terisi, materai+canvas muncul, submit disabled
+Draw TTD di canvas       → "Tanda tangan berhasil direkam", submit masih disabled
+Centang checkbox         → submit AKTIF (biru)
+GET /sign/{token-invalid}→ "Link Tidak Valid" + tombol WA, tidak ada halaman 404 generik
+GET /sign/{token-used}   → "Perjanjian Sudah Ditandatangani"
+POST /sign/{token-valid} → R2 upload, token_used=1, status=signed, properti published
+```
+
+---
+
+### ⚠️ TODO PRODUKSI F3 (wajib sebelum go-live)
+
+| # | Item | Detail |
+|---|------|--------|
+| a | **ASET TTD ARDY — BELUM UPLOAD** | URL `https://images.salambumi.xyz/ttd/gsd-removebg-preview.png` → **404**. File `gsd-removebg-preview Copy.png` belum di-upload ke CDN. Akibat: kolom Pihak Pertama (TTD SBP) kosong di dokumen (`onError` menyembunyikan img, tidak crash). **Sebelum produksi:** upload file ke CDN, lalu update konstanta `TTD_ARDY_URL` di baris 10 `src/app/components/SignPage.tsx`. |
+| b | **ALIGN PASAL dengan spec 12.6** | Susunan `pasal[]` dari `GET /api/sign/:token` berbeda dari spec 12.6 (saat ini: Pasal 1=PARA PIHAK; spec=Objek properti dengan harga/legalitas). Isi sudah benar — fee dari `fee_persen` API, bukan hardcoded. Align penomoran/konten pasal di `buildPasalPasal()` di `functions/api/sign/[token].js` saat F4 (PDF arsip). |
+| c | **VERIFIKASI MATERAI PRODUKSI** | `https://images.salambumi.xyz/materai/hg.png` — konfirmasi CDN menyajikan file ini di produksi. |
+
+---
+
+### ⚠️ GOTCHA tambahan F3 (konfirmasi berulang dari F2)
+
+**[e] NODE ZOMBIE + CHUNK HASH BASI (terjadi LAGI di F3):**
+Di sesi F3, 3 proses Node zombie dari sesi sebelumnya semuanya mendengarkan di port 8790. Salah satunya menyajikan HTML dengan chunk hash lama (`SignPage-Ds75rX0F.js`) padahal build baru menghasilkan `SignPage-o6l9CH2t.js`. React tidak bisa load → halaman stuck di "Memuat dokumen perjanjian…" selamanya.
+
+**Protokol wajib sebelum setiap sesi wrangler:**
+1. `Get-Process node | Stop-Process -Force` — kill SEMUA node
+2. Clean build: `Remove-Item -Recurse -Force dist, .react-router && npm run build`
+3. Start SATU instance wrangler: `npx wrangler pages dev dist/client --port 8790`
+4. Verifikasi chunk hash benar: `curl http://127.0.0.1:8790/sign/{token} | grep -o "SignPage[^'\"]*\.js"` → harus cocok dengan file di `dist/client/assets/`
 
 ---
 

@@ -1,121 +1,490 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router';
-import { CheckCircle, AlertTriangle, Clock, Pen, RotateCcw, FileText, Shield } from 'lucide-react';
+import {
+  CheckCircle, AlertTriangle, Clock, Pen, RotateCcw,
+  FileText, Shield, ExternalLink, Loader2,
+} from 'lucide-react';
 
-const MOCK_AGREEMENTS: Record<string, { status: 'valid' | 'expired' | 'used'; nama: string; nik: string; properti: string; kode: string; tanggal: string }> = {
-  'sbp-token-abc123': { status: 'valid', nama: 'Budi Santoso', nik: '3471012345678901', properti: 'Rumah 2 Lantai di Condongcatur, Sleman', kode: 'SBP-2024-001', tanggal: '31 Mei 2026' },
-  'sbp-token-expired': { status: 'expired', nama: 'Siti Rahayu', nik: '3471098765432100', properti: 'Kost Exclusive di Mlati', kode: 'SBP-2024-002', tanggal: '01 Januari 2024' },
-  'sbp-token-used': { status: 'used', nama: 'Ahmad Fauzi', nik: '3471011122334455', properti: 'Villa di Ngemplak', kode: 'SBP-2024-003', tanggal: '15 Maret 2024' },
-};
+// TODO: upload gsd-removebg-preview Copy.png ke CDN dan update URL ini
+const TTD_ARDY_URL  = 'https://images.salambumi.xyz/ttd/gsd-removebg-preview.png';
+const MATERAI_URL   = 'https://images.salambumi.xyz/materai/hg.png';
+const WA_ADMIN      = 'https://wa.me/6281391278889';
 
-const PERJANJIAN_TEXT = `PERJANJIAN KERJASAMA PEMASARAN PROPERTI
+// ──────────────────────────────────────────────────────────────
+// Types
+// ──────────────────────────────────────────────────────────────
+interface Pasal {
+  pasal: number;
+  judul: string;
+  isi: string;
+}
 
-Yang bertanda tangan di bawah ini:
+interface AgreementData {
+  status: 'valid';
+  kode_perjanjian: string;
+  token_expires_at: string | null;
+  owner: {
+    nama_pemilik: string;
+    nama_ktp: string;
+    nik: string | null;
+    alamat_ktp: string;
+    rt_rw: string | null;
+    kelurahan: string | null;
+    kecamatan: string | null;
+    bertindak_sebagai: string;
+  };
+  properti: {
+    title: string;
+    slug: string;
+    jenis_properti: string;
+    tujuan: string;
+    harga: number | null;
+    provinsi: string | null;
+    kabupaten: string | null;
+    kecamatan: string | null;
+    kelurahan: string | null;
+    legalitas: string | null;
+  };
+  jenis_transaksi: string;
+  jenis_listing: string;
+  durasi_kontrak: number | null;
+  fee_persen: number;
+  pasal: Pasal[];
+}
 
-Pihak Pertama (Agen):
-Nama          : CV Salam Bumi Property
-Alamat        : Jl. Pajajaran, Catur Tunggal, Depok, Sleman, DI Yogyakarta
-Telepon/WA    : 0813-9127-8889
+type PageState =
+  | { kind: 'loading' }
+  | { kind: 'not_found' }
+  | { kind: 'kedaluwarsa' }
+  | { kind: 'belum_dikonfigurasi' }
+  | { kind: 'sudah_ditandatangani'; slug_properti: string | null; kode_perjanjian: string }
+  | { kind: 'valid'; data: AgreementData }
+  | { kind: 'success'; property_url: string; kode_perjanjian: string };
 
-Pihak Kedua (Pemilik):
-Nama          : {NAMA}
-No. KTP (NIK) : {NIK}
+// ──────────────────────────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────────────────────────
+function formatRupiah(n: number | null | undefined): string {
+  if (!n) return '-';
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency', currency: 'IDR', maximumFractionDigits: 0,
+  }).format(n);
+}
 
-Bersepakat untuk mengadakan Perjanjian Kerjasama Pemasaran Properti dengan ketentuan sebagai berikut:
+function formatTanggalId(date: Date = new Date()): string {
+  return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+}
 
-PASAL 1 — OBYEK PERJANJIAN
+function buildPropertyUrl(pd: AgreementData['properti']): string {
+  const prefix = pd.tujuan === 'disewa' ? 'disewa' : 'dijual';
+  const parts = [pd.jenis_properti, pd.provinsi ?? '', pd.kabupaten ?? '', pd.kecamatan ?? '']
+    .map(s => s.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''));
+  return `/${prefix}/${parts.join('/')}/${pd.slug}`;
+}
 
-Pihak Kedua mempercayakan pemasaran properti miliknya kepada Pihak Pertama, dengan detail:
-- Jenis Properti  : {PROPERTI}
-- Kode Listing    : {KODE}
+function labelBertindak(b: string): string {
+  if (b === 'ahli_waris') return 'Ahli Waris';
+  if (b === 'kuasa') return 'Pemegang Kuasa';
+  return 'Pemilik Langsung';
+}
 
-PASAL 2 — RUANG LINGKUP KERJASAMA
+function labelListingDurasi(jenis: string, durasi: number | null): string {
+  if (jenis === 'exclusive') return `Exclusive${durasi ? ` — ${durasi} Bulan` : ''}`;
+  return 'Open (Tidak Terbatas)';
+}
 
-Pihak Pertama bersedia melakukan:
-a. Pemasaran properti secara digital melalui website resmi SBP, media sosial, dan platform properti nasional;
-b. Pemotretan/dokumentasi profesional properti (sesuai kesepakatan);
-c. Pendampingan proses negoisasi antara pemilik dan calon pembeli/penyewa;
-d. Koordinasi proses legalitas (AJB, balik nama, dsb.) bersama notaris/PPAT rekanan;
-e. Pelaporan perkembangan pemasaran secara berkala.
+function labelJenisTransaksi(jt: string): string {
+  if (jt === 'sewa') return 'Sewa Menyewa';
+  return 'Jual Beli';
+}
 
-PASAL 3 — FEE / KOMISI AGEN
+// ──────────────────────────────────────────────────────────────
+// Sub-views (early returns)
+// ──────────────────────────────────────────────────────────────
+function LoadingView() {
+  return (
+    <div className="min-h-screen flex items-center justify-center" style={{ background: '#F0F4F8' }}>
+      <div className="text-center">
+        <Loader2 size={40} className="text-[#1565C0] mx-auto mb-4 animate-spin" />
+        <p className="text-[#64748B]">Memuat dokumen perjanjian…</p>
+      </div>
+    </div>
+  );
+}
 
-Pihak Kedua setuju membayar komisi kepada Pihak Pertama sebesar yang telah disepakati bersama secara lisan/tertulis sebelum penandatanganan perjanjian ini, atas keberhasilan transaksi jual beli atau sewa properti yang dimaksud.
+function NotFoundView() {
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 pt-16" style={{ background: '#F0F4F8' }}>
+      <div className="text-center max-w-md">
+        <AlertTriangle size={48} className="text-[#EF4444] mx-auto mb-4" />
+        <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Link Tidak Valid</h1>
+        <p className="text-[#64748B] mb-6">
+          Link perjanjian ini sudah tidak berlaku. Silakan hubungi tim SBP untuk link baru.
+        </p>
+        <a
+          href={`${WA_ADMIN}?text=Halo+SBP,+link+perjanjian+saya+tidak+valid`}
+          target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-[#10B981] hover:bg-[#059669] transition-colors"
+        >
+          Hubungi SBP via WhatsApp
+        </a>
+      </div>
+    </div>
+  );
+}
 
-PASAL 4 — KEWAJIBAN PIHAK KEDUA
+function ExpiredView() {
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 pt-16" style={{ background: '#F0F4F8' }}>
+      <div className="text-center max-w-md">
+        <Clock size={48} className="text-[#F5A623] mx-auto mb-4" />
+        <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Link Sudah Tidak Berlaku</h1>
+        <p className="text-[#64748B] mb-6">
+          Link perjanjian ini sudah kedaluwarsa atau belum dikonfigurasi admin.
+          Silakan hubungi tim SBP untuk mendapatkan link baru.
+        </p>
+        <a
+          href={`${WA_ADMIN}?text=Halo+SBP,+link+perjanjian+saya+sudah+expired`}
+          target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-[#10B981] hover:bg-[#059669] transition-colors"
+        >
+          Hubungi SBP via WhatsApp
+        </a>
+      </div>
+    </div>
+  );
+}
 
-Pihak Kedua berkewajiban untuk:
-a. Memberikan informasi dan dokumen properti yang benar dan lengkap;
-b. Tidak memasarkan properti secara paralel melalui agen lain tanpa sepengetahuan Pihak Pertama selama masa perjanjian ini berlaku;
-c. Memberikan akses kepada Pihak Pertama untuk melakukan survei dan pemotretan properti;
-d. Segera menginformasikan kepada Pihak Pertama apabila terdapat perubahan kondisi atau status properti.
+function AlreadySignedView({ data }: { data: Extract<PageState, { kind: 'sudah_ditandatangani' }> }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 pt-16" style={{ background: '#F0F4F8' }}>
+      <div className="text-center max-w-md">
+        <div className="w-20 h-20 rounded-full bg-[#10B981] flex items-center justify-center mx-auto mb-6">
+          <CheckCircle size={40} className="text-white" />
+        </div>
+        <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Perjanjian Sudah Ditandatangani</h1>
+        <p className="text-[#64748B] mb-6">
+          Perjanjian kode <strong>{data.kode_perjanjian}</strong> sudah pernah ditandatangani sebelumnya.
+          Hubungi tim SBP jika ada pertanyaan.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+          {data.slug_properti && (
+            <Link
+              to={`/properties`}
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-[#1565C0] hover:bg-[#1976D2] transition-colors"
+            >
+              <ExternalLink size={16} /> Lihat Properti
+            </Link>
+          )}
+          <a
+            href={WA_ADMIN}
+            target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-[#1565C0] border border-[#1565C0] hover:bg-[#E3F2FD] transition-colors"
+          >
+            Hubungi SBP
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-PASAL 5 — MASA BERLAKU
+function SuccessView({ data }: { data: Extract<PageState, { kind: 'success' }> }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 pt-16" style={{ background: '#F0F4F8' }}>
+      <div className="text-center max-w-md">
+        <div className="text-6xl mb-6">🚀</div>
+        <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">
+          Selamat, properti Anda telah tayang!
+        </h1>
+        <p className="text-[#64748B] mb-2">
+          Tanda tangan elektronik Anda telah berhasil direkam.
+        </p>
+        <p className="text-[#64748B] mb-6 text-sm">
+          Kode perjanjian: <span className="font-semibold text-[#1565C0]">{data.kode_perjanjian}</span>.
+          Salinan perjanjian akan dikirimkan via WhatsApp dalam 1×24 jam.
+        </p>
+        <div className="bg-[#F0FFF4] border border-[#10B981]/30 rounded-xl p-4 text-sm text-[#10B981] mb-6">
+          <Shield size={16} className="inline mr-2" />
+          Data Anda dilindungi sesuai UU PDP RI
+        </div>
+        <Link
+          to={data.property_url}
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-[#1565C0] hover:bg-[#1976D2] transition-colors"
+        >
+          Lihat Properti Saya <ExternalLink size={16} />
+        </Link>
+      </div>
+    </div>
+  );
+}
 
-Perjanjian ini berlaku selama 3 (tiga) bulan sejak tanggal ditandatangani dan dapat diperpanjang atas kesepakatan kedua belah pihak.
+// ──────────────────────────────────────────────────────────────
+// Stepper (dekoratif)
+// ──────────────────────────────────────────────────────────────
+function Stepper() {
+  return (
+    <div className="flex items-center justify-center gap-2 mb-6 text-sm">
+      {(['Data Diri', 'Info Properti'] as const).map(label => (
+        <span key={label} className="flex items-center gap-1 text-[#10B981] font-medium">
+          <CheckCircle size={14} /> {label}
+          <span className="mx-2 text-[#CBD5E1]">›</span>
+        </span>
+      ))}
+      <span className="flex items-center gap-1 text-[#1565C0] font-semibold">
+        <span className="w-5 h-5 rounded-full bg-[#1565C0] text-white text-xs flex items-center justify-center">3</span>
+        Tanda Tangan
+      </span>
+    </div>
+  );
+}
 
-PASAL 6 — KERAHASIAAN DATA
+// ──────────────────────────────────────────────────────────────
+// Document renderer
+// ──────────────────────────────────────────────────────────────
+function PerjanjianDocument({ data, today }: { data: AgreementData; today: string }) {
+  const { owner, properti, pasal } = data;
 
-Pihak Pertama berkomitmen menjaga kerahasiaan data pribadi Pihak Kedua sesuai dengan Undang-Undang Pelindungan Data Pribadi (UU PDP) Republik Indonesia. Data NIK/KTP dienkripsi dan hanya digunakan untuk keperluan perjanjian ini.
+  const alamatOwner = [
+    owner.alamat_ktp,
+    owner.rt_rw ? `RT/RW ${owner.rt_rw}` : null,
+    owner.kelurahan,
+    owner.kecamatan,
+  ].filter(Boolean).join(', ');
 
-PASAL 7 — PENYELESAIAN SENGKETA
+  return (
+    <div className="font-serif text-sm text-[#1a1a1a] leading-relaxed space-y-4">
+      {/* ── Header ── */}
+      <div className="text-center space-y-1 pb-4 border-b border-gray-300">
+        <p className="font-bold text-base uppercase tracking-wide">
+          Perjanjian Jasa Pemasaran — Salam Bumi Property
+        </p>
+        <p className="text-xs text-[#64748B]">
+          Jenis: {labelListingDurasi(data.jenis_listing, data.durasi_kontrak)}&nbsp;·&nbsp;
+          Jenis Perjanjian: {labelJenisTransaksi(data.jenis_transaksi)}&nbsp;·&nbsp;
+          Nomor: {data.kode_perjanjian}
+        </p>
+        <p className="text-xs text-[#64748B]">Tanggal: {today}</p>
+      </div>
 
-Apabila terdapat perselisihan, kedua belah pihak sepakat untuk menyelesaikannya secara musyawarah mufakat. Apabila tidak tercapai, penyelesaian dilakukan melalui Pengadilan Negeri Sleman.
+      {/* ── Para Pihak ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <p className="font-bold text-xs uppercase text-[#64748B] tracking-wider">Pihak Pertama — Agen</p>
+          <p className="font-semibold">CV Salam Bumi Property</p>
+          <p className="text-xs text-[#374151]">Jl. Pajajaran, Catur Tunggal, Depok, Sleman, DI Yogyakarta (Virtual Office)</p>
+          <p className="text-xs text-[#374151]">WA: 0813-9127-8889</p>
+          <p className="text-xs text-[#374151]">Email: salambumiproperty@gmail.com</p>
+          <p className="text-xs text-[#374151]">Website: salambumi.xyz</p>
+        </div>
+        <div className="space-y-1">
+          <p className="font-bold text-xs uppercase text-[#64748B] tracking-wider">Pihak Kedua — Pemilik</p>
+          <p className="font-semibold">{owner.nama_ktp}</p>
+          <p className="text-xs text-[#374151]">NIK: {owner.nik ?? 'Tidak tersedia'}</p>
+          <p className="text-xs text-[#374151]">Alamat KTP: {alamatOwner || '-'}</p>
+          <p className="text-xs text-[#374151]">
+            Bertindak sebagai: {labelBertindak(owner.bertindak_sebagai)}
+          </p>
+        </div>
+      </div>
 
-PASAL 8 — TANDA TANGAN ELEKTRONIK
+      <div className="border-t border-gray-200" />
 
-Tanda tangan pada perjanjian ini dilakukan secara elektronik dan memiliki kekuatan hukum yang sama dengan tanda tangan konvensional sesuai UU ITE No. 11 Tahun 2008 dan perubahannya.
+      {/* ── Pasal-pasal ── */}
+      {pasal.map(p => (
+        <div key={p.pasal} className="space-y-1">
+          <p className="font-bold">Pasal {p.pasal} — {p.judul}</p>
+          <p className="text-[#374151]">{p.isi}</p>
+        </div>
+      ))}
 
-Demikian perjanjian ini dibuat dengan penuh kesadaran dan tanpa paksaan dari pihak mana pun.
+      <div className="border-t border-gray-200" />
 
-Yogyakarta, {TANGGAL}
+      {/* ── Area TTD bawah dokumen ── */}
+      <div className="grid grid-cols-2 gap-6 pt-2">
+        {/* Pihak Pertama */}
+        <div className="text-center space-y-2">
+          <p className="text-xs text-[#64748B]">Pihak Pertama,</p>
+          <p className="text-xs text-[#64748B]">CV Salam Bumi Property</p>
+          <div className="h-20 flex items-center justify-center">
+            <img
+              src={TTD_ARDY_URL}
+              alt="TTD Ardy Salam"
+              className="max-h-16 max-w-full object-contain"
+              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            />
+          </div>
+          <div className="border-t border-gray-400 pt-1">
+            <p className="text-xs font-semibold">Ardy Salam</p>
+            <p className="text-xs text-[#64748B]">Direktur</p>
+          </div>
+        </div>
 
-Pihak Pertama,                    Pihak Kedua,
-CV Salam Bumi Property             {NAMA}
+        {/* Pihak Kedua — placeholder materai + label "TTD di bawah" */}
+        <div className="text-center space-y-2">
+          <p className="text-xs text-[#64748B]">Pihak Kedua,</p>
+          <p className="text-xs text-[#64748B]">{owner.nama_ktp}</p>
+          <div className="h-20 flex items-center justify-center">
+            <img
+              src={MATERAI_URL}
+              alt="Materai"
+              className="h-16 w-16 object-contain opacity-40"
+            />
+          </div>
+          <div className="border-t border-gray-400 pt-1">
+            <p className="text-xs text-[#94A3B8] italic">( tanda tangan di bawah )</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-Monica Dewi Rahayu                 ___________________
-Direktur`;
+// ──────────────────────────────────────────────────────────────
+// Signature pad area (materai layer + canvas on top)
+// ──────────────────────────────────────────────────────────────
+interface SigPadProps {
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
+  hasSigned: boolean;
+  onStart: (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => void;
+  onMove:  (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => void;
+  onEnd:   () => void;
+  onClear: () => void;
+}
 
+function SignaturePad({ canvasRef, hasSigned, onStart, onMove, onEnd, onClear }: SigPadProps) {
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Pen size={18} className="text-[#1565C0]" />
+          <span className="font-semibold text-[#0F172A]">Tanda Tangan Pihak Kedua</span>
+        </div>
+        <button
+          onClick={onClear}
+          className="flex items-center gap-1.5 text-sm text-[#64748B] hover:text-[#EF4444] transition-colors"
+          type="button"
+        >
+          <RotateCcw size={14} /> Hapus
+        </button>
+      </div>
+
+      <p className="text-xs text-[#94A3B8] mb-3">
+        Gambar tanda tangan Anda di area abu-abu. Materai tampil sebagai latar — tanda tangan akan menimpa materai secara visual.
+      </p>
+
+      {/* Canvas area: materai layer bawah, canvas transparan di atas */}
+      <div
+        className="relative rounded-xl overflow-hidden border-2 border-dashed border-gray-200"
+        style={{ height: 220, background: '#FAFAFA' }}
+      >
+        {/* Materai — layer bawah, centered */}
+        <img
+          src={MATERAI_URL}
+          alt="Materai"
+          className="absolute pointer-events-none select-none"
+          style={{
+            width: 120, height: 120,
+            top: '50%', left: '50%',
+            transform: 'translate(-50%, -50%)',
+            opacity: 0.55,
+          }}
+        />
+
+        {/* Canvas — transparent, di atas materai */}
+        <canvas
+          ref={canvasRef}
+          width={800}
+          height={220}
+          className="absolute inset-0 w-full h-full touch-none cursor-crosshair"
+          style={{ zIndex: 1 }}
+          onMouseDown={onStart}
+          onMouseMove={onMove}
+          onMouseUp={onEnd}
+          onMouseLeave={onEnd}
+          onTouchStart={onStart}
+          onTouchMove={onMove}
+          onTouchEnd={onEnd}
+        />
+      </div>
+
+      <p className={`text-center text-xs mt-2 transition-colors ${hasSigned ? 'text-[#10B981]' : 'text-[#94A3B8]'}`}>
+        {hasSigned ? '✓ Tanda tangan berhasil direkam' : 'Area tanda tangan di atas'}
+      </p>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────
+// Main component
+// ──────────────────────────────────────────────────────────────
 export default function SignPage() {
   const { token } = useParams<{ token: string }>();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
+  const [state, setState] = useState<PageState>({ kind: 'loading' });
+  const isDrawingRef = useRef(false);
   const [hasSigned, setHasSigned] = useState(false);
   const [agreed, setAgreed] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const lastPos = useRef<{ x: number; y: number } | null>(null);
+  const today = formatTanggalId();
 
-  const data = token ? MOCK_AGREEMENTS[token] : null;
+  // Fetch agreement on mount
+  useEffect(() => {
+    if (!token) { setState({ kind: 'not_found' }); return; }
 
-  const perjanjianFilled = data
-    ? PERJANJIAN_TEXT
-        .replace(/{NAMA}/g, data.nama)
-        .replace(/{NIK}/g, data.nik.replace(/(\d{8})(\d+)/, '$1****'))
-        .replace(/{PROPERTI}/g, data.properti)
-        .replace(/{KODE}/g, data.kode)
-        .replace(/{TANGGAL}/g, data.tanggal)
-    : '';
+    fetch(`/api/sign/${token}`)
+      .then(r => r.json())
+      .then((json: any) => {
+        if (!json.success) { setState({ kind: 'not_found' }); return; }
+        const d = json.data;
+        switch (d.status) {
+          case 'valid':
+            setState({ kind: 'valid', data: d });
+            break;
+          case 'sudah_ditandatangani':
+            setState({ kind: 'sudah_ditandatangani', slug_properti: d.slug_properti ?? null, kode_perjanjian: d.kode_perjanjian });
+            break;
+          case 'kedaluwarsa':
+          case 'belum_dikonfigurasi':
+            setState({ kind: 'kedaluwarsa' });
+            break;
+          default:
+            setState({ kind: 'not_found' });
+        }
+      })
+      .catch(() => setState({ kind: 'not_found' }));
+  }, [token]);
 
-  const getPos = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  // Canvas helpers — must scale mouse coords to canvas buffer size
+  const getPos = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
     if ('touches' in e) {
-      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+      return {
+        x: (e.touches[0].clientX - rect.left) * scaleX,
+        y: (e.touches[0].clientY - rect.top) * scaleY,
+      };
     }
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  };
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
+  }, []);
 
-  const startDraw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  const startDraw = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    setIsDrawing(true);
+    isDrawingRef.current = true;
     lastPos.current = getPos(e);
-  };
+  }, [getPos]);
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  const draw = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    if (!isDrawing) return;
+    if (!isDrawingRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx || !lastPos.current) return;
@@ -124,172 +493,115 @@ export default function SignPage() {
     ctx.moveTo(lastPos.current.x, lastPos.current.y);
     ctx.lineTo(pos.x, pos.y);
     ctx.strokeStyle = '#0F172A';
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 2.8;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.stroke();
     lastPos.current = pos;
     setHasSigned(true);
-  };
+  }, [getPos]);
 
-  const endDraw = () => { setIsDrawing(false); lastPos.current = null; };
+  const endDraw = useCallback(() => { isDrawingRef.current = false; lastPos.current = null; }, []);
 
-  const clearCanvas = () => {
+  const clearCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     setHasSigned(false);
-  };
+  }, []);
 
-  const handleSubmit = () => {
-    setLoading(true);
-    setTimeout(() => { setLoading(false); setSubmitted(true); }, 2000);
-  };
+  const handleSubmit = useCallback(async () => {
+    if (state.kind !== 'valid') return;
+    const canvas = canvasRef.current;
+    if (!canvas || !hasSigned || !agreed) return;
 
-  if (!data) {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-4 pt-16" style={{ background: '#F0F4F8' }}>
-        <div className="text-center max-w-md">
-          <AlertTriangle size={48} className="text-[#EF4444] mx-auto mb-4" />
-          <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Link Tidak Valid</h1>
-          <p className="text-[#64748B] mb-6">Link tanda tangan ini tidak ditemukan atau sudah tidak berlaku.</p>
-          <Link to="/" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-[#1565C0]">Ke Beranda</Link>
-        </div>
-      </div>
-    );
-  }
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const dataUrl = canvas.toDataURL('image/png');
+      const res = await fetch(`/api/sign/${token}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signature: dataUrl, persetujuan: true }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Gagal mengirim tanda tangan');
+      const d = json.data;
+      const propertyUrl = buildPropertyUrl(state.data.properti);
+      setState({ kind: 'success', property_url: propertyUrl, kode_perjanjian: d.kode_perjanjian });
+    } catch (err: any) {
+      setSubmitError(err.message || 'Terjadi kesalahan. Silakan coba lagi.');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [state, token, hasSigned, agreed]);
 
-  if (data.status === 'expired') {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-4 pt-16" style={{ background: '#F0F4F8' }}>
-        <div className="text-center max-w-md">
-          <Clock size={48} className="text-[#F5A623] mx-auto mb-4" />
-          <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Link Sudah Kadaluarsa</h1>
-          <p className="text-[#64748B] mb-6">Link tanda tangan ini sudah melewati batas waktu. Silakan hubungi tim SBP untuk mendapatkan link baru.</p>
-          <a href="https://wa.me/6281391278889?text=Halo SBP, link tanda tangan saya sudah expired" target="_blank" rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-[#10B981]">
-            Hubungi SBP via WhatsApp
-          </a>
-        </div>
-      </div>
-    );
-  }
+  // ── State routing ─────────────────────────────────────────
+  if (state.kind === 'loading')               return <LoadingView />;
+  if (state.kind === 'not_found')             return <NotFoundView />;
+  if (state.kind === 'kedaluwarsa')           return <ExpiredView />;
+  if (state.kind === 'belum_dikonfigurasi')   return <ExpiredView />;
+  if (state.kind === 'sudah_ditandatangani')  return <AlreadySignedView data={state} />;
+  if (state.kind === 'success')               return <SuccessView data={state} />;
 
-  if (data.status === 'used') {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-4 pt-16" style={{ background: '#F0F4F8' }}>
-        <div className="text-center max-w-md">
-          <CheckCircle size={48} className="text-[#10B981] mx-auto mb-4" />
-          <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Perjanjian Sudah Ditandatangani</h1>
-          <p className="text-[#64748B] mb-6">Perjanjian untuk listing <strong>{data.kode}</strong> sudah pernah ditandatangani sebelumnya. Hubungi tim SBP jika ada pertanyaan.</p>
-          <a href="https://wa.me/6281391278889" target="_blank" rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-[#1565C0]">
-            Hubungi SBP
-          </a>
-        </div>
-      </div>
-    );
-  }
-
-  if (submitted) {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-4 pt-16" style={{ background: '#F0F4F8' }}>
-        <div className="text-center max-w-md">
-          <div className="w-20 h-20 rounded-full bg-[#10B981] flex items-center justify-center mx-auto mb-6">
-            <CheckCircle size={40} className="text-white" />
-          </div>
-          <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Perjanjian Berhasil Ditandatangani!</h1>
-          <p className="text-[#64748B] mb-2">
-            Terima kasih, <strong>{data.nama}</strong>. Tanda tangan elektronik Anda telah berhasil direkam.
-          </p>
-          <p className="text-[#64748B] mb-6 text-sm">
-            Kode listing: <span className="font-semibold text-[#1565C0]">{data.kode}</span>. Salinan perjanjian akan dikirimkan via WhatsApp dalam 1×24 jam.
-          </p>
-          <div className="bg-[#F0FFF4] border border-[#10B981]/30 rounded-xl p-4 text-sm text-[#10B981] mb-6">
-            <Shield size={16} className="inline mr-2" />
-            Data Anda dilindungi sesuai UU PDP RI
-          </div>
-          <a href="https://wa.me/6281391278889" target="_blank" rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-[#10B981] hover:bg-[#059669] transition-colors">
-            Hubungi Tim SBP
-          </a>
-        </div>
-      </div>
-    );
-  }
+  const { data } = state;
+  const canSubmit = hasSigned && agreed && !submitting;
 
   return (
-    <div className="min-h-screen pt-16 pb-12" style={{ background: '#F0F4F8' }}>
-      <div className="max-w-3xl mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2 bg-[#E3F2FD] text-[#1565C0] px-4 py-2 rounded-full text-sm font-semibold mb-4">
-            <FileText size={14} /> Perjanjian Kerjasama Pemasaran Properti
-          </div>
-          <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-2">Tanda Tangan Elektronik</h1>
-          <p className="text-[#64748B] text-sm">Halo <strong>{data.nama}</strong>, silakan baca perjanjian berikut dan berikan tanda tangan Anda.</p>
-        </div>
+    <div className="min-h-screen pt-16 pb-16" style={{ background: '#F0F4F8' }}>
+      <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
 
-        {/* Info bar */}
-        <div className="bg-[#FFF9E6] border border-[#F5A623]/30 rounded-xl p-4 flex items-start gap-3 mb-6">
-          <AlertTriangle size={18} className="text-[#F5A623] flex-shrink-0 mt-0.5" />
-          <p className="text-sm text-[#92400E]">
-            Tanda tangan elektronik ini memiliki kekuatan hukum yang sah sesuai <strong>UU ITE No. 11 Tahun 2008</strong>. Pastikan Anda membaca seluruh isi perjanjian sebelum menandatangani.
+        {/* Page header */}
+        <div className="text-center">
+          <div className="inline-flex items-center gap-2 bg-[#E3F2FD] text-[#1565C0] px-4 py-2 rounded-full text-sm font-semibold mb-4">
+            <FileText size={14} /> Tanda Tangan Digital — Salam Bumi Property
+          </div>
+          <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-2">Perjanjian Pemasaran Properti</h1>
+          <p className="text-[#64748B] text-sm">
+            Halo <strong>{data.owner.nama_ktp}</strong>, silakan baca dokumen perjanjian berikut dan berikan tanda tangan Anda.
           </p>
         </div>
 
-        {/* Perjanjian Document */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-6">
+        {/* Stepper */}
+        <Stepper />
+
+        {/* Info bar UU ITE */}
+        <div className="bg-[#FFF9E6] border border-[#F5A623]/30 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle size={18} className="text-[#F5A623] flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-[#92400E]">
+            Tanda tangan elektronik ini memiliki kekuatan hukum yang sah sesuai <strong>UU ITE No. 11 Tahun 2008</strong> dan
+            perubahannya. Pastikan Anda membaca seluruh isi perjanjian sebelum menandatangani.
+          </p>
+        </div>
+
+        {/* Document card */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
           <div className="flex items-center gap-3 p-5 border-b border-gray-100">
             <FileText size={20} className="text-[#1565C0]" />
             <div>
-              <div className="font-semibold text-[#0F172A] text-sm">Perjanjian Kerjasama Pemasaran</div>
-              <div className="text-xs text-[#64748B]">Kode: {data.kode} · Tanggal: {data.tanggal}</div>
+              <div className="font-semibold text-[#0F172A] text-sm">Dokumen Perjanjian (Read-Only)</div>
+              <div className="text-xs text-[#64748B]">Nomor: {data.kode_perjanjian} · Fee: {data.fee_persen}% · Harga: {formatRupiah(data.properti.harga)}</div>
             </div>
           </div>
-          <div className="p-5 max-h-80 overflow-y-auto">
-            <pre className="whitespace-pre-wrap font-sans text-xs text-[#374151] leading-relaxed">{perjanjianFilled}</pre>
+          {/* Scrollable document area */}
+          <div className="p-6 max-h-[70vh] overflow-y-auto">
+            <PerjanjianDocument data={data} today={today} />
           </div>
         </div>
 
-        {/* Signature Canvas */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-6 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Pen size={18} className="text-[#1565C0]" />
-              <span className="font-semibold text-[#0F172A]">Tanda Tangan Anda</span>
-            </div>
-            <button onClick={clearCanvas} className="flex items-center gap-1.5 text-sm text-[#64748B] hover:text-[#EF4444] transition-colors">
-              <RotateCcw size={14} /> Ulangi
-            </button>
-          </div>
-          <div className="border-2 border-dashed border-gray-200 rounded-xl overflow-hidden" style={{ background: '#FAFAFA' }}>
-            <canvas
-              ref={canvasRef}
-              width={640}
-              height={180}
-              className="w-full touch-none cursor-crosshair"
-              style={{ display: 'block' }}
-              onMouseDown={startDraw}
-              onMouseMove={draw}
-              onMouseUp={endDraw}
-              onMouseLeave={endDraw}
-              onTouchStart={startDraw}
-              onTouchMove={draw}
-              onTouchEnd={endDraw}
-            />
-          </div>
-          {!hasSigned && (
-            <p className="text-center text-xs text-[#94A3B8] mt-3">Gambar tanda tangan Anda di area abu-abu di atas</p>
-          )}
-          {hasSigned && (
-            <p className="text-center text-xs text-[#10B981] mt-3">✓ Tanda tangan berhasil direkam</p>
-          )}
-        </div>
+        {/* Signature pad */}
+        <SignaturePad
+          canvasRef={canvasRef}
+          hasSigned={hasSigned}
+          onStart={startDraw}
+          onMove={draw}
+          onEnd={endDraw}
+          onClear={clearCanvas}
+        />
 
-        {/* Consent */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-6 p-5">
+        {/* Consent checkbox */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
           <label className="flex items-start gap-3 cursor-pointer">
             <input
               type="checkbox"
@@ -298,25 +610,52 @@ export default function SignPage() {
               className="mt-0.5 flex-shrink-0 w-4 h-4 accent-[#1565C0]"
             />
             <span className="text-sm text-[#374151] leading-relaxed">
-              Saya, <strong>{data.nama}</strong>, menyatakan bahwa saya telah membaca, memahami, dan menyetujui seluruh isi perjanjian kerjasama pemasaran properti ini. Saya memberikan tanda tangan ini secara sadar dan tanpa paksaan dari pihak mana pun.
+              Saya setuju dengan syarat dan ketentuan yang berlaku. Dengan mencentang ini, saya menyatakan semua
+              informasi benar dan menyetujui perjanjian pemasaran dengan Salam Bumi Property.
             </span>
           </label>
         </div>
 
-        {/* Submit */}
+        {/* Submit error */}
+        {submitError && (
+          <div className="bg-[#FEF2F2] border border-[#EF4444]/30 rounded-xl p-4 flex items-start gap-3">
+            <AlertTriangle size={16} className="text-[#EF4444] flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-[#DC2626]">{submitError}</p>
+          </div>
+        )}
+
+        {/* Disabled hints */}
+        {!hasSigned && (
+          <p className="text-center text-xs text-[#94A3B8]">
+            ↑ Gambar tanda tangan Anda di area di atas untuk mengaktifkan tombol kirim
+          </p>
+        )}
+        {hasSigned && !agreed && (
+          <p className="text-center text-xs text-[#94A3B8]">
+            ↑ Centang persetujuan di atas untuk mengaktifkan tombol kirim
+          </p>
+        )}
+
+        {/* Submit button */}
         <button
           onClick={handleSubmit}
-          disabled={!hasSigned || !agreed || loading}
+          disabled={!canSubmit}
+          type="button"
           className="w-full py-4 rounded-xl font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          style={{ background: hasSigned && agreed ? 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' : '#94A3B8' }}>
-          {loading ? (
-            <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Mengirim...</>
+          style={{
+            background: canSubmit
+              ? 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)'
+              : '#94A3B8',
+          }}
+        >
+          {submitting ? (
+            <><Loader2 size={18} className="animate-spin" /> Mengirim…</>
           ) : (
             <><CheckCircle size={18} /> Kirim Perjanjian yang Ditandatangani</>
           )}
         </button>
 
-        <p className="text-center text-xs text-[#94A3B8] mt-4">
+        <p className="text-center text-xs text-[#94A3B8]">
           <Shield size={12} className="inline mr-1" />
           Data Anda dilindungi sesuai UU PDP RI · Tanda tangan dienkripsi dan disimpan dengan aman
         </p>
