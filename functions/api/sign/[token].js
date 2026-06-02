@@ -7,6 +7,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../_shared/response.js';
 import { decryptNIK } from '../../_lib/crypto.js';
+import { generateAgreementPDF } from '../../_lib/pdf.js';
 
 // ─── Ambil & validasi agreement dari token ────────────────────────────────────
 async function getAgreementByToken(db, token) {
@@ -53,44 +54,56 @@ async function hashDokumen(agr, nikPlain, signedAt) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// ─── Pasal-pasal perjanjian (spec 12.6, untuk render di frontend) ─────────────
+// ─── Pasal-pasal perjanjian (spec 12.6) ──────────────────────────────────────
 function buildPasalPasal(agr) {
-  const durasiLabel = agr.durasi_kontrak ? `${agr.durasi_kontrak} bulan` : 'tidak terbatas (open listing)';
+  const isExclusive     = agr.jenis_listing === 'exclusive';
+  const jenisListing    = isExclusive ? 'Exclusive Listing' : 'Open Listing';
+  const durasiLabel     = agr.durasi_kontrak ? `${agr.durasi_kontrak} bulan` : 'tidak terbatas';
+  const jenisTxLabel    = agr.jenis_transaksi === 'sewa' ? 'Sewa Menyewa' : 'Jual Beli';
+  const alamatProperti  = [agr.alamat, agr.kelurahan, agr.kecamatan, agr.kabupaten, agr.provinsi].filter(Boolean).join(', ');
+  const hargaFmt        = agr.harga
+    ? new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(agr.harga)
+    : 'Harga negosiasi';
+
   return [
     {
       pasal: 1,
-      judul: 'PARA PIHAK',
-      isi: `Perjanjian ini dibuat antara PT Salam Bumi Property (Pihak Pertama / Agen) dan ${agr.nama_ktp} (Pihak Kedua / Pemilik Properti).`,
+      judul: 'OBJEK PERJANJIAN',
+      isi: `Pihak Pertama diberikan hak pemasaran ${jenisListing} atas properti: ${agr.jenis_properti ?? 'Properti'}, berlokasi di ${alamatProperti || `${agr.kecamatan}, ${agr.kabupaten}`}. Legalitas: ${agr.legalitas ?? 'belum diverifikasi'}. Harga penawaran: ${hargaFmt} (dapat dinegosiasikan).`,
     },
     {
       pasal: 2,
-      judul: 'OBYEK PERJANJIAN',
-      isi: `Properti yang dipasarkan: ${agr.title}, berlokasi di ${agr.kecamatan}, ${agr.kabupaten}. Legalitas: ${agr.legalitas ?? 'belum diverifikasi'}.`,
+      judul: 'JENIS LISTING & MASA KONTRAK',
+      isi: isExclusive
+        ? `Perjanjian ini bersifat Exclusive Listing dengan durasi ${durasiLabel}. Selama masa kontrak, Pihak Kedua tidak diperbolehkan menunjuk agen atau perantara properti lain untuk memasarkan properti yang sama.`
+        : `Perjanjian ini bersifat Open Listing, berlaku tidak terbatas waktu. Pihak Kedua dapat menunjuk agen lain sepanjang tidak ada kesepakatan eksklusif.`,
     },
     {
       pasal: 3,
-      judul: 'JANGKA WAKTU',
-      isi: `Jenis listing: ${agr.jenis_listing === 'exclusive' ? 'Exclusive' : 'Open'}. Durasi: ${durasiLabel}.`,
+      judul: 'FEE PEMASARAN',
+      isi: `Pihak Kedua menyetujui fee pemasaran sebesar ${agr.fee_persen}% dari harga transaksi ${jenisTxLabel}. Fee dibayarkan paling lambat 3 (tiga) hari kerja setelah penandatanganan AJB (Akta Jual Beli); atau setelah pembayaran uang muka minimal 30% dari harga deal apabila pembayaran dilakukan secara tunai bertahap.`,
     },
     {
       pasal: 4,
-      judul: 'FEE PEMASARAN',
-      isi: `Pihak Kedua menyetujui fee pemasaran sebesar ${agr.fee_persen}% dari harga transaksi ${agr.jenis_transaksi === 'jual' ? 'jual beli' : 'sewa menyewa'}.`,
+      judul: 'JENIS PEMASARAN',
+      isi: isExclusive
+        ? `Jenis pemasaran yang disepakati adalah Exclusive Listing. Pihak Pertama berhak memasarkan properti secara penuh dan eksklusif melalui seluruh kanal pemasaran yang dimiliki, termasuk digital, media sosial, jaringan agen mitra, dan media offline selama durasi kontrak.`
+        : `Jenis pemasaran yang disepakati adalah Open Listing. Pihak Pertama berhak memasarkan properti melalui seluruh kanal yang dimiliki, tanpa pembatasan eksklusif.`,
     },
     {
       pasal: 5,
-      judul: 'KEWAJIBAN AGEN',
-      isi: 'Pihak Pertama berkewajiban memasarkan properti secara profesional, menjaga kerahasiaan data pemilik, dan melaporkan perkembangan pemasaran secara berkala.',
+      judul: 'KEWAJIBAN PARA PIHAK',
+      isi: `Pihak Pertama berkewajiban: (a) memasarkan properti secara profesional dan aktif; (b) menjaga kerahasiaan data Pihak Kedua; (c) melaporkan perkembangan pemasaran secara berkala. Pihak Kedua berkewajiban: (a) memberikan informasi properti yang benar dan lengkap; (b) menyediakan akses untuk survei dan pemotretan; (c) tidak memasarkan kepada pihak lain secara eksklusif selama masa perjanjian (bila Exclusive).`,
     },
     {
       pasal: 6,
-      judul: 'KEWAJIBAN PEMILIK',
-      isi: 'Pihak Kedua berkewajiban memberikan informasi yang benar dan lengkap, menyediakan akses untuk survei, dan tidak memasarkan secara eksklusif kepada pihak lain selama masa perjanjian (bila exclusive).',
+      judul: 'PENYELESAIAN SENGKETA',
+      isi: `Apabila timbul perselisihan dalam pelaksanaan perjanjian ini, Para Pihak sepakat untuk menyelesaikannya secara musyawarah mufakat. Apabila musyawarah tidak mencapai kesepakatan dalam 30 (tiga puluh) hari, penyelesaian dilakukan melalui jalur hukum yang berlaku di wilayah Daerah Istimewa Yogyakarta.`,
     },
     {
       pasal: 7,
-      judul: 'PERSETUJUAN DIGITAL',
-      isi: 'Penandatanganan digital ini memiliki kekuatan hukum yang sama dengan tanda tangan basah sesuai UU ITE No. 11 Tahun 2008 dan perubahannya. Audit hash dokumen dicatat untuk keperluan pembuktian.',
+      judul: 'LAIN-LAIN',
+      isi: `Perjanjian ini dibuat dan ditandatangani secara elektronik oleh Para Pihak dengan kesadaran penuh tanpa paksaan, dan memiliki kekuatan hukum yang sama dengan perjanjian tertulis sesuai UU ITE No. 11 Tahun 2008 dan perubahannya. Segala perubahan atas perjanjian ini hanya sah apabila dibuat secara tertulis dan disetujui oleh kedua belah pihak.`,
     },
   ];
 }
@@ -328,7 +341,40 @@ export async function onRequestPost(context) {
     console.error('[sign POST] Auto-publish properti gagal:', err.message);
   }
 
-  // TODO F4: generate PDF arsip dan simpan ke pdf_url. Untuk sekarang pdf_url = null.
+  // ─── [7] Generate PDF arsip (non-fatal: gagal = pdf_url null, sign tetap sukses) ──
+  let pdf_tersedia = false;
+  try {
+    // Ambil bytes TTD owner dari R2 untuk diembed di PDF
+    let ownerSigBytes = null;
+    try {
+      const sigObj = await env.MEDIA.get(signature_image_url);
+      if (sigObj) ownerSigBytes = await sigObj.arrayBuffer();
+    } catch (err) {
+      console.error('[sign POST] Fetch owner sig dari R2 gagal:', err.message);
+    }
+
+    const pdfBytes = await generateAgreementPDF({
+      agr,
+      nikPlain,
+      signedAt,
+      auditIp:   audit_ip,
+      auditHash: audit_hash_dokumen,
+      ownerSigBytes,
+      pasalList: buildPasalPasal(agr),
+    });
+
+    const pdfKey = `agreements/${agr.kode_perjanjian}-${crypto.randomUUID()}.pdf`;
+    await env.MEDIA.put(pdfKey, pdfBytes, {
+      httpMetadata: { contentType: 'application/pdf' },
+    });
+
+    await env.DB.prepare('UPDATE agreements SET pdf_url = ? WHERE sign_token = ?')
+      .bind(pdfKey, token).run();
+
+    pdf_tersedia = true;
+  } catch (err) {
+    console.error('[sign POST] Generate/simpan PDF gagal (non-fatal):', err.message);
+  }
 
   return jsonOk({
     status: 'signed',
@@ -336,6 +382,7 @@ export async function onRequestPost(context) {
     slug_properti: agr.slug,
     signed_at: signedAt,
     audit_hash_dokumen,
+    pdf_tersedia,
     pesan: 'Tanda tangan berhasil. Properti Anda telah dipublikasikan di platform SBP.',
   });
 }

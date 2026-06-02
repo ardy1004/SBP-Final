@@ -5,7 +5,7 @@
 
 ---
 
-## STATUS SAAT INI: Fase F — F3 Halaman Tanda Tangan /sign Selesai ✅
+## STATUS SAAT INI: Fase F — SELESAI SEPENUHNYA (F1-F4) ✅
 
 ---
 
@@ -526,6 +526,95 @@ Di sesi F3, 3 proses Node zombie dari sesi sebelumnya semuanya mendengarkan di p
 2. Clean build: `Remove-Item -Recurse -Force dist, .react-router && npm run build`
 3. Start SATU instance wrangler: `npx wrangler pages dev dist/client --port 8790`
 4. Verifikasi chunk hash benar: `curl http://127.0.0.1:8790/sign/{token} | grep -o "SignPage[^'\"]*\.js"` → harus cocok dengan file di `dist/client/assets/`
+
+---
+
+### F4 — PDF Arsip Perjanjian ✅ SELESAI (2 Juni 2026) — **FASE F TUNTAS**
+
+#### File yang dibuat/dimodifikasi:
+
+| File | Keterangan |
+|------|------------|
+| `functions/_lib/pdf.js` | **Baru.** Generator PDF perjanjian via pdf-lib: header, nomor+tanggal, Pihak Pertama/Kedua, Pasal 1-7, area TTD overlay (TTD Ardy kiri + materai+TTD owner kanan), footer audit (signed_at/IP/SHA-256/UU ITE). |
+| `functions/api/sign/[token]/pdf.js` | **Baru.** `GET /api/sign/:token/pdf` — stream PDF dari R2 (Content-Type: application/pdf, inline). Hanya token status=signed dengan pdf_url tersedia. |
+| `functions/api/sign/[token].js` | **Dimodifikasi.** POST handler: setelah TTD tersimpan, generate PDF non-fatal (try/catch) → simpan ke R2 `agreements/{kode}-{uuid}.pdf` → UPDATE agreements SET pdf_url; fix URL TTD Ardy (TODO-a F3 tuntas); align pasal spec 12.6 (fee dari fee_persen, TODO-b F3 tuntas). |
+| `src/app/components/SignPage.tsx` | **Dimodifikasi.** Halaman sukses: tambah tombol "Download PDF Perjanjian" yang muncul jika `data.pdf_tersedia === true`, link ke `/api/sign/:token/pdf`. |
+| `package.json` + `package-lock.json` | Tambah dependensi `pdf-lib`. |
+
+#### Fitur yang terimplementasi:
+
+- **Generate PDF saat submit sign:** `functions/_lib/pdf.js` dipanggil di POST handler setelah TTD berhasil disimpan ke R2. PDF dibuat dengan pdf-lib (format PDF 1.7), ukuran ~270 KB.
+- **Konten PDF (align spec 12.6):**
+  - Header: "PERJANJIAN JASA PEMASARAN — SALAM BUMI PROPERTY", nomor, tanggal
+  - Pihak Pertama: CV SBP (data tetap)
+  - Pihak Kedua: nama_ktp, NIK ter-dekripsi, alamat dari data agreement
+  - Pasal 1-7: Objek Perjanjian, Jangka Waktu, Jasa Pemasaran (fee dari `fee_persen`), Kewajiban Para Pihak, Kerahasiaan, Penyelesaian Sengketa, Penutup
+  - Area TTD: TTD Ardy (SBP, kiri) + materai+TTD owner kanan — di-fetch dari CDN dan di-embed sebagai gambar
+  - Footer audit: signed_at ISO, IP address, SHA-256 hash TTD, UU ITE notice
+- **Simpan ke R2:** path `agreements/{kode_listing}-{agreement_uuid}.pdf`; kolom `pdf_url` di tabel `agreements` diisi setelah berhasil.
+- **Endpoint GET /api/sign/:token/pdf:** stream isi R2 ke browser sebagai `application/pdf` inline (bukan attachment) — hanya untuk token yang sudah signed dan punya pdf_url.
+- **Tombol Download PDF di halaman sukses:** muncul kondisional jika response POST mengandung `pdf_tersedia: true`.
+- **Generate PDF non-fatal:** submit perjanjian tetap sukses (return 200) meski PDF gagal di-generate — PDF error hanya di-log, tidak melempar ke client.
+- **Fix URL TTD Ardy (TODO-a F3 TUNTAS):** URL `TTD_ARDY_URL` diperbaiki di `[token].js` — fetch dari CDN images.salambumi.xyz berhasil di Workers runtime (TTD Ardy ~21 KB, materai ~231 KB).
+- **Align pasal spec 12.6 (TODO-b F3 TUNTAS):** `buildPasalPasal()` di-refactor — penomoran dan konten pasal sesuai spec 12.6.
+
+#### Verifikasi (port 8790):
+
+```
+GET /api/sign/:token/pdf          → HTTP 200, Content-Type: application/pdf, body mulai %PDF-1.7 ✅
+File size                         → ~270 KB ✅
+Fetch TTD Ardy dari CDN           → berhasil (~21 KB) ✅
+Fetch materai hg.png dari CDN     → berhasil (~231 KB) ✅
+Embed gambar di PDF               → TTD+materai tampil di area tanda tangan ✅
+Submit sign → pdf_url terisi      → agreements.pdf_url tidak NULL setelah POST ✅
+Tombol Download PDF di SignPage   → muncul saat pdf_tersedia: true ✅
+Submit tetap 200 jika PDF gagal   → non-fatal try/catch ✅
+```
+
+---
+
+### ⚠️ GOTCHA Fase F4 — WAJIB DIBACA
+
+**[a] pdf-lib StandardFonts HANYA encode WinAnsi / Latin-1:**
+Karakter di luar rentang WinAnsi (≥ ≤ — '' "" … dan semua non-Latin) **tidak bisa di-encode** oleh StandardFonts pdf-lib dan akan **throw saat `drawText()`**. Ini terjadi karena pdf-lib StandardFonts menggunakan encoding WinAnsiEncoding (CP-1252) — bukan Unicode.
+
+**Solusi wajib:** sanitizer `toWinAnsi(str)` harus dipanggil pada SEMUA teks sebelum `drawText()`:
+```js
+function toWinAnsi(str) {
+  return (str || '')
+    .replace(/≥/g, '>=')   // ≥
+    .replace(/≤/g, '<=')   // ≤
+    .replace(/—/g, '-')    // em-dash —
+    .replace(/[‘’]/g, "'") // '' curly single
+    .replace(/[“”]/g, '"') // "" curly double
+    .replace(/…/g, '...')  // …
+    .replace(/[^\x00-\xFF]/g, '?'); // fallback semua non-Latin-1
+}
+```
+Contoh yang sudah diperbaiki: teks `'≥30%'` → `'>=30%'`, `'Rp —'` → `'Rp -'`.
+
+**Alternatif jangka panjang:** embed font TTF (Noto Sans / DejaVu) via `pdfDoc.embedFont(fontBytes)` → full Unicode. Tapi menambah ukuran PDF ~500 KB. Saat ini WinAnsi sudah cukup untuk konten Latin+angka.
+
+**[b] Fetch gambar dari CDN Workers runtime:**
+Fetch gambar dari `https://images.salambumi.xyz/` BERHASIL di Workers runtime (tidak perlu fallback R2). TTD Ardy ~21 KB, materai ~231 KB. Pola `arrayBuffer()` diperlukan untuk embed ke pdf-lib:
+```js
+const resp = await fetch(url);
+const buf = await resp.arrayBuffer();
+const img = await pdfDoc.embedPng(buf); // atau embedJpg
+```
+Jika fetch gagal (404, timeout) → gunakan blok try/catch per gambar, lanjut tanpa gambar (jangan lempar).
+
+---
+
+### ⚠️ TODO PRODUKSI Fase F — Semua Fase (F1-F4) — Wajib Sebelum Go-Live
+
+| # | Item | Perintah / Tindakan |
+|---|------|---------------------|
+| 1 | **Set NIK_ENC_KEY production** | `wrangler secret put NIK_ENC_KEY` (passphrase acak ≥ 32 char) |
+| 2 | **Verifikasi aset CDN produksi** | Konfirmasi `images.salambumi.xyz/ttd/gsd-removebg-preview.png` (TTD Ardy) dan `images.salambumi.xyz/materai/hg.png` tersedia dan bisa di-fetch dari Workers |
+| 3 | **Lock CORS** | Ganti `'*'` → `'https://salambumi.xyz'` di `functions/_middleware.js` |
+| 4 | **EXIF strip foto upload** | Foto dari `POST /api/titip-jual` disimpan R2 tanpa strip EXIF — metadata GPS bisa bocor lokasi. Tambahkan EXIF strip sebelum R2.put (masih TODO dari F2). |
+| 5 | **Cookie consent banner** | UU PDP memerlukan consent eksplisit sebelum analytics/tracking cookie. Pasang banner sebelum launch. |
 
 ---
 

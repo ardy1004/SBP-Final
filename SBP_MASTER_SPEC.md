@@ -56,8 +56,8 @@ Ini adalah keputusan fondasi yang **wajib** dipatuhi seluruh modul. Mengabaikann
 Daftar aturan tegas hasil koreksi iterasi. Builder **dilarang** menyimpang dari ini:
 
 1. **Filter Homepage:** Lokasi = **4 dropdown TERPISAH & searchable** (Provinsi → Kab./Kota → Kecamatan → Kel./Desa) yang bertingkat. **DILARANG** menggabungkan menjadi satu kolom "Wilayah". (Detail 6.3)
-2. **Banner Properti Pilihan:** auto-slider **full-width sinematik** (1 properti/slide, gradient overlay, kartu info melayang), bukan kartu split datar. (Detail 6.4)
-3. **Homepage WAJIB punya section "Artikel Terbaru" (spill blog)** berisi 3 artikel sebelum footer. (Detail 6.9)
+2. **Banner Properti Pilihan:** auto-slider **full-width sinematik** (1 properti/slide, gradient overlay, kartu info melayang), bukan kartu split datar. (Detail 6.5)
+3. **Homepage WAJIB punya section "Artikel Terbaru" (spill blog)** berisi 3 artikel sebelum footer. (Detail 6.10)
 4. **Halaman Detail — tombol WhatsApp HANYA SATU**, di **bawah form** "Kirim Pesan ke Admin", **disabled** sampai semua field wajib terisi lalu **aktif**. **DILARANG** menaruh tombol WA di kotak harga atau di tempat lain. (Detail 8.1 & 8.8)
 5. **Alur Owner Titip Jual = 3 langkah** (`Data Diri → Info Properti → Tanda Tangan`). **DILARANG** menampilkan halaman/langkah "Opsi Perjanjian" ke publik. Opsi (Open/Exclusive/Sewa, durasi, fee) **dikonfigurasi ADMIN** di dashboard sebelum mengirim link tanda tangan. (Detail 12.0 & 13.5)
 6. **SSR/prerender wajib** untuk halaman publik (K1). **Tidak ada kredensial hardcoded** (K7).
@@ -640,14 +640,26 @@ Tepat di bawah hero, **sebelum** banner carousel. Background `--navy #0B2447`, p
 ```
 Setiap item: angka `gradient-blue-cta` text (font 36px bold, animasi count-up saat terlihat) + label putih kecil di bawahnya. Divider vertikal tipis antar item. Efek: meyakinkan dan impresif. **Sumber angka: dinamis dari DB** (COUNT listing aktif, COUNT properti SOLD/portofolio, rata-rata rating testimoni); "100% Dikurasi" statis. Bila data minim di awal, admin dapat set angka minimum di Pengaturan (13.15).
 
-### 6.5 Banner Carousel "Properti Pilihan" — tetap sesuai 6.4 (sinematik)
-*Background section:* `gradient-sky-section` (`#E3F2FD → #F0F9FF`).
+### 6.5 Banner Carousel "Properti Pilihan" — AUTO-SLIDER SINEMATIK
+> ⚠️ **DIREKTIF BUILDER:** Menampilkan listing `properti_pilihan = true`, **satu properti per slide, auto-slide tiap 5 detik**. BUKAN kartu split datar.
+
+*Background section:* `gradient-sky-section` (`#E3F2FD → #F0F9FF`), padding 60px vertikal.
 *Section header:* label kecil `⭐ PROPERTI PILIHAN`, judul "Properti Unggulan Terkurasi", subtitle abu.
+
+**Desain per slide (sinematik):**
+- **Full-width**, tinggi 460–520px (desktop), foto properti sebagai latar penuh + **gradient overlay gelap** di sisi kiri (`gradient-card-hover`) agar teks terbaca.
+- **Kartu info melayang** (gunakan `.glass-dark`, lihat 2.5) di atas foto, berisi: badge ({PREMIUM/FEATURED/HOT}, glow emas untuk PREMIUM), Kode Listing, Judul, ringkasan 1 baris, **Harga besar menonjol**, ikon ringkas (📍 Lokasi · LT · KT/KM), dan **dua tombol**: "Lihat Detail" (`gradient-blue-cta`) + "WhatsApp" (`--emerald` hijau).
+
+**Kontrol & interaksi:**
+- Panah navigasi kiri/kanan + **dot pagination** di bawah.
+- **Auto-advance 5 detik, pause on hover**, **swipe** di mobile, transisi geser/fade mulus.
+- Mobile: kartu info menumpuk di bawah/menimpa foto, tetap terbaca.
+- Diisi & diurutkan dari Admin (13.8); interval auto-slide dapat diatur admin.
 
 ### 6.6 Product Cards Section — "Semua Properti"
 *Background section:* `--white`.
 *Section header:* "Temukan Properti Impian Anda" (h2 center) + tombol "Lihat Semua →" (outline, kanan).
-Grid 3 kolom (desktop) dengan kartu sesuai spesifikasi 6.5. Load 6 kartu di homepage, tombol "Lihat Semua Properti →".
+Grid 3 kolom (desktop) dengan kartu **sesuai anatomi & badge di 7.3**. Load 6 kartu di homepage (prioritas: Properti Pilihan/PREMIUM → FEATURED → HOT → terbaru), lalu tombol "Lihat Semua Properti →".
 
 ### 6.7 ✦ Investment Intelligence Teaser (BARU — Section Premium)
 *Background:* `gradient-navy-section` (`#0B2447 → #1565C0`), teks putih.
@@ -1405,10 +1417,11 @@ FASE 2 — PENANDATANGANAN (LINK KHUSUS DARI ADMIN)
 ### 12.3 Opsi Perjanjian — DITENTUKAN ADMIN (bukan halaman publik)
 > Definisi tetap berlaku sebagai aturan bisnis, tetapi **dikonfigurasi oleh admin di dashboard (13.5)**, bukan dipilih owner di website. Nilai yang dipilih admin otomatis mengisi dokumen Perjanjian (12.6).
 
-Jenis transaksi: **JUAL/BELI | SEWA**.
-- **OPEN LISTING:** bebas/tidak terikat. Fee **3%** dari harga deal, dibayar setelah AJB.
-- **EXCLUSIVE LISTING:** terikat (3/6/12 bln, dapat diperpanjang). Fee **5%**. Jika lewat kontrak & belum terjual → auto-downgrade ke Open Listing (fee 3%). Keunggulan: biaya iklan 100% ditanggung SBP, layanan prioritas, garansi pemasaran maksimal.
-- **SEWA:** Open Listing, fee **10%** dari harga deal, sustainable (perpanjangan oleh penyewa dari leads SBP → fee 10% tetap berlaku).
+Jenis transaksi: **JUAL/BELI | SEWA** (diturunkan otomatis dari `properties.tujuan`, bukan diinput admin).
+- **OPEN LISTING:** bebas/tidak terikat, tidak ada durasi.
+- **EXCLUSIVE LISTING:** terikat (durasi 3/6/12 bln dipilih admin, dapat diperpanjang). Jika lewat kontrak & belum terjual → dapat auto-downgrade ke Open Listing. Keunggulan: biaya iklan 100% ditanggung SBP, layanan prioritas, garansi pemasaran maksimal.
+
+> **REVISI FEE (fleksibel & negotiable):** Persentase fee **TIDAK lagi terkunci** pada angka tetap (dulu 3%/5%/10%). Fee dinegosiasikan admin↔owner via WhatsApp manual, lalu admin **input angka persentase manual** (mis. 2% / 2.5% / 3% / 5%) di form Konfigurasi Perjanjian (13.5). Angka ini auto-sync mengisi Pasal 3 dokumen. Jenis listing dipilih admin via **radio button (Open ATAU Exclusive, tidak keduanya)**.
 
 ### 12.4 HALAMAN TANDA TANGAN (URL: `/sign/{token}` — link dari admin)
 
@@ -1453,7 +1466,7 @@ Jenis transaksi: **JUAL/BELI | SEWA**.
   5. **Properti auto-tayang** (`status_publish = published`, `published_at = now`).
   6. Redirect ke halaman sukses Fase 2.
 
-**Kanvas TTD:** library signature pad (mouse + touch), responsif, garis hitam di atas gambar materai.
+**Kanvas TTD:** library signature pad (mouse + touch), responsif, garis hitam di atas gambar materai. **PENAJAMAN:** (1) goresan tanda tangan **WAJIB menimpa/menindih materai** (praktik hukum ID — TTD harus mengenai materai agar sah); materai (hg.png) diposisikan di dalam area kanvas. (2) **Area menggambar luas/tidak terbatas** — kanvas tidak dibatasi kotak kecil; owner bebas menggoreskan TTD seluas yang dibutuhkan, boleh melampaui kotak materai. Garis TTD dirender DI ATAS layer materai (z-index lebih tinggi) sehingga visual TTD menimpa materai.
 
 **Halaman Sukses Fase 2 (`/sign/sukses`):** ikon 🚀, *"Selamat, properti Anda telah tayang!"* + tombol "Lihat Properti Saya →" (link ke detail listing). Checkbox persetujuan teks: *"Saya setuju dengan syarat dan ketentuan yang berlaku. Dengan mencentang ini, saya menyatakan semua informasi benar dan menyetujui perjanjian pemasaran dengan Salam Bumi Property."*
 
@@ -1637,11 +1650,13 @@ Foto pertama + Kode + Nama Owner + Jenis Properti + Lokasi + Tanggal Masuk + **S
 - Tab **"Data Diri"**: Nama, NIK (terenkripsi, ikon 👁️ reveal on click dengan log), Alamat KTP, No. WA (+ tombol 📱 buka WA langsung), dll.
 - Tab **"Data Properti"**: semua field yang diisi owner, preview foto.
 - Tab **"Konfigurasi Perjanjian"** (admin set di sini):
-  - Jenis Transaksi: toggle `[Jual/Beli]` `[Sewa]`.
-  - Jenis Listing: kartu pilih `[Open Listing — Fee 3%]` `[Exclusive Listing — Fee 5% ⭐REKOMENDASI]` (styling sama seperti UI yang ada, tapi hanya admin yang bisa memilih).
-  - Durasi (muncul bila Exclusive): pill `[3 Bulan]` `[6 Bulan]` `[12 Bulan]`.
-  - Fee %: auto (3/5/10) dengan override manual.
-  - Tombol **"✅ Konfirmasi Opsi & Generate Link TTD"** → generate link unik `/sign/{token}` + status berubah "Opsi Dikonfigurasi".
+  - **Jenis Transaksi: TIDAK diinput admin — diturunkan otomatis dari `properties.tujuan`** (dijual → "Jual/Beli", disewa → "Sewa"). Ditampilkan sebagai label read-only.
+  - **Jenis Listing: RADIO BUTTON (pilih SATU, saling-eksklusif):** `◯ Open Listing` `◯ Exclusive Listing`. Tidak boleh keduanya tercentang.
+  - **Durasi (muncul HANYA bila Exclusive dipilih):** radio/pill `◯ 3 Bulan` `◯ 6 Bulan` `◯ 12 Bulan`. Open Listing → tidak ada durasi (tidak terikat).
+  - **Input Fee: angka manual `___ %`** (mis. 2 / 2.5 / 3 / 5) — hasil negosiasi WA admin↔owner di luar sistem. **Fee TIDAK lagi terkunci per jenis listing** (revisi dari aturan lama 3%/5%/10%); fleksibel & negotiable. Nilai ini auto-sync mengisi Pasal 3 dokumen perjanjian (12.6).
+  - Tombol **"✅ Konfirmasi Opsi & Generate Link TTD"** → generate link unik `/sign/{token}` + status berubah "Opsi Dikonfigurasi". Validasi: jenis listing wajib dipilih, fee wajib diisi (>0), durasi wajib bila Exclusive.
+
+> **CATATAN REVISI (alur fee fleksibel):** Sebelum generate link, admin menegosiasikan persentase fee dengan owner via WhatsApp manual. Setelah owner setuju (mis. 3%), admin input angka tersebut di field Fee. Owner di halaman `/sign` HANYA membaca + menandatangani — owner TIDAK memilih opsi/fee (konsisten dengan direktif 12.0). Aturan lama 12.3 (fee tetap 3%/5%/10% per jenis) digantikan oleh input fee manual ini.
 - Tab **"Kontrak"**: tombol "📋 Salin Link TTD" (copy ke clipboard) + "📱 Kirim via WA Owner" (buka WA langsung dengan pesan: "Halo {Nama}, berikut link perjanjian Anda: {link}") + status timeline.
 
 **Status Timeline (bawah drawer):**
@@ -1875,7 +1890,7 @@ Tabel provinsi → kab → kec → kel (tree view dapat di-expand). Tombol Tamba
 - Schema valid (Rich Results Test): RealEstateListing, BreadcrumbList, FAQPage, Organization.
 - Semua form menyimpan lead ke DB sebelum membuka WA.
 - **Filter homepage memiliki 4 dropdown lokasi terpisah & searchable (Provinsi→Kab/Kota→Kecamatan→Kel/Desa), bukan satu kolom "Wilayah".**
-- **Banner "Properti Pilihan" tampil sebagai auto-slider sinematik full-width sesuai 6.4.**
+- **Banner "Properti Pilihan" tampil sebagai auto-slider sinematik full-width sesuai 6.5.**
 - **Homepage memuat section "Artikel Terbaru" (spill blog) berisi 3 artikel.**
 - **Halaman detail hanya punya SATU tombol WhatsApp di bawah form, disabled hingga field wajib terisi, lalu aktif; tidak ada tombol WA di kotak harga.**
 - **Alur owner = 3 langkah (Data Diri → Info Properti → Tanda Tangan); TIDAK ada halaman "Opsi Perjanjian" di publik; opsi perjanjian dikonfigurasi admin di dashboard.**

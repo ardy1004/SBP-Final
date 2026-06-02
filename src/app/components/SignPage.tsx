@@ -5,8 +5,7 @@ import {
   FileText, Shield, ExternalLink, Loader2,
 } from 'lucide-react';
 
-// TODO: upload gsd-removebg-preview Copy.png ke CDN dan update URL ini
-const TTD_ARDY_URL  = 'https://images.salambumi.xyz/ttd/gsd-removebg-preview.png';
+const TTD_ARDY_URL  = 'https://images.salambumi.xyz/materai/gsd-removebg-preview%20-%20Copy.png';
 const MATERAI_URL   = 'https://images.salambumi.xyz/materai/hg.png';
 const WA_ADMIN      = 'https://wa.me/6281391278889';
 
@@ -59,7 +58,7 @@ type PageState =
   | { kind: 'belum_dikonfigurasi' }
   | { kind: 'sudah_ditandatangani'; slug_properti: string | null; kode_perjanjian: string }
   | { kind: 'valid'; data: AgreementData }
-  | { kind: 'success'; property_url: string; kode_perjanjian: string };
+  | { kind: 'success'; property_url: string; kode_perjanjian: string; token: string; pdf_tersedia: boolean };
 
 // ──────────────────────────────────────────────────────────────
 // Helpers
@@ -202,18 +201,29 @@ function SuccessView({ data }: { data: Extract<PageState, { kind: 'success' }> }
         </p>
         <p className="text-[#64748B] mb-6 text-sm">
           Kode perjanjian: <span className="font-semibold text-[#1565C0]">{data.kode_perjanjian}</span>.
-          Salinan perjanjian akan dikirimkan via WhatsApp dalam 1×24 jam.
         </p>
         <div className="bg-[#F0FFF4] border border-[#10B981]/30 rounded-xl p-4 text-sm text-[#10B981] mb-6">
           <Shield size={16} className="inline mr-2" />
           Data Anda dilindungi sesuai UU PDP RI
         </div>
-        <Link
-          to={data.property_url}
-          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-[#1565C0] hover:bg-[#1976D2] transition-colors"
-        >
-          Lihat Properti Saya <ExternalLink size={16} />
-        </Link>
+        <div className="flex flex-col gap-3">
+          <Link
+            to={data.property_url}
+            className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-[#1565C0] hover:bg-[#1976D2] transition-colors"
+          >
+            Lihat Properti Saya <ExternalLink size={16} />
+          </Link>
+          {data.pdf_tersedia && (
+            <a
+              href={`/api/sign/${data.token}/pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-[#1565C0] border border-[#1565C0] hover:bg-[#E3F2FD] transition-colors"
+            >
+              <FileText size={16} /> Download PDF Perjanjian
+            </a>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -529,7 +539,13 @@ export default function SignPage() {
       if (!json.success) throw new Error(json.error || 'Gagal mengirim tanda tangan');
       const d = json.data;
       const propertyUrl = buildPropertyUrl(state.data.properti);
-      setState({ kind: 'success', property_url: propertyUrl, kode_perjanjian: d.kode_perjanjian });
+      setState({
+        kind: 'success',
+        property_url: propertyUrl,
+        kode_perjanjian: d.kode_perjanjian,
+        token: token!,
+        pdf_tersedia: d.pdf_tersedia === true,
+      });
     } catch (err: any) {
       setSubmitError(err.message || 'Terjadi kesalahan. Silakan coba lagi.');
     } finally {
