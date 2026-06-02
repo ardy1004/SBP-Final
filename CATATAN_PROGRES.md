@@ -5,7 +5,7 @@
 
 ---
 
-## STATUS SAAT INI: Fase G — G1 Login + Shell Dashboard Selesai ✅ (Fase F masih di branch, belum merge — lihat TODO)
+## STATUS SAAT INI: Fase G — G2 Modul Agreements Selesai ✅
 
 ---
 
@@ -672,6 +672,85 @@ Klik Keluar                  → POST /api/admin/logout → redirect /admin/logi
 - **Kredensial PRODUKSI:** `salambumiproperty@gmail.com` (akun berbeda — pastikan admin produksi dikonfigurasi dengan benar sebelum go-live via seed atau endpoint `PUT /api/admin/password` di G2)
 - **401 dari `GET /api/admin/me` sebelum login adalah NORMAL** — ini cara guard mendeteksi sesi kosong/tidak valid, bukan bug. Jangan alert atau log sebagai error.
 - **Fase F masih di branch `feat/fase-f-agreements` dan belum di-merge ke main.** G1 di-commit di branch yang sama. Merge ke main dilakukan setelah semua Fase F + Fase G selesai direview.
+
+---
+
+### G2 — Modul Admin Agreements/Titip Jual ✅ SELESAI (2 Juni 2026)
+
+#### Tujuan:
+Mengganti placeholder "Segera hadir" Titip Jual dengan modul admin agreements lengkap: list+filter, detail dengan NIK terdekripsi, edit terbatas field kunci (Opsi X), form konfigurasi perjanjian, generate sign_token, dan tombol Salin+Kirim WA.
+
+#### Endpoint baru:
+
+| Endpoint | File | Keterangan |
+|----------|------|------------|
+| `GET /api/admin/agreements` | `functions/api/admin/agreements/index.js` | List semua agreement JOIN owners+properties. Filter: `status` query param. Respons tanpa NIK (NIK tidak dikembalikan di list). |
+| `GET /api/admin/agreements/:id` | `functions/api/admin/agreements/[id]/index.js` | Detail satu agreement: NIK terdekripsi AES-GCM, foto properti dari R2, semua field perjanjian. |
+| `PATCH /api/admin/agreements/:id` | `functions/api/admin/agreements/[id]/index.js` | Edit terbatas field kunci Opsi X: nama, NIK (re-enkripsi), alamat, no_wa, harga, lokasi, jenis_properti. Hanya untuk status `draft` atau `menunggu_ttd`. |
+
+#### Endpoint yang dikonsumsi (dari F1, sudah ada):
+
+| Endpoint | Keterangan |
+|----------|------------|
+| `POST /api/admin/agreements/:id/configure` | Form konfigurasi: jenis_listing, fee, durasi, jenis_transaksi → generate sign_token + link TTD |
+
+#### File yang dibuat/dimodifikasi:
+
+| File | Perubahan |
+|------|-----------|
+| `functions/api/admin/agreements/index.js` | **Baru.** GET list + (PATCH di `[id]/index.js`) |
+| `functions/api/admin/agreements/[id]/index.js` | **Baru.** GET detail + PATCH update field kunci |
+| `functions/api/admin/media.js` | **Baru.** Proxy foto dari R2 ke frontend (via signed URL atau proxy direct) |
+| `src/app/components/admin/AdminAgreementsPage.tsx` | **Baru.** Tabel list agreements + filter badge status + navigasi ke detail |
+| `src/app/components/admin/AdminAgreementDetailPage.tsx` | **Baru.** Detail agreement: data pemilik (NIK terdekripsi), foto properti, form edit Opsi X, form konfigurasi (radio Open/Exclusive, durasi kondisional, fee manual, jenis transaksi auto), generate link sign + tombol Salin + tombol Kirim WA |
+| `src/app/routes.ts` | Tambah route `/admin/agreements` dan `/admin/agreements/:id` → komponen baru |
+
+#### Fitur yang terimplementasi:
+
+- **AdminAgreementsPage — list + filter:**
+  - Tabel agreement: nomor, nama pemilik, properti, status (badge warna), tanggal, aksi
+  - Filter dropdown status: semua / draft / menunggu_ttd / signed
+  - Klik baris → navigasi ke halaman detail
+
+- **AdminAgreementDetailPage — detail lengkap:**
+  - Data pemilik: nama, NIK (terdekripsi, tampil di UI), alamat, no_wa
+  - Data properti: jenis, lokasi, harga, foto (via proxy R2)
+  - Status badge + kode agreement
+
+- **Edit terbatas (Opsi X):**
+  - Field yang bisa diedit: nama, NIK, alamat, no_wa, harga, lokasi, jenis_properti
+  - NIK diinput plaintext di form → PATCH → re-enkripsi AES-GCM di server sebelum disimpan
+  - Hanya aktif untuk status `draft` atau `menunggu_ttd`
+
+- **Form konfigurasi perjanjian (spec 13.5):**
+  - Radio `jenis_listing`: Open (non-eksklusif) / Exclusive
+  - `durasi_bulan`: input angka — hanya muncul jika jenis_listing = Exclusive
+  - `fee_persen`: input manual (persentase)
+  - `jenis_transaksi`: auto-detect dari jenis properti (jual / sewa / jual_sewa) — read-only
+  - Tombol "Konfigurasi & Generate Link" → `POST /api/admin/agreements/:id/configure`
+
+- **Generate link + Salin + Kirim WA:**
+  - Setelah configure berhasil, `sign_token` muncul → URL `/sign/:token` ditampilkan
+  - Tombol "Salin Link" → clipboard copy
+  - Tombol "Kirim via WA" → `wa.me/{no_wa}?text=...` (Opsi b: wa.me link langsung ke nomor pemilik)
+
+#### Alur end-to-end yang terverifikasi (Playwright Chromium, port 8790):
+
+```
+Login /admin/login           → berhasil, redirect /admin
+Klik "Titip Jual" sidebar    → AdminAgreementsPage, tabel tampil
+Filter status=menunggu_ttd   → tabel terfilter
+Klik baris agreement         → AdminAgreementDetailPage, NIK terdekripsi tampil
+Edit nama/NIK field          → PATCH /api/admin/agreements/:id → 200, NIK re-terenkripsi di DB
+Isi form konfigurasi         → POST configure → link TTD muncul
+Klik "Salin Link"            → clipboard terisi URL /sign/:token
+Klik "Kirim via WA"          → wa.me/... terbuka di tab baru
+Buka /sign/:token            → SignPage tampil dokumen perjanjian (end-to-end ✅)
+```
+
+#### Temuan non-bug (dicatat agar tidak dikira bug):
+
+- **Foto kotak hijau di dev:** foto properti tampil sebagai kotak hijau di mode dev — ini bukan bug, melainkan R2 emulation lokal wrangler kosong (tidak ada file foto sebenarnya diupload di local). Di produksi dengan R2 berisi foto nyata, foto tampil normal.
 
 ---
 

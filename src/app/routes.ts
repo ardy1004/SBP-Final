@@ -25,7 +25,8 @@ export default [
   route("admin/login", "./components/admin/AdminLoginPage.tsx"),
   layout("./components/admin/AdminLayout.tsx", [
     route("admin", "./components/admin/AdminOverviewPage.tsx"),
-    route("admin/agreements", "./components/admin/AdminPlaceholderPage.tsx", { id: "admin-agreements" }),
+    route("admin/agreements", "./components/admin/AdminAgreementsPage.tsx", { id: "admin-agreements" }),
+    route("admin/agreements/:id", "./components/admin/AdminAgreementDetailPage.tsx", { id: "admin-agreement-detail" }),
     route("admin/listing", "./components/admin/AdminListingPage.tsx"),
     route("admin/leads", "./components/admin/AdminLeadsPage.tsx"),
     route("admin/testimoni", "./components/admin/AdminPlaceholderPage.tsx", { id: "admin-testimoni" }),
