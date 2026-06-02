@@ -14,14 +14,34 @@ export default function AdminLoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    await new Promise(r => setTimeout(r, 1000));
-    if (email === 'admin@salambumi.id' && password === 'sbpadmin2024') {
-      sessionStorage.setItem('sbp_admin', '1');
-      navigate('/admin');
-    } else {
-      setError('Email atau password salah.');
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (res.ok) {
+        navigate('/admin');
+        return;
+      }
+
+      if (res.status === 429) {
+        setError('Terlalu banyak percobaan, coba lagi nanti.');
+      } else {
+        let msg = 'Email atau password salah.';
+        try {
+          const data = await res.json();
+          if (data?.error) msg = data.error;
+        } catch {}
+        setError(msg);
+      }
+    } catch {
+      setError('Gagal menghubungi server. Periksa koneksi Anda.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (
@@ -48,7 +68,7 @@ export default function AdminLoginPage() {
                   type="email"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
-                  placeholder="admin@salambumi.id"
+                  placeholder="Email admin"
                   required
                   className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] transition-colors"
                 />
@@ -85,13 +105,11 @@ export default function AdminLoginPage() {
               disabled={loading}
               className="w-full py-3 rounded-xl font-semibold text-white transition-all disabled:opacity-60 flex items-center justify-center gap-2"
               style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
-              {loading ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Memverifikasi...</> : 'Masuk'}
+              {loading
+                ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Memverifikasi...</>
+                : 'Masuk'}
             </button>
           </div>
-
-          <p className="text-center text-xs text-[#94A3B8] mt-5">
-            Demo: admin@salambumi.id / sbpadmin2024
-          </p>
         </form>
       </div>
     </div>

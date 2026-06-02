@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
+import { useOutletContext } from 'react-router';
 import { TrendingUp, Home, Users, Eye, MessageCircle, FileText, ArrowUpRight, ArrowDownRight } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+
+interface AdminUser { sub: number; email: string; nama: string; role: string; }
 
 const KPI_DATA = [
   { label: 'Total Listing Aktif', value: 47, delta: +3, icon: Home, color: '#1565C0', bg: '#E3F2FD' },
@@ -34,6 +37,7 @@ const ACTIVITY = [
 ];
 
 export default function AdminOverviewPage() {
+  const admin = useOutletContext<AdminUser | null>();
   const [count, setCount] = useState(KPI_DATA.map(() => 0));
 
   useEffect(() => {
@@ -46,8 +50,10 @@ export default function AdminOverviewPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-xl font-bold text-[#0F172A]">Overview Dashboard</h1>
-        <p className="text-[#64748B] text-sm mt-0.5">Ringkasan performa SBP hari ini, Minggu 31 Mei 2026</p>
+        <h1 className="font-display text-xl font-bold text-[#0F172A]">
+          Selamat datang, {admin?.nama ?? 'Admin'}
+        </h1>
+        <p className="text-[#64748B] text-sm mt-0.5">Ringkasan performa Salam Bumi Property</p>
       </div>
 
       {/* KPI Cards */}

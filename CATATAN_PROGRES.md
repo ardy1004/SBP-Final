@@ -5,7 +5,7 @@
 
 ---
 
-## STATUS SAAT INI: Fase F — SELESAI SEPENUHNYA (F1-F4) ✅
+## STATUS SAAT INI: Fase G — G1 Login + Shell Dashboard Selesai ✅ (Fase F masih di branch, belum merge — lihat TODO)
 
 ---
 
@@ -615,6 +615,63 @@ Jika fetch gagal (404, timeout) → gunakan blok try/catch per gambar, lanjut ta
 | 3 | **Lock CORS** | Ganti `'*'` → `'https://salambumi.xyz'` di `functions/_middleware.js` |
 | 4 | **EXIF strip foto upload** | Foto dari `POST /api/titip-jual` disimpan R2 tanpa strip EXIF — metadata GPS bisa bocor lokasi. Tambahkan EXIF strip sebelum R2.put (masih TODO dari F2). |
 | 5 | **Cookie consent banner** | UU PDP memerlukan consent eksplisit sebelum analytics/tracking cookie. Pasang banner sebelum launch. |
+
+---
+
+---
+
+## FASE G — Admin Dashboard Lengkap
+
+**Branch:** `feat/fase-f-agreements`
+
+### G1 — Login Admin + Shell Dashboard ✅ SELESAI (2 Juni 2026)
+
+#### Tujuan:
+Mengganti auth mock (sessionStorage + hardcoded credential) di frontend admin dengan auth nyata via API (`POST /api/admin/login`, `GET /api/admin/me`, `POST /api/admin/logout`), dan membangun shell dashboard dengan sidebar 9 modul + placeholder untuk modul G2+.
+
+#### File yang dimodifikasi/dibuat:
+
+| File | Perubahan |
+|------|-----------|
+| `src/app/components/admin/AdminLoginPage.tsx` | Real auth: `POST /api/admin/login`, handle 401 (salah kredensial) + 429 (rate limit) + network error. Hapus mock sessionStorage. |
+| `src/app/components/admin/AdminLayout.tsx` | Auth guard via `GET /api/admin/me` saat mount: redirect ke `/admin/login` jika 401, loading spinner tanpa flash. Nama admin dari API response. Logout via `POST /api/admin/logout`. |
+| `src/app/components/admin/AdminOverviewPage.tsx` | Bersih dari mock auth; konten ringkasan dashboard siap sambung API G2. |
+| `src/app/components/admin/AdminPlaceholderPage.tsx` | **Baru.** Komponen placeholder "Segera hadir" untuk modul yang belum diisi (G2+). |
+| `src/app/routes.ts` | +6 route admin placeholder: Titip Jual, Properti, Leads, Testimoni, Blog, Portfolio, Media, Pengaturan → semua menuju `AdminPlaceholderPage`. |
+
+#### Fitur yang terimplementasi:
+
+- **AdminLoginPage — real auth:** `POST /api/admin/login` dengan body `{ email, password }`. Handle response: 200 → redirect `/admin`; 401 → "Email atau password salah"; 429 → "Terlalu banyak percobaan — coba lagi 15 menit"; network error → pesan generik. Hapus semua mock sessionStorage.
+- **AdminLayout — auth guard:** `useEffect` mount → `GET /api/admin/me`. Jika 401 → `navigate('/admin/login')`. Selama fetch berlangsung: tampilkan loading spinner (tidak flash konten terproteksi). Nama admin ditampilkan di header dari response API (`data.nama`).
+- **AdminLayout — logout:** tombol Keluar → `POST /api/admin/logout` (clear cookie server-side) → `navigate('/admin/login')`. Tidak mengandalkan state lokal.
+- **Sidebar 9 modul:**
+  - Ringkasan (AdminOverviewPage — aktif)
+  - Titip Jual (AdminPlaceholderPage)
+  - Properti (AdminPlaceholderPage)
+  - Leads (AdminPlaceholderPage)
+  - Testimoni (AdminPlaceholderPage)
+  - Blog (AdminPlaceholderPage)
+  - Portfolio (AdminPlaceholderPage)
+  - Media (AdminPlaceholderPage)
+  - Pengaturan (AdminPlaceholderPage)
+- **Admin CSR (bukan SSR):** semua route admin dilayani client-side — auth guard lewat `GET /api/admin/me` saat mount, bukan loader SSR. Ini by design agar cookie httpOnly bisa diverifikasi oleh Workers middleware.
+
+#### Alur yang terverifikasi di browser:
+
+```
+Akses /admin (tanpa sesi)    → loading spinner → redirect /admin/login (tidak flash konten)
+POST /admin/login (salah)    → "Email atau password salah" (401)
+POST /admin/login (benar)    → redirect /admin, nama admin tampil di header
+Klik sidebar modul G2+       → halaman "Segera hadir" (AdminPlaceholderPage)
+Klik Keluar                  → POST /api/admin/logout → redirect /admin/login
+```
+
+#### Catatan teknis penting:
+
+- **Kredensial LOCAL dev:** `admin@salambumi.id` / `SbpAdmin2024!` (seed migration `0003_seed_dummy.sql`)
+- **Kredensial PRODUKSI:** `salambumiproperty@gmail.com` (akun berbeda — pastikan admin produksi dikonfigurasi dengan benar sebelum go-live via seed atau endpoint `PUT /api/admin/password` di G2)
+- **401 dari `GET /api/admin/me` sebelum login adalah NORMAL** — ini cara guard mendeteksi sesi kosong/tidak valid, bukan bug. Jangan alert atau log sebagai error.
+- **Fase F masih di branch `feat/fase-f-agreements` dan belum di-merge ke main.** G1 di-commit di branch yang sama. Merge ke main dilakukan setelah semua Fase F + Fase G selesai direview.
 
 ---
 
