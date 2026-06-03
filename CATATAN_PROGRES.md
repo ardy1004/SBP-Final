@@ -5,7 +5,7 @@
 
 ---
 
-## STATUS SAAT INI: Fase F — Perbaikan /sign + PDF + klausul perjanjian (revisi notaris) SELESAI ✅
+## STATUS SAAT INI: Fase H — H1 Hardening (CORS env + EXIF strip) Selesai ✅ (branch feat/fase-h-production)
 
 ---
 
@@ -882,6 +882,73 @@ GET /api/admin/properties (admin)     → semua status tampil (termasuk draft+ar
 |---|------|------|
 | 1 | Upload foto baru + reorder urutan | G3b |
 | 2 | DATA UJI ngawur perlu diarsipkan/dibersihkan sebelum produksi: id=7 (harga 433M / 435 kamar), properti `verified=0` dari sesi uji — ubah status ke `archived` via dashboard atau hapus manual dari D1 sebelum go-live | Sebelum produksi |
+
+---
+
+---
+
+## FASE H — Hardening Pra-Deploy
+
+**Branch:** `feat/fase-h-production`
+
+### H1 — CORS via env + EXIF strip ✅ SELESAI (3 Juni 2026)
+
+#### Lingkup:
+Dua hardening keamanan sebelum deploy ke produksi: (1) CORS dari `'*'` menjadi berbasis env var `ALLOWED_ORIGIN` agar fleksibel saat pindah domain; (2) Strip metadata EXIF/GPS dari foto JPEG sebelum disimpan ke R2 — mencegah kebocoran lokasi GPS pemilik properti.
+
+#### CORS — Perubahan:
+
+| File | Perubahan |
+|------|-----------|
+| `functions/_middleware.js` | **Primary.** Baca `env.ALLOWED_ORIGIN \|\| '*'`. Dipakai di OPTIONS preflight return (intercept semua) dan `headers.set()` pasca-`next()` (override semua response). |
+| `functions/api/admin/login.js` | Ganti hardcoded `'*'` → `env.ALLOWED_ORIGIN \|\| '*'` di manual Response. |
+| `functions/api/admin/logout.js` | Tambah destruktur `env` dari context; ganti `'*'` → `env.ALLOWED_ORIGIN \|\| '*'`. |
+| `functions/api/sign/[token]/pdf.js` | Tambah param `context` pada `onRequestOptions`; ganti `'*'` → `env.ALLOWED_ORIGIN \|\| '*'`. |
+
+**Pola:** `const origin = env.ALLOWED_ORIGIN || '*'` — fallback `'*'` hanya untuk dev lokal (`.dev.vars` tidak di-set atau diset ke `http://localhost:8790`). Di produksi env diset ke URL `.pages.dev`, lalu domain final — **tanpa ubah kode lagi**.
+
+**Note arsitektur:** `functions/api/_shared/response.js` tidak diubah — `_middleware.js` (root) wraps ALL requests, sehingga override CORS headers dari helper statis tersebut otomatis ditimpa. Individual `onRequestOptions` handler juga dead code untuk OPTIONS (root middleware intercepts sebelum `next()`).
+
+**Verifikasi:**
+```
+GET  /api/health → Access-Control-Allow-Origin: http://localhost:8790 ✅ (dari env)
+OPTIONS /api/health → 204, Access-Control-Allow-Origin: http://localhost:8790 ✅ (dari env)
+```
+
+#### EXIF strip — Perubahan:
+
+| File | Perubahan |
+|------|-----------|
+| `functions/_lib/exif.js` | **Baru.** `stripExif(bytes: Uint8Array)` — pure JS, zero dependency, Workers-compatible. Parse JPEG marker chain, skip APP1 segment dengan signature `Exif\0\0` (container GPS + kamera metadata). Non-JPEG (PNG/WebP) dikembalikan tanpa modifikasi. |
+| `functions/api/titip-jual.js` | Import `stripExif`. Sebelum `env.MEDIA.put()`: `rawBytes → stripExif(rawBytes) → bytes`. Satu-satunya titik upload foto. |
+
+**Keterbatasan EXIF strip (WAJIB DIBACA sebelum H5/domain publik):**
+- ✅ **JPEG:** APP1/EXIF (GPS + kamera metadata) di-strip penuh
+- ⚠️ **PNG:** EXIF di chunk `eXIf` — **tidak distrip** (rare di upload properti, namun mungkin di iOS)
+- ⚠️ **WebP:** EXIF di chunk `EXIF` — **tidak distrip** (rare, namun bisa dari beberapa kamera/app)
+- **Sebelum domain go-live (H5):** pertimbangkan salah satu: (a) batasi upload JPEG saja (drop PNG/WebP), atau (b) strip EXIF di sisi client sebelum upload (FileReader → canvas → toBlob → strip atau cukup canvas re-encode yang sudah drop metadata di kebanyakan browser)
+
+**Verifikasi (unit test 9/9 pass):**
+```
+EXIF APP1 dihapus dari output ✅
+SOI (FF D8) + EOI (FF D9) terjaga ✅
+APP0 (JFIF) terjaga ✅
+Output lebih kecil dari input ✅
+PNG passthrough (sama reference) ✅
+Non-JPEG passthrough ✅
+JPEG tanpa EXIF: valid SOI+EOI ✅
+Build npm run build → sukses, 0 error ✅
+```
+
+#### TODO Fase H berikutnya:
+
+| # | Item | Prioritas |
+|---|------|-----------|
+| **H2** | **Set secret produksi: `wrangler secret put NIK_ENC_KEY` + `wrangler secret put JWT_SECRET`** | 🔴 KRITIS sebelum deploy |
+| **H2** | Verifikasi binding D1/R2 Cloudflare Pages project baru (buat project via dashboard atau wrangler) | 🔴 KRITIS |
+| **H3** | Migrasi D1 remote (DB produksi kosong): `wrangler d1 execute sbp-db --remote --file=migrations/000x.sql` semua file, lalu seed admin produksi (`0003_seed_dummy.sql` atau buat seed khusus dengan email/password produksi) | 🔴 KRITIS |
+| **H4** | Deploy ke `.pages.dev`: `wrangler pages deploy dist/client`. Set env var `ALLOWED_ORIGIN` di Cloudflare Pages dashboard ke URL `.pages.dev` yang diberikan. Verifikasi CORS, submit titip-jual, sign flow. | ⚡ Utama |
+| **H5** | Sambung domain `salambumi.xyz` → update `ALLOWED_ORIGIN` ke `https://salambumi.xyz`. Tangani EXIF PNG/WebP (strip client-side atau batasi JPEG). | 📅 Setelah domain aktif |
 
 ---
 

@@ -127,7 +127,7 @@ export async function onRequestPost(context) {
       headers: {
         'Content-Type': 'application/json',
         'Set-Cookie': cookie,
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || '*',
         'Access-Control-Allow-Credentials': 'true',
       },
     }

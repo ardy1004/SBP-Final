@@ -2,6 +2,7 @@ import { handleOptions } from '../_shared/response.js';
 import { makeSessionCookie } from '../_shared/jwt.js';
 
 export async function onRequestPost(context) {
+  const { env } = context;
   const cookie = makeSessionCookie('', true); // clear=true → Max-Age=0
 
   return new Response(
@@ -11,7 +12,7 @@ export async function onRequestPost(context) {
       headers: {
         'Content-Type': 'application/json',
         'Set-Cookie': cookie,
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || '*',
       },
     }
   );
