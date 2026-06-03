@@ -5,7 +5,7 @@
 
 ---
 
-## STATUS SAAT INI: Fase F — Perbaikan /sign + PDF + klausul perjanjian (revisi notaris) SELESAI ✅
+## STATUS SAAT INI: Fase H — Deploy .pages.dev + uji produksi LULUS ✅ (H5 go-live domain pending)
 
 ---
 
@@ -882,6 +882,124 @@ GET /api/admin/properties (admin)     → semua status tampil (termasuk draft+ar
 |---|------|------|
 | 1 | Upload foto baru + reorder urutan | G3b |
 | 2 | DATA UJI ngawur perlu diarsipkan/dibersihkan sebelum produksi: id=7 (harga 433M / 435 kamar), properti `verified=0` dari sesi uji — ubah status ke `archived` via dashboard atau hapus manual dari D1 sebelum go-live | Sebelum produksi |
+
+---
+
+---
+
+## FASE H — Hardening Pra-Deploy
+
+**Branch:** `feat/fase-h-production`
+
+### H1 — CORS via env + EXIF strip ✅ SELESAI (3 Juni 2026)
+
+#### Lingkup:
+Dua hardening keamanan sebelum deploy ke produksi: (1) CORS dari `'*'` menjadi berbasis env var `ALLOWED_ORIGIN` agar fleksibel saat pindah domain; (2) Strip metadata EXIF/GPS dari foto JPEG sebelum disimpan ke R2 — mencegah kebocoran lokasi GPS pemilik properti.
+
+#### CORS — Perubahan:
+
+| File | Perubahan |
+|------|-----------|
+| `functions/_middleware.js` | **Primary.** Baca `env.ALLOWED_ORIGIN \|\| '*'`. Dipakai di OPTIONS preflight return (intercept semua) dan `headers.set()` pasca-`next()` (override semua response). |
+| `functions/api/admin/login.js` | Ganti hardcoded `'*'` → `env.ALLOWED_ORIGIN \|\| '*'` di manual Response. |
+| `functions/api/admin/logout.js` | Tambah destruktur `env` dari context; ganti `'*'` → `env.ALLOWED_ORIGIN \|\| '*'`. |
+| `functions/api/sign/[token]/pdf.js` | Tambah param `context` pada `onRequestOptions`; ganti `'*'` → `env.ALLOWED_ORIGIN \|\| '*'`. |
+
+**Pola:** `const origin = env.ALLOWED_ORIGIN || '*'` — fallback `'*'` hanya untuk dev lokal (`.dev.vars` tidak di-set atau diset ke `http://localhost:8790`). Di produksi env diset ke URL `.pages.dev`, lalu domain final — **tanpa ubah kode lagi**.
+
+**Note arsitektur:** `functions/api/_shared/response.js` tidak diubah — `_middleware.js` (root) wraps ALL requests, sehingga override CORS headers dari helper statis tersebut otomatis ditimpa. Individual `onRequestOptions` handler juga dead code untuk OPTIONS (root middleware intercepts sebelum `next()`).
+
+**Verifikasi:**
+```
+GET  /api/health → Access-Control-Allow-Origin: http://localhost:8790 ✅ (dari env)
+OPTIONS /api/health → 204, Access-Control-Allow-Origin: http://localhost:8790 ✅ (dari env)
+```
+
+#### EXIF strip — Perubahan:
+
+| File | Perubahan |
+|------|-----------|
+| `functions/_lib/exif.js` | **Baru.** `stripExif(bytes: Uint8Array)` — pure JS, zero dependency, Workers-compatible. Parse JPEG marker chain, skip APP1 segment dengan signature `Exif\0\0` (container GPS + kamera metadata). Non-JPEG (PNG/WebP) dikembalikan tanpa modifikasi. |
+| `functions/api/titip-jual.js` | Import `stripExif`. Sebelum `env.MEDIA.put()`: `rawBytes → stripExif(rawBytes) → bytes`. Satu-satunya titik upload foto. |
+
+**Keterbatasan EXIF strip (WAJIB DIBACA sebelum H5/domain publik):**
+- ✅ **JPEG:** APP1/EXIF (GPS + kamera metadata) di-strip penuh
+- ⚠️ **PNG:** EXIF di chunk `eXIf` — **tidak distrip** (rare di upload properti, namun mungkin di iOS)
+- ⚠️ **WebP:** EXIF di chunk `EXIF` — **tidak distrip** (rare, namun bisa dari beberapa kamera/app)
+- **Sebelum domain go-live (H5):** pertimbangkan salah satu: (a) batasi upload JPEG saja (drop PNG/WebP), atau (b) strip EXIF di sisi client sebelum upload (FileReader → canvas → toBlob → strip atau cukup canvas re-encode yang sudah drop metadata di kebanyakan browser)
+
+**Verifikasi (unit test 9/9 pass):**
+```
+EXIF APP1 dihapus dari output ✅
+SOI (FF D8) + EOI (FF D9) terjaga ✅
+APP0 (JFIF) terjaga ✅
+Output lebih kecil dari input ✅
+PNG passthrough (sama reference) ✅
+Non-JPEG passthrough ✅
+JPEG tanpa EXIF: valid SOI+EOI ✅
+Build npm run build → sukses, 0 error ✅
+```
+
+#### TODO Fase H berikutnya:
+
+| # | Item | Prioritas |
+|---|------|-----------|
+| **H2** | **Set secret produksi: `wrangler secret put NIK_ENC_KEY` + `wrangler secret put JWT_SECRET`** | 🔴 KRITIS sebelum deploy |
+| **H2** | Verifikasi binding D1/R2 Cloudflare Pages project baru (buat project via dashboard atau wrangler) | 🔴 KRITIS |
+| **H3** | Migrasi D1 remote (DB produksi kosong): `wrangler d1 execute sbp-db --remote --file=migrations/000x.sql` semua file, lalu seed admin produksi (`0003_seed_dummy.sql` atau buat seed khusus dengan email/password produksi) | 🔴 KRITIS |
+| **H4** | Deploy ke `.pages.dev`: `wrangler pages deploy dist/client`. Set env var `ALLOWED_ORIGIN` di Cloudflare Pages dashboard ke URL `.pages.dev` yang diberikan. Verifikasi CORS, submit titip-jual, sign flow. | ⚡ Utama |
+| **H5** | Sambung domain `salambumi.xyz` → update `ALLOWED_ORIGIN` ke `https://salambumi.xyz`. Tangani EXIF PNG/WebP (strip client-side atau batasi JPEG). | 📅 Setelah domain aktif |
+
+---
+
+## FASE H — H2/H3/H4 SELESAI ✅
+
+### H2 — wrangler.toml produksi
+
+`name=sbp-final`, `ENVIRONMENT=production`, `account_id` dihapus (Pages tidak mendukung field ini — menyebabkan error deploy).
+
+### H3 — Migrasi DB produksi (sbp-db remote)
+
+Apply manual via `wrangler d1 execute sbp-db --remote --file=...`:
+- ✅ 0001_initial_schema.sql — schema + (berisi seed dummy, dibersihkan manual via DELETE setelahnya)
+- ✅ 0002_seed_locations.sql — 196 lokasi DIY
+- ⏭️ 0003_seed_dummy.sql — SKIP (seed dummy, tidak dipakai produksi)
+- ✅ 0004_login_rate_limits.sql
+- ⏭️ 0005_agreements_owners.sql — SKIP (schema kolom sudah ada di 0001, apply harmless tapi gagal ALTER di SQLite; schema final sudah benar)
+- ✅ 0006_expand_property_status.sql
+- ⏭️ 0007_restore_property_images.sql — SKIP (restore data dummy, tidak dipakai produksi)
+
+**PENTING:** 0001 ternyata MENGANDUNG seed dummy (properties, admins dev, testimonials, blog) — dummy dibersihkan via `DELETE FROM` setelah apply. DB final: struktur lengkap + 196 locations + 1 admin produksi (`salambumiproperty@gmail.com`, bcrypt cost-12), 0 data dummy.
+
+**Kelola DB produksi via `d1 execute` manual. JANGAN pakai `migrations apply`** — `d1_migrations` tabel tidak konsisten, bisa retry migration yang sudah pernah jalan dan memasukkan data dummy lagi.
+
+### H4 — Deploy ke project sbp-final (.pages.dev)
+
+Deploy via `wrangler pages deploy dist/client` ke project `sbp-final` (preview env, branch `feat-fase-h-production`).
+
+Secret `NIK_ENC_KEY` + `JWT_SECRET` di-set untuk **Production DAN Preview**. Catatan penting: wrangler 4.94 `pages secret put` tanpa flag `--environment` → set ke Production. Untuk Preview, set via **Cloudflare Dashboard** (Pages > project > Settings > Environment Variables > Preview).
+
+**Uji LULUS di URL preview `.pages.dev`:**
+- ✅ `GET /api/health` → `{"status":"ok","environment":"production","db":"connected","locations":196}`
+- ✅ Homepage SSR (judul, harga, deskripsi tampil di HTML sebelum JS)
+- ✅ Admin login (`salambumiproperty@gmail.com`) — bcrypt verify + JWT cookie
+- ✅ Titip jual end-to-end (submit form → property draft + owner + agreement ter-insert atomik)
+- ✅ NIK terenkripsi format `IV:ciphertext` (bukan plaintext)
+- ✅ Agreement + kode listing ter-generate saat admin configure
+- ✅ Data uji sudah dibersihkan dari DB produksi setelah uji
+
+---
+
+### ⚠️ H5 — GO-LIVE DOMAIN (PENDING — WAJIB sebelum publik)
+
+| # | Item | Detail |
+|---|------|--------|
+| 1 | **APP_URL** | Masih `https://salambumi.xyz` di `wrangler.toml` — benar otomatis saat domain disambungkan ke `sbp-final`. Jika uji lanjut di `.pages.dev`, link `/sign` akan salah arah ke `salambumi.xyz`. |
+| 2 | **ALLOWED_ORIGIN** | Belum dikunci (fallback `'*'`). Set ke `https://salambumi.xyz` sebelum publik via Cloudflare Dashboard (Production + Preview). |
+| 3 | **NIK_ENC_KEY konsistensi** | Pastikan nilai `NIK_ENC_KEY` Production == Preview (identik) — kritis untuk konsistensi enkripsi/dekripsi NIK lintas environment. |
+| 4 | **EXIF PNG/WebP** | H1 hanya strip EXIF JPEG. PNG (`eXIf` chunk) dan WebP (`EXIF` chunk) belum distrip. Sebelum publik: batasi upload JPEG saja, atau strip client-side (canvas re-encode). |
+| 5 | **Sambung domain** | Putus `salambumi.xyz` dari project lama `sbp` → sambungkan ke `sbp-final`. Deploy ke Production (branch `master`), bukan preview. |
+| 6 | **Uji ulang sign flow** | Setelah domain live: buka link sign, gambar TTD, submit PDF — di domain `salambumi.xyz` asli. |
 
 ---
 

@@ -1,5 +1,6 @@
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { encryptNIK } from '../_lib/crypto.js';
+import { stripExif } from '../_lib/exif.js';
 
 function sanitize(val, maxLen = 500) {
   if (typeof val !== 'string') return '';
@@ -282,7 +283,8 @@ export async function onRequestPost(context) {
       const ext = match[1].toLowerCase() === 'jpg' ? 'jpeg' : match[1].toLowerCase();
       const base64Data = p.slice(p.indexOf(',') + 1);
       const binaryStr = atob(base64Data);
-      const bytes = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
+      const rawBytes = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
+      const bytes = stripExif(rawBytes);
       // TODO PRODUKSI: konversi ke WebP via Cloudflare Images sebelum simpan
       const r2Key = `property-photos/${crypto.randomUUID()}.${ext}`;
       await env.MEDIA.put(r2Key, bytes.buffer, { httpMetadata: { contentType: `image/${ext}` } });

@@ -33,11 +33,12 @@ export async function onRequestGet(context) {
   });
 }
 
-export async function onRequestOptions() {
+export async function onRequestOptions(context) {
+  const { env } = context;
   return new Response(null, {
     status: 204,
     headers: {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || '*',
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
     },
   });
