@@ -2,7 +2,6 @@
 # Arsitektur: Cloudflare Pages (React/Vite frontend) + Workers (API + SSR) + D1 (database) + R2 (media)
 
 name = "sbp-final"
-account_id = "f1bac4af6572062bfcf88549ed59c823"
 
 # compatibility_date: versi runtime Cloudflare. Gunakan tanggal terbaru yang stabil.
 # nodejs_compat: aktifkan API Node.js (path, crypto, dll.) di Workers — diperlukan untuk bcrypt, UUID, dll.
