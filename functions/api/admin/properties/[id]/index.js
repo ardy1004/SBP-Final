@@ -4,7 +4,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 
-const VALID_JENIS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','gudang','komersial'];
+const VALID_JENIS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
 const VALID_TUJUAN = ['dijual','disewa','dijual_disewa'];
 const VALID_FURNISHED = ['fully','semi','unfurnished'];
 const VALID_STATUS_LEGALITAS = ['on_hand','on_bank'];

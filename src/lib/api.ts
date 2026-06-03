@@ -176,24 +176,7 @@ export interface ApiLeadResponse {
 // TIPE NORMALIZED (kompatibel dengan komponen UI yang sudah ada)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Emoji per jenis properti — pengganti field jenisEmoji yang tidak ada di API */
-const JENIS_EMOJI: Record<string, string> = {
-  rumah: '🏠',
-  kost: '🏗️',
-  villa: '🌴',
-  hotel: '🏨',
-  homestay: '🏡',
-  apartemen: '🏢',
-  apartment: '🏢',
-  tanah: '🌿',
-  gudang: '🏭',
-  komersial: '🏬',
-};
-
-/** Kapitalisasi huruf pertama */
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
+import { getPropertyTypeLabel, getPropertyTypeEmoji } from './propertyTypes';
 
 /**
  * Konversi ApiPropertyListItem → format Property yang dipakai komponen UI.
@@ -201,14 +184,13 @@ function capitalize(s: string): string {
  */
 export function normalizeProperty(p: ApiPropertyListItem) {
   const jenis = p.jenis_properti;
-  const jenisLabel = capitalize(jenis);
   return {
     id: p.id,
     kode: p.kode_listing,
     slug: p.slug,
     title: p.title,
-    jenis: jenisLabel,
-    jenisEmoji: JENIS_EMOJI[jenis] ?? '🏠',
+    jenis: getPropertyTypeLabel(jenis),
+    jenisEmoji: getPropertyTypeEmoji(jenis),
     tujuan: p.tujuan,
     harga: p.harga,
     harga_lama: p.harga_lama ?? undefined,

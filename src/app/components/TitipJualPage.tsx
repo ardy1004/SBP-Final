@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router';
 import { Check, ChevronRight, Upload, X, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { getLocations, type ApiLocation } from '../../lib/api';
+import { PROPERTY_TYPES } from '../../lib/propertyTypes';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -291,17 +292,7 @@ function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
 
 // ─── STEP 2: Info Properti ────────────────────────────────────────────────────
 
-const JENIS_OPTIONS = [
-  { value: 'rumah',     label: 'Rumah' },
-  { value: 'kost',      label: 'Kost' },
-  { value: 'tanah',     label: 'Tanah' },
-  { value: 'hotel',     label: 'Hotel' },
-  { value: 'homestay',  label: 'Homestay' },
-  { value: 'villa',     label: 'Villa' },
-  { value: 'apartment', label: 'Apartemen' },
-  { value: 'gudang',    label: 'Gudang' },
-  { value: 'komersial', label: 'Komersial Lainnya' },
-];
+const JENIS_OPTIONS = PROPERTY_TYPES.map(t => ({ value: t.value, label: t.label }));
 const LEGALITAS_OPTIONS = [
   'SHM & IMB/PBG Lengkap', 'SHGB & IMB/PBG Lengkap',
   'SHM Pekarangan Tanpa IMB/PBG', 'SHM Sawah/Tegalan',

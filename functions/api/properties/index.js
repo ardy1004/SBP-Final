@@ -12,7 +12,7 @@ const ORDER_MAP = {
   yield:    'p.income_per_bulan DESC, p.published_at DESC',
 };
 
-const VALID_JENIS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','gudang','komersial'];
+const VALID_JENIS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
 const VALID_TUJUAN = ['dijual','disewa','dijual_disewa'];
 
 export async function onRequestGet(context) {
