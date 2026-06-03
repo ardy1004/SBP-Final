@@ -438,8 +438,8 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     let photoErr = '';
     for (const file of files) {
       if (photoFiles.length + toAdd.length >= 20) { photoErr = 'Maksimal 20 foto'; break; }
-      if (!['image/jpeg','image/png','image/webp'].includes(file.type)) {
-        photoErr = `${file.name}: tipe tidak didukung (jpeg/png/webp)`; continue;
+      if (!['image/jpeg'].includes(file.type)) {
+        photoErr = `${file.name}: Hanya foto JPG yang didukung saat ini.`; continue;
       }
       if (file.size > 8 * 1024 * 1024) { photoErr = `${file.name}: ukuran melebihi 8MB`; continue; }
       toAdd.push(file);
@@ -809,9 +809,9 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
             className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${errors.photos ? 'border-red-400 bg-red-50' : 'border-gray-200 hover:border-[#1565C0]'}`}>
             <Upload size={28} className="mx-auto mb-2 text-gray-400" />
             <p className="text-sm text-[#64748B]">Klik atau drag foto ke sini</p>
-            <p className="text-xs text-gray-400 mt-1">JPG/PNG/WEBP · Maks 20 foto · Maks 8MB/foto · Foto pertama jadi cover</p>
+            <p className="text-xs text-gray-400 mt-1">JPG · Maks 20 foto · Maks 8MB/foto · Foto pertama jadi cover</p>
           </div>
-          <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp"
+          <input ref={fileInputRef} type="file" accept="image/jpeg"
             multiple className="hidden" onChange={handleFileSelect} />
           <FieldErr msg={errors.photos} />
 

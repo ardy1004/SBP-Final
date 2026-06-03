@@ -101,11 +101,11 @@ export default function Footer() {
             <ul className="space-y-2 text-sm mb-6">
               {[
                 { label: 'About Us', href: '/about' },
-                { label: 'Blog & Tips Properti', href: '/blog' },
+                // { label: 'Blog & Tips Properti', href: '/blog' }, // disembunyikan sampai konten nyata — TODO aktifkan kembali
                 { label: 'FAQ', href: '/faq' },
                 { label: 'Layanan Notaris', href: '/notaris' },
                 { label: 'Titip Jual', href: '/titip-jual' },
-                { label: 'Portofolio', href: '/portfolio' },
+                // { label: 'Portofolio', href: '/portfolio' }, // disembunyikan sampai konten nyata — TODO aktifkan kembali
                 { label: 'Privacy Policy', href: '/privacy' },
                 { label: 'Contact', href: '/contact' },
               ].map((link) => (

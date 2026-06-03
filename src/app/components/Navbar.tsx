@@ -5,9 +5,9 @@ import { Menu, X } from 'lucide-react';
 const NAV_LINKS = [
   { label: 'Home', href: '/' },
   { label: 'Properties', href: '/properties' },
-  { label: 'Portofolio', href: '/portfolio' },
+  // { label: 'Portofolio', href: '/portfolio' }, // disembunyikan sampai konten nyata — TODO aktifkan kembali
   { label: 'About Us', href: '/about' },
-  { label: 'Blog', href: '/blog' },
+  // { label: 'Blog', href: '/blog' }, // disembunyikan sampai konten nyata — TODO aktifkan kembali
   { label: 'FAQ', href: '/faq' },
   { label: 'Contact', href: '/contact' },
 ];

@@ -88,9 +88,7 @@ export function makeSessionCookie(token, clear = false) {
     'SameSite=Strict',
     'Path=/',
     clear ? 'Max-Age=0' : `Max-Age=${SESSION_HOURS * 3600}`,
-    // Secure diaktifkan di produksi; di local dev (http) dibiarkan agar cookie tetap bisa dibaca
-    // Uncomment baris berikut bila sudah deploy ke HTTPS:
-    // 'Secure',
+    'Secure',
   ];
   return opts.join('; ');
 }
