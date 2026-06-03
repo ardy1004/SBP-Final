@@ -5,7 +5,7 @@
 
 ---
 
-## STATUS SAAT INI: Fase E — Task 3 Selesai ✅
+## STATUS SAAT INI: Fase F — Perbaikan /sign + PDF + klausul perjanjian (revisi notaris) SELESAI ✅
 
 ---
 
@@ -325,12 +325,563 @@ Pakai **dynamic import dalam useEffect** (mounted-flag), BUKAN `React.lazy`.
 ---
 
 ### Fase-fase berikutnya setelah D:
-- **Fase E:** SSR/Edge Rendering (K1 — kritis untuk programmatic SEO)
-- **Fase F:** Alur Titip Jual + Tanda Tangan Digital
+- **Fase E:** SSR/Edge Rendering (K1 — kritis untuk programmatic SEO) ✅
+- **Fase F:** Alur Titip Jual + Tanda Tangan Digital (F1 backend selesai ✅)
 - **Fase G:** Admin Dashboard lengkap (13 modul) — sambungkan juga BlogPage, PortfolioPage ke API
 - **Fase H:** Keamanan & compliance (hapus hardcode, enkripsi UU PDP, refactor tipe PropertyCard)
 - **Fase I:** SEO Engine (sitemap, schema JSON-LD, halaman programmatic)
 - **Fase J:** Diferensiasi (Investment Intelligence lanjutan, Proximity Engine, AI content)
+
+---
+
+---
+
+## FASE F — Alur Titip Jual + Tanda Tangan Digital
+
+**Branch:** `feat/fase-f-agreements`
+
+### F1 — Backend Agreements ✅ SELESAI (2 Juni 2026)
+
+#### Migrasi database:
+`migrations/0005_agreements_owners.sql` — 4 perubahan:
+1. `ALTER TABLE owners RENAME COLUMN nik TO nik_encrypted` — nama kolom mempertegas isinya ciphertext
+2. `ALTER TABLE owners ADD COLUMN updated_at` — kolom yang hilang di skema awal
+3. `CREATE INDEX idx_agreements_status` — filter dashboard admin per status
+4. `CREATE INDEX idx_owners_property_id` — lookup owner dari property
+
+#### File yang dibuat:
+
+| File | Keterangan |
+|------|------------|
+| `functions/_lib/crypto.js` | Helper enkripsi/dekripsi NIK: AES-256-GCM via Web Crypto. Passphrase → SHA-256 → 32-byte key. Format: `base64(iv):base64(ciphertext)`. |
+| `functions/api/titip-jual.js` | `POST /api/titip-jual` — form titip jual publik: validasi 422, enkripsi NIK, insert 3 tabel atomik (property draft + owner + agreement draft) |
+| `functions/api/admin/agreements/[id]/configure.js` | `POST /api/admin/agreements/:id/configure` — admin set jenis_listing/fee/durasi, generate sign_token UUID + expiry 72 jam, status → menunggu_ttd |
+| `functions/api/sign/[token].js` | `GET` — validasi token, dekripsi NIK untuk ditampilkan, kembalikan pasal-pasal; `POST` — upload TTD PNG ke R2, atomic UPDATE agreements (token_used=1, status=signed, audit_ip, audit_hash), auto-publish properti |
+
+#### Alur lengkap yang teruji:
+
+```
+Pemilik → POST /api/titip-jual                 [NIK terenkripsi AES-GCM, 3 INSERT atomik]
+Admin   → POST /api/admin/agreements/:id/configure [sign_token + link TTD]
+Pemilik → GET  /api/sign/:token                 [dokumen + pasal ditampilkan]
+Pemilik → POST /api/sign/:token {signature PNG}  [R2 upload + DB atomic update + auto-publish]
+```
+
+**Bukti R2:** `signatures/SBP-AGR-20260601-001-7e8ceb99-998f-4898-ba33-ecbc746a6be1.png` (PNG valid, 70 bytes) tersimpan di bucket lokal `sbp-media`. Verifikasi: `wrangler r2 object get sbp-media/signatures/... --local` → Download complete ✅.
+
+**Bukti enkripsi:** `POST /api/titip-jual` → `"status": "draft"` 201 OK setelah NIK_ENC_KEY dipindah dari `wrangler.toml` ke `.dev.vars` saja.
+
+**Properti auto-publish:** setelah POST sign berhasil, `UPDATE properties SET status_publish='published'` berjalan non-blocking.
+
+---
+
+### ⚠️ GOTCHA Fase F1 — WAJIB DIBACA
+
+**[a] `.dev.vars` — nilai dengan `=` (base64 padding) gagal ter-inject:**
+Wrangler Pages dev pernah gagal menginjeksi env var dari `.dev.vars` jika nilai mengandung karakter `=` (mis. base64 key seperti `abc123==`). Solusi: gunakan passphrase biasa tanpa `=` sebagai `NIK_ENC_KEY`, lalu derive AES key via SHA-256 di dalam `crypto.js` → tidak ada ketergantungan pada karakter tertentu.
+
+**[b] NIK_ENC_KEY JANGAN masuk `wrangler.toml`:**
+Kunci enkripsi adalah rahasia. Wrangler.toml di-commit ke Git → kunci masuk riwayat forever.
+- Dev lokal: set di `.dev.vars` (gitignored)
+- Produksi: `wrangler secret put NIK_ENC_KEY`
+- Wrangler.toml hanya boleh punya komentar pengingat, TIDAK nilai kunci.
+
+**[c] `wrangler r2 object list` tidak tersedia di wrangler 4.x:**
+Gunakan `wrangler r2 object get <bucket>/<key> --local` untuk verifikasi manual.
+
+---
+
+### ⚠️ TODO PRODUKSI Fase F1 (wajib sebelum go-live)
+
+| # | Item | Perintah / Tindakan |
+|---|------|---------------------|
+| a | **Set NIK_ENC_KEY production** | `wrangler secret put NIK_ENC_KEY` (isi passphrase acak kuat ≥ 32 char, simpan di password manager) |
+| b | **Apply migrasi 0005 ke remote** | `wrangler d1 execute sbp-db --remote --file=migrations/0005_agreements_owners.sql` |
+| c | **Endpoint GET /api/admin/agreements** | Tambahkan di Fase G (Admin Dashboard) untuk list semua agreement + filter status |
+| d | **Notifikasi WhatsApp** | Setelah POST sign berhasil, kirim WA ke admin via nomor `WA_ADMIN` (Fase F2) |
+| e | **Generate PDF arsip** | `TODO F4` di sign handler — simpan ke `pdf_url` di D1 (Fase F3/F4) |
+
+---
+
+---
+
+### F2 — Frontend Titip Jual ✅ SELESAI (2 Juni 2026)
+
+#### File yang dimodifikasi:
+
+| File | Keterangan |
+|------|------------|
+| `src/app/components/TitipJualPage.tsx` | Form 2 langkah: Langkah 1 = Data Diri, Langkah 2 = Info Properti + Foto |
+| `functions/api/titip-jual.js` | Diperluas: terima array foto base64 → upload ke R2 + INSERT property_images |
+
+#### Fitur yang terimplementasi:
+
+- **Form 2 langkah (wizard):** Langkah 1 — Data Diri (nama, NIK, telp, email, bertindak_sebagai); Langkah 2 — Info Properti + Upload Foto. Navigasi Lanjut / Kembali antar langkah.
+- **Endpoint diperluas:** `POST /api/titip-jual` kini terima `photos[]` (base64 + mimeType + filename) → upload ke R2 path `property-photos/<propertyId>/<filename>`, INSERT ke `property_images`; foto pertama otomatis jadi cover (`is_cover=1`).
+- **Field ahli waris kondisional:** field `nama_pewaris` & `hubungan_pewaris` hanya muncul saat `bertindak_sebagai = ahli_waris`.
+- **Cascade lokasi:** Provinsi → Kota/Kab → Kecamatan → Kelurahan/Desa → Jalan via `/api/locations?type=...&parent_id=...`.
+- **Consent PDP wajib:** checkbox persetujuan pengolahan data pribadi (Pasal 4 UU 27/2022) harus dicentang sebelum submit bisa aktif.
+- **Validasi foto:** max 8 MB per file, tipe image/* saja, tampilkan preview thumbnail + tombol hapus.
+- **Halaman sukses:** setelah submit berhasil, tampilkan pesan "Pengajuan Diterima — Tunggu konfirmasi via WhatsApp".
+- **4 tabel terisi atomik:** `properties` (status=draft) + `owners` (NIK terenkripsi AES-GCM) + `agreements` (status=draft) + `property_images`.
+
+#### Alur lengkap yang teruji di browser (wrangler port 8790):
+
+```
+Pengguna isi Langkah 1 (Data Diri) → Lanjut →
+Pengguna isi Langkah 2 (Info Properti + Foto) → Submit →
+POST /api/titip-jual { ...formData, photos: [{base64, mimeType, filename}] } →
+  ↳ INSERT properties (draft)
+  ↳ INSERT owners (NIK terenkripsi)
+  ↳ INSERT agreements (draft)
+  ↳ FOREACH photo: R2.put(property-photos/<id>/<filename>) + INSERT property_images
+→ 201 { status: "draft", propertyId, agreementId } →
+Halaman sukses "Tunggu WA"
+```
+
+---
+
+### ⚠️ GOTCHA Fase F2 — WAJIB DIBACA
+
+**[a] NODE ZOMBIE menumpuk di Windows:**
+Wrangler dev / `wrangler pages dev` sering meninggalkan proses Node yang tetap berjalan di background setelah Ctrl+C. Gejala: server tampak "Ready" tapi koneksi menggantung / timeout / tidak merespons.
+Solusi: `Get-Process node | Stop-Process -Force` lalu restart wrangler bersih. Cek berkala: `Get-Process node`.
+
+**[b] JANGAN uji endpoint `/api/*` di `npm run dev` (Vite port 5173):**
+Vite dev server TIDAK menjalankan Cloudflare Functions maupun D1. Semua request ke `/api/*` akan 404 atau 500.
+Uji API HANYA di mode wrangler: `wrangler pages dev dist/client` (port 8790 atau konfigurasikan sendiri).
+
+**[c] Setiap perubahan komponen/route WAJIB clean build + restart wrangler bersih + hard reload browser:**
+Urutan wajib:
+1. Hapus `dist/` dan `.react-router/` (`Remove-Item -Recurse -Force dist, .react-router`)
+2. Build ulang (`npm run build`)
+3. Restart wrangler (setelah kill semua zombie Node)
+4. Browser: Empty Cache and Hard Reload (Ctrl+Shift+R atau DevTools)
+Jika langkah ini dilewati → 404 aset hash-basi atau hydration error React #418/#421/#423 dari HTML cache lama.
+
+**[d] Jangan jalankan `curl` di terminal yang sama dengan wrangler:**
+Curl yang tidak selesai / connection hang di terminal wrangler menyebabkan wrangler hang dan tidak merespons request berikutnya. Pisahkan terminal: satu untuk wrangler, satu untuk curl/testing.
+
+---
+
+### F3 — Halaman /sign Tanda Tangan ✅ SELESAI (2 Juni 2026)
+
+#### File yang dimodifikasi:
+
+| File | Keterangan |
+|------|------------|
+| `src/app/components/SignPage.tsx` | Ditulis ulang sepenuhnya — konsumsi API nyata GET/POST /api/sign/:token |
+
+#### Fitur yang terimplementasi:
+
+- **State machine token (6 kondisi):**
+  - `loading` → skeleton spinner
+  - `not_found` / token 404 → "Link Tidak Valid" + tombol WA `wa.me/6281391278889`
+  - `kedaluwarsa` / `belum_dikonfigurasi` → "Link Sudah Tidak Berlaku" + tombol WA
+  - `sudah_ditandatangani` → "Perjanjian Sudah Ditandatangani" + link ke properti
+  - `valid` → dokumen perjanjian + signature pad (alur utama)
+  - `success` → halaman sukses 🚀 + "Lihat Properti Saya →" (link properti dari `slug_properti`)
+- **Dokumen perjanjian (read-only, scrollable `max-h-[70vh]`):** header "PERJANJIAN JASA PEMASARAN — SALAM BUMI PROPERTY", jenis/nomor/tanggal, Pihak Pertama (CV SBP, data tetap), Pihak Kedua (nama_ktp, NIK, alamat dari API), Pasal 1-7 dari `pasal[]` API, area TTD dua kolom (Ardy kiri, materai+placeholder kanan).
+- **Signature pad canvas (mouse + touch):** container `position: relative`, materai `<img>` absolute centered `opacity: 0.55`, `<canvas>` absolute `z-index: 1` transparan di atasnya → goresan TTD tampak menimpa materai (Opsi A visual). Area besar `height: 220px`, buffer `800×220`. Tombol "Hapus" (clearRect). Deteksi non-kosong: `hasSigned` state.
+- **Logika tombol "Kirim Perjanjian":** aktif HANYA jika `hasSigned === true` AND `agreed === true`. Disabled abu-abu jika salah satu belum terpenuhi. Petunjuk teks konditional muncul di bawah signature pad.
+- **Submit flow:** `canvas.toDataURL('image/png')` → `POST /api/sign/:token { signature, persetujuan: true }` → TTD ke R2 + audit hash + `token_used=1` + properti `auto-publish` → state `success` + link properti dari `buildPropertyUrl(data.properti)`.
+- **Stepper dekoratif:** ✓ Data Diri › ✓ Info Properti › ● Tanda Tangan.
+- **Checkbox persetujuan** teks persis sesuai spec 12.4.
+
+#### Bug yang diperbaiki selama implementasi:
+
+**isDrawing `useState` → `useRef` (stale closure):**
+`draw` di-memoize dengan `useCallback([isDrawing, getPos])`. Saat `startDraw` memanggil `setIsDrawing(true)`, React menjadwalkan re-render secara async. Sebelum re-render selesai, event `mousemove` sudah muncul dan `draw` (closure lama) masih melihat `isDrawing=false` → return early → `setHasSigned(true)` tidak pernah dipanggil → tombol selamanya disabled. Fix: `isDrawingRef = useRef(false)`, diupdate synchronously di `startDraw`/`endDraw`, dicek langsung di `draw` tanpa closure dependency.
+
+#### Alur yang terverifikasi via Playwright Chromium (port 8790):
+
+```
+GET /sign/{token-valid}  → dokumen terisi, materai+canvas muncul, submit disabled
+Draw TTD di canvas       → "Tanda tangan berhasil direkam", submit masih disabled
+Centang checkbox         → submit AKTIF (biru)
+GET /sign/{token-invalid}→ "Link Tidak Valid" + tombol WA, tidak ada halaman 404 generik
+GET /sign/{token-used}   → "Perjanjian Sudah Ditandatangani"
+POST /sign/{token-valid} → R2 upload, token_used=1, status=signed, properti published
+```
+
+---
+
+### ⚠️ TODO PRODUKSI F3 (wajib sebelum go-live)
+
+| # | Item | Detail |
+|---|------|--------|
+| a | **ASET TTD ARDY — BELUM UPLOAD** | URL `https://images.salambumi.xyz/ttd/gsd-removebg-preview.png` → **404**. File `gsd-removebg-preview Copy.png` belum di-upload ke CDN. Akibat: kolom Pihak Pertama (TTD SBP) kosong di dokumen (`onError` menyembunyikan img, tidak crash). **Sebelum produksi:** upload file ke CDN, lalu update konstanta `TTD_ARDY_URL` di baris 10 `src/app/components/SignPage.tsx`. |
+| b | **ALIGN PASAL dengan spec 12.6** | Susunan `pasal[]` dari `GET /api/sign/:token` berbeda dari spec 12.6 (saat ini: Pasal 1=PARA PIHAK; spec=Objek properti dengan harga/legalitas). Isi sudah benar — fee dari `fee_persen` API, bukan hardcoded. Align penomoran/konten pasal di `buildPasalPasal()` di `functions/api/sign/[token].js` saat F4 (PDF arsip). |
+| c | **VERIFIKASI MATERAI PRODUKSI** | `https://images.salambumi.xyz/materai/hg.png` — konfirmasi CDN menyajikan file ini di produksi. |
+
+---
+
+### ⚠️ GOTCHA tambahan F3 (konfirmasi berulang dari F2)
+
+**[e] NODE ZOMBIE + CHUNK HASH BASI (terjadi LAGI di F3):**
+Di sesi F3, 3 proses Node zombie dari sesi sebelumnya semuanya mendengarkan di port 8790. Salah satunya menyajikan HTML dengan chunk hash lama (`SignPage-Ds75rX0F.js`) padahal build baru menghasilkan `SignPage-o6l9CH2t.js`. React tidak bisa load → halaman stuck di "Memuat dokumen perjanjian…" selamanya.
+
+**Protokol wajib sebelum setiap sesi wrangler:**
+1. `Get-Process node | Stop-Process -Force` — kill SEMUA node
+2. Clean build: `Remove-Item -Recurse -Force dist, .react-router && npm run build`
+3. Start SATU instance wrangler: `npx wrangler pages dev dist/client --port 8790`
+4. Verifikasi chunk hash benar: `curl http://127.0.0.1:8790/sign/{token} | grep -o "SignPage[^'\"]*\.js"` → harus cocok dengan file di `dist/client/assets/`
+
+---
+
+### F4 — PDF Arsip Perjanjian ✅ SELESAI (2 Juni 2026) — **FASE F TUNTAS**
+
+#### File yang dibuat/dimodifikasi:
+
+| File | Keterangan |
+|------|------------|
+| `functions/_lib/pdf.js` | **Baru.** Generator PDF perjanjian via pdf-lib: header, nomor+tanggal, Pihak Pertama/Kedua, Pasal 1-7, area TTD overlay (TTD Ardy kiri + materai+TTD owner kanan), footer audit (signed_at/IP/SHA-256/UU ITE). |
+| `functions/api/sign/[token]/pdf.js` | **Baru.** `GET /api/sign/:token/pdf` — stream PDF dari R2 (Content-Type: application/pdf, inline). Hanya token status=signed dengan pdf_url tersedia. |
+| `functions/api/sign/[token].js` | **Dimodifikasi.** POST handler: setelah TTD tersimpan, generate PDF non-fatal (try/catch) → simpan ke R2 `agreements/{kode}-{uuid}.pdf` → UPDATE agreements SET pdf_url; fix URL TTD Ardy (TODO-a F3 tuntas); align pasal spec 12.6 (fee dari fee_persen, TODO-b F3 tuntas). |
+| `src/app/components/SignPage.tsx` | **Dimodifikasi.** Halaman sukses: tambah tombol "Download PDF Perjanjian" yang muncul jika `data.pdf_tersedia === true`, link ke `/api/sign/:token/pdf`. |
+| `package.json` + `package-lock.json` | Tambah dependensi `pdf-lib`. |
+
+#### Fitur yang terimplementasi:
+
+- **Generate PDF saat submit sign:** `functions/_lib/pdf.js` dipanggil di POST handler setelah TTD berhasil disimpan ke R2. PDF dibuat dengan pdf-lib (format PDF 1.7), ukuran ~270 KB.
+- **Konten PDF (align spec 12.6):**
+  - Header: "PERJANJIAN JASA PEMASARAN — SALAM BUMI PROPERTY", nomor, tanggal
+  - Pihak Pertama: CV SBP (data tetap)
+  - Pihak Kedua: nama_ktp, NIK ter-dekripsi, alamat dari data agreement
+  - Pasal 1-7: Objek Perjanjian, Jangka Waktu, Jasa Pemasaran (fee dari `fee_persen`), Kewajiban Para Pihak, Kerahasiaan, Penyelesaian Sengketa, Penutup
+  - Area TTD: TTD Ardy (SBP, kiri) + materai+TTD owner kanan — di-fetch dari CDN dan di-embed sebagai gambar
+  - Footer audit: signed_at ISO, IP address, SHA-256 hash TTD, UU ITE notice
+- **Simpan ke R2:** path `agreements/{kode_listing}-{agreement_uuid}.pdf`; kolom `pdf_url` di tabel `agreements` diisi setelah berhasil.
+- **Endpoint GET /api/sign/:token/pdf:** stream isi R2 ke browser sebagai `application/pdf` inline (bukan attachment) — hanya untuk token yang sudah signed dan punya pdf_url.
+- **Tombol Download PDF di halaman sukses:** muncul kondisional jika response POST mengandung `pdf_tersedia: true`.
+- **Generate PDF non-fatal:** submit perjanjian tetap sukses (return 200) meski PDF gagal di-generate — PDF error hanya di-log, tidak melempar ke client.
+- **Fix URL TTD Ardy (TODO-a F3 TUNTAS):** URL `TTD_ARDY_URL` diperbaiki di `[token].js` — fetch dari CDN images.salambumi.xyz berhasil di Workers runtime (TTD Ardy ~21 KB, materai ~231 KB).
+- **Align pasal spec 12.6 (TODO-b F3 TUNTAS):** `buildPasalPasal()` di-refactor — penomoran dan konten pasal sesuai spec 12.6.
+
+#### Verifikasi (port 8790):
+
+```
+GET /api/sign/:token/pdf          → HTTP 200, Content-Type: application/pdf, body mulai %PDF-1.7 ✅
+File size                         → ~270 KB ✅
+Fetch TTD Ardy dari CDN           → berhasil (~21 KB) ✅
+Fetch materai hg.png dari CDN     → berhasil (~231 KB) ✅
+Embed gambar di PDF               → TTD+materai tampil di area tanda tangan ✅
+Submit sign → pdf_url terisi      → agreements.pdf_url tidak NULL setelah POST ✅
+Tombol Download PDF di SignPage   → muncul saat pdf_tersedia: true ✅
+Submit tetap 200 jika PDF gagal   → non-fatal try/catch ✅
+```
+
+---
+
+### ⚠️ GOTCHA Fase F4 — WAJIB DIBACA
+
+**[a] pdf-lib StandardFonts HANYA encode WinAnsi / Latin-1:**
+Karakter di luar rentang WinAnsi (≥ ≤ — '' "" … dan semua non-Latin) **tidak bisa di-encode** oleh StandardFonts pdf-lib dan akan **throw saat `drawText()`**. Ini terjadi karena pdf-lib StandardFonts menggunakan encoding WinAnsiEncoding (CP-1252) — bukan Unicode.
+
+**Solusi wajib:** sanitizer `toWinAnsi(str)` harus dipanggil pada SEMUA teks sebelum `drawText()`:
+```js
+function toWinAnsi(str) {
+  return (str || '')
+    .replace(/≥/g, '>=')   // ≥
+    .replace(/≤/g, '<=')   // ≤
+    .replace(/—/g, '-')    // em-dash —
+    .replace(/[‘’]/g, "'") // '' curly single
+    .replace(/[“”]/g, '"') // "" curly double
+    .replace(/…/g, '...')  // …
+    .replace(/[^\x00-\xFF]/g, '?'); // fallback semua non-Latin-1
+}
+```
+Contoh yang sudah diperbaiki: teks `'≥30%'` → `'>=30%'`, `'Rp —'` → `'Rp -'`.
+
+**Alternatif jangka panjang:** embed font TTF (Noto Sans / DejaVu) via `pdfDoc.embedFont(fontBytes)` → full Unicode. Tapi menambah ukuran PDF ~500 KB. Saat ini WinAnsi sudah cukup untuk konten Latin+angka.
+
+**[b] Fetch gambar dari CDN Workers runtime:**
+Fetch gambar dari `https://images.salambumi.xyz/` BERHASIL di Workers runtime (tidak perlu fallback R2). TTD Ardy ~21 KB, materai ~231 KB. Pola `arrayBuffer()` diperlukan untuk embed ke pdf-lib:
+```js
+const resp = await fetch(url);
+const buf = await resp.arrayBuffer();
+const img = await pdfDoc.embedPng(buf); // atau embedJpg
+```
+Jika fetch gagal (404, timeout) → gunakan blok try/catch per gambar, lanjut tanpa gambar (jangan lempar).
+
+---
+
+---
+
+### Perbaikan UI /sign + PDF + Klausul Perjanjian (Revisi Notaris) ✅ SELESAI (3 Juni 2026)
+
+#### Lingkup perbaikan:
+
+**(a) SignPage.tsx — layout UI halaman /sign:**
+- Kanvas TTD bebas/luas — TTD menimpa area materai (bukan terkurung kotak sempit)
+- Materai proporsional rasio asli (gambar tidak gepeng/distorsi)
+- Dua kolom identitas Pihak Pertama / Pihak Kedua rata tengah
+- Responsif mobile/tablet: stack vertikal di layar sempit
+- Label "Agent Properti" (Pihak Pertama) dan "Pemilik Properti" (Pihak Kedua) — sebelumnya "Direktur"
+- Status machine (loading/valid/kedaluwarsa/sudah_ditandatangani/success) tampil tengah bawah
+- Tombol "Ulangi TTD" untuk hapus dan gambar ulang tanda tangan
+
+**(b) functions/_lib/pdf.js — layout PDF generator:**
+- Materai diperbesar (IMG_H 75→90, slot 20% lebih tinggi) + opacity 0.9 (sebelumnya 0.45 = pucat)
+- Rasio materai dijaga (mH × rasio asli, bukan scaleToFit kotak persegi)
+- TTD owner menimpa materai (z-order: materai dulu → owner di atas), rapi dalam kolom Pihak Kedua
+- Label "Agent Properti" (sebelumnya "Direktur") di bawah nama Ardy Salam
+- Nama owner tidak duplikat: hanya muncul SEKALI di bawah garis (sebelumnya muncul 2x)
+- Alamat akta: "Jl. Pajajaran, Dabag, Condongcatur, Depok, Sleman, Daerah Istimewa Yogyakarta" — tanpa label "(Virtual Office)"
+
+**(c) functions/api/sign/[token].js — buildPasalPasal — 8 pasal revisi notaris:**
+- Hash dokumen: `PT Salam Bumi Property` diperbaiki → `CV Salam Bumi Property` (badan hukum benar)
+- **Pasal 2** BERCABANG: Open = berlaku s.d. terjual atau diakhiri sesuai Pasal 6; Exclusive = jangka waktu durasi_kontrak bulan eksplisit
+- **Pasal 3** penambahan pemicu fee: fee hak Pihak Pertama jika pembeli diperkenalkan/diperantarai — sebelumnya hanya teks pembayaran
+- **Pasal 4** BERCABANG: Open = tidak menutup hak Pihak Kedua pasarkan sendiri; Exclusive = hak tunggal eksklusif
+- **Pasal 5** BUG TUNTAS — huruf (d) eksklusivitas ("tidak memasarkan kepada pihak lain...") HANYA muncul jika Exclusive; sebelumnya string `(bila Exclusive)` tercetak di semua jenis listing
+- **Pasal 6 BARU** — PENARIKAN PROPERTI & PENGAKHIRAN: notice 14 hari, ganti rugi biaya nyata (iklan/pemotretan/survei), tail period 60 hari → Pasal 3
+- **Pasal 7** forum penyelesaian sengketa = PN **lokasi properti** (bukan "Daerah Istimewa Yogyakarta" generik); merujuk ke Pasal 1
+- **Pasal 8** (ex-Pasal 7) — UU ITE No. 11/2008 dipertahankan persis, nomor digeser
+
+#### Catatan arsitektur:
+- **SATU SUMBER teks pasal:** `buildPasalPasal(agr)` di `[token].js` = sumber tunggal. Dikonsumsi oleh halaman web `/sign` (via GET response JSON) DAN pdf.js (via param `pasalList`). Perubahan teks pasal cukup di satu tempat.
+- **Klausul disetujui notaris** — rumusan final Pasal 1-8 sudah direview & disetujui notaris sebelum di-tanam.
+- **TODO produksi:** materai yang ditampilkan (gambar `hg.png`) adalah gambar materai, BUKAN e-meterai resmi PERURI. Penggunaan gambar materai = keputusan sadar owner yang harus dipahami sebelum perjanjian digunakan secara hukum formal.
+
+---
+
+### ⚠️ TODO PRODUKSI Fase F — Semua Fase (F1-F4) — Wajib Sebelum Go-Live
+
+| # | Item | Perintah / Tindakan |
+|---|------|---------------------|
+| 1 | **Set NIK_ENC_KEY production** | `wrangler secret put NIK_ENC_KEY` (passphrase acak ≥ 32 char) |
+| 2 | **Verifikasi aset CDN produksi** | Konfirmasi `images.salambumi.xyz/ttd/gsd-removebg-preview.png` (TTD Ardy) dan `images.salambumi.xyz/materai/hg.png` tersedia dan bisa di-fetch dari Workers |
+| 3 | **Lock CORS** | Ganti `'*'` → `'https://salambumi.xyz'` di `functions/_middleware.js` |
+| 4 | **EXIF strip foto upload** | Foto dari `POST /api/titip-jual` disimpan R2 tanpa strip EXIF — metadata GPS bisa bocor lokasi. Tambahkan EXIF strip sebelum R2.put (masih TODO dari F2). |
+| 5 | **Cookie consent banner** | UU PDP memerlukan consent eksplisit sebelum analytics/tracking cookie. Pasang banner sebelum launch. |
+
+---
+
+---
+
+## FASE G — Admin Dashboard Lengkap
+
+**Branch:** `feat/fase-f-agreements`
+
+### G1 — Login Admin + Shell Dashboard ✅ SELESAI (2 Juni 2026)
+
+#### Tujuan:
+Mengganti auth mock (sessionStorage + hardcoded credential) di frontend admin dengan auth nyata via API (`POST /api/admin/login`, `GET /api/admin/me`, `POST /api/admin/logout`), dan membangun shell dashboard dengan sidebar 9 modul + placeholder untuk modul G2+.
+
+#### File yang dimodifikasi/dibuat:
+
+| File | Perubahan |
+|------|-----------|
+| `src/app/components/admin/AdminLoginPage.tsx` | Real auth: `POST /api/admin/login`, handle 401 (salah kredensial) + 429 (rate limit) + network error. Hapus mock sessionStorage. |
+| `src/app/components/admin/AdminLayout.tsx` | Auth guard via `GET /api/admin/me` saat mount: redirect ke `/admin/login` jika 401, loading spinner tanpa flash. Nama admin dari API response. Logout via `POST /api/admin/logout`. |
+| `src/app/components/admin/AdminOverviewPage.tsx` | Bersih dari mock auth; konten ringkasan dashboard siap sambung API G2. |
+| `src/app/components/admin/AdminPlaceholderPage.tsx` | **Baru.** Komponen placeholder "Segera hadir" untuk modul yang belum diisi (G2+). |
+| `src/app/routes.ts` | +6 route admin placeholder: Titip Jual, Properti, Leads, Testimoni, Blog, Portfolio, Media, Pengaturan → semua menuju `AdminPlaceholderPage`. |
+
+#### Fitur yang terimplementasi:
+
+- **AdminLoginPage — real auth:** `POST /api/admin/login` dengan body `{ email, password }`. Handle response: 200 → redirect `/admin`; 401 → "Email atau password salah"; 429 → "Terlalu banyak percobaan — coba lagi 15 menit"; network error → pesan generik. Hapus semua mock sessionStorage.
+- **AdminLayout — auth guard:** `useEffect` mount → `GET /api/admin/me`. Jika 401 → `navigate('/admin/login')`. Selama fetch berlangsung: tampilkan loading spinner (tidak flash konten terproteksi). Nama admin ditampilkan di header dari response API (`data.nama`).
+- **AdminLayout — logout:** tombol Keluar → `POST /api/admin/logout` (clear cookie server-side) → `navigate('/admin/login')`. Tidak mengandalkan state lokal.
+- **Sidebar 9 modul:**
+  - Ringkasan (AdminOverviewPage — aktif)
+  - Titip Jual (AdminPlaceholderPage)
+  - Properti (AdminPlaceholderPage)
+  - Leads (AdminPlaceholderPage)
+  - Testimoni (AdminPlaceholderPage)
+  - Blog (AdminPlaceholderPage)
+  - Portfolio (AdminPlaceholderPage)
+  - Media (AdminPlaceholderPage)
+  - Pengaturan (AdminPlaceholderPage)
+- **Admin CSR (bukan SSR):** semua route admin dilayani client-side — auth guard lewat `GET /api/admin/me` saat mount, bukan loader SSR. Ini by design agar cookie httpOnly bisa diverifikasi oleh Workers middleware.
+
+#### Alur yang terverifikasi di browser:
+
+```
+Akses /admin (tanpa sesi)    → loading spinner → redirect /admin/login (tidak flash konten)
+POST /admin/login (salah)    → "Email atau password salah" (401)
+POST /admin/login (benar)    → redirect /admin, nama admin tampil di header
+Klik sidebar modul G2+       → halaman "Segera hadir" (AdminPlaceholderPage)
+Klik Keluar                  → POST /api/admin/logout → redirect /admin/login
+```
+
+#### Catatan teknis penting:
+
+- **Kredensial LOCAL dev:** `admin@salambumi.id` / `SbpAdmin2024!` (seed migration `0003_seed_dummy.sql`)
+- **Kredensial PRODUKSI:** `salambumiproperty@gmail.com` (akun berbeda — pastikan admin produksi dikonfigurasi dengan benar sebelum go-live via seed atau endpoint `PUT /api/admin/password` di G2)
+- **401 dari `GET /api/admin/me` sebelum login adalah NORMAL** — ini cara guard mendeteksi sesi kosong/tidak valid, bukan bug. Jangan alert atau log sebagai error.
+- **Fase F masih di branch `feat/fase-f-agreements` dan belum di-merge ke main.** G1 di-commit di branch yang sama. Merge ke main dilakukan setelah semua Fase F + Fase G selesai direview.
+
+---
+
+### G2 — Modul Admin Agreements/Titip Jual ✅ SELESAI (2 Juni 2026)
+
+#### Tujuan:
+Mengganti placeholder "Segera hadir" Titip Jual dengan modul admin agreements lengkap: list+filter, detail dengan NIK terdekripsi, edit terbatas field kunci (Opsi X), form konfigurasi perjanjian, generate sign_token, dan tombol Salin+Kirim WA.
+
+#### Endpoint baru:
+
+| Endpoint | File | Keterangan |
+|----------|------|------------|
+| `GET /api/admin/agreements` | `functions/api/admin/agreements/index.js` | List semua agreement JOIN owners+properties. Filter: `status` query param. Respons tanpa NIK (NIK tidak dikembalikan di list). |
+| `GET /api/admin/agreements/:id` | `functions/api/admin/agreements/[id]/index.js` | Detail satu agreement: NIK terdekripsi AES-GCM, foto properti dari R2, semua field perjanjian. |
+| `PATCH /api/admin/agreements/:id` | `functions/api/admin/agreements/[id]/index.js` | Edit terbatas field kunci Opsi X: nama, NIK (re-enkripsi), alamat, no_wa, harga, lokasi, jenis_properti. Hanya untuk status `draft` atau `menunggu_ttd`. |
+
+#### Endpoint yang dikonsumsi (dari F1, sudah ada):
+
+| Endpoint | Keterangan |
+|----------|------------|
+| `POST /api/admin/agreements/:id/configure` | Form konfigurasi: jenis_listing, fee, durasi, jenis_transaksi → generate sign_token + link TTD |
+
+#### File yang dibuat/dimodifikasi:
+
+| File | Perubahan |
+|------|-----------|
+| `functions/api/admin/agreements/index.js` | **Baru.** GET list + (PATCH di `[id]/index.js`) |
+| `functions/api/admin/agreements/[id]/index.js` | **Baru.** GET detail + PATCH update field kunci |
+| `functions/api/admin/media.js` | **Baru.** Proxy foto dari R2 ke frontend (via signed URL atau proxy direct) |
+| `src/app/components/admin/AdminAgreementsPage.tsx` | **Baru.** Tabel list agreements + filter badge status + navigasi ke detail |
+| `src/app/components/admin/AdminAgreementDetailPage.tsx` | **Baru.** Detail agreement: data pemilik (NIK terdekripsi), foto properti, form edit Opsi X, form konfigurasi (radio Open/Exclusive, durasi kondisional, fee manual, jenis transaksi auto), generate link sign + tombol Salin + tombol Kirim WA |
+| `src/app/routes.ts` | Tambah route `/admin/agreements` dan `/admin/agreements/:id` → komponen baru |
+
+#### Fitur yang terimplementasi:
+
+- **AdminAgreementsPage — list + filter:**
+  - Tabel agreement: nomor, nama pemilik, properti, status (badge warna), tanggal, aksi
+  - Filter dropdown status: semua / draft / menunggu_ttd / signed
+  - Klik baris → navigasi ke halaman detail
+
+- **AdminAgreementDetailPage — detail lengkap:**
+  - Data pemilik: nama, NIK (terdekripsi, tampil di UI), alamat, no_wa
+  - Data properti: jenis, lokasi, harga, foto (via proxy R2)
+  - Status badge + kode agreement
+
+- **Edit terbatas (Opsi X):**
+  - Field yang bisa diedit: nama, NIK, alamat, no_wa, harga, lokasi, jenis_properti
+  - NIK diinput plaintext di form → PATCH → re-enkripsi AES-GCM di server sebelum disimpan
+  - Hanya aktif untuk status `draft` atau `menunggu_ttd`
+
+- **Form konfigurasi perjanjian (spec 13.5):**
+  - Radio `jenis_listing`: Open (non-eksklusif) / Exclusive
+  - `durasi_bulan`: input angka — hanya muncul jika jenis_listing = Exclusive
+  - `fee_persen`: input manual (persentase)
+  - `jenis_transaksi`: auto-detect dari jenis properti (jual / sewa / jual_sewa) — read-only
+  - Tombol "Konfigurasi & Generate Link" → `POST /api/admin/agreements/:id/configure`
+
+- **Generate link + Salin + Kirim WA:**
+  - Setelah configure berhasil, `sign_token` muncul → URL `/sign/:token` ditampilkan
+  - Tombol "Salin Link" → clipboard copy
+  - Tombol "Kirim via WA" → `wa.me/{no_wa}?text=...` (Opsi b: wa.me link langsung ke nomor pemilik)
+
+#### Alur end-to-end yang terverifikasi (Playwright Chromium, port 8790):
+
+```
+Login /admin/login           → berhasil, redirect /admin
+Klik "Titip Jual" sidebar    → AdminAgreementsPage, tabel tampil
+Filter status=menunggu_ttd   → tabel terfilter
+Klik baris agreement         → AdminAgreementDetailPage, NIK terdekripsi tampil
+Edit nama/NIK field          → PATCH /api/admin/agreements/:id → 200, NIK re-terenkripsi di DB
+Isi form konfigurasi         → POST configure → link TTD muncul
+Klik "Salin Link"            → clipboard terisi URL /sign/:token
+Klik "Kirim via WA"          → wa.me/... terbuka di tab baru
+Buka /sign/:token            → SignPage tampil dokumen perjanjian (end-to-end ✅)
+```
+
+#### Temuan non-bug (dicatat agar tidak dikira bug):
+
+- **Foto kotak hijau di dev:** foto properti tampil sebagai kotak hijau di mode dev — ini bukan bug, melainkan R2 emulation lokal wrangler kosong (tidak ada file foto sebenarnya diupload di local). Di produksi dengan R2 berisi foto nyata, foto tampil normal.
+
+---
+
+### G3a — Modul Admin Properti ✅ SELESAI (3 Juni 2026)
+
+#### Tujuan:
+Mengganti placeholder "Segera hadir" Properti dengan modul admin properti lengkap: list semua status + filter, detail/edit 37 field, galeri foto (set cover / hapus), dan manajemen status termasuk soft-delete (archived).
+
+#### Migrasi database:
+
+| File | Isi |
+|------|-----|
+| `migrations/0006_expand_property_status.sql` | Expand CHECK `status_publish` dari 2 nilai (`draft`/`published`) menjadi 4 (`draft`/`published`/`sold`/`archived`). Recreate tabel karena SQLite tidak support `ALTER COLUMN`. |
+| `migrations/0007_restore_property_images.sql` | Restore baris `property_images` yang ikut terhapus saat `DROP TABLE properties` di 0006 (CASCADE DELETE terpicu). 3 seed foto + 6 foto dari sesi uji titip-jual. |
+
+#### Endpoint baru:
+
+| Endpoint | File | Keterangan |
+|----------|------|------------|
+| `GET /api/admin/properties` | `functions/api/admin/properties/index.js` | List semua properti SEMUA status (draft/published/sold/archived), filter `status`, `q` (cari judul/kode), pagination. Tidak ada filter `status_publish='published'` — khusus admin. |
+| `GET /api/admin/properties/:id` | `functions/api/admin/properties/[id]/index.js` | Detail satu properti: semua 37 field + array foto (`property_images` ORDER BY urutan). |
+| `PATCH /api/admin/properties/:id` | `functions/api/admin/properties/[id]/index.js` | Update field properti (37 field). Fix NOT NULL: pisah `notNullTextFields` (string kosong `''` dikirim apa adanya) vs `nullableTextFields` (string kosong dikonversi ke `null`). |
+| `PATCH /api/admin/properties/:id/status` | `functions/api/admin/properties/[id]/status.js` | Ubah `status_publish`: `draft` / `published` / `sold` / `archived`. Archived = soft-delete (properti tidak dihapus, owner dan agreement tetap utuh). |
+| `PATCH /api/admin/properties/:id/photos/:imageId/cover` | `functions/api/admin/properties/[id]/photos/[imageId]/cover.js` | Set foto sebagai cover (`is_cover=1`), reset foto lain di properti yang sama ke `is_cover=0`. |
+| `DELETE /api/admin/properties/:id/photos/:imageId` | `functions/api/admin/properties/[id]/photos/[imageId]/index.js` | Hapus satu foto: DELETE dari `property_images`, hapus objek dari R2 (non-fatal jika R2 gagal). |
+
+#### File yang dibuat/dimodifikasi:
+
+| File | Perubahan |
+|------|-----------|
+| `functions/api/admin/properties/index.js` | **Baru.** GET list semua status + filter |
+| `functions/api/admin/properties/[id]/index.js` | **Baru.** GET detail + PATCH update 37 field |
+| `functions/api/admin/properties/[id]/status.js` | **Baru.** PATCH ubah status_publish |
+| `functions/api/admin/properties/[id]/photos/[imageId]/cover.js` | **Baru.** PATCH set cover foto |
+| `functions/api/admin/properties/[id]/photos/[imageId]/index.js` | **Baru.** DELETE hapus foto |
+| `src/app/components/admin/AdminPropertyDetailPage.tsx` | **Baru.** Halaman detail/edit properti admin: 37 field dalam form section-based, galeri foto (set cover badge/hapus, placeholder tombol upload untuk G3b), badge status + dropdown ubah status. |
+| `src/app/components/admin/AdminListingPage.tsx` | **Dimodifikasi.** Repurpose menjadi list properti admin: filter status (semua/draft/published/sold/archived), badge warna per status, klik baris → navigasi ke AdminPropertyDetailPage. |
+| `src/app/routes.ts` | Tambah route `/admin/properties` dan `/admin/properties/:id`. |
+| `migrations/0006_expand_property_status.sql` | **Baru.** Expand status CHECK + recreate table. |
+| `migrations/0007_restore_property_images.sql` | **Baru.** Restore baris property_images yang hilang. |
+
+#### Fitur yang terimplementasi:
+
+- **List properti admin (`/admin/properties`):**
+  - Tabel semua properti SEMUA status (draft, published, sold, archived) — tidak ada filter status_publish='published' seperti endpoint publik
+  - Filter dropdown: semua / draft / published / sold / archived
+  - Badge warna per status (draft=abu / published=hijau / sold=biru / archived=merah)
+  - Pencarian judul/kode listing (`q` query param)
+  - Klik baris → navigasi ke halaman detail/edit
+
+- **Detail/edit properti (`/admin/properties/:id`):**
+  - Form 37 field dalam section: Info Dasar, Harga, Spesifikasi, Lokasi, Deskripsi, SEO/Meta, Investment
+  - Badge status + dropdown ubah status (draft/published/sold/archived) dengan konfirmasi
+  - Galeri foto: thumbnail, badge "Cover", tombol "Jadikan Cover" + "Hapus" per foto
+  - Placeholder tombol "Upload Foto Baru" (diimplementasikan di G3b)
+  - Tombol Simpan → PATCH ke endpoint update field
+  - Tombol Kembali ke list
+
+- **Soft-delete via status `archived`:**
+  - Status `archived` = properti disembunyikan dari semua tampilan publik
+  - Data properti, owner, dan agreement TIDAK dihapus dari DB — aman untuk audit trail
+  - Properti `archived` tidak muncul di `GET /api/properties` (publik)
+
+- **Manajemen foto:**
+  - Set cover: PATCH `/photos/:imageId/cover` → `is_cover=1`, semua foto lain di properti itu `is_cover=0`
+  - Hapus foto: DELETE `/photos/:imageId` → hapus baris DB + hapus objek R2 (non-fatal)
+
+#### Bug yang ditemukan dan diperbaiki:
+
+**NOT NULL error saat update field kosong (kecamatan/kabupaten/provinsi):**
+- Gejala: `PATCH /api/admin/properties/:id` dengan field `kecamatan`, `kabupaten`, atau `provinsi` yang dikosongkan → DB reject `NOT NULL constraint failed` → HTTP 500.
+- Root cause: semua text field di-handle sama — string kosong `''` dikonversi ke `null` sebelum dimasukkan ke SQL. Tapi kolom lokasi (provinsi/kabupaten/kecamatan/kelurahan) di schema adalah `NOT NULL DEFAULT ''`, sehingga `null` ditolak DB.
+- Fix: pisah dua grup field:
+  - `notNullTextFields` (provinsi, kabupaten, kecamatan, kelurahan, dll.) → nilai `''` dikirim apa adanya ke DB, tidak dikonversi ke `null`
+  - `nullableTextFields` (alamat, deskripsi, gmaps_link, dll.) → `''` dikonversi ke `null` (diperbolehkan DB)
+
+#### Verifikasi keamanan — privasi data publik LULUS:
+
+```
+GET /api/properties (publik)         → 7 properti published saja ✅
+Properti status=draft                 → TIDAK muncul di endpoint publik ✅
+Properti status=archived              → TIDAK muncul di endpoint publik ✅
+GET /api/admin/properties (admin)     → semua status tampil (termasuk draft+archived) ✅
+```
+
+#### TODO:
+
+| # | Item | Fase |
+|---|------|------|
+| 1 | Upload foto baru + reorder urutan | G3b |
+| 2 | DATA UJI ngawur perlu diarsipkan/dibersihkan sebelum produksi: id=7 (harga 433M / 435 kamar), properti `verified=0` dari sesi uji — ubah status ke `archived` via dashboard atau hapus manual dari D1 sebelum go-live | Sebelum produksi |
 
 ---
 
