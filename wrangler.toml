@@ -1,7 +1,7 @@
 # wrangler.toml — Konfigurasi Cloudflare untuk Salam Bumi Property (SBP)
 # Arsitektur: Cloudflare Pages (React/Vite frontend) + Workers (API + SSR) + D1 (database) + R2 (media)
 
-name = "sbp-website"
+name = "sbp-final"
 account_id = "f1bac4af6572062bfcf88549ed59c823"
 
 # compatibility_date: versi runtime Cloudflare. Gunakan tanggal terbaru yang stabil.
@@ -40,7 +40,7 @@ bucket_name = "sbp-media"
 # Secret seperti API key / JWT secret -> simpan via 'wrangler secret put'
 # =============================================================================
 [vars]
-ENVIRONMENT = "development"
+ENVIRONMENT = "production"
 APP_URL = "https://salambumi.xyz"
 WA_ADMIN = "6281391278889"
 ADMIN_EMAIL = "salambumiproperty@gmail.com"
