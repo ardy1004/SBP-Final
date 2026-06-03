@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { ArrowLeft, Save, Star, Trash2, ImageOff, AlertTriangle, ChevronDown } from 'lucide-react';
+import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,7 +62,7 @@ interface PropertyDetail {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const JENIS_OPTIONS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','gudang','komersial'];
+const JENIS_OPTIONS = PROPERTY_TYPES;
 const TUJUAN_OPTIONS = ['dijual','disewa','dijual_disewa'];
 const LEGALITAS_OPTIONS = ['shm','shgb','shp','girik','letter_c','akte_jual_beli','hak_pakai','lainnya'];
 const STATUS_LEGALITAS_OPTIONS: { value: string; label: string }[] = [
@@ -426,7 +427,7 @@ export default function AdminPropertyDetailPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Jenis Properti">
             <select value={form.jenis_properti ?? ''} onChange={e => setForm(f => ({ ...f, jenis_properti: e.target.value }))} className={selectCls}>
-              {JENIS_OPTIONS.map(j => <option key={j} value={j}>{j}</option>)}
+              {JENIS_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
           </Field>
 

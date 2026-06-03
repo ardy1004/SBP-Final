@@ -6,20 +6,11 @@ import {
   type NormalizedProperty, type ApiLocation, type PropertiesParams,
   formatRupiah,
 } from '../../lib/api';
+import { PROPERTY_TYPES } from '../../lib/propertyTypes';
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
 
-const JENIS_OPTIONS = [
-  { value: 'rumah',    label: '🏠 Rumah' },
-  { value: 'kost',     label: '🏗️ Kost' },
-  { value: 'hotel',    label: '🏨 Hotel' },
-  { value: 'homestay', label: '🏡 Homestay' },
-  { value: 'villa',    label: '🌴 Villa' },
-  { value: 'apartemen',label: '🏢 Apartemen' },
-  { value: 'komersial',label: '🏬 Ruko/Komersial' },
-  { value: 'tanah',    label: '🌿 Tanah' },
-  { value: 'gudang',   label: '🏭 Gudang' },
-];
+const JENIS_OPTIONS = PROPERTY_TYPES.map(t => ({ value: t.value, label: `${t.emoji} ${t.label}` }));
 
 const HARGA_RANGES = [
   { label: 'Semua Harga',  min: 0,              max: 0 },

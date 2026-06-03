@@ -98,7 +98,7 @@ export async function onRequestPost(context) {
   const jenis_properti = sanitize(body.jenis_properti ?? '', 30);
   const tujuan         = sanitize(body.tujuan ?? '', 20);
 
-  const JENIS_VALID = ['rumah','tanah','kost','hotel','homestay','villa','apartment','gudang','komersial'];
+  const JENIS_VALID = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
   const TUJUAN_VALID = ['dijual','disewa','dijual_disewa'];
   if (!JENIS_VALID.includes(jenis_properti)) errors.jenis_properti = 'jenis_properti tidak valid';
   if (!TUJUAN_VALID.includes(tujuan)) errors.tujuan = 'tujuan harus: dijual, disewa, atau dijual_disewa';

@@ -1018,6 +1018,52 @@ Empat perbaikan kecil & reversible sebelum sambung domain publik. Build sukses, 
 
 ---
 
+## Fix Konsistensi Jenis Properti ✅ SELESAI (4 Juni 2026)
+
+**Branch:** `feat/fix-property-types`
+
+### Akar masalah
+
+Daftar jenis properti didefinisikan secara terpisah di 4 tempat frontend dengan value, label, dan urutan yang berbeda-beda. **BUG KRITIS:** `HeroFilter` (HomePage) dan `PropertiesPage` menggunakan value `'apartemen'` padahal DB menyimpan `'apartment'` — akibatnya filter apartemen di-drop secara silent oleh backend (`VALID_JENIS` tidak mengenali `'apartemen'`), sehingga semua properti dikembalikan tanpa filter.
+
+### Solusi
+
+| Komponen | Perubahan |
+|---|---|
+| `src/lib/propertyTypes.ts` (**baru**) | Sumber kebenaran tunggal — array `PROPERTY_TYPES` (10 tipe, urutan canonical), helper `getPropertyTypeLabel()` + `getPropertyTypeEmoji()` |
+| `HomePage.tsx` HeroFilter | Import `PROPERTY_TYPES`, hapus hardcoded array — value `'apartment'` benar (fix bug) |
+| `PropertiesPage.tsx` | Hapus 9-item `JENIS_OPTIONS` lokal, pakai `PROPERTY_TYPES.map(...)` — fix value `'apartemen'`→`'apartment'` |
+| `TitipJualPage.tsx` | Hapus 9-item array lokal, pakai `PROPERTY_TYPES.map(...)` — label selaras canonical |
+| `AdminPropertyDetailPage.tsx` | `JENIS_OPTIONS = PROPERTY_TYPES`, render `t.label` (bukan raw value lowercase) |
+| `src/lib/api.ts` `normalizeProperty` | Hapus `JENIS_EMOJI` + `capitalize()`, pakai `getPropertyTypeLabel/Emoji` dari `propertyTypes.ts` |
+| `functions/api/titip-jual.js` | Tambah `'ruko'` ke `JENIS_VALID` (jadi 10 nilai) |
+| `functions/api/properties/index.js` | Tambah `'ruko'` ke `VALID_JENIS` (jadi 10 nilai) |
+| `functions/api/admin/properties/[id]/index.js` | Tambah `'ruko'` ke `VALID_JENIS` (jadi 10 nilai) |
+| `migrations/0008_add_ruko_property_type.sql` (**baru**) | Recreate table `properties` — identik 0006, hanya CHECK `jenis_properti` diperluas: tambah `'ruko'` (jadi 10 nilai) |
+
+### 10 jenis properti canonical (urutan & label baku)
+
+`apartment` (Apartment), `rumah` (Rumah), `tanah` (Tanah), `kost` (Kost), `hotel` (Hotel), `homestay` (Homestay/Guesthouse), `villa` (Villa), `ruko` (Ruko — **baru**), `gudang` (Gudang), `komersial` (Komersial Lainnya)
+
+### Hasil verifikasi lokal
+
+- ✅ Build sukses (0 TypeScript error)
+- ✅ `GET /api/properties?jenis=apartment` → filter diterapkan benar (bukan di-drop)
+- ✅ `POST /api/titip-jual` dengan `jenis_properti=ruko` → lolos validasi (bukan ditolak)
+- ✅ Migrasi 0008 diterapkan ke **DB lokal** — 6 perintah sukses
+
+### ⚠️ PENTING — Langkah wajib setelah merge ke master
+
+**DB produksi (remote) BELUM dimigrasi.** Setelah merge, jalankan:
+
+```bash
+wrangler d1 execute sbp-db --remote --file=migrations/0008_add_ruko_property_type.sql
+```
+
+Aman dijalankan: DB produksi kosong (0 properti), INSERT SELECT tidak akan konflik. Setelah itu redeploy ke Pages.
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |

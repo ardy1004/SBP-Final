@@ -8,6 +8,7 @@ import {
   getTestimonials, type ApiTestimonial,
   getBlogPosts, type ApiBlogPost,
 } from '../../lib/api';
+import { PROPERTY_TYPES } from '../../lib/propertyTypes';
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
 
@@ -378,8 +379,8 @@ function HeroFilter() {
           <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Jenis Properti</label>
           <select value={jenis} onChange={e => setJenis(e.target.value)} className={selectClass}>
             <option value="">Semua Jenis</option>
-            {['Rumah', 'Kost', 'Villa', 'Hotel', 'Homestay', 'Apartemen', 'Tanah', 'Gudang', 'Komersial'].map(j => (
-              <option key={j} value={j.toLowerCase()}>{j}</option>
+            {PROPERTY_TYPES.map(t => (
+              <option key={t.value} value={t.value}>{t.label}</option>
             ))}
           </select>
           <ChevronDown size={14} className="absolute right-3 bottom-3 text-gray-400 pointer-events-none" />
