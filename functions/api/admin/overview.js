@@ -1,0 +1,193 @@
+// GET /api/admin/overview — KPI dashboard (data nyata dari DB)
+// Auth: _middleware.js (admin-only, otomatis mencakup semua /api/admin/*)
+
+import { jsonOk, jsonError, handleOptions } from '../_shared/response.js';
+
+const JENIS_LABEL = {
+  apartment: 'Apartment', rumah: 'Rumah', tanah: 'Tanah', kost: 'Kost',
+  hotel: 'Hotel', homestay: 'Homestay/Guesthouse', villa: 'Villa',
+  ruko: 'Ruko', gudang: 'Gudang', komersial: 'Komersial Lainnya',
+};
+const JENIS_COLORS = [
+  '#1565C0', '#29B6F6', '#10B981', '#F5A623',
+  '#7C3AED', '#EF4444', '#059669', '#0891B2', '#78716C', '#DC2626',
+];
+const BULAN_ID = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Ags','Sep','Okt','Nov','Des'];
+
+function fmtWaktu(dtStr) {
+  if (!dtStr) return '';
+  const d = new Date(dtStr);
+  if (isNaN(d.getTime())) return '';
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+export async function onRequestGet(context) {
+  const { env } = context;
+  const db = env.DB;
+
+  try {
+    const [
+      listingByStatusRes,
+      leadsStatsRow,
+      waHariIniRow,
+      agreementsStatsRes,
+      viewsTotalRow,
+      ownersTotalRow,
+      leadsPerBulanRes,
+      distribusiJenisRes,
+      leadsRecentRes,
+      agreementsRecentRes,
+      listingsRecentRes,
+    ] = await Promise.all([
+
+      // 1. Breakdown listing per status_publish
+      db.prepare(`SELECT status_publish, COUNT(*) AS cnt FROM properties GROUP BY status_publish`).all(),
+
+      // 2. Leads: total + bulan ini + bulan lalu (untuk delta)
+      db.prepare(`
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN created_at >= strftime('%Y-%m-01','now') THEN 1 ELSE 0 END) AS bulan_ini,
+          SUM(CASE WHEN created_at >= strftime('%Y-%m-01','now','-1 month')
+                   AND created_at < strftime('%Y-%m-01','now') THEN 1 ELSE 0 END) AS bulan_lalu
+        FROM leads
+      `).first(),
+
+      // 3. Kontak WA hari ini (wa_clicked_at = today)
+      db.prepare(`
+        SELECT COUNT(*) AS cnt FROM leads
+        WHERE wa_clicked_at IS NOT NULL
+          AND DATE(wa_clicked_at,'localtime') = DATE('now','localtime')
+      `).first(),
+
+      // 4. Breakdown agreements per status
+      db.prepare(`SELECT status, COUNT(*) AS cnt FROM agreements GROUP BY status`).all(),
+
+      // 5. Total views kumulatif (SUM views_count semua properti)
+      // NOTE: bukan per-30-hari — views_count adalah counter kumulatif sejak listing dibuat
+      db.prepare(`SELECT COALESCE(SUM(views_count), 0) AS total FROM properties`).first(),
+
+      // 6. Total owners terdaftar
+      db.prepare(`SELECT COUNT(*) AS cnt FROM owners`).first(),
+
+      // 7. Leads per bulan — 6 bulan terakhir
+      db.prepare(`
+        SELECT strftime('%Y-%m', created_at) AS ym, COUNT(*) AS leads
+        FROM leads
+        WHERE created_at >= strftime('%Y-%m-01','now','-5 months')
+        GROUP BY ym ORDER BY ym
+      `).all(),
+
+      // 8. Distribusi jenis properti (semua status)
+      db.prepare(`
+        SELECT jenis_properti, COUNT(*) AS cnt
+        FROM properties GROUP BY jenis_properti ORDER BY cnt DESC
+      `).all(),
+
+      // 9. Activity: leads terbaru
+      db.prepare(`
+        SELECT l.nama, p.title, l.created_at
+        FROM leads l LEFT JOIN properties p ON p.id = l.property_id
+        ORDER BY l.created_at DESC LIMIT 4
+      `).all(),
+
+      // 10. Activity: agreements baru ditandatangani
+      db.prepare(`
+        SELECT a.kode_perjanjian, a.signed_at, p.title
+        FROM agreements a JOIN properties p ON p.id = a.property_id
+        WHERE a.status = 'signed' AND a.signed_at IS NOT NULL
+        ORDER BY a.signed_at DESC LIMIT 3
+      `).all(),
+
+      // 11. Activity: listing baru published/sold
+      db.prepare(`
+        SELECT title, kode_listing, published_at, status_publish
+        FROM properties
+        WHERE status_publish IN ('published','sold') AND published_at IS NOT NULL
+        ORDER BY published_at DESC LIMIT 3
+      `).all(),
+    ]);
+
+    // --- KPI ---
+    const listingMap = Object.fromEntries(
+      (listingByStatusRes.results ?? []).map(r => [r.status_publish, r.cnt])
+    );
+    const agreementsMap = Object.fromEntries(
+      (agreementsStatsRes.results ?? []).map(r => [r.status, r.cnt])
+    );
+
+    const kpi = {
+      listing_published:  listingMap.published  ?? 0,
+      listing_draft:      listingMap.draft       ?? 0,
+      listing_sold:       listingMap.sold        ?? 0,
+      listing_archived:   listingMap.archived    ?? 0,
+      leads_total:        leadsStatsRow?.total      ?? 0,
+      leads_bulan_ini:    leadsStatsRow?.bulan_ini  ?? 0,
+      leads_bulan_lalu:   leadsStatsRow?.bulan_lalu ?? 0,
+      wa_hari_ini:        waHariIniRow?.cnt         ?? 0,
+      agreements_signed:  agreementsMap.signed      ?? 0,
+      agreements_pending: agreementsMap.menunggu_ttd ?? 0,
+      agreements_total:   Object.values(agreementsMap).reduce((s, v) => s + v, 0),
+      views_total:        viewsTotalRow?.total      ?? 0,
+      owners_total:       ownersTotalRow?.cnt       ?? 0,
+    };
+
+    // --- Leads per Bulan (isi missing month dengan 0) ---
+    const leadsMap = Object.fromEntries((leadsPerBulanRes.results ?? []).map(r => [r.ym, r.leads]));
+    const now = new Date();
+    const leads_per_bulan = Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      return { bulan: BULAN_ID[d.getMonth()], leads: leadsMap[ym] ?? 0 };
+    });
+
+    // --- Distribusi Jenis ---
+    const distribusi_jenis = (distribusiJenisRes.results ?? []).map((r, i) => ({
+      name:  JENIS_LABEL[r.jenis_properti] ?? r.jenis_properti,
+      value: r.cnt,
+      color: JENIS_COLORS[i % JENIS_COLORS.length],
+    }));
+
+    // --- Aktivitas Terbaru (gabungkan + sort by waktu) ---
+    const activities = [];
+    for (const r of (leadsRecentRes.results ?? [])) {
+      activities.push({
+        tipe: 'lead', warna: '#10B981',
+        teks: r.title ? `Lead baru: ${r.nama} → ${r.title}` : `Lead baru dari ${r.nama}`,
+        waktu: fmtWaktu(r.created_at), _ts: r.created_at,
+      });
+    }
+    for (const r of (agreementsRecentRes.results ?? [])) {
+      activities.push({
+        tipe: 'sign', warna: '#F5A623',
+        teks: `Perjanjian ${r.kode_perjanjian} ditandatangani`,
+        waktu: fmtWaktu(r.signed_at), _ts: r.signed_at,
+      });
+    }
+    for (const r of (listingsRecentRes.results ?? [])) {
+      const sold = r.status_publish === 'sold';
+      activities.push({
+        tipe: sold ? 'sold' : 'listing', warna: sold ? '#EF4444' : '#1565C0',
+        teks: `${r.kode_listing}: "${r.title}" ${sold ? 'dimarkir TERJUAL' : 'dipublikasikan'}`,
+        waktu: fmtWaktu(r.published_at), _ts: r.published_at,
+      });
+    }
+    activities.sort((a, b) => {
+      if (!a._ts && !b._ts) return 0;
+      if (!a._ts) return 1;
+      if (!b._ts) return -1;
+      return new Date(b._ts) - new Date(a._ts);
+    });
+    const aktivitas_terbaru = activities.slice(0, 8).map(({ _ts, ...rest }) => rest);
+
+    return jsonOk({ kpi, leads_per_bulan, distribusi_jenis, aktivitas_terbaru });
+
+  } catch (err) {
+    console.error('[admin/overview]', err.message);
+    return jsonError('Gagal mengambil data overview', 500);
+  }
+}
+
+export async function onRequestOptions() {
+  return handleOptions();
+}

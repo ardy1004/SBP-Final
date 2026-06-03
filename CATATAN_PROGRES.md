@@ -1064,6 +1064,75 @@ Aman dijalankan: DB produksi kosong (0 properti), INSERT SELECT tidak akan konfl
 
 ---
 
+## Admin Dashboard Gelombang 1 — Modul Overview Real ✅ SELESAI (4 Juni 2026)
+
+**Branch:** `feat/admin-overview`
+
+### Konteks
+
+AdminOverviewPage sebelumnya menampilkan 100% data hardcoded (KPI_DATA, MONTHLY_LEADS, JENIS_CHART, ACTIVITY). Diubah untuk mengambil data nyata dari DB via endpoint baru.
+
+### Endpoint baru
+
+**`GET /api/admin/overview`** — dilindungi auth guard JWT (`_middleware.js`, otomatis mencakup semua `/api/admin/*`).
+
+File: `functions/api/admin/overview.js`
+
+Mengembalikan:
+- `kpi` — 13 metrik nyata dari DB (lihat tabel di bawah)
+- `leads_per_bulan` — 6 bulan terakhir (COUNT GROUP BY bulan, missing month = 0)
+- `distribusi_jenis` — COUNT properties GROUP BY jenis_properti
+- `aktivitas_terbaru` — gabungan leads terbaru + agreements signed + listings published/sold, sorted by waktu (maks 8 item)
+
+### Tabel investigasi metrik
+
+| Metrik dummy lama | Bisa dihitung dari DB? | Sumber / Catatan |
+|---|---|---|
+| Total Listing Aktif (47) | ✅ Ya | `COUNT properties WHERE status_publish='published'` → renamed "Properti Published" |
+| Total Leads Bulan Ini (128) | ✅ Ya | `COUNT leads WHERE created_at >= start of month` + delta vs bulan lalu |
+| Total Views 30 Hari (12.4K) | ⚠️ Partial | `SUM(views_count)` ada — tapi kumulatif, bukan per-30-hari. Label diubah ke "Total Views (Kumulatif)". Delta dihilangkan. |
+| Perjanjian Ditandatangani (9) | ✅ Ya | `COUNT agreements WHERE status='signed'` + breakdown pending + total |
+| Kontak WA Hari Ini (14) | ✅ Ya | `COUNT leads WHERE DATE(wa_clicked_at,'localtime') = DATE('now','localtime')` |
+| Properti Terjual MTD (4) | ⚠️ Partial | `COUNT properties WHERE status_publish='sold'` ada — tapi total (bukan MTD). Label diubah ke "Properti Terjual (Total)". Tidak ada kolom `sold_at` → MTD tidak bisa dihitung. |
+| Leads per Bulan (chart) | ✅ Ya | `GROUP BY strftime('%Y-%m', created_at)` 6 bulan terakhir |
+| Distribusi Jenis (pie) | ✅ Ya | `GROUP BY jenis_properti ORDER BY cnt DESC` |
+| Activity Feed (hardcoded) | ✅ Ya | Gabungan: leads terbaru + agreements signed terbaru + listings published/sold terbaru |
+
+### Metrik yang BELUM tersedia (TODO)
+
+| Metrik | Alasan | Solusi ke depan |
+|---|---|---|
+| Views per-30-hari | `views_count` adalah counter kumulatif per properti, bukan per-hari | Butuh tabel `property_view_events` (id, property_id, created_at) |
+| Delta properti published bulan ini | Tidak ada snapshot historis per-bulan per status_publish | Bisa dihitung jika ada tabel audit/history, atau dengan `published_at` filter bulan ini |
+| Properti terjual MTD | Tidak ada kolom `sold_at` di table properties | Tambahkan kolom `sold_at DATETIME` di migrasi berikutnya |
+
+### Perubahan AdminOverviewPage.tsx
+
+- Hapus semua konstanta hardcoded (`KPI_DATA`, `MONTHLY_LEADS`, `JENIS_CHART`, `ACTIVITY`)
+- Tambah `fetch('/api/admin/overview')` di `useEffect`, dengan loading skeleton + error state
+- 6 KPI cards sekarang dari data nyata; delta hanya tampil untuk "Leads Bulan Ini" (selisih vs bulan lalu)
+- Chart bar (leads/bulan) dan pie (distribusi jenis) dari API
+- Activity feed dari DB — listing events + leads nyata
+
+### Hasil verifikasi lokal
+
+- ✅ Build sukses (0 error)
+- ✅ `GET /api/admin/overview` tanpa session → `401 "Sesi tidak ditemukan"` (auth guard jalan)
+- ✅ Setelah login → data nyata tampil: `listing_published: 9`, `views_total: 4256`, `distribusi_jenis: [{Rumah,9},{Kost,2},{Tanah,1}]`, aktivitas listing & leads nyata dari DB lokal
+- ✅ DB kosong/minimal → angka masuk akal (0 bukan error)
+
+### Modul admin berikutnya (belum dibangun)
+
+| Prioritas | Modul | Status |
+|---|---|---|
+| 1 | **Leads** — tabel CRM (baca, ubah status pipeline, tambah catatan) | Belum |
+| 2 | **Testimoni** — CRUD testimonial (tambah/edit/hapus/reorder) | Belum |
+| 3 | **Blog** — CRUD blog posts (draft/publish/schedule) | Belum |
+| 4 | **Lokasi** — kelola data lokasi DIY | Belum |
+| 5 | **Settings** — ganti password admin | Belum |
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |
