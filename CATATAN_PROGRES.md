@@ -1003,6 +1003,21 @@ Secret `NIK_ENC_KEY` + `JWT_SECRET` di-set untuk **Production DAN Preview**. Cat
 
 ---
 
+## Pra-Go-Live — Perbaikan Pra-Domain ✅ SELESAI (4 Juni 2026)
+
+**Branch:** `feat/fase-h-prelaunch`
+
+Empat perbaikan kecil & reversible sebelum sambung domain publik. Build sukses, tidak ada error baru.
+
+| # | Item | File | Perubahan |
+|---|------|------|-----------|
+| 1 | **FAQ fee text → generik** | `src/app/data/mockData.ts` | Teks fee `"3%/5%/10%"` (spec lama) diganti → `"Besaran fee jasa pemasaran disepakati bersama dan dicantumkan dalam perjanjian."` — tidak menyebut persentase tetap, sesuai skema fee manual saat ini. |
+| 2 | **Blog & Portfolio disembunyikan dari Navbar + Footer** | `Navbar.tsx`, `Footer.tsx` | Link menu Blog dan Portofolio di-comment dengan tag `// TODO aktifkan kembali`. Halaman/route `BlogPage` dan `PortfolioPage` **tetap ada** — hanya tidak ada link dari navigasi. Alasan: konten masih mock, halaman detail blog (`:slug`) menghasilkan 404. |
+| 3 | **Upload foto dibatasi JPEG saja** | `TitipJualPage.tsx` (frontend), `functions/api/titip-jual.js` (backend) | Frontend: `accept="image/jpeg"`, validasi tipe hanya `image/jpeg`, pesan error "Hanya foto JPG yang didukung saat ini." Backend: regex validasi diubah dari `jpeg\|jpg\|png\|webp` → `jpeg\|jpg`, error "Format foto harus JPG". Alasan: `stripExif()` di `functions/_lib/exif.js` hanya bisa strip EXIF dari JPEG — PNG (`eXIf` chunk) dan WebP (`EXIF` chunk) tidak distrip, berpotensi bocorkan GPS. |
+| 4 | **Secure flag cookie session diaktifkan** | `functions/api/_shared/jwt.js` | Baris `// 'Secure',` di `makeSessionCookie()` di-uncomment → `'Secure'` aktif. Cookie session kini HttpOnly + SameSite=Strict + **Secure** — hanya dikirim via HTTPS. Catatan: uji login lokal via `http://localhost` tidak akan menge-set cookie ini (wajar dan benar — produksi `.pages.dev` dan domain custom pakai HTTPS). |
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |

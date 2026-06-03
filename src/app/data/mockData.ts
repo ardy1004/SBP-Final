@@ -624,7 +624,7 @@ export const FAQ_DATA = [
       },
       {
         q: 'Berapa biaya (fee) jasa pemasaran SBP?',
-        a: 'Fee Open Listing: 3% dari harga deal, dibayar setelah AJB. Fee Exclusive Listing: 5% dengan keuntungan biaya iklan ditanggung SBP dan layanan prioritas. Fee Sewa: 10% dari harga deal sewa.',
+        a: 'Besaran fee jasa pemasaran disepakati bersama dan dicantumkan dalam perjanjian. Hubungi tim SBP untuk informasi lengkap.',
       },
       {
         q: 'Kapan properti saya mulai tayang di website?',
