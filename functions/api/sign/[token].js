@@ -38,7 +38,7 @@ async function hashDokumen(agr, nikPlain, signedAt) {
     `PERJANJIAN PEMASARAN PROPERTI`,
     `Kode: ${agr.kode_perjanjian}`,
     `Tanggal TTD: ${signedAt}`,
-    `Pihak Pertama: PT Salam Bumi Property`,
+    `Pihak Pertama: CV Salam Bumi Property`,
     `Pihak Kedua: ${agr.nama_ktp} (NIK: ${nikPlain})`,
     `Alamat KTP: ${agr.alamat_ktp}, ${agr.owner_kelurahan}, ${agr.owner_kecamatan}`,
     `Bertindak sebagai: ${agr.bertindak_sebagai}`,
@@ -56,14 +56,18 @@ async function hashDokumen(agr, nikPlain, signedAt) {
 
 // ─── Pasal-pasal perjanjian (spec 12.6) ──────────────────────────────────────
 function buildPasalPasal(agr) {
-  const isExclusive     = agr.jenis_listing === 'exclusive';
-  const jenisListing    = isExclusive ? 'Exclusive Listing' : 'Open Listing';
-  const durasiLabel     = agr.durasi_kontrak ? `${agr.durasi_kontrak} bulan` : 'tidak terbatas';
-  const jenisTxLabel    = agr.jenis_transaksi === 'sewa' ? 'Sewa Menyewa' : 'Jual Beli';
-  const alamatProperti  = [agr.alamat, agr.kelurahan, agr.kecamatan, agr.kabupaten, agr.provinsi].filter(Boolean).join(', ');
-  const hargaFmt        = agr.harga
+  const isExclusive    = agr.jenis_listing === 'exclusive';
+  const jenisListing   = isExclusive ? 'Exclusive Listing' : 'Open Listing';
+  const durasiLabel    = agr.durasi_kontrak ? `${agr.durasi_kontrak} bulan` : 'tidak terbatas';
+  const jenisTxLabel   = agr.jenis_transaksi === 'sewa' ? 'Sewa Menyewa' : 'Jual Beli';
+  const alamatProperti = [agr.alamat, agr.kelurahan, agr.kecamatan, agr.kabupaten, agr.provinsi].filter(Boolean).join(', ');
+  const hargaFmt       = agr.harga
     ? new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(agr.harga)
     : 'Harga negosiasi';
+  const kotaProperti   = agr.kabupaten || agr.kecamatan || 'setempat';
+
+  // Pasal 5 base — Pihak Kedua; huruf (d) hanya untuk Exclusive
+  const p5Base = 'Pihak Pertama berkewajiban: (a) memasarkan properti secara profesional dan aktif; (b) menjaga kerahasiaan data Pihak Kedua; (c) melaporkan perkembangan pemasaran secara berkala. Pihak Kedua berkewajiban: (a) memberikan informasi properti yang benar dan lengkap; (b) menyediakan akses untuk survei dan pemotretan; (c) memberitahukan kepada Pihak Pertama apabila properti telah terjual atau ditarik dari pemasaran.';
 
   return [
     {
@@ -75,33 +79,40 @@ function buildPasalPasal(agr) {
       pasal: 2,
       judul: 'JENIS LISTING & MASA KONTRAK',
       isi: isExclusive
-        ? `Perjanjian ini bersifat Exclusive Listing dengan durasi ${durasiLabel}. Selama masa kontrak, Pihak Kedua tidak diperbolehkan menunjuk agen atau perantara properti lain untuk memasarkan properti yang sama.`
-        : `Perjanjian ini bersifat Open Listing, berlaku tidak terbatas waktu. Pihak Kedua dapat menunjuk agen lain sepanjang tidak ada kesepakatan eksklusif.`,
+        ? `Perjanjian ini bersifat Exclusive Listing dengan jangka waktu ${agr.durasi_kontrak} bulan terhitung sejak tanggal penandatanganan. Selama jangka waktu tersebut, Pihak Kedua memberikan hak pemasaran secara eksklusif kepada Pihak Pertama dan tidak menunjuk agen lain maupun memasarkan sendiri di luar koordinasi dengan Pihak Pertama.`
+        : `Perjanjian ini bersifat Open Listing. Pihak Kedua berhak menunjuk agen pemasaran lain dan/atau memasarkan sendiri properti tersebut. Perjanjian berlaku sejak ditandatangani sampai properti terjual atau sampai diakhiri oleh salah satu Pihak sesuai Pasal 6.`,
     },
     {
       pasal: 3,
       judul: 'FEE PEMASARAN',
-      isi: `Pihak Kedua menyetujui fee pemasaran sebesar ${agr.fee_persen}% dari harga transaksi ${jenisTxLabel}. Fee dibayarkan paling lambat 3 (tiga) hari kerja setelah penandatanganan AJB (Akta Jual Beli); atau setelah pembayaran uang muka minimal 30% dari harga deal apabila pembayaran dilakukan secara tunai bertahap.`,
+      isi: `Pihak Kedua menyetujui fee pemasaran sebesar ${agr.fee_persen}% dari nilai transaksi ${jenisTxLabel}. Fee menjadi hak Pihak Pertama apabila transaksi terjadi dengan pembeli yang diperkenalkan, diperantarai, atau diperoleh melalui upaya pemasaran Pihak Pertama. Fee dibayarkan paling lambat 3 (tiga) hari kerja setelah penandatanganan Akta Jual Beli (AJB), atau setelah pembayaran uang muka minimal 30% dari harga kesepakatan apabila pembayaran dilakukan secara tunai bertahap.`,
     },
     {
       pasal: 4,
       judul: 'JENIS PEMASARAN',
       isi: isExclusive
-        ? `Jenis pemasaran yang disepakati adalah Exclusive Listing. Pihak Pertama berhak memasarkan properti secara penuh dan eksklusif melalui seluruh kanal pemasaran yang dimiliki, termasuk digital, media sosial, jaringan agen mitra, dan media offline selama durasi kontrak.`
-        : `Jenis pemasaran yang disepakati adalah Open Listing. Pihak Pertama berhak memasarkan properti melalui seluruh kanal yang dimiliki, tanpa pembatasan eksklusif.`,
+        ? `Pihak Pertama memperoleh hak pemasaran tunggal (eksklusif) dan berhak memasarkan properti melalui seluruh kanal yang dimilikinya. Selama masa eksklusif, seluruh pemasaran properti dikoordinasikan melalui Pihak Pertama.`
+        : `Pihak Pertama berhak memasarkan properti melalui seluruh kanal yang dimilikinya tanpa pembatasan eksklusif. Pemasaran oleh Pihak Pertama tidak menghapus hak Pihak Kedua untuk memasarkan sendiri atau melalui pihak lain.`,
     },
     {
       pasal: 5,
       judul: 'KEWAJIBAN PARA PIHAK',
-      isi: `Pihak Pertama berkewajiban: (a) memasarkan properti secara profesional dan aktif; (b) menjaga kerahasiaan data Pihak Kedua; (c) melaporkan perkembangan pemasaran secara berkala. Pihak Kedua berkewajiban: (a) memberikan informasi properti yang benar dan lengkap; (b) menyediakan akses untuk survei dan pemotretan; (c) tidak memasarkan kepada pihak lain secara eksklusif selama masa perjanjian (bila Exclusive).`,
+      isi: isExclusive
+        ? p5Base.slice(0, -1) + '; (d) tidak memasarkan properti kepada pihak lain maupun menunjuk agen lain selama jangka waktu eksklusif berlangsung.'
+        : p5Base,
     },
     {
       pasal: 6,
-      judul: 'PENYELESAIAN SENGKETA',
-      isi: `Apabila timbul perselisihan dalam pelaksanaan perjanjian ini, Para Pihak sepakat untuk menyelesaikannya secara musyawarah mufakat. Apabila musyawarah tidak mencapai kesepakatan dalam 30 (tiga puluh) hari, penyelesaian dilakukan melalui jalur hukum yang berlaku di wilayah Daerah Istimewa Yogyakarta.`,
+      judul: 'PENARIKAN PROPERTI & PENGAKHIRAN',
+      isi: `Salah satu Pihak dapat mengakhiri perjanjian ini dengan pemberitahuan tertulis kepada Pihak lain sekurang-kurangnya 14 (empat belas) hari sebelumnya. Apabila Pihak Kedua menarik properti dari pemasaran atau mengakhiri perjanjian setelah Pihak Pertama mengeluarkan biaya pemasaran yang nyata (antara lain biaya iklan, pemotretan, atau survei), Pihak Kedua mengganti biaya yang telah dikeluarkan tersebut secara wajar dan dapat dibuktikan. Apabila dalam jangka waktu 60 (enam puluh) hari setelah perjanjian berakhir properti terjual kepada pembeli yang sebelumnya telah diperkenalkan atau diperantarai oleh Pihak Pertama, Pihak Pertama tetap berhak atas fee pemasaran sebagaimana diatur dalam Pasal 3.`,
     },
     {
       pasal: 7,
+      judul: 'PENYELESAIAN SENGKETA',
+      isi: `Apabila timbul perselisihan dalam pelaksanaan perjanjian ini, Para Pihak sepakat menyelesaikannya secara musyawarah untuk mufakat. Apabila musyawarah tidak mencapai kesepakatan dalam 30 (tiga puluh) hari, Para Pihak sepakat menyelesaikannya melalui Pengadilan Negeri yang wilayah hukumnya meliputi lokasi properti objek perjanjian sebagaimana disebut dalam Pasal 1.`,
+    },
+    {
+      pasal: 8,
       judul: 'LAIN-LAIN',
       isi: `Perjanjian ini dibuat dan ditandatangani secara elektronik oleh Para Pihak dengan kesadaran penuh tanpa paksaan, dan memiliki kekuatan hukum yang sama dengan perjanjian tertulis sesuai UU ITE No. 11 Tahun 2008 dan perubahannya. Segala perubahan atas perjanjian ini hanya sah apabila dibuat secara tertulis dan disetujui oleh kedua belah pihak.`,
     },

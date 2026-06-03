@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router';
 import {
-  CheckCircle, AlertTriangle, Clock, Pen, RotateCcw,
+  CheckCircle, AlertTriangle, Clock, RotateCcw,
   FileText, Shield, ExternalLink, Loader2,
 } from 'lucide-react';
 
@@ -252,7 +252,18 @@ function Stepper() {
 // ──────────────────────────────────────────────────────────────
 // Document renderer
 // ──────────────────────────────────────────────────────────────
-function PerjanjianDocument({ data, today }: { data: AgreementData; today: string }) {
+interface PerjanjianDocumentProps {
+  data: AgreementData;
+  today: string;
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
+  hasSigned: boolean;
+  onStart: (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => void;
+  onMove:  (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => void;
+  onEnd:   () => void;
+  onClear: () => void;
+}
+
+function PerjanjianDocument({ data, today, canvasRef, hasSigned, onStart, onMove, onEnd, onClear }: PerjanjianDocumentProps) {
   const { owner, properti, pasal } = data;
 
   const alamatOwner = [
@@ -311,103 +322,78 @@ function PerjanjianDocument({ data, today }: { data: AgreementData; today: strin
       <div className="border-t border-gray-200" />
 
       {/* ── Area TTD bawah dokumen ── */}
-      <div className="grid grid-cols-2 gap-6 pt-2">
-        {/* Pihak Pertama */}
-        <div className="text-center space-y-2">
+
+      {/* MOBILE ONLY: Pihak Pertama block lengkap — disembunyikan di md+ */}
+      <div className="md:hidden text-center pt-2">
+        <p className="text-xs text-[#64748B]">Pihak Pertama,</p>
+        <p className="text-xs text-[#64748B]">CV Salam Bumi Property</p>
+        <div className="flex items-center justify-center py-4">
+          <img
+            src={TTD_ARDY_URL}
+            alt="TTD Ardy Salam"
+            className="max-h-24 max-w-full object-contain"
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+        </div>
+        <div className="border-t border-gray-400 pt-1">
+          <p className="text-xs font-semibold">Ardy Salam</p>
+          <p className="text-xs text-[#64748B]">Agent Properti</p>
+        </div>
+      </div>
+
+      {/* Baris 1: Label pihak + tombol Ulangi */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+        {/* Pihak Pertama label — desktop only */}
+        <div className="hidden md:block text-center">
           <p className="text-xs text-[#64748B]">Pihak Pertama,</p>
           <p className="text-xs text-[#64748B]">CV Salam Bumi Property</p>
-          <div className="h-20 flex items-center justify-center">
-            <img
-              src={TTD_ARDY_URL}
-              alt="TTD Ardy Salam"
-              className="max-h-16 max-w-full object-contain"
-              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-            />
-          </div>
-          <div className="border-t border-gray-400 pt-1">
-            <p className="text-xs font-semibold">Ardy Salam</p>
-            <p className="text-xs text-[#64748B]">Direktur</p>
-          </div>
         </div>
-
-        {/* Pihak Kedua — placeholder materai + label "TTD di bawah" */}
-        <div className="text-center space-y-2">
+        {/* Pihak Kedua label + Ulangi — selalu tampil */}
+        <div className="relative text-center">
           <p className="text-xs text-[#64748B]">Pihak Kedua,</p>
-          <p className="text-xs text-[#64748B]">{owner.nama_ktp}</p>
-          <div className="h-20 flex items-center justify-center">
-            <img
-              src={MATERAI_URL}
-              alt="Materai"
-              className="h-16 w-16 object-contain opacity-40"
-            />
-          </div>
-          <div className="border-t border-gray-400 pt-1">
-            <p className="text-xs text-[#94A3B8] italic">( tanda tangan di bawah )</p>
-          </div>
+          <button
+            onClick={onClear}
+            type="button"
+            className="absolute right-0 top-0 flex items-center gap-1 text-xs text-[#94A3B8] hover:text-[#EF4444] transition-colors"
+          >
+            <RotateCcw size={10} /> Ulangi
+          </button>
         </div>
       </div>
-    </div>
-  );
-}
 
-// ──────────────────────────────────────────────────────────────
-// Signature pad area (materai layer + canvas on top)
-// ──────────────────────────────────────────────────────────────
-interface SigPadProps {
-  canvasRef: React.RefObject<HTMLCanvasElement | null>;
-  hasSigned: boolean;
-  onStart: (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => void;
-  onMove:  (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => void;
-  onEnd:   () => void;
-  onClear: () => void;
-}
-
-function SignaturePad({ canvasRef, hasSigned, onStart, onMove, onEnd, onClear }: SigPadProps) {
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <Pen size={18} className="text-[#1565C0]" />
-          <span className="font-semibold text-[#0F172A]">Tanda Tangan Pihak Kedua</span>
-        </div>
-        <button
-          onClick={onClear}
-          className="flex items-center gap-1.5 text-sm text-[#64748B] hover:text-[#EF4444] transition-colors"
-          type="button"
+      {/* Baris 2: Area gambar TTD — satu kanvas untuk mobile & desktop */}
+      <div className="relative" style={{ height: 220 }}>
+        {/* TTD Ardy — desktop only, setengah kiri */}
+        <div
+          className="hidden md:flex absolute inset-y-0 left-0 items-center justify-center"
+          style={{ width: '50%' }}
         >
-          <RotateCcw size={14} /> Hapus
-        </button>
-      </div>
-
-      <p className="text-xs text-[#94A3B8] mb-3">
-        Gambar tanda tangan Anda di area abu-abu. Materai tampil sebagai latar — tanda tangan akan menimpa materai secara visual.
-      </p>
-
-      {/* Canvas area: materai layer bawah, canvas transparan di atas */}
-      <div
-        className="relative rounded-xl overflow-hidden border-2 border-dashed border-gray-200"
-        style={{ height: 220, background: '#FAFAFA' }}
-      >
-        {/* Materai — layer bawah, centered */}
+          <img
+            src={TTD_ARDY_URL}
+            alt="TTD Ardy Salam"
+            className="max-h-24 max-w-full object-contain"
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+        </div>
+        {/* Materai — tengah layar di mobile, kiri-tengah Pihak Kedua di desktop */}
         <img
           src={MATERAI_URL}
           alt="Materai"
-          className="absolute pointer-events-none select-none"
+          className="absolute pointer-events-none select-none left-[40%] md:left-[63%]"
           style={{
-            width: 120, height: 120,
-            top: '50%', left: '50%',
+            height: 125, width: 'auto',
+            top: '50%',
             transform: 'translate(-50%, -50%)',
-            opacity: 0.55,
+            opacity: 0.9,
           }}
         />
-
-        {/* Canvas — transparent, di atas materai */}
+        {/* Kanvas — satu ref, bekerja akurat di mobile & desktop via getBoundingClientRect */}
         <canvas
           ref={canvasRef}
-          width={800}
-          height={220}
+          width={1400}
+          height={440}
           className="absolute inset-0 w-full h-full touch-none cursor-crosshair"
-          style={{ zIndex: 1 }}
+          style={{ zIndex: 5 }}
           onMouseDown={onStart}
           onMouseMove={onMove}
           onMouseUp={onEnd}
@@ -418,8 +404,23 @@ function SignaturePad({ canvasRef, hasSigned, onStart, onMove, onEnd, onClear }:
         />
       </div>
 
+      {/* Baris 3: Garis + nama + jabatan */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Pihak Pertama nama — desktop only */}
+        <div className="hidden md:block text-center border-t border-gray-400 pt-1">
+          <p className="text-xs font-semibold">Ardy Salam</p>
+          <p className="text-xs text-[#64748B]">Agent Properti</p>
+        </div>
+        {/* Pihak Kedua nama — selalu tampil */}
+        <div className="text-center border-t border-gray-400 pt-1">
+          <p className="text-xs font-semibold">{owner.nama_ktp}</p>
+          <p className="text-xs text-[#64748B]">Pemilik Properti</p>
+        </div>
+      </div>
+
+      {/* Status TTD — rata tengah di bawah */}
       <p className={`text-center text-xs mt-2 transition-colors ${hasSigned ? 'text-[#10B981]' : 'text-[#94A3B8]'}`}>
-        {hasSigned ? '✓ Tanda tangan berhasil direkam' : 'Area tanda tangan di atas'}
+        {hasSigned ? '✓ TTD direkam' : 'Silahkan menggambar TTD'}
       </p>
     </div>
   );
@@ -602,19 +603,18 @@ export default function SignPage() {
           </div>
           {/* Scrollable document area */}
           <div className="p-6 max-h-[70vh] overflow-y-auto">
-            <PerjanjianDocument data={data} today={today} />
+            <PerjanjianDocument
+              data={data}
+              today={today}
+              canvasRef={canvasRef}
+              hasSigned={hasSigned}
+              onStart={startDraw}
+              onMove={draw}
+              onEnd={endDraw}
+              onClear={clearCanvas}
+            />
           </div>
         </div>
-
-        {/* Signature pad */}
-        <SignaturePad
-          canvasRef={canvasRef}
-          hasSigned={hasSigned}
-          onStart={startDraw}
-          onMove={draw}
-          onEnd={endDraw}
-          onClear={clearCanvas}
-        />
 
         {/* Consent checkbox */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
@@ -643,7 +643,7 @@ export default function SignPage() {
         {/* Disabled hints */}
         {!hasSigned && (
           <p className="text-center text-xs text-[#94A3B8]">
-            ↑ Gambar tanda tangan Anda di area di atas untuk mengaktifkan tombol kirim
+            Silahkan menggambar TTD di dokumen untuk mengaktifkan tombol kirim
           </p>
         )}
         {hasSigned && !agreed && (

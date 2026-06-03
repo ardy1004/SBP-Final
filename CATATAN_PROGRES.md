@@ -5,7 +5,7 @@
 
 ---
 
-## STATUS SAAT INI: Fase G — G3a Modul Properti (kelola+edit+status) Selesai ✅
+## STATUS SAAT INI: Fase F — Perbaikan /sign + PDF + klausul perjanjian (revisi notaris) SELESAI ✅
 
 ---
 
@@ -603,6 +603,46 @@ const buf = await resp.arrayBuffer();
 const img = await pdfDoc.embedPng(buf); // atau embedJpg
 ```
 Jika fetch gagal (404, timeout) → gunakan blok try/catch per gambar, lanjut tanpa gambar (jangan lempar).
+
+---
+
+---
+
+### Perbaikan UI /sign + PDF + Klausul Perjanjian (Revisi Notaris) ✅ SELESAI (3 Juni 2026)
+
+#### Lingkup perbaikan:
+
+**(a) SignPage.tsx — layout UI halaman /sign:**
+- Kanvas TTD bebas/luas — TTD menimpa area materai (bukan terkurung kotak sempit)
+- Materai proporsional rasio asli (gambar tidak gepeng/distorsi)
+- Dua kolom identitas Pihak Pertama / Pihak Kedua rata tengah
+- Responsif mobile/tablet: stack vertikal di layar sempit
+- Label "Agent Properti" (Pihak Pertama) dan "Pemilik Properti" (Pihak Kedua) — sebelumnya "Direktur"
+- Status machine (loading/valid/kedaluwarsa/sudah_ditandatangani/success) tampil tengah bawah
+- Tombol "Ulangi TTD" untuk hapus dan gambar ulang tanda tangan
+
+**(b) functions/_lib/pdf.js — layout PDF generator:**
+- Materai diperbesar (IMG_H 75→90, slot 20% lebih tinggi) + opacity 0.9 (sebelumnya 0.45 = pucat)
+- Rasio materai dijaga (mH × rasio asli, bukan scaleToFit kotak persegi)
+- TTD owner menimpa materai (z-order: materai dulu → owner di atas), rapi dalam kolom Pihak Kedua
+- Label "Agent Properti" (sebelumnya "Direktur") di bawah nama Ardy Salam
+- Nama owner tidak duplikat: hanya muncul SEKALI di bawah garis (sebelumnya muncul 2x)
+- Alamat akta: "Jl. Pajajaran, Dabag, Condongcatur, Depok, Sleman, Daerah Istimewa Yogyakarta" — tanpa label "(Virtual Office)"
+
+**(c) functions/api/sign/[token].js — buildPasalPasal — 8 pasal revisi notaris:**
+- Hash dokumen: `PT Salam Bumi Property` diperbaiki → `CV Salam Bumi Property` (badan hukum benar)
+- **Pasal 2** BERCABANG: Open = berlaku s.d. terjual atau diakhiri sesuai Pasal 6; Exclusive = jangka waktu durasi_kontrak bulan eksplisit
+- **Pasal 3** penambahan pemicu fee: fee hak Pihak Pertama jika pembeli diperkenalkan/diperantarai — sebelumnya hanya teks pembayaran
+- **Pasal 4** BERCABANG: Open = tidak menutup hak Pihak Kedua pasarkan sendiri; Exclusive = hak tunggal eksklusif
+- **Pasal 5** BUG TUNTAS — huruf (d) eksklusivitas ("tidak memasarkan kepada pihak lain...") HANYA muncul jika Exclusive; sebelumnya string `(bila Exclusive)` tercetak di semua jenis listing
+- **Pasal 6 BARU** — PENARIKAN PROPERTI & PENGAKHIRAN: notice 14 hari, ganti rugi biaya nyata (iklan/pemotretan/survei), tail period 60 hari → Pasal 3
+- **Pasal 7** forum penyelesaian sengketa = PN **lokasi properti** (bukan "Daerah Istimewa Yogyakarta" generik); merujuk ke Pasal 1
+- **Pasal 8** (ex-Pasal 7) — UU ITE No. 11/2008 dipertahankan persis, nomor digeser
+
+#### Catatan arsitektur:
+- **SATU SUMBER teks pasal:** `buildPasalPasal(agr)` di `[token].js` = sumber tunggal. Dikonsumsi oleh halaman web `/sign` (via GET response JSON) DAN pdf.js (via param `pasalList`). Perubahan teks pasal cukup di satu tempat.
+- **Klausul disetujui notaris** — rumusan final Pasal 1-8 sudah direview & disetujui notaris sebelum di-tanam.
+- **TODO produksi:** materai yang ditampilkan (gambar `hg.png`) adalah gambar materai, BUKAN e-meterai resmi PERURI. Penggunaan gambar materai = keputusan sadar owner yang harus dipahami sebelum perjanjian digunakan secara hukum formal.
 
 ---
 

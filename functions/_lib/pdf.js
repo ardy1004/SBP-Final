@@ -186,8 +186,8 @@ export async function generateAgreementPDF({ agr, nikPlain, signedAt, auditIp, a
   drawRawText('PIHAK PERTAMA — AGEN', col1X, y1, { f: fB, sz: 8, col: C.gray }); y1 -= 8 * 1.6;
   drawRawText('CV Salam Bumi Property', col1X, y1, { f: fB, sz: 9 }); y1 -= 9 * 1.6;
   for (const s of [
-    'Jl. Pajajaran, Catur Tunggal, Depok,',
-    'Sleman, DI Yogyakarta (Virtual Office)',
+    'Jl. Pajajaran, Dabag, Condongcatur,',
+    'Depok, Sleman, Daerah Istimewa Yogyakarta',
     'WA: 0813-9127-8889',
     'Email: salambumiproperty@gmail.com',
     'Website: salambumi.xyz',
@@ -229,15 +229,15 @@ export async function generateAgreementPDF({ agr, nikPlain, signedAt, auditIp, a
   drawHRule();
 
   // ─── TANDA TANGAN ─────────────────────────────────────────────────────────
-  ensurePage(160);
+  ensurePage(180);
   const SIG_TOP  = y;
-  const IMG_H    = 75;
+  const IMG_H    = 90;
   // Image slot starts below two label lines (each ~14pt)
   const IMG_Y    = SIG_TOP - 14 - 14 - IMG_H;
   const LINE_Y1  = IMG_Y - 6;
   const LINE_Y2  = IMG_Y - 6;
 
-  // Left column — Pihak Pertama (Ardy)
+  // Left column - Pihak Pertama (Ardy)
   drawRawText('Pihak Pertama,',         col1X, SIG_TOP,      { sz: 9, col: C.gray });
   drawRawText('CV Salam Bumi Property', col1X, SIG_TOP - 14, { f: fB, sz: 9 });
   if (imgArdy) {
@@ -247,17 +247,18 @@ export async function generateAgreementPDF({ agr, nikPlain, signedAt, auditIp, a
     drawRawText('[TTD]', col1X + 10, IMG_Y + IMG_H / 2, { sz: 8, col: C.gray });
   }
   page.drawLine({ start: { x: col1X, y: LINE_Y1 }, end: { x: col1X + colW, y: LINE_Y1 }, thickness: 0.5, color: C.lgray });
-  drawRawText('Ardy Salam', col1X, LINE_Y1 - 14, { f: fB, sz: 9 });
-  drawRawText('Direktur',   col1X, LINE_Y1 - 26, { sz: 8, col: C.gray });
+  drawRawText('Ardy Salam',     col1X, LINE_Y1 - 14, { f: fB, sz: 9 });
+  drawRawText('Agent Properti', col1X, LINE_Y1 - 26, { sz: 8, col: C.gray });
 
-  // Right column — Pihak Kedua (materai + owner TTD)
-  drawRawText('Pihak Kedua,', col2X, SIG_TOP,      { sz: 9, col: C.gray });
-  drawRawText(agr.nama_ktp,   col2X, SIG_TOP - 14, { f: fB, sz: 9 });
+  // Right column - Pihak Kedua (materai + owner TTD)
+  drawRawText('Pihak Kedua,', col2X, SIG_TOP, { sz: 9, col: C.gray });
   if (imgMaterai) {
-    const d = imgMaterai.scaleToFit(IMG_H, IMG_H);
+    // Preserve aspect ratio at full slot height; materai drawn first (under owner TTD)
+    const mH = IMG_H;
+    const mW = mH * (imgMaterai.width / imgMaterai.height);
     page.drawImage(imgMaterai, {
-      x: col2X + (colW - d.width) / 2, y: IMG_Y,
-      width: d.width, height: d.height, opacity: 0.45,
+      x: col2X + (colW - mW) / 2, y: IMG_Y,
+      width: mW, height: mH, opacity: 0.9,
     });
   }
   if (imgOwner) {
@@ -268,7 +269,7 @@ export async function generateAgreementPDF({ agr, nikPlain, signedAt, auditIp, a
     drawRawText('[TTD Pemilik]', col2X + 10, IMG_Y + IMG_H / 2, { sz: 8, col: C.gray });
   }
   page.drawLine({ start: { x: col2X, y: LINE_Y2 }, end: { x: col2X + colW, y: LINE_Y2 }, thickness: 0.5, color: C.lgray });
-  drawRawText(agr.nama_ktp,    col2X, LINE_Y2 - 14, { f: fB, sz: 9 });
+  drawRawText(agr.nama_ktp,       col2X, LINE_Y2 - 14, { f: fB, sz: 9 });
   drawRawText('Pemilik Properti', col2X, LINE_Y2 - 26, { sz: 8, col: C.gray });
 
   y = Math.min(LINE_Y1, LINE_Y2) - 42;
