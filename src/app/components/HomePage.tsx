@@ -2,9 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router';
 import { Search, ChevronDown, ChevronLeft, ChevronRight, Star, ArrowRight, Shield, CheckCircle, Scale, Handshake, TrendingUp, Clock, BarChart2, AlertCircle, RefreshCw } from 'lucide-react';
 import useEmblaCarousel from 'embla-carousel-react';
-import { LOCATION_HIERARCHY } from '../data/mockData';
 import {
-  getProperties, normalizeProperty, type NormalizedProperty, formatRupiah,
+  getProperties, getLocations, normalizeProperty,
+  type NormalizedProperty, type ApiLocation, formatRupiah,
   getTestimonials, type ApiTestimonial,
   getBlogPosts, type ApiBlogPost,
 } from '../../lib/api';
@@ -330,17 +330,41 @@ function TestimonialsSection({ items }: { items: ApiTestimonial[] }) {
 /* ── HERO FILTER ── */
 function HeroFilter() {
   const [tab, setTab] = useState<'dijual' | 'disewa'>('dijual');
-  const [prov, setProv] = useState('');
-  const [kab, setKab] = useState('');
-  const [kec, setKec] = useState('');
-  const [kel, setKel] = useState('');
   const [jenis, setJenis] = useState('');
+  const [prov, setProv] = useState('');
+  const [provId, setProvId] = useState<number | null>(null);
+  const [kab, setKab] = useState('');
+  const [kabupatenId, setKabupatenId] = useState<number | null>(null);
+  const [kec, setKec] = useState('');
+  const [provList, setProvList] = useState<ApiLocation[]>([]);
+  const [kabList, setKabList] = useState<ApiLocation[]>([]);
+  const [kecList, setKecList] = useState<ApiLocation[]>([]);
+  const [locLoading, setLocLoading] = useState(true);
   const navigate = useNavigate();
 
-  const loc = LOCATION_HIERARCHY['DI Yogyakarta'];
-  const kabList = prov ? Object.keys(loc[prov as keyof typeof loc] || {}) : [];
-  const kecList = prov && kab ? Object.keys((loc[prov as keyof typeof loc] as Record<string, Record<string, string[]>>)?.[kab] || {}) : [];
-  const kelList = prov && kab && kec ? ((loc[prov as keyof typeof loc] as Record<string, Record<string, string[]>>)?.[kab]?.[kec] || []) : [];
+  // Load semua provinsi saat mount
+  useEffect(() => {
+    setLocLoading(true);
+    getLocations().then(res => {
+      if (res.success && res.data) setProvList(res.data.items);
+    }).catch(() => {}).finally(() => setLocLoading(false));
+  }, []);
+
+  // Load kabupaten saat provinsi dipilih
+  useEffect(() => {
+    if (!provId) { setKabList([]); setKecList([]); setKab(''); setKabupatenId(null); setKec(''); return; }
+    getLocations(provId).then(res => {
+      if (res.success && res.data) setKabList(res.data.items);
+    });
+  }, [provId]);
+
+  // Load kecamatan saat kabupaten dipilih
+  useEffect(() => {
+    if (!kabupatenId) { setKecList([]); setKec(''); return; }
+    getLocations(kabupatenId).then(res => {
+      if (res.success && res.data) setKecList(res.data.items);
+    });
+  }, [kabupatenId]);
 
   const handleSearch = () => {
     const params = new URLSearchParams();
@@ -349,7 +373,6 @@ function HeroFilter() {
     if (prov) params.set('provinsi', prov);
     if (kab) params.set('kabupaten', kab);
     if (kec) params.set('kecamatan', kec);
-    if (kel) params.set('kelurahan', kel);
     navigate(`/properties?${params.toString()}`);
   };
 
@@ -386,63 +409,70 @@ function HeroFilter() {
           <ChevronDown size={14} className="absolute right-3 bottom-3 text-gray-400 pointer-events-none" />
         </div>
 
-        {/* Provinsi */}
+        {/* Provinsi — dari API, semua provinsi */}
         <div className="relative">
           <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Provinsi</label>
           <select
-            value={prov}
-            onChange={e => { setProv(e.target.value); setKab(''); setKec(''); setKel(''); }}
+            value={provId ?? ''}
+            onChange={e => {
+              const id = parseInt(e.target.value, 10) || null;
+              const found = provList.find(p => p.id === id);
+              setProvId(id);
+              setProv(found?.nama ?? '');
+              setKab(''); setKabupatenId(null); setKec('');
+            }}
             className={selectClass}
+            disabled={locLoading}
           >
-            <option value="">Semua Provinsi</option>
-            <option value="DI Yogyakarta">DI Yogyakarta</option>
+            <option value="">{locLoading ? 'Memuat…' : 'Semua Provinsi'}</option>
+            {provList.map(p => <option key={p.id} value={p.id}>{p.nama}</option>)}
           </select>
           <ChevronDown size={14} className="absolute right-3 bottom-3 text-gray-400 pointer-events-none" />
         </div>
 
-        {/* Kabupaten */}
+        {/* Kabupaten — dari API, cascade dari provinsi */}
         <div className="relative">
           <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Kab./Kota</label>
           <select
             value={kab}
-            onChange={e => { setKab(e.target.value); setKec(''); setKel(''); }}
+            onChange={e => {
+              const nama = e.target.value;
+              const found = kabList.find(k => k.nama === nama);
+              setKab(nama);
+              setKabupatenId(found?.id ?? null);
+              setKec('');
+            }}
             className={selectClass}
-            disabled={!prov}
+            disabled={!provId}
           >
             <option value="">Semua Kab./Kota</option>
-            {kabList.map(k => <option key={k} value={k}>{k}</option>)}
+            {kabList.map(k => <option key={k.id} value={k.nama}>{k.nama}</option>)}
           </select>
           <ChevronDown size={14} className="absolute right-3 bottom-3 text-gray-400 pointer-events-none" />
         </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
-        {/* Kecamatan */}
+        {/* Kecamatan — dari API, cascade dari kabupaten */}
         <div className="relative">
           <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Kecamatan</label>
           <select
             value={kec}
-            onChange={e => { setKec(e.target.value); setKel(''); }}
+            onChange={e => setKec(e.target.value)}
             className={selectClass}
             disabled={!kab}
           >
             <option value="">Semua Kecamatan</option>
-            {kecList.map(k => <option key={k} value={k}>{k}</option>)}
+            {kecList.map(k => <option key={k.id} value={k.nama}>{k.nama}</option>)}
           </select>
           <ChevronDown size={14} className="absolute right-3 bottom-3 text-gray-400 pointer-events-none" />
         </div>
 
-        {/* Kelurahan */}
+        {/* Kel./Desa — placeholder, API tidak menyediakan level ini */}
         <div className="relative">
           <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Kel./Desa</label>
-          <select
-            value={kel}
-            onChange={e => setKel(e.target.value)}
-            className={selectClass}
-            disabled={!kec}
-          >
+          <select className={selectClass} disabled>
             <option value="">Semua Kel./Desa</option>
-            {kelList.map(k => <option key={k} value={k}>{k}</option>)}
           </select>
           <ChevronDown size={14} className="absolute right-3 bottom-3 text-gray-400 pointer-events-none" />
         </div>
