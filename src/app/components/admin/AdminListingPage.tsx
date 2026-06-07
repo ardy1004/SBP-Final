@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Filter, ChevronDown, Edit } from 'lucide-react';
+import { Search, Filter, ChevronDown, Edit, Plus } from 'lucide-react';
 
 interface PropertyRow {
   id: number;
@@ -94,6 +94,13 @@ export default function AdminListingPage() {
             {loading ? 'Memuat…' : `${filtered.length} properti ditampilkan`}
           </p>
         </div>
+        <button
+          onClick={() => navigate('/admin/listing/new')}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+          style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
+        >
+          <Plus size={15} /> Tambah Properti
+        </button>
       </div>
 
       {/* Filter bar */}

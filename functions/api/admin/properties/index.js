@@ -1,10 +1,36 @@
-// GET /api/admin/properties — semua properti semua status + cover image
-// ?status=draft|published|sold|archived  (opsional)
+// GET  /api/admin/properties — semua properti + cover image
+// POST /api/admin/properties — buat properti baru (draft)
 // Auth: _middleware.js
 
-import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+import { jsonOk, jsonCreated, jsonError, handleOptions } from '../../_shared/response.js';
 
 const VALID_STATUSES = new Set(['draft', 'published', 'sold', 'archived']);
+const VALID_JENIS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
+const VALID_TUJUAN = ['dijual','disewa','dijual_disewa'];
+
+function sanitize(val, max = 500) {
+  if (typeof val !== 'string') return '';
+  return val.replace(/<[^>]*>/g, '').replace(/[<>"'`]/g, '').trim().slice(0, max);
+}
+
+function slugify(text) {
+  return text.toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function today8() {
+  const d = new Date();
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth()+1).padStart(2,'0')}${String(d.getUTCDate()).padStart(2,'0')}`;
+}
+
+async function nextPropSeq(db, prefix) {
+  const row = await db.prepare('SELECT COUNT(*) as cnt FROM properties WHERE kode_listing LIKE ?').bind(`${prefix}%`).first();
+  return String((row?.cnt ?? 0) + 1).padStart(3, '0');
+}
 
 export async function onRequestGet(context) {
   const { request, env } = context;
@@ -51,6 +77,68 @@ export async function onRequestGet(context) {
   } catch (err) {
     console.error('[admin properties list]', err.message);
     return jsonError('Gagal mengambil data properti', 500);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// POST /api/admin/properties — buat properti baru (draft)
+// ═══════════════════════════════════════════════════════════════════
+export async function onRequestPost(context) {
+  const { request, env } = context;
+
+  const ct = request.headers.get('content-type') ?? '';
+  if (!ct.includes('application/json')) return jsonError('Content-Type harus application/json', 415);
+
+  let body;
+  try { body = await request.json(); }
+  catch { return jsonError('Body JSON tidak valid', 400); }
+
+  const title        = sanitize(body.title ?? '', 200);
+  const jenis        = sanitize(body.jenis_properti ?? '', 30);
+  const tujuan       = sanitize(body.tujuan ?? '', 20);
+  const harga        = body.harga != null ? parseInt(String(body.harga), 10) : 0;
+  const kecamatan    = sanitize(body.kecamatan ?? '', 100);
+  const kabupaten    = sanitize(body.kabupaten ?? '', 100);
+  const provinsi     = sanitize(body.provinsi ?? 'DI Yogyakarta', 100) || 'DI Yogyakarta';
+
+  const errors = {};
+  if (!title)                    errors.title          = 'Judul properti wajib diisi';
+  if (!VALID_JENIS.includes(jenis))  errors.jenis_properti = 'jenis_properti tidak valid';
+  if (!VALID_TUJUAN.includes(tujuan)) errors.tujuan        = 'tujuan harus: dijual, disewa, atau dijual_disewa';
+  if (!Number.isInteger(harga) || harga < 0) errors.harga  = 'Harga harus angka non-negatif';
+  if (Object.keys(errors).length > 0) return jsonError('Validasi gagal', 422, errors);
+
+  const date8  = today8();
+  const prefix = `SBP-${date8}-`;
+
+  let kode_listing, slug;
+  try {
+    const seq    = await nextPropSeq(env.DB, prefix);
+    kode_listing = `${prefix}${seq}`;
+    const rand   = Array.from(crypto.getRandomValues(new Uint8Array(3)))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+    const base   = slugify(title);
+    slug         = base ? `${base}-${rand}` : `properti-${rand}`;
+  } catch (err) {
+    console.error('[admin property POST] generate kode:', err.message);
+    return jsonError('Gagal generate kode listing', 500);
+  }
+
+  try {
+    const result = await env.DB.prepare(`
+      INSERT INTO properties
+        (kode_listing, title, slug, jenis_properti, tujuan, harga,
+         provinsi, kabupaten, kecamatan, kelurahan, alamat,
+         status_publish, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,  ?,?,?,?,?,  'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    `).bind(kode_listing, title, slug, jenis, tujuan, harga,
+            provinsi, kabupaten, kecamatan, '', '').run();
+
+    const newId = result.meta?.last_row_id;
+    return jsonCreated({ id: newId, kode_listing, slug });
+  } catch (err) {
+    console.error('[admin property POST]', err.message);
+    return jsonError('Gagal menyimpan properti', 500);
   }
 }
 

@@ -110,6 +110,7 @@ const selectCls = `${inputCls} bg-white cursor-pointer`;
 export default function AdminPropertyDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const isNew = id === 'new';
 
   const [property, setProperty] = useState<PropertyDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -136,6 +137,14 @@ export default function AdminPropertyDetailPage() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   const loadProperty = useCallback(async () => {
+    if (id === 'new') {
+      setForm({ title: '', jenis_properti: 'rumah', tujuan: 'dijual', harga: 0,
+        provinsi: 'DI Yogyakarta', kabupaten: '', kecamatan: '', kelurahan: '',
+        alamat: '', nego: 0, nett: 0, badge_premium: 0, badge_featured: 0,
+        badge_hot: 0, properti_pilihan: 0, verified: 0 });
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setFetchError('');
     try {
@@ -146,6 +155,7 @@ export default function AdminPropertyDetailPage() {
       setProperty(data);
       setPhotos(data.images ?? []);
       setForm({
+        title: data.title,
         jenis_properti: data.jenis_properti,
         tujuan: data.tujuan,
         harga: data.harga,
@@ -199,6 +209,26 @@ export default function AdminPropertyDetailPage() {
     setSaveMsg('');
     setSaveError('');
     try {
+      if (id === 'new') {
+        const res = await fetch('/api/admin/properties', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            title: form.title ?? '',
+            jenis_properti: form.jenis_properti,
+            tujuan: form.tujuan,
+            harga: form.harga ?? 0,
+            kecamatan: form.kecamatan ?? '',
+            kabupaten: form.kabupaten ?? '',
+            provinsi: form.provinsi ?? 'DI Yogyakarta',
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+        navigate(`/admin/listing/${json.data.id}`);
+        return;
+      }
       const body: Record<string, unknown> = {
         jenis_properti: form.jenis_properti,
         tujuan: form.tujuan,
@@ -341,7 +371,7 @@ export default function AdminPropertyDetailPage() {
     );
   }
 
-  if (fetchError || !property) {
+  if (!isNew && (fetchError || !property)) {
     return (
       <div className="space-y-4">
         <button onClick={() => navigate('/admin/listing')} className="flex items-center gap-2 text-sm text-[#64748B] hover:text-[#0F172A]">
@@ -355,7 +385,9 @@ export default function AdminPropertyDetailPage() {
     );
   }
 
-  const currentBadge = STATUS_BADGE[property.status_publish] ?? { label: property.status_publish, cls: 'bg-gray-100 text-gray-500 border border-gray-200' };
+  const currentBadge = isNew
+    ? STATUS_BADGE['draft']
+    : (STATUS_BADGE[property!.status_publish] ?? { label: property!.status_publish, cls: 'bg-gray-100 text-gray-500 border border-gray-200' });
 
   return (
     <div className="space-y-5 max-w-4xl">
@@ -365,17 +397,22 @@ export default function AdminPropertyDetailPage() {
           <ArrowLeft size={20} />
         </button>
         <div className="flex-1 min-w-0">
-          <h1 className="font-display text-xl font-bold text-[#0F172A] line-clamp-2">{property.title}</h1>
-          <div className="flex flex-wrap items-center gap-2 mt-1">
-            <span className="text-xs text-[#94A3B8]">{property.kode_listing}</span>
-            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${currentBadge.cls}`}>
-              {currentBadge.label}
-            </span>
-          </div>
+          <h1 className="font-display text-xl font-bold text-[#0F172A] line-clamp-2">
+            {isNew ? 'Buat Properti Baru' : property!.title}
+          </h1>
+          {!isNew && (
+            <div className="flex flex-wrap items-center gap-2 mt-1">
+              <span className="text-xs text-[#94A3B8]">{property!.kode_listing}</span>
+              <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${currentBadge.cls}`}>
+                {currentBadge.label}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
       {/* ── STATUS CARD ── */}
+      {!isNew && (
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
         <h2 className="font-semibold text-[#0F172A] text-sm mb-3">Status Publikasi</h2>
         <div className="flex flex-wrap items-end gap-3">
@@ -401,13 +438,13 @@ export default function AdminPropertyDetailPage() {
           </div>
           <button
             onClick={handleStatusSave}
-            disabled={statusSaving || statusPending === property.status_publish}
+            disabled={statusSaving || statusPending === property!.status_publish}
             className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-[#1565C0] disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#1e40af] transition-colors"
           >
             {statusSaving ? 'Menyimpan…' : 'Terapkan Status'}
           </button>
         </div>
-        {statusPending === 'archived' && statusPending !== property.status_publish && (
+        {statusPending === 'archived' && statusPending !== property!.status_publish && (
           <p className="mt-2 text-xs text-amber-600 flex items-center gap-1">
             <AlertTriangle size={12} />
             Properti akan disembunyikan dari semua halaman publik (soft-delete, data tidak dihapus).
@@ -415,16 +452,23 @@ export default function AdminPropertyDetailPage() {
         )}
         {statusMsg && <p className="mt-2 text-xs text-emerald-600">{statusMsg}</p>}
         {statusError && <p className="mt-2 text-xs text-red-600">{statusError}</p>}
-        {property.published_at && (
-          <p className="mt-2 text-xs text-[#94A3B8]">Pertama dipublish: {new Date(property.published_at).toLocaleString('id-ID')}</p>
+        {property!.published_at && (
+          <p className="mt-2 text-xs text-[#94A3B8]">Pertama dipublish: {new Date(property!.published_at).toLocaleString('id-ID')}</p>
         )}
       </div>
+      )}
 
       {/* ── EDIT FORM ── */}
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
         <h2 className="font-semibold text-[#0F172A] text-sm mb-4">Detail Properti</h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
+            <Field label="Judul Listing *">
+              <input type="text" value={form.title ?? ''} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className={inputCls} placeholder="Judul listing properti" />
+            </Field>
+          </div>
+
           <Field label="Jenis Properti">
             <select value={form.jenis_properti ?? ''} onChange={e => setForm(f => ({ ...f, jenis_properti: e.target.value }))} className={selectCls}>
               {JENIS_OPTIONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
@@ -599,7 +643,7 @@ export default function AdminPropertyDetailPage() {
             style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
           >
             <Save size={15} />
-            {saving ? 'Menyimpan…' : 'Simpan Perubahan'}
+            {saving ? 'Menyimpan…' : isNew ? 'Buat Properti' : 'Simpan Perubahan'}
           </button>
           {saveMsg && <span className="text-sm text-emerald-600 font-medium">{saveMsg}</span>}
           {saveError && <span className="text-sm text-red-600">{saveError}</span>}
@@ -607,6 +651,12 @@ export default function AdminPropertyDetailPage() {
       </div>
 
       {/* ── GALERI FOTO ── */}
+      {isNew ? (
+        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 text-center py-8">
+          <ImageOff size={28} className="mx-auto mb-2 text-[#E2E8F0]" />
+          <p className="text-sm text-[#64748B]">Simpan dulu untuk mulai upload foto.</p>
+        </div>
+      ) : (
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-[#0F172A] text-sm">Galeri Foto ({photos.length})</h2>
@@ -689,6 +739,7 @@ export default function AdminPropertyDetailPage() {
           <p className="text-xs text-[#94A3B8] italic">Upload foto baru: segera tersedia (G3b)</p>
         </div>
       </div>
+      )}
     </div>
   );
 }
