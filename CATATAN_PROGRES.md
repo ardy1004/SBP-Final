@@ -1321,6 +1321,54 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 
 ---
 
+## Admin Gelombang 2 Modul 3 — CSV Import Properti (lokal, belum commit)
+
+**Branch:** `feat/admin-csv-import`
+**Tanggal:** 7 Juni 2026
+**Status:** ✅ Build sukses + API test lulus — **BELUM DI-COMMIT**
+
+### Yang dibangun:
+
+| File | Perubahan |
+|---|---|
+| `functions/api/admin/properties/batch.js` | Baru — POST /api/admin/properties/batch: partial import, max 500 baris, validasi per-baris, kode_listing+slug otomatis, report errors |
+| `src/app/components/admin/CsvImportModal.tsx` | Baru — modal upload CSV: template download, papaparse parse, preview 5 baris, validasi client-side, submit ke batch endpoint, laporan hasil per-baris |
+| `src/app/components/admin/AdminListingPage.tsx` | Diubah — tambah tombol "Import CSV" + state modal |
+
+### Dependency baru:
+- `papaparse ^5.5.3` (runtime) + `@types/papaparse` (dev) — CSV parser dengan dukungan quoted fields, BOM Excel, skipEmptyLines
+
+### Arsitektur:
+- **Parse di browser** (FileReader → papaparse → JSON) — user lihat preview sebelum submit
+- **Partial insert intentional** — baris valid masuk DB, baris gagal dilaporkan (bukan all-or-nothing)
+- **Template CSV (16 kolom):** `title, jenis_properti, tujuan, harga, provinsi, kabupaten, kecamatan, kelurahan, luas_tanah, luas_bangunan, jumlah_kamar_tidur, jumlah_kamar_mandi, legalitas, deskripsi, nego, nett`
+
+### Hasil API test (wrangler port 8790):
+
+| Test | Hasil |
+|---|---|
+| POST /batch tanpa auth | ✅ 401 "Sesi tidak ditemukan" |
+| POST 2 baris valid + 1 baris invalid (jenis_properti=xyz) | ✅ `{inserted:2, errors:[{row:3,...}], total:3}` |
+| Verifikasi DB — 2 properti draft masuk | ✅ "Rumah Test CSV Sleman" + "Tanah Kavling Bantul" |
+| npm run build | ✅ 0 error |
+
+### Catatan teknis:
+- Import path `'../../_shared/response.js'` dari `functions/api/admin/properties/` (sama dengan index.js di folder yang sama)
+- `nextPropSeq()` dipanggil per-baris — COUNT re-runs setelah tiap INSERT sehingga kode sequential benar
+- `skipBom:true` + `transformHeader: h => h.trim().replace(/^﻿/, '')` — handle file Excel dengan BOM
+
+---
+
+## Modul berikutnya (Gelombang 3)
+
+| Prioritas | Modul | Status |
+|---|---|---|
+| 1 | **Blog CMS** — CRUD blog posts (draft/publish, rich text, slug auto) + halaman detail publik `/blog/:slug` | Belum |
+| 2 | **Portfolio** — CRUD portfolio items + halaman publik `/portfolio` | Belum |
+| 3 | **Upload Foto Properti G3b** — drag & drop + WebP resize di Admin Properti | Belum |
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |
