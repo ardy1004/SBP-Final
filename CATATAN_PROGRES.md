@@ -1321,6 +1321,69 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 
 ---
 
+## Gelombang 3 Modul 2 — Form Overhaul AdminPropertyDetailPage
+
+**Branch:** `feat/admin-form-overhaul`
+**Tanggal:** 7 Juni 2026
+
+### Apa yang dikerjakan:
+
+1. **Ekstrak PropertyPhotosCard.tsx** — section foto (~134 baris) dipindah ke komponen terpisah `src/app/components/admin/PropertyPhotosCard.tsx`. Props: `{propertyId, isNew, initialPhotos}`. AdminPropertyDetailPage turun dari 904 → ~530 baris.
+
+2. **Form dinamis kondisional per jenis properti:**
+   - Jenis Properti → field dimensi/detail muncul sesuai jenis
+   - `rumah`: luas_tanah, luas_bangunan, lebar_depan, lantai, KT, KM
+   - `tanah`: luas_tanah, lebar_depan saja
+   - `kost`: jenis_kost (details JSON), dimensi lengkap, sewa kamar, pengeluaran
+   - `hotel`: jenis_hotel (details JSON), dimensi, sewa kamar, income, pengeluaran
+   - `homestay/villa`: dimensi, sewa kamar, income, pengeluaran
+   - `apartment`: no_unit (details JSON), luas_bangunan, lantai, KT, KM, furnished
+   - `gudang/komersial`: luas_tanah, luas_bangunan, lebar_depan
+   - `ruko`: luas_tanah, luas_bangunan, lebar_depan, lantai
+
+3. **Harga kondisional per tujuan:**
+   - Dijual → harga penawaran + nego/nett + harga_lama
+   - Disewakan → harga_sewa_tahun saja
+   - Dijual & Disewakan → keduanya
+   - Harga lama diisi → `badge_hot` auto-centang
+
+4. **Lingkungan kondisional:** radio Jauh/Dekat Sungai/Dekat Makam/Dekat Sutet → input jarak_*_m muncul sesuai pilihan
+
+5. **details JSON:** `jenis_kost`, `jenis_hotel`, `no_unit` disimpan ke kolom `details` sebagai JSON. Load dari `data.details` saat edit, dikelola via `detailsMap` state + helper `getDetail(key)` / `setDetail(key, val)`.
+
+6. **Fix bug title di PATCH:** `title` sebelumnya ada di form UI tapi tidak dikirim ke backend. Sekarang fix di dua tempat:
+   - `handleSave` (frontend): `title` masuk PATCH body
+   - `functions/api/admin/properties/[id]/index.js`: `title` ditambah ke validasi PATCH (sanitize max 200 char, wajib diisi)
+
+7. **Field baru:** `jarak_sungai_m`, `jarak_makam_m`, `jarak_sutet_m` sudah ada di PATCH endpoint, sekarang juga ada di form state + body
+
+8. **status_sold badge:** ditambah ke boolFields PATCH endpoint + form UI. Overlay merah di PropertyCard (frontend publik) → **TODO** (catat di bawah).
+
+9. **POST endpoint:** tambah support `details` ke INSERT properti baru.
+
+### File yang diubah:
+
+| File | Perubahan |
+|------|-----------|
+| `src/app/components/admin/AdminPropertyDetailPage.tsx` | Full overhaul: form dinamis, details, lingkungan, bug fix title, 904→530 baris |
+| `src/app/components/admin/PropertyPhotosCard.tsx` | **BARU** — komponen foto terpisah |
+| `functions/api/admin/properties/[id]/index.js` | Tambah title ke PATCH, status_sold ke boolFields |
+| `functions/api/admin/properties/index.js` | Tambah details ke INSERT POST |
+
+### TODO (belum dikerjakan):
+
+- **SOLD overlay di PropertyCard** (frontend publik): badge `status_sold=1` belum menampilkan overlay diagonal merah di card tampilan publik. Ini sub-tugas terpisah.
+- **Lokasi cascade dropdown**: saat ini masih text input. Dropdown kecamatan/kabupaten berdasarkan data wilayah Indonesia adalah sub-modul terpisah.
+
+### Verifikasi:
+
+| Test | Hasil |
+|---|---|
+| `npm run build` | ✅ 0 error, built in ~18s |
+| Build client + server | ✅ sukses |
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |

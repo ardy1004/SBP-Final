@@ -98,6 +98,12 @@ export async function onRequestPatch(context) {
   const pairs = [];
 
   // ─── Field validations ──────────────────────────────────────────
+  if (body.title !== undefined) {
+    const v = sanitize(String(body.title ?? ''), 200);
+    if (!v) errors.title = 'Judul properti wajib diisi';
+    else pairs.push({ col: 'title', val: v });
+  }
+
   if (body.jenis_properti !== undefined) {
     const v = sanitize(body.jenis_properti, 30);
     if (!VALID_JENIS.includes(v)) errors.jenis_properti = 'jenis_properti tidak valid';
@@ -193,7 +199,7 @@ export async function onRequestPatch(context) {
     }
   }
 
-  const boolFields = ['badge_premium','badge_featured','badge_hot','properti_pilihan','verified'];
+  const boolFields = ['badge_premium','badge_featured','badge_hot','properti_pilihan','verified','status_sold'];
   for (const f of boolFields) {
     if (body[f] !== undefined) pairs.push({ col: f, val: body[f] ? 1 : 0 });
   }
