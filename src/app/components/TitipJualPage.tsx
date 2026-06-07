@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router';
-import { Check, ChevronRight, Upload, X, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { Check, ChevronRight, Upload, X, AlertCircle } from 'lucide-react';
 import { getLocations, type ApiLocation } from '../../lib/api';
 import { PROPERTY_TYPES } from '../../lib/propertyTypes';
 
@@ -19,7 +19,6 @@ interface Step1State {
   ahli_waris_sepakat: boolean;
   ahli_waris_kuasa: boolean;
   ahli_waris_turun: boolean;
-  gmaps: string;
   no_wa: string;
   no_wa_2: string;
 }
@@ -93,9 +92,8 @@ function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
     nama_ktp: '', nik: '', alamat_ktp: '', rt_rw: '',
     kelurahan: '', kecamatan: '', prov_owner: '', bertindak: '',
     ahli_waris_jumlah: '', ahli_waris_sepakat: false, ahli_waris_kuasa: false, ahli_waris_turun: false,
-    gmaps: '', no_wa: '', no_wa_2: '',
+    no_wa: '', no_wa_2: '',
   });
-  const [showNIK, setShowNIK] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const f = (k: keyof Step1State, v: string | boolean) =>
@@ -111,7 +109,6 @@ function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
     if (!form.kelurahan) e.kelurahan = 'Kelurahan wajib diisi';
     if (!form.kecamatan) e.kecamatan = 'Kecamatan wajib diisi';
     if (!form.bertindak) e.bertindak = 'Wajib dipilih';
-    if (!form.gmaps) e.gmaps = 'Link Google Maps properti wajib diisi';
     if (!form.no_wa) e.no_wa = 'Nomor WhatsApp wajib diisi';
     else if (!/^(0|62|8)\d{8,12}$/.test(form.no_wa.replace(/\D/g, ''))) e.no_wa = 'Nomor WhatsApp tidak valid';
     return e;
@@ -140,20 +137,14 @@ function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
         {/* NIK */}
         <div>
           <label className="block text-xs font-semibold text-[#64748B] mb-1">NIK (KTP) *</label>
-          <div className="relative">
-            <input
-              type={showNIK ? 'text' : 'password'}
-              value={form.nik}
-              onChange={e => { f('nik', e.target.value.replace(/\D/g, '').slice(0, 16)); clearErr('nik'); }}
-              placeholder="16 digit NIK"
-              className={inputCls(errors.nik)}
-            />
-            <button type="button" onClick={() => setShowNIK(v => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-              {showNIK ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
-          </div>
-          <p className="text-xs text-gray-400 mt-0.5">NIK dienkripsi dan tidak pernah ditampilkan kembali.</p>
+          <input
+            type="text"
+            value={form.nik}
+            onChange={e => { f('nik', e.target.value.replace(/\D/g, '').slice(0, 16)); clearErr('nik'); }}
+            placeholder="16 digit NIK"
+            className={inputCls(errors.nik)}
+          />
+          <p className="text-xs text-gray-400 mt-0.5">NIK dienkripsi untuk keamanan data Anda.</p>
           <FieldErr msg={errors.nik} />
         </div>
 
@@ -247,15 +238,6 @@ function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
             ))}
           </div>
         )}
-
-        {/* Google Maps Properti */}
-        <div>
-          <label className="block text-xs font-semibold text-[#64748B] mb-1">Link Google Maps Properti *</label>
-          <input value={form.gmaps} onChange={e => { f('gmaps', e.target.value); clearErr('gmaps'); }}
-            placeholder="https://maps.google.com/..." className={inputCls(errors.gmaps)} />
-          <p className="text-xs text-gray-400 mt-0.5">Buka Google Maps → share link → paste di sini.</p>
-          <FieldErr msg={errors.gmaps} />
-        </div>
 
         {/* No WA */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -356,6 +338,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
   const [bankAgunan, setBankAgunan] = useState('');
   const [outstanding, setOutstanding] = useState('');
   const [lingkungan, setLingkungan] = useState('');
+  const [gmaps, setGmaps] = useState('');
   const [infoTambahan, setInfoTambahan] = useState('');
   const [alasanJual, setAlasanJual]     = useState('');
   // Jenis-specific
@@ -486,7 +469,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         kelurahan_owner:  step1.kelurahan,
         kecamatan_owner:  step1.kecamatan,
         bertindak_sebagai: step1.bertindak,
-        gmaps_link:       step1.gmaps,
+        gmaps_link:       gmaps || undefined,
         no_wa:            step1.no_wa,
         no_wa_2:          step1.no_wa_2 || undefined,
         data_ahli_waris:  step1.bertindak === 'ahli_waris' ? {
@@ -747,6 +730,14 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
           <label className="block text-xs font-semibold text-[#64748B] mb-1">Alamat Lengkap Properti <span className="font-normal text-gray-400">(Opsional)</span></label>
           <textarea value={alamat} onChange={e => setAlamat(e.target.value)} rows={2}
             placeholder="Nomor, nama jalan, RT/RW — tidak ditampilkan publik" className={`${inputCls()} resize-none`} />
+        </div>
+
+        {/* Google Maps Properti */}
+        <div>
+          <label className="block text-xs font-semibold text-[#64748B] mb-1">Link Google Maps Properti <span className="font-normal text-gray-400">(Opsional)</span></label>
+          <input value={gmaps} onChange={e => setGmaps(e.target.value)}
+            placeholder="https://maps.google.com/..." className={inputCls()} />
+          <p className="text-xs text-gray-400 mt-0.5">Buka Google Maps → cari properti → share link → paste di sini.</p>
         </div>
 
         {/* Lebar Jalan */}
