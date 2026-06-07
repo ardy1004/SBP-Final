@@ -57,6 +57,7 @@ export interface ApiPropertyListItem {
   updated_at: string;
   cover_url: string | null;
   cover_alt: string | null;
+  images_raw: string | null;  // GROUP_CONCAT url_webp dipisah '|||' (maks 5) — untuk slider card
 }
 
 export interface ApiPagination {
@@ -212,7 +213,9 @@ export function normalizeProperty(p: ApiPropertyListItem) {
     status_legalitas: p.status_legalitas ?? undefined,
     furnished: p.furnished ?? undefined,
     deskripsi: '',  // tidak ada di response list
-    images: p.cover_url ? [`/api/media?key=${encodeURIComponent(p.cover_url)}`] : [],
+    images: p.images_raw
+      ? p.images_raw.split('|||').map(u => `/api/media?key=${encodeURIComponent(u)}`)
+      : (p.cover_url ? [`/api/media?key=${encodeURIComponent(p.cover_url)}`] : []),
     badge_premium: Boolean(p.badge_premium),
     badge_featured: Boolean(p.badge_featured),
     badge_hot: Boolean(p.badge_hot),

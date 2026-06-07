@@ -96,7 +96,11 @@ export async function onRequestGet(context) {
       (SELECT url_webp FROM property_images
          WHERE property_id = p.id ORDER BY is_cover DESC, urutan ASC LIMIT 1) AS cover_url,
       (SELECT alt_text  FROM property_images
-         WHERE property_id = p.id ORDER BY is_cover DESC, urutan ASC LIMIT 1) AS cover_alt
+         WHERE property_id = p.id ORDER BY is_cover DESC, urutan ASC LIMIT 1) AS cover_alt,
+      (SELECT GROUP_CONCAT(url_webp, '|||') FROM (
+         SELECT url_webp FROM property_images
+           WHERE property_id = p.id ORDER BY is_cover DESC, urutan ASC LIMIT 5
+       )) AS images_raw
     FROM properties p
     WHERE ${where}
     ORDER BY ${orderBy}
