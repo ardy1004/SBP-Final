@@ -18,7 +18,7 @@
 - Styling: Tailwind CSS v4 + shadcn/ui (47 primitif Radix)
 - Data: 100% mock di `src/app/data/mockData.ts`
 - Admin Dashboard: baru 3 dari 13 modul (Overview, Listing, Leads)
-- Credential hardcoded: `admin@salambumi.id / sbpadmin2024` di `AdminLoginPage.tsx` + NIK mock di `SignPage.tsx` → **ditangani di fase keamanan**
+- Credential hardcoded: `admin@salambumi.id / [mock password lama]` di `AdminLoginPage.tsx` + NIK mock di `SignPage.tsx` → **ditangani di fase keamanan**
 
 ### Yang dilakukan:
 - [x] Git init + `.gitignore` + commit pertama (`9eeee36`)
@@ -79,7 +79,7 @@
 
 ### Admin seed:
 - Email: `admin@salambumi.id`
-- Password: `SbpAdmin2024!` (disimpan sebagai bcrypt cost-12, bukan plaintext)
+- Password: [lihat .dev.vars lokal] (disimpan sebagai bcrypt cost-12, bukan plaintext)
 - ⚠️ **Ganti password ini sebelum production via Admin Dashboard**
 
 ### Catatan teknis penting:
@@ -708,7 +708,7 @@ Klik Keluar                  → POST /api/admin/logout → redirect /admin/logi
 
 #### Catatan teknis penting:
 
-- **Kredensial LOCAL dev:** `admin@salambumi.id` / `SbpAdmin2024!` (seed migration `0003_seed_dummy.sql`)
+- **Kredensial LOCAL dev:** `admin@salambumi.id` / [lihat .dev.vars lokal] (seed migration `0003_seed_dummy.sql`)
 - **Kredensial PRODUKSI:** `salambumiproperty@gmail.com` (akun berbeda — pastikan admin produksi dikonfigurasi dengan benar sebelum go-live via seed atau endpoint `PUT /api/admin/password` di G2)
 - **401 dari `GET /api/admin/me` sebelum login adalah NORMAL** — ini cara guard mendeteksi sesi kosong/tidak valid, bukan bug. Jangan alert atau log sebagai error.
 - **Fase F masih di branch `feat/fase-f-agreements` dan belum di-merge ke main.** G1 di-commit di branch yang sama. Merge ke main dilakukan setelah semua Fase F + Fase G selesai direview.
@@ -1412,9 +1412,9 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 | PUT password_baru ≠ konfirmasi | ✅ 400 "Password baru dan konfirmasi tidak cocok" |
 | PUT password_baru < 8 karakter | ✅ 400 "Password baru minimal 8 karakter" |
 | PUT password_lama salah | ✅ 401 "Password lama salah" |
-| PUT berhasil (uji → SbpTest2024!) | ✅ 200 "Password berhasil diubah" |
+| PUT berhasil (uji → [password-uji]) | ✅ 200 "Password berhasil diubah" |
 | Login dengan password baru | ✅ 200 login sukses |
-| Restore ke SbpAdmin2024! | ✅ 200 password dikembalikan |
+| Restore ke [password-asli] | ✅ 200 password dikembalikan |
 | Login dengan password asli | ✅ 200 login sukses |
 | npm run build | ✅ 0 error |
 
@@ -1432,6 +1432,6 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 | Cloudflare account_id | `f1bac4af6572062bfcf88549ed59c823` |
 | R2 bucket | `sbp-media` |
 | Admin email (dev) | `admin@salambumi.id` |
-| Admin password (dev) | `SbpAdmin2024!` ← **ganti sebelum prod** |
+| Admin password (dev) | [lihat .dev.vars lokal] ← **ganti sebelum prod** |
 | Wrangler version | 4.94.0 |
 | Node.js | 24.16.0 |
