@@ -1241,6 +1241,45 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 
 ---
 
+## Fix Field Sync Admin ↔ TitipJual ✅ SELESAI (lokal)
+
+**Branch:** `feat/admin-field-sync`
+**Tanggal:** 7 Juni 2026
+
+### Yang diperbaiki:
+
+| # | Isu | File | Fix |
+|---|---|---|---|
+| 1 | **Legalitas opsi mismatch** | `AdminPropertyDetailPage.tsx` | Ganti `LEGALITAS_OPTIONS` dari short-code ke string panjang identik TitipJual. Hapus `.toUpperCase()`. |
+| 2 | **`furnished` tidak tersimpan dari TitipJual** | `functions/api/titip-jual.js` | Ekstrak `kelengkapan` dari `detailsObj`, simpan juga ke kolom `furnished` dalam INSERT. `details.kelengkapan` tetap dipertahankan. |
+| 3 | **`outstanding_bank` tidak ada di admin** | `AdminPropertyDetailPage.tsx` + `[id]/index.js` | Tambah field ke interface, form state, PATCH body, UI. Tambah ke `numericFields` di PATCH endpoint. |
+| 4 | **`meta_title` + `meta_description` tidak ada di admin** | `AdminPropertyDetailPage.tsx` | Tambah ke interface, form state, PATCH body, section SEO baru di form. |
+
+### Nilai legalitas standar (setelah fix):
+
+`SHM & IMB/PBG Lengkap` · `SHGB & IMB/PBG Lengkap` · `SHM Pekarangan Tanpa IMB/PBG` · `SHM Sawah/Tegalan` · `SHGB Tanpa IMB/PBG` · `Girik/Letter C/PPJB/dll` · `Izin Usaha`
+
+> ⚠️ Data lama di DB pakai short-code (`shm`, `shgb`, dll) — perlu update manual atau skrip sebelum produksi.
+
+### Gap BELUM diperbaiki (backlog):
+
+| Gap | Prioritas |
+|---|---|
+| `ruko` di PROPERTY_TYPES tapi tidak di DB CHECK constraint | 🔴 P1 — butuh migrasi |
+| Data lama legalitas short-code perlu diupdate di DB | 🟡 P2 |
+| Filter Advanced (legalitas, furnished) di PropertiesPage belum ke API | 🟡 P3 |
+| `details` JSON (jenis_kost, no_unit) tidak bisa diedit di admin | 🟡 P3 |
+| `jarak_sungai_m/makam_m/sutet_m` tidak di form manapun | 🟡 P3 |
+| `latitude`, `longitude` tidak di form manapun | 🟡 P3 |
+
+### Verifikasi:
+
+| Test | Hasil |
+|---|---|
+| `npm run build` | ✅ 0 error, built in 887ms |
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |

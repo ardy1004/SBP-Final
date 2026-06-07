@@ -34,6 +34,7 @@ interface PropertyDetail {
   legalitas: string | null;
   status_legalitas: string | null;
   bank_agunan: string | null;
+  outstanding_bank: number | null;
   furnished: string | null;
   provinsi: string | null;
   kabupaten: string | null;
@@ -56,6 +57,8 @@ interface PropertyDetail {
   verified: number;
   status_publish: string;
   published_at: string | null;
+  meta_title: string | null;
+  meta_description: string | null;
   details: Record<string, unknown> | null;
   images: PropertyImage[];
 }
@@ -64,7 +67,11 @@ interface PropertyDetail {
 
 const JENIS_OPTIONS = PROPERTY_TYPES;
 const TUJUAN_OPTIONS = ['dijual','disewa','dijual_disewa'];
-const LEGALITAS_OPTIONS = ['shm','shgb','shp','girik','letter_c','akte_jual_beli','hak_pakai','lainnya'];
+const LEGALITAS_OPTIONS = [
+  'SHM & IMB/PBG Lengkap','SHGB & IMB/PBG Lengkap',
+  'SHM Pekarangan Tanpa IMB/PBG','SHM Sawah/Tegalan',
+  'SHGB Tanpa IMB/PBG','Girik/Letter C/PPJB/dll','Izin Usaha',
+];
 const STATUS_LEGALITAS_OPTIONS: { value: string; label: string }[] = [
   { value: 'on_hand', label: 'On Hand (bersih)' },
   { value: 'on_bank', label: 'On Bank (agunan)' },
@@ -172,6 +179,7 @@ export default function AdminPropertyDetailPage() {
         legalitas: data.legalitas,
         status_legalitas: data.status_legalitas,
         bank_agunan: data.bank_agunan,
+        outstanding_bank: data.outstanding_bank,
         furnished: data.furnished,
         provinsi: data.provinsi,
         kabupaten: data.kabupaten,
@@ -184,6 +192,8 @@ export default function AdminPropertyDetailPage() {
         info_tambahan: data.info_tambahan,
         alasan_dijual: data.alasan_dijual,
         video_youtube: data.video_youtube,
+        meta_title: data.meta_title,
+        meta_description: data.meta_description,
         income_per_bulan: data.income_per_bulan,
         pengeluaran_per_bulan: data.pengeluaran_per_bulan,
         harga_sewa_kamar_bulan: data.harga_sewa_kamar_bulan,
@@ -246,6 +256,7 @@ export default function AdminPropertyDetailPage() {
         legalitas: form.legalitas ?? null,
         status_legalitas: form.status_legalitas ?? null,
         bank_agunan: form.bank_agunan ?? null,
+        outstanding_bank: form.outstanding_bank ?? null,
         furnished: form.furnished ?? null,
         provinsi: form.provinsi ?? null,
         kabupaten: form.kabupaten ?? null,
@@ -258,6 +269,8 @@ export default function AdminPropertyDetailPage() {
         info_tambahan: form.info_tambahan ?? null,
         alasan_dijual: form.alasan_dijual ?? null,
         video_youtube: form.video_youtube ?? null,
+        meta_title: form.meta_title ?? null,
+        meta_description: form.meta_description ?? null,
         income_per_bulan: form.income_per_bulan ?? null,
         pengeluaran_per_bulan: form.pengeluaran_per_bulan ?? null,
         harga_sewa_kamar_bulan: form.harga_sewa_kamar_bulan ?? null,
@@ -496,7 +509,7 @@ export default function AdminPropertyDetailPage() {
           <Field label="Legalitas">
             <select value={form.legalitas ?? ''} onChange={e => setForm(f => ({ ...f, legalitas: e.target.value || null }))} className={selectCls}>
               <option value="">— pilih —</option>
-              {LEGALITAS_OPTIONS.map(l => <option key={l} value={l}>{l.toUpperCase()}</option>)}
+              {LEGALITAS_OPTIONS.map(l => <option key={l} value={l}>{l}</option>)}
             </select>
           </Field>
 
@@ -544,6 +557,10 @@ export default function AdminPropertyDetailPage() {
 
           <Field label="Bank Agunan">
             <input type="text" value={form.bank_agunan ?? ''} onChange={e => setForm(f => ({ ...f, bank_agunan: e.target.value || null }))} className={inputCls} placeholder="Nama bank jika ada agunan" />
+          </Field>
+
+          <Field label="Sisa KPR / Hutang Bank (Rp)">
+            <input type="number" min={0} value={form.outstanding_bank ?? ''} onChange={e => setForm(f => ({ ...f, outstanding_bank: e.target.value ? parseInt(e.target.value) : null }))} className={inputCls} placeholder="Kosong jika lunas" />
           </Field>
         </div>
 
@@ -632,6 +649,17 @@ export default function AdminPropertyDetailPage() {
               </label>
             ))}
           </div>
+        </div>
+
+        {/* SEO */}
+        <div className="mt-5 pt-4 border-t border-gray-100 space-y-4">
+          <h3 className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">SEO (Opsional)</h3>
+          <Field label="Meta Title">
+            <input type="text" value={form.meta_title ?? ''} onChange={e => setForm(f => ({ ...f, meta_title: e.target.value || null }))} className={inputCls} placeholder="Judul halaman untuk mesin pencari" />
+          </Field>
+          <Field label="Meta Description">
+            <textarea value={form.meta_description ?? ''} onChange={e => setForm(f => ({ ...f, meta_description: e.target.value || null }))} rows={3} className={`${inputCls} resize-y`} placeholder="Deskripsi singkat untuk Google ~150 karakter" />
+          </Field>
         </div>
 
         {/* Save button */}

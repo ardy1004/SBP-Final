@@ -134,7 +134,7 @@ export async function onRequestPatch(context) {
   const numericFields = [
     'luas_tanah','luas_bangunan','lebar_depan','lantai',
     'jumlah_kamar_tidur','jumlah_kamar_mandi',
-    'jarak_sungai_m','jarak_makam_m','jarak_sutet_m','lebar_jalan_m',
+    'outstanding_bank','jarak_sungai_m','jarak_makam_m','jarak_sutet_m','lebar_jalan_m',
     'income_per_bulan','pengeluaran_per_bulan','harga_sewa_kamar_bulan',
   ];
   for (const f of numericFields) {
