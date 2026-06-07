@@ -1364,6 +1364,10 @@ npx wrangler d1 execute sbp-db --remote --file=migrations/0010_add_property_view
 | `GET /api/admin/overview` | ✅ 200, field `views_per_hari` (30 elemen) hadir |
 | DB lokal | ✅ Row: `property_id=1, tanggal=2026-06-07, views=1, wa_clicks=1` |
 
+### Fix (commit berikutnya):
+
+> **Fix: upsert `property_view_daily` dipindah ke SSR loader `property-detail.tsx`** (REST API endpoint `[slug].js` tidak dipanggil saat halaman dirender via SSR — hanya loader yang berjalan). Pakai `ctx.waitUntil` jika tersedia, fallback ke fire-and-forget. File: `src/app/routes/property-detail.tsx`.
+
 ---
 
 ## REFERENSI CEPAT

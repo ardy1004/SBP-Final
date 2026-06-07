@@ -136,6 +136,16 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
     };
 
     const property = normalizePropertyDetail(apiDetail);
+
+    // Fire-and-forget view tracking — non-blocking, jangan tunda response SSR
+    const ctx = (context as any)?.cloudflare?.ctx;
+    const trackPromise = db.prepare(`
+      INSERT INTO property_view_daily (property_id, tanggal, views)
+      VALUES (?, DATE('now','localtime'), 1)
+      ON CONFLICT(property_id, tanggal) DO UPDATE SET views = views + 1
+    `).bind(r.id).run().catch((e: Error) => console.error('[views_daily loader]', e.message));
+    if (ctx?.waitUntil) ctx.waitUntil(trackPromise);
+
     return { property };
   } catch (e) {
     if (e instanceof Response) throw e;
