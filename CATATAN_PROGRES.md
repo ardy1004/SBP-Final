@@ -9,6 +9,32 @@
 
 ---
 
+## Meta SEO auto-generate + SOLD overlay PropertyCard ✅ (branch: feat/meta-seo-sold)
+
+**Tanggal:** 7 Juni 2026
+
+### Yang dilakukan:
+
+**Meta SEO auto-generate:**
+- Dibuat `functions/_lib/metaSeo.js` — helper `generateMetaSeo({ jenis_properti, tujuan, harga, kecamatan, kabupaten, luas_tanah, luas_bangunan, nego })` → `{ meta_title, meta_description }`
+- Format `meta_title`: `[Jenis] [Tujuan] di [Kecamatan], [Kabupaten] - [Harga] | Salam Bumi Property` — max 60 karakter (potong + `...` jika melebihi)
+- Format `meta_description`: kalimat lengkap dari data tersedia — max 155 karakter
+- Format harga: `Rp X Miliar` / `Rp X Juta` / `Rp X Ribu` (desimal dengan koma, hanya jika tidak bulat)
+- Diterapkan di 2 endpoint INSERT:
+  - `functions/api/titip-jual.js` — selalu generate (owner tidak mengisi meta)
+  - `functions/api/admin/properties/index.js` (POST manual) — generate hanya jika `body.meta_title` kosong; jika sudah diisi admin, tidak di-overwrite
+- **Catatan:** `batch.js` (CSV import) belum ada di codebase, akan diterapkan saat endpoint dibuat
+- **Catatan penting:** Meta yang sudah ada di DB tidak diupdate — hanya properti baru yang INSERT setelah ini yang mendapat meta SEO otomatis
+
+**SOLD overlay PropertyCard:**
+- Diubah di `src/app/components/PropertyCard.tsx` (sekitar baris 96–103)
+- Kondisi: `status_sold === true` ATAU `status_publish === 'sold'`
+- Overlay: `div absolute inset-0 bg-red-600/30` (opacity 30%) + teks `SOLD` diagonal `rotate-[-35deg]`, font-black, drop-shadow
+- Tipe `status_publish` di `mockData.ts` diperluas: `'published' | 'draft' | 'sold' | 'archived'`
+- Hanya visual — tidak ada perubahan data/logik
+
+---
+
 ## FASE A — Analisis & Setup Git ✅ SELESAI
 
 **Tanggal:** 1 Juni 2026
