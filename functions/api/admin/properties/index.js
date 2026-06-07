@@ -124,15 +124,20 @@ export async function onRequestPost(context) {
     return jsonError('Gagal generate kode listing', 500);
   }
 
+  let detailsVal = null;
+  if (body.details != null && typeof body.details === 'object') {
+    try { detailsVal = JSON.stringify(body.details); } catch { /* ignore */ }
+  }
+
   try {
     const result = await env.DB.prepare(`
       INSERT INTO properties
         (kode_listing, title, slug, jenis_properti, tujuan, harga,
          provinsi, kabupaten, kecamatan, kelurahan, alamat,
-         status_publish, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,  ?,?,?,?,?,  'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+         details, status_publish, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,  ?,?,?,?,?,  ?, 'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     `).bind(kode_listing, title, slug, jenis, tujuan, harga,
-            provinsi, kabupaten, kecamatan, '', '').run();
+            provinsi, kabupaten, kecamatan, '', '', detailsVal).run();
 
     const newId = result.meta?.last_row_id;
     return jsonCreated({ id: newId, kode_listing, slug });

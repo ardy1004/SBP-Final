@@ -1359,13 +1359,41 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 
 ---
 
-## Modul berikutnya (Gelombang 3)
+## Gelombang 3 Modul 2 — Form Overhaul AdminPropertyDetailPage
 
-| Prioritas | Modul | Status |
-|---|---|---|
-| 1 | **Blog CMS** — CRUD blog posts (draft/publish, rich text, slug auto) + halaman detail publik `/blog/:slug` | Belum |
-| 2 | **Portfolio** — CRUD portfolio items + halaman publik `/portfolio` | Belum |
-| 3 | **Upload Foto Properti G3b** — drag & drop + WebP resize di Admin Properti | Belum |
+**Branch:** `feat/admin-form-overhaul`
+**Tanggal:** 7 Juni 2026
+
+### Apa yang dikerjakan:
+
+1. **Ekstrak PropertyPhotosCard.tsx** — section foto (~134 baris) dipindah ke komponen terpisah `src/app/components/admin/PropertyPhotosCard.tsx`. Props: `{propertyId, isNew, initialPhotos}`. AdminPropertyDetailPage turun dari 904 → ~530 baris.
+
+2. **Form dinamis kondisional per jenis properti:**
+   - `rumah`: luas_tanah, luas_bangunan, lebar_depan, lantai, KT, KM
+   - `tanah`: luas_tanah, lebar_depan saja
+   - `kost`: jenis_kost (details JSON), dimensi lengkap, sewa kamar, pengeluaran
+   - `hotel`: jenis_hotel (details JSON), dimensi, sewa kamar, income, pengeluaran
+   - `homestay/villa`: dimensi, sewa kamar, income, pengeluaran
+   - `apartment`: no_unit (details JSON), luas_bangunan, lantai, KT, KM, furnished
+   - `gudang/komersial`: luas_tanah, luas_bangunan, lebar_depan
+   - `ruko`: luas_tanah, luas_bangunan, lebar_depan, lantai
+
+3. **Harga kondisional per tujuan** + lingkungan kondisional + details JSON + fix bug title di PATCH + status_sold + POST support details
+
+### File yang diubah:
+
+| File | Perubahan |
+|------|-----------|
+| `src/app/components/admin/AdminPropertyDetailPage.tsx` | Full overhaul: form dinamis, details, lingkungan, bug fix title, 904→530 baris |
+| `src/app/components/admin/PropertyPhotosCard.tsx` | **BARU** — komponen foto terpisah |
+| `functions/api/admin/properties/[id]/index.js` | Tambah title ke PATCH, status_sold ke boolFields |
+| `functions/api/admin/properties/index.js` | Tambah details ke INSERT POST |
+
+### Verifikasi:
+
+| Test | Hasil |
+|---|---|
+| `npm run build` | ✅ 0 error, built in ~18s |
 
 ---
 
