@@ -1301,6 +1301,26 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 
 ---
 
+## Fix Homepage: Cover Image + Hero Overlay ✅ SELESAI (lokal)
+
+**Branch:** `master`
+**Tanggal:** 7 Juni 2026
+
+### Yang diperbaiki:
+
+| # | Isu | File | Fix |
+|---|---|---|---|
+| 1 | **cover_url null di SSR loader homepage** | `src/app/routes/home.tsx` | Subquery `AND is_cover=1` → `ORDER BY is_cover DESC, urutan ASC` (fallback ke foto pertama) |
+| 2 | **Hero overlay terlalu gelap** | `src/app/components/HomePage.tsx` | Opacity dikurangi: `0.92/0.72/0.88` → `0.52/0.35/0.48` |
+
+### Verifikasi:
+
+| Test | Hasil |
+|---|---|
+| `npm run build` | ✅ 0 error, built in 959ms |
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |
