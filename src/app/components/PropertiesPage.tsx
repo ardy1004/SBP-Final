@@ -93,6 +93,8 @@ export default function PropertiesPage() {
   const [page, setPage] = useState(1);
 
   // ── Location cascade state ────────────────────────────────────────────────
+  const [provList, setProvList] = useState<ApiLocation[]>([]);
+  const [provId, setProvId] = useState<number | null>(null);
   const [kabList, setKabList] = useState<ApiLocation[]>([]);
   const [kecList, setKecList] = useState<ApiLocation[]>([]);
   const [locLoading, setLocLoading] = useState(true);
@@ -104,30 +106,29 @@ export default function PropertiesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Load kabupaten via cascading API on mount ─────────────────────────────
+  // ── Load provinces on mount ───────────────────────────────────────────────
   useEffect(() => {
     setLocLoading(true);
-    // Ambil provinsi (parent_id kosong) → ambil id DIY → ambil kabupaten
-    getLocations().then(provRes => {
-      if (!provRes.success || !provRes.data?.items.length) {
-        setLocLoading(false);
-        return;
-      }
-      const diy = provRes.data.items[0]; // Hanya 1 provinsi di DB: DI Yogyakarta
-      getLocations(diy.id).then(kabRes => {
-        if (kabRes.success && kabRes.data) {
-          const list = kabRes.data.items;
-          setKabList(list);
-          // Sync kabupatenId dari URL param jika ada
-          const urlKab = searchParams.get('kabupaten');
-          if (urlKab) {
-            const found = list.find(k => k.nama.toLowerCase() === urlKab.toLowerCase());
-            if (found) setKabupatenId(found.id);
-          }
-        }
-      }).finally(() => setLocLoading(false));
-    }).catch(() => setLocLoading(false));
+    getLocations().then(res => {
+      if (res.success && res.data) setProvList(res.data.items);
+    }).catch(() => {}).finally(() => setLocLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Load kabupaten saat provinsi dipilih ──────────────────────────────────
+  useEffect(() => {
+    if (!provId) { setKabList([]); setKecList([]); setKabupaten(''); setKabupatenId(null); setKecamatan(''); return; }
+    getLocations(provId).then(res => {
+      if (res.success && res.data) {
+        const list = res.data.items;
+        setKabList(list);
+        const urlKab = searchParams.get('kabupaten');
+        if (urlKab) {
+          const found = list.find(k => k.nama.toLowerCase() === urlKab.toLowerCase());
+          if (found) setKabupatenId(found.id);
+        }
+      }
+    });
+  }, [provId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Fetch kecamatan saat kabupaten berubah ────────────────────────────────
   useEffect(() => {
@@ -178,6 +179,11 @@ export default function PropertiesPage() {
     setPage(1);
   };
 
+  const handleProvChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const id = parseInt(e.target.value, 10) || null;
+    setProvId(id); setKabupaten(''); setKabupatenId(null); setKecamatan(''); setPage(1);
+  };
+
   const handleKabChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const nama = e.target.value;
     const found = kabList.find(k => k.nama === nama);
@@ -191,6 +197,7 @@ export default function PropertiesPage() {
     setTujuan('semua');
     setSelectedJenis([]);
     setHargaRange(0);
+    setProvId(null);
     setKabupaten('');
     setKabupatenId(null);
     setKecamatan('');
@@ -271,13 +278,20 @@ export default function PropertiesPage() {
         <label className="block text-xs font-semibold text-[#64748B] uppercase tracking-wide mb-2">Lokasi</label>
         <div className="space-y-2">
           <div className="relative">
+            <select value={provId ?? ''} onChange={handleProvChange} className={selectClass} disabled={locLoading}>
+              <option value="">{locLoading ? 'Memuat…' : 'Semua Provinsi'}</option>
+              {provList.map(p => <option key={p.id} value={p.id}>{p.nama}</option>)}
+            </select>
+            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          </div>
+          <div className="relative">
             <select
               value={kabupaten}
               onChange={handleKabChange}
               className={selectClass}
-              disabled={locLoading}
+              disabled={!provId}
             >
-              <option value="">{locLoading ? 'Memuat lokasi…' : 'Semua Kab./Kota'}</option>
+              <option value="">Semua Kab./Kota</option>
               {kabList.map(k => <option key={k.id} value={k.nama}>{k.nama}</option>)}
             </select>
             <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router';
 import {
   LayoutDashboard, List, Users, LogOut, Menu, X, Bell, Shield,
-  FileText, Star, BookOpen, Briefcase, Image, Settings,
+  FileText, Star, BookOpen, Briefcase, Image, Settings, MapPin,
 } from 'lucide-react';
 
 interface AdminUser {
@@ -68,6 +68,7 @@ export default function AdminLayout() {
     { to: '/admin/portfolio', label: 'Portfolio', icon: Briefcase, end: false, badge: 0 },
     { to: '/admin/media', label: 'Media', icon: Image, end: false, badge: 0 },
     { to: '/admin/pengaturan', label: 'Pengaturan', icon: Settings, end: false, badge: 0 },
+    { to: '/admin/lokasi', label: 'Lokasi', icon: MapPin, end: false, badge: 0 },
   ];
 
   const initials = admin?.nama

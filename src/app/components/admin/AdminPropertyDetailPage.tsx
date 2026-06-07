@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { ArrowLeft, Save, Star, Trash2, ImageOff, AlertTriangle, ChevronDown, ChevronUp, Upload } from 'lucide-react';
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
+import { getLocations, type ApiLocation } from '../../../lib/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -154,6 +155,14 @@ export default function AdminPropertyDetailPage() {
   const [saveMsg, setSaveMsg] = useState('');
   const [saveError, setSaveError] = useState('');
 
+  // Location cascade
+  const [provList, setProvList] = useState<ApiLocation[]>([]);
+  const [kabList, setKabList] = useState<ApiLocation[]>([]);
+  const [kecList, setKecList] = useState<ApiLocation[]>([]);
+  const [provId, setProvId] = useState<number | null>(null);
+  const [kabId, setKabId] = useState<number | null>(null);
+  const locationInitRef = useRef(false);
+
   // Status
   const [statusPending, setStatusPending] = useState<StatusValue | ''>('');
   const [statusSaving, setStatusSaving] = useState(false);
@@ -172,6 +181,8 @@ export default function AdminPropertyDetailPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadProperty = useCallback(async () => {
+    locationInitRef.current = false;
+    setProvId(null); setKabId(null); setKabList([]); setKecList([]);
     if (id === 'new') {
       setForm({ title: '', jenis_properti: 'rumah', tujuan: 'dijual', harga: 0,
         provinsi: 'DI Yogyakarta', kabupaten: '', kecamatan: '', kelurahan: '',
@@ -240,6 +251,53 @@ export default function AdminPropertyDetailPage() {
   }, [id]);
 
   useEffect(() => { loadProperty(); }, [loadProperty]);
+
+  // ─── Location cascade ─────────────────────────────────────────────
+  useEffect(() => {
+    getLocations().then(res => { if (res.success && res.data) setProvList(res.data.items); });
+  }, []);
+
+  useEffect(() => {
+    if (locationInitRef.current || !provList.length || !form?.provinsi) return;
+    const prov = provList.find(p => p.nama === form.provinsi);
+    if (!prov) return;
+    locationInitRef.current = true;
+    setProvId(prov.id);
+  }, [provList, form?.provinsi]); // eslint-disable-line
+
+  useEffect(() => {
+    if (!provId) { setKabList([]); setKecList([]); setKabId(null); return; }
+    getLocations(provId).then(res => {
+      if (!res.success || !res.data) return;
+      const list = res.data.items;
+      setKabList(list);
+      if (form?.kabupaten) {
+        const kab = list.find(k => k.nama === form.kabupaten);
+        if (kab) setKabId(kab.id);
+      }
+    });
+  }, [provId]); // eslint-disable-line
+
+  useEffect(() => {
+    if (!kabId) { setKecList([]); return; }
+    getLocations(kabId).then(res => { if (res.success && res.data) setKecList(res.data.items); });
+  }, [kabId]);
+
+  const handleProvChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const id = parseInt(e.target.value, 10) || null;
+    const nama = provList.find(p => p.id === id)?.nama ?? null;
+    setProvId(id); setKabId(null); setKabList([]); setKecList([]);
+    setForm(f => ({ ...f, provinsi: nama, kabupaten: null, kecamatan: null }));
+  };
+  const handleKabChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const nama = e.target.value || null;
+    const found = kabList.find(k => k.nama === nama);
+    setKabId(found?.id ?? null); setKecList([]);
+    setForm(f => ({ ...f, kabupaten: nama, kecamatan: null }));
+  };
+  const handleKecChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setForm(f => ({ ...f, kecamatan: e.target.value || null }));
+  };
 
   // ─── Save field changes ───────────────────────────────────────────
   const handleSave = async () => {
@@ -656,13 +714,22 @@ export default function AdminPropertyDetailPage() {
           <h3 className="text-xs font-semibold text-[#64748B] uppercase tracking-wide mb-3">Lokasi</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Provinsi">
-              <input type="text" value={form.provinsi ?? ''} onChange={e => setForm(f => ({ ...f, provinsi: e.target.value || null }))} className={inputCls} />
+              <select value={provId ?? ''} onChange={handleProvChange} className={selectCls}>
+                <option value="">-- Pilih Provinsi --</option>
+                {provList.map(p => <option key={p.id} value={p.id}>{p.nama}</option>)}
+              </select>
             </Field>
             <Field label="Kabupaten / Kota">
-              <input type="text" value={form.kabupaten ?? ''} onChange={e => setForm(f => ({ ...f, kabupaten: e.target.value || null }))} className={inputCls} />
+              <select value={form.kabupaten ?? ''} onChange={handleKabChange} className={selectCls} disabled={!provId}>
+                <option value="">-- Pilih Kabupaten --</option>
+                {kabList.map(k => <option key={k.id} value={k.nama}>{k.nama}</option>)}
+              </select>
             </Field>
             <Field label="Kecamatan">
-              <input type="text" value={form.kecamatan ?? ''} onChange={e => setForm(f => ({ ...f, kecamatan: e.target.value || null }))} className={inputCls} />
+              <select value={form.kecamatan ?? ''} onChange={handleKecChange} className={selectCls} disabled={!kabId}>
+                <option value="">-- Pilih Kecamatan --</option>
+                {kecList.map(k => <option key={k.id} value={k.nama}>{k.nama}</option>)}
+              </select>
             </Field>
             <Field label="Kelurahan">
               <input type="text" value={form.kelurahan ?? ''} onChange={e => setForm(f => ({ ...f, kelurahan: e.target.value || null }))} className={inputCls} />

@@ -1321,6 +1321,83 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 
 ---
 
+## Lokasi Cascade Dropdown Indonesia ✅ BUILD SELESAI (branch: feat/lokasi-cascade)
+
+**Tanggal:** 7 Juni 2026
+
+### Yang dibangun:
+
+| File | Status |
+|---|---|
+| `functions/api/admin/locations/import.js` | Baru — POST (import wilayah.id) + DELETE (hapus semua) |
+| `src/app/components/admin/AdminLokasiPage.tsx` | Baru — stats + import 1-klik (~280 baris) |
+| `src/app/routes.ts` | Diubah — tambah route `admin/lokasi` |
+| `src/app/components/admin/AdminLayout.tsx` | Diubah — tambah nav Lokasi (MapPin) |
+| `src/app/components/TitipJualPage.tsx` | Diubah — hapus hardcode DIY, cascade provinsi→kab→kec |
+| `src/app/components/PropertiesPage.tsx` | Diubah — hapus hardcode DIY, tambah dropdown provinsi |
+| `src/app/components/admin/AdminPropertyDetailPage.tsx` | Diubah — 3 text input lokasi → 3 cascade dropdown |
+
+### API wilayah.id yang dipakai:
+
+| URL | Isi |
+|---|---|
+| `https://wilayah.id/api/provinces.json` | Semua provinsi |
+| `https://wilayah.id/api/regencies/{kode_prov}.json` | Kabupaten/kota per provinsi |
+| `https://wilayah.id/api/districts/{kode_kab}.json` | Kecamatan per kabupaten |
+
+### Format data (kode Kemendagri):
+
+- Provinsi: 2 digit (`34` = DIY)
+- Kabupaten: 4 digit (`3404` = Sleman)
+- Kecamatan: 6 digit (`340401` = Gamping)
+- Kelurahan: 8+ digit (belum diimport)
+- `kode` disimpan sebagai INTEGER id di tabel `locations`, `parent_id` dari `parseInt(parent_kode)`
+
+### Cara import (1 klik dari /admin/lokasi):
+
+1. Klik "Mulai Import" → konfirmasi dialog
+2. DELETE semua data lama via `DELETE /api/admin/locations/import`
+3. Fetch `wilayah.id/api/provinces.json` → 38 provinsi
+4. Per provinsi: fetch regencies → per regency: fetch districts
+5. POST chunk 500 rows ke `/api/admin/locations/import` (INSERT OR REPLACE)
+6. Progress text update real-time; error non-fatal dicatat di log
+7. Kecamatan count disimpan ke `localStorage('sbp_kec_count')`
+
+### Catatan arsitektur:
+
+- `GET /api/locations` (cascade publik) **tidak diubah** — sudah cascade-ready
+- Nilai lokasi di tabel `properties` tetap disimpan sebagai **TEXT (nama)**, bukan ID
+- Pre-selection saat edit admin: `locationInitRef = useRef(false)` untuk one-shot match by nama
+- Kecamatan count ~7266 → tracking via localStorage karena butuh 514 API call untuk hitung langsung
+
+---
+
+## Meta SEO Auto-generate + SOLD Overlay ✅ SELESAI (branch: feat/meta-seo-sold)
+
+**Tanggal:** 7 Juni 2026
+
+### Yang dibangun:
+
+| File | Status |
+|---|---|
+| `functions/_lib/metaSeo.js` | Baru — `generateMetaSeo()` helper |
+| `functions/api/titip-jual.js` | Diubah — auto-generate meta SEO saat INSERT |
+| `functions/api/admin/properties/index.js` | Diubah — auto-generate jika `meta_title` kosong |
+| `src/app/components/PropertyCard.tsx` | Diubah — SOLD overlay absolut + rotasi |
+| `src/app/data/mockData.ts` | Diubah — perluas tipe `status_publish` ke 4 nilai |
+
+### generateMetaSeo() — format output:
+
+- `meta_title` (max 60 char): `"Rumah Dijual di Gamping, Sleman - Rp 1,5 Miliar | Salam Bumi Property"`
+- `meta_description` (max 155 char): `"Properti rumah dijual di Gamping, Sleman. Luas tanah 120m². Harga Rp 1,5 Miliar. Hubungi Salam Bumi Property untuk info lengkap."`
+
+### SOLD overlay (PropertyCard):
+
+- Kondisi: `status_sold || status_publish === 'sold'`
+- Implementasi: `div absolute inset-0` merah transparan + `span rotate-[-35deg]` SOLD putih
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |
