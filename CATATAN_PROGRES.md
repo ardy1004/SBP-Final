@@ -9,6 +9,33 @@
 
 ---
 
+## PropertyCard upgrade: slider, SOLD stamp, specs, format harga ✅ (branch: feat/propertycard-upgrade)
+
+**Tanggal:** 8 Juni 2026
+
+### Yang dilakukan:
+
+- **Image slider** di `src/app/components/PropertyCard.tsx`:
+  - State `slideIdx` + `useRef` touchStartX untuk swipe gesture
+  - Touch swipe kiri/kanan (threshold 40px) untuk ganti foto
+  - Hover arrows (`ChevronLeft`/`ChevronRight`) — muncul saat hover, hidden jika hanya 1 foto
+  - Dots indicator (max 5) — hanya muncul jika `total > 1`, klik untuk navigasi
+  - No new libraries — pure React state + DOM events
+- **SOLD stamp** diganti ke format baru:
+  - Overlay: `div absolute inset-0 bg-red-600/20`
+  - Badge: `border-4 border-red-600 rounded-lg px-4 py-2 rotate-[-20deg] bg-red-600/10`
+  - Teks: `font-black text-red-600 text-3xl tracking-[0.3em]`
+- **Specs section**: kondisi `!= null` (lebih ketat dari `&&` sebelumnya), legalitas dipindah ke grid specs
+- **Format harga** `formatHargaShort` baru (lokal di file):
+  - ≥ 1 Miliar: `Rp 2M`, `Rp 2,5M` (bukan `Rp 2,0M`)
+  - ≥ 1 Juta: `Rp 500Jt`, `Rp 1,5Jt`
+  - Separator desimal koma (Indonesia), strip `,0` di akhir
+  - Berlaku untuk harga utama, harga lama, dan harga/m²
+- Import `Star` dan `formatRupiah` dihapus (tidak digunakan lagi)
+- Build TypeScript: ✅ sukses
+
+---
+
 ## Meta SEO auto-generate + SOLD overlay PropertyCard ✅ (branch: feat/meta-seo-sold)
 
 **Tanggal:** 7 Juni 2026
