@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { ArrowLeft, Save, AlertTriangle, ChevronDown } from 'lucide-react';
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
