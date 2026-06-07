@@ -1202,6 +1202,45 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 
 ---
 
+## Admin: Input Properti Manual (Create Mode) ✅ SELESAI (lokal)
+
+**Branch:** `feat/admin-add-property`
+**Tanggal:** 7 Juni 2026
+
+### Yang dibangun:
+
+| File | Perubahan |
+|---|---|
+| `functions/api/admin/properties/index.js` | Diubah — tambah `onRequestPost`: buat properti baru (draft) |
+| `src/app/components/admin/AdminPropertyDetailPage.tsx` | Diubah — create mode (`isNew`), field title, POST handler, guard foto |
+| `src/app/components/admin/AdminListingPage.tsx` | Diubah — tombol "Tambah Properti" → `/admin/listing/new` |
+
+### Endpoint baru:
+
+| Endpoint | Method | Fungsi |
+|---|---|---|
+| `POST /api/admin/properties` | POST | Buat properti baru (draft), return `{ id, kode_listing, slug }` |
+
+### Keputusan desain:
+- **kode_listing**: pola identik titip-jual.js — `SBP-YYYYMMDD-XXX` (COUNT-based, zero-pad 3 digit)
+- **slug**: `${slugify(title)}-${randomHex6}` — pola identik titip-jual.js
+- **Create mode** dideteksi via `id === 'new'` — tidak perlu route baru (`/admin/listing/:id` sudah cover)
+- **Field `title`** ditambah ke form state kedua mode (create + edit)
+- **Foto section** disembunyikan di create mode — tampil pesan "Simpan dulu untuk upload foto"
+- **Status card** disembunyikan di create mode (properti baru selalu draft)
+- Setelah POST sukses → auto redirect ke `/admin/listing/${newId}` (switch ke edit mode)
+
+### Hasil verifikasi lokal:
+
+| Test | Hasil |
+|---|---|
+| `npm run build` | ✅ 0 error |
+| POST /api/admin/properties tanpa auth | ✅ 401 auth guard aktif |
+| POST dengan auth (title, jenis, tujuan, harga, lokasi) | ✅ 201 — `{ id: 13, kode_listing: "SBP-20260607-001", slug: "test-rumah-jogja-a2d275" }` |
+| GET list setelah create | ✅ total=13, properti baru muncul di list |
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |
