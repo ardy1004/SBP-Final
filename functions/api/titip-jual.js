@@ -78,7 +78,6 @@ export async function onRequestPost(context) {
     data_ahli_waris = body.data_ahli_waris.trim().slice(0, 2000);
   }
 
-  if (!nama_pemilik) errors.nama_pemilik = 'Nama pemilik wajib diisi';
   if (!nik_raw) { errors.nik = 'NIK wajib diisi'; }
   else if (!/^\d{16}$/.test(nik_raw)) { errors.nik = 'NIK harus 16 digit angka'; }
   if (!nama_ktp) errors.nama_ktp = 'Nama KTP wajib diisi';
@@ -86,7 +85,7 @@ export async function onRequestPost(context) {
   if (!kelurahan_owner) errors.kelurahan = 'Kelurahan wajib diisi';
   if (!kecamatan_owner) errors.kecamatan = 'Kecamatan wajib diisi';
 
-  const BERTINDAK_VALID = ['owner_sah', 'pasangan', 'ahli_waris', 'lainnya'];
+  const BERTINDAK_VALID = ['pemilik_sertifikat', 'suami_istri', 'ahli_waris', 'lainnya'];
   if (!BERTINDAK_VALID.includes(bertindak)) {
     errors.bertindak_sebagai = 'bertindak_sebagai harus: ' + BERTINDAK_VALID.join(', ');
   }
