@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Filter, ChevronDown, Edit, Plus } from 'lucide-react';
+import { Search, Filter, ChevronDown, Edit, Plus, FileUp } from 'lucide-react';
+import CsvImportModal from './CsvImportModal';
 
 interface PropertyRow {
   id: number;
@@ -57,6 +58,7 @@ export default function AdminListingPage() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('Semua');
+  const [showCsvModal, setShowCsvModal] = useState(false);
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -94,13 +96,21 @@ export default function AdminListingPage() {
             {loading ? 'Memuat…' : `${filtered.length} properti ditampilkan`}
           </p>
         </div>
-        <button
-          onClick={() => navigate('/admin/listing/new')}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white hover:opacity-90 transition-opacity"
-          style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
-        >
-          <Plus size={15} /> Tambah Properti
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowCsvModal(true)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF] transition-colors"
+          >
+            <FileUp size={15} /> Import CSV
+          </button>
+          <button
+            onClick={() => navigate('/admin/listing/new')}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+            style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
+          >
+            <Plus size={15} /> Tambah Properti
+          </button>
+        </div>
       </div>
 
       {/* Filter bar */}
@@ -250,6 +260,12 @@ export default function AdminListingPage() {
           </span>
         </div>
       </div>
+
+      <CsvImportModal
+        isOpen={showCsvModal}
+        onClose={() => setShowCsvModal(false)}
+        onSuccess={() => { setShowCsvModal(false); fetchProperties(); }}
+      />
     </div>
   );
 }
