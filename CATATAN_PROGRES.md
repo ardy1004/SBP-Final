@@ -1321,6 +1321,62 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 
 ---
 
+## Gelombang 2 Modul 1 — Testimoni CRUD ✅ SELESAI (lokal, belum commit)
+
+**Branch:** `feat/admin-testimoni`
+**Tanggal:** 7 Juni 2026
+
+### Yang dibangun:
+
+| File | Status | Keterangan |
+|---|---|---|
+| `functions/api/admin/testimonials/index.js` | ✅ Baru | GET list semua + POST tambah |
+| `functions/api/admin/testimonials/[id]/index.js` | ✅ Baru | PATCH edit + DELETE hapus |
+| `src/app/components/admin/AdminTestimoniPage.tsx` | ✅ Baru | List tabel + modal form + toggle tampilkan |
+| `src/app/routes.ts` | ✅ Diubah | Route `/admin/testimoni` → `AdminTestimoniPage` (sebelumnya `AdminPlaceholderPage`) |
+
+### Fitur AdminTestimoniPage:
+- Tabel list: foto avatar, nama_klien, rating bintang, isi_testimoni (truncate 80 char), lokasi, jenis_transaksi, toggle tampilkan, aksi edit/hapus
+- Toggle `tampilkan` → optimistic update (UI langsung berubah, PATCH ke API, revert jika gagal)
+- Modal form create & edit: nama_klien (required), isi_testimoni (required), rating (bintang klik), lokasi, foto_url (URL text), jenis_transaksi, toggle tampilkan, urutan
+- Delete dengan dialog konfirmasi
+- Loading skeleton + error state + empty state
+- Auto reload list setelah tambah/edit/hapus
+
+### Endpoint yang tersedia:
+
+| Method | Path | Keterangan |
+|---|---|---|
+| GET | `/api/admin/testimonials` | List semua (termasuk `tampilkan=0`), order urutan ASC, id DESC |
+| POST | `/api/admin/testimonials` | Tambah baru — validasi nama_klien, isi_testimoni, rating 1-5 |
+| PATCH | `/api/admin/testimonials/:id` | Partial update — hanya field yang dikirim |
+| DELETE | `/api/admin/testimonials/:id` | Hapus permanen — validasi row exists |
+
+### Catatan teknis:
+- Auth guard: otomatis via `functions/api/admin/_middleware.js` — tanpa login → 401
+- Tidak perlu migrasi DB — tabel `testimonials` sudah lengkap di `0001_initial_schema.sql`
+- Foto: input URL saja (bukan upload R2) — cukup untuk V1
+- Tabel tidak punya kolom `updated_at` — PATCH tidak menyertakan timestamp update
+
+### Verifikasi:
+
+| Test | Hasil |
+|---|---|
+| `npm run build` | ✅ 0 error |
+
+---
+
+### Gelombang 2 — Modul Berikutnya (Backlog):
+
+| Modul | Prioritas | Catatan |
+|---|---|---|
+| **Tracking Klik (wa_clicked_at)** | 🔴 P1 | Update `wa_clicked_at` via PATCH saat tombol WA diklik di frontend |
+| **CSV Import Leads** | 🟡 P2 | Endpoint `POST /api/admin/leads/import` terima CSV, validasi, bulk insert |
+| **Blog Admin CRUD** | 🟡 P2 | `AdminBlogPage.tsx` + endpoint blog admin |
+| **Portfolio Admin CRUD** | 🟡 P3 | `AdminPortfolioPage.tsx` |
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |

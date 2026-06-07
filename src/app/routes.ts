@@ -30,7 +30,7 @@ export default [
     route("admin/listing", "./components/admin/AdminListingPage.tsx"),
     route("admin/listing/:id", "./components/admin/AdminPropertyDetailPage.tsx", { id: "admin-property-detail" }),
     route("admin/leads", "./components/admin/AdminLeadsPage.tsx"),
-    route("admin/testimoni", "./components/admin/AdminPlaceholderPage.tsx", { id: "admin-testimoni" }),
+    route("admin/testimoni", "./components/admin/AdminTestimoniPage.tsx", { id: "admin-testimoni" }),
     route("admin/blog", "./components/admin/AdminPlaceholderPage.tsx", { id: "admin-blog" }),
     route("admin/portfolio", "./components/admin/AdminPlaceholderPage.tsx", { id: "admin-portfolio" }),
     route("admin/media", "./components/admin/AdminPlaceholderPage.tsx", { id: "admin-media" }),
