@@ -35,6 +35,7 @@ export default [
     route("admin/portfolio", "./components/admin/AdminPlaceholderPage.tsx", { id: "admin-portfolio" }),
     route("admin/media", "./components/admin/AdminPlaceholderPage.tsx", { id: "admin-media" }),
     route("admin/pengaturan", "./components/admin/AdminSettingsPage.tsx", { id: "admin-pengaturan" }),
+    route("admin/lokasi", "./components/admin/AdminLokasiPage.tsx"),
   ]),
 
   route("*", "./components/NotFoundPage.tsx"),

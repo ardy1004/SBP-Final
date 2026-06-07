@@ -330,10 +330,11 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
   const [provId, setProvId] = useState<number | null>(null);
   const [kabId, setKabId]   = useState<number | null>(null);
   const [kecId, setKecId]   = useState<number | null>(null);
+  const [provList, setProvList] = useState<ApiLocation[]>([]);
   const [kabList, setKabList] = useState<ApiLocation[]>([]);
   const [kecList, setKecList] = useState<ApiLocation[]>([]);
   const [kelList, setKelList] = useState<ApiLocation[]>([]);
-  const [provinsi, setProvinsi]   = useState('DI Yogyakarta');
+  const [provinsi, setProvinsi]   = useState('');
   const [kabupaten, setKabupaten] = useState('');
   const [kecProp, setKecProp]     = useState('');
   const [kelProp, setKelProp]     = useState('');
@@ -380,19 +381,19 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
 
   const clearErr = (k: string) => setErrors(p => ({ ...p, [k]: '' }));
 
-  // Load provinces → then kabupaten (DIY only)
+  // Load all provinces
   useEffect(() => {
     setLocLoading(true);
     getLocations().then(res => {
-      if (!res.success || !res.data?.items.length) { setLocLoading(false); return; }
-      const diy = res.data.items[0];
-      setProvId(diy.id);
-      setProvinsi(diy.nama);
-      return getLocations(diy.id);
-    }).then(res => {
-      if (res?.success && res.data) setKabList(res.data.items);
+      if (res.success && res.data) setProvList(res.data.items);
     }).catch(() => {}).finally(() => setLocLoading(false));
   }, []);
+
+  // Load kabupaten saat provinsi dipilih
+  useEffect(() => {
+    if (!provId) { setKabList([]); setKecList([]); setKelList([]); setKabupaten(''); setKecProp(''); setKelProp(''); return; }
+    getLocations(provId).then(res => { if (res.success && res.data) setKabList(res.data.items); });
+  }, [provId]);
 
   useEffect(() => {
     if (!kabId) { setKecList([]); setKelList([]); setKecProp(''); setKelProp(''); return; }
@@ -403,6 +404,12 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     if (!kecId) { setKelList([]); setKelProp(''); return; }
     getLocations(kecId).then(res => { if (res.success && res.data) setKelList(res.data.items); });
   }, [kecId]);
+
+  const handleProvChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    const id = parseInt(e.target.value, 10) || null;
+    const nama = provList.find(p => p.id === id)?.nama ?? '';
+    setProvId(id); setProvinsi(nama); setKabId(null); setKabupaten(''); setKecId(null); setKecProp(''); setKelProp('');
+  }, [provList]);
 
   const handleKabChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const id = parseInt(e.target.value, 10) || null;
@@ -713,9 +720,11 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
             <div className="h-10 bg-gray-100 animate-pulse rounded-xl" />
           ) : (
             <div className="space-y-2">
-              {/* Provinsi: fixed DIY */}
-              <input value={provinsi} readOnly className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm bg-gray-50 text-gray-500" />
-              <select onChange={handleKabChange} defaultValue="" className={selectCls()}>
+              <select onChange={handleProvChange} value={provId ?? ''} className={selectCls()}>
+                <option value="">-- Pilih Provinsi --</option>
+                {provList.map(p => <option key={p.id} value={p.id}>{p.nama}</option>)}
+              </select>
+              <select onChange={handleKabChange} defaultValue="" className={selectCls()} disabled={!provId}>
                 <option value="">-- Pilih Kabupaten --</option>
                 {kabList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
               </select>
