@@ -39,6 +39,7 @@ export interface ApiPropertyListItem {
   lebar_depan: number | null;
   lantai: number | null;
   legalitas: string;
+  status_legalitas: string | null;
   furnished: string | null;
   kecamatan: string;
   kabupaten: string;
@@ -208,6 +209,7 @@ export function normalizeProperty(p: ApiPropertyListItem) {
     kamar_tidur: p.jumlah_kamar_tidur ?? undefined,
     kamar_mandi: p.jumlah_kamar_mandi ?? undefined,
     legalitas: p.legalitas,
+    status_legalitas: p.status_legalitas ?? undefined,
     furnished: p.furnished ?? undefined,
     deskripsi: '',  // tidak ada di response list
     images: p.cover_url ? [`/api/media?key=${encodeURIComponent(p.cover_url)}`] : [],
