@@ -94,7 +94,12 @@ export default function PropertyCard({ property, className = '' }: Props) {
         </div>
 
         {/* SOLD overlay */}
-        {property.status_sold && <div className="sold-overlay" />}
+        {(property.status_sold || property.status_publish === 'sold') && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+            <div className="absolute inset-0 bg-red-600/30" />
+            <span className="relative rotate-[-35deg] text-white font-black text-2xl tracking-widest drop-shadow-lg select-none">SOLD</span>
+          </div>
+        )}
         {property.verified && (
           <div className="absolute bottom-3 right-3">
             <span className="bg-[#10B981]/90 text-white px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1">

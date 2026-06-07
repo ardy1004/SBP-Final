@@ -1,6 +1,7 @@
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { encryptNIK } from '../_lib/crypto.js';
 import { stripExif } from '../_lib/exif.js';
+import { generateMetaSeo } from '../_lib/metaSeo.js';
 
 function sanitize(val, maxLen = 500) {
   if (typeof val !== 'string') return '';
@@ -206,6 +207,12 @@ export async function onRequestPost(context) {
 
   const titleFinal = title_raw || `${jenis_properti.charAt(0).toUpperCase() + jenis_properti.slice(1)} ${kecamatan_prop || kelurahan_owner}`;
 
+  const meta = generateMetaSeo({
+    jenis_properti, tujuan, harga,
+    kecamatan: kecamatan_prop || kecamatan_owner,
+    kabupaten, luas_tanah, luas_bangunan, nego,
+  });
+
   // ─── K6: INSERT ke DB ─────────────────────────────────────────────────────
   let property_id, owner_id, agreement_id;
   try {
@@ -221,6 +228,7 @@ export async function onRequestPost(context) {
          gmaps_link, lebar_jalan_m,
          income_per_bulan, pengeluaran_per_bulan, harga_sewa_kamar_bulan,
          details, furnished,
+         meta_title, meta_description,
          status_publish, created_at, updated_at)
       VALUES
         (?,?,?,?,?,?,
@@ -233,6 +241,7 @@ export async function onRequestPost(context) {
          ?,?,
          ?,?,?,
          ?,?,
+         ?,?,
          'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     `).bind(
       kode_listing, titleFinal, slug, jenis_properti, tujuan, harga,
@@ -244,7 +253,8 @@ export async function onRequestPost(context) {
       deskripsi, info_tambahan, alasan_dijual,
       gmaps_link, lebar_jalan_m,
       income_per_bulan, pengeluaran_per_bulan, harga_sewa_kamar_bulan,
-      details, furnished
+      details, furnished,
+      meta.meta_title, meta.meta_description
     ).run();
     property_id = propResult.meta?.last_row_id;
 

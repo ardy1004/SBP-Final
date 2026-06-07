@@ -37,7 +37,7 @@ export interface Property {
   pengeluaran_per_bulan?: number;
   latitude?: number;
   longitude?: number;
-  status_publish: 'published' | 'draft';
+  status_publish: 'published' | 'draft' | 'sold' | 'archived';
   published_at: string;
   updated_at: string;
   video_youtube?: string;

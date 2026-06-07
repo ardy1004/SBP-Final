@@ -3,6 +3,7 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonCreated, jsonError, handleOptions } from '../../_shared/response.js';
+import { generateMetaSeo } from '../../../_lib/metaSeo.js';
 
 const VALID_STATUSES = new Set(['draft', 'published', 'sold', 'archived']);
 const VALID_JENIS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
@@ -100,6 +101,9 @@ export async function onRequestPost(context) {
   const kecamatan    = sanitize(body.kecamatan ?? '', 100);
   const kabupaten    = sanitize(body.kabupaten ?? '', 100);
   const provinsi     = sanitize(body.provinsi ?? 'DI Yogyakarta', 100) || 'DI Yogyakarta';
+  const luas_tanah   = parseInt(body.luas_tanah, 10) || null;
+  const luas_bangunan = parseInt(body.luas_bangunan, 10) || null;
+  const nego         = body.nego ? 1 : 0;
 
   const errors = {};
   if (!title)                    errors.title          = 'Judul properti wajib diisi';
@@ -124,15 +128,21 @@ export async function onRequestPost(context) {
     return jsonError('Gagal generate kode listing', 500);
   }
 
+  const meta = !body.meta_title
+    ? generateMetaSeo({ jenis_properti: jenis, tujuan, harga, kecamatan, kabupaten, luas_tanah, luas_bangunan, nego })
+    : { meta_title: sanitize(body.meta_title, 60), meta_description: sanitize(body.meta_description ?? '', 155) };
+
   try {
     const result = await env.DB.prepare(`
       INSERT INTO properties
         (kode_listing, title, slug, jenis_properti, tujuan, harga,
          provinsi, kabupaten, kecamatan, kelurahan, alamat,
+         meta_title, meta_description,
          status_publish, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,  ?,?,?,?,?,  'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      VALUES (?,?,?,?,?,?,  ?,?,?,?,?,  ?,?,  'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     `).bind(kode_listing, title, slug, jenis, tujuan, harga,
-            provinsi, kabupaten, kecamatan, '', '').run();
+            provinsi, kabupaten, kecamatan, '', '',
+            meta.meta_title, meta.meta_description).run();
 
     const newId = result.meta?.last_row_id;
     return jsonCreated({ id: newId, kode_listing, slug });
