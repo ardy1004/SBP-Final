@@ -156,14 +156,14 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const jenisSlug = p.jenis.toLowerCase();
   const provSlug = p.provinsi.toLowerCase().replace(/\s+/g, '-');
   const kabSlug = p.kabupaten.toLowerCase().replace(/\s+/g, '-');
-  const kecSlug = p.kecamatan.toLowerCase().replace(/\s+/g, '-');
+  const kecSlug = (p.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-');
   const canonicalUrl = `https://salambumi.xyz/${tujuanPath}/${jenisSlug}/${provSlug}/${kabSlug}/${kecSlug}/${p.slug}`;
 
   const titleSeo = `${p.title} ${p.kecamatan} ${p.kabupaten} | Salam Bumi Property`;
   const rawDesc = p.deskripsi ||
     `${p.jenis} ${tujuanPath === 'dijual' ? 'dijual' : 'disewa'} di ${p.kecamatan}, ${p.kabupaten}, ${p.provinsi}.`;
   const desc = rawDesc.length > 158 ? rawDesc.slice(0, 155) + '...' : rawDesc;
-  const ogImage = p.images[0] ?? 'https://images.salambumi.xyz/kost%20dijual%20jogja.webp';
+  const ogImage = p.images[0] ? (p.images[0].startsWith('http') ? p.images[0] : `https://salambumi.xyz${p.images[0]}`) : 'https://images.salambumi.xyz/materai/hg.png';
 
   return [
     { title: titleSeo },

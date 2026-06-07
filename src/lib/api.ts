@@ -210,7 +210,7 @@ export function normalizeProperty(p: ApiPropertyListItem) {
     legalitas: p.legalitas,
     furnished: p.furnished ?? undefined,
     deskripsi: '',  // tidak ada di response list
-    images: p.cover_url ? [p.cover_url] : [],
+    images: p.cover_url ? [`/api/media?key=${encodeURIComponent(p.cover_url)}`] : [],
     badge_premium: Boolean(p.badge_premium),
     badge_featured: Boolean(p.badge_featured),
     badge_hot: Boolean(p.badge_hot),
@@ -241,7 +241,7 @@ export function normalizePropertyDetail(p: ApiPropertyDetail) {
     longitude: p.longitude ?? undefined,
     gmaps_link: p.gmaps_link ?? undefined,
     details: p.details ?? undefined,
-    images: p.images.map(img => img.url_webp),
+    images: p.images.map(img => `/api/media?key=${encodeURIComponent(img.url_webp)}`),
     imagesData: p.images,
     investment_intelligence: p.investment_intelligence ?? undefined,
     video_youtube: p.video_youtube ?? undefined,

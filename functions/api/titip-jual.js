@@ -171,6 +171,8 @@ export async function onRequestPost(context) {
     detailsObj.lingkungan = body.lingkungan;
   }
   const details = Object.keys(detailsObj).length > 0 ? JSON.stringify(detailsObj) : null;
+  const VALID_FURNISHED = ['fully', 'semi', 'unfurnished'];
+  const furnished = VALID_FURNISHED.includes(detailsObj.kelengkapan) ? detailsObj.kelengkapan : null;
 
   const no_wa_1 = normalizeWA(no_wa_raw);
   const no_wa_2 = no_wa_2_raw ? normalizeWA(no_wa_2_raw) : null;
@@ -218,7 +220,7 @@ export async function onRequestPost(context) {
          deskripsi, info_tambahan, alasan_dijual,
          gmaps_link, lebar_jalan_m,
          income_per_bulan, pengeluaran_per_bulan, harga_sewa_kamar_bulan,
-         details,
+         details, furnished,
          status_publish, created_at, updated_at)
       VALUES
         (?,?,?,?,?,?,
@@ -230,7 +232,7 @@ export async function onRequestPost(context) {
          ?,?,?,
          ?,?,
          ?,?,?,
-         ?,
+         ?,?,
          'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     `).bind(
       kode_listing, titleFinal, slug, jenis_properti, tujuan, harga,
@@ -242,7 +244,7 @@ export async function onRequestPost(context) {
       deskripsi, info_tambahan, alasan_dijual,
       gmaps_link, lebar_jalan_m,
       income_per_bulan, pengeluaran_per_bulan, harga_sewa_kamar_bulan,
-      details
+      details, furnished
     ).run();
     property_id = propResult.meta?.last_row_id;
 

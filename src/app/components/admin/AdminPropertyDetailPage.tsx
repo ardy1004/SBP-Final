@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
-import { ArrowLeft, Save, Star, Trash2, ImageOff, AlertTriangle, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Save, Star, Trash2, ImageOff, AlertTriangle, ChevronDown, ChevronUp, Upload } from 'lucide-react';
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -34,6 +34,7 @@ interface PropertyDetail {
   legalitas: string | null;
   status_legalitas: string | null;
   bank_agunan: string | null;
+  outstanding_bank: number | null;
   furnished: string | null;
   provinsi: string | null;
   kabupaten: string | null;
@@ -56,6 +57,8 @@ interface PropertyDetail {
   verified: number;
   status_publish: string;
   published_at: string | null;
+  meta_title: string | null;
+  meta_description: string | null;
   details: Record<string, unknown> | null;
   images: PropertyImage[];
 }
@@ -64,7 +67,11 @@ interface PropertyDetail {
 
 const JENIS_OPTIONS = PROPERTY_TYPES;
 const TUJUAN_OPTIONS = ['dijual','disewa','dijual_disewa'];
-const LEGALITAS_OPTIONS = ['shm','shgb','shp','girik','letter_c','akte_jual_beli','hak_pakai','lainnya'];
+const LEGALITAS_OPTIONS = [
+  'SHM & IMB/PBG Lengkap','SHGB & IMB/PBG Lengkap',
+  'SHM Pekarangan Tanpa IMB/PBG','SHM Sawah/Tegalan',
+  'SHGB Tanpa IMB/PBG','Girik/Letter C/PPJB/dll','Izin Usaha',
+];
 const STATUS_LEGALITAS_OPTIONS: { value: string; label: string }[] = [
   { value: 'on_hand', label: 'On Hand (bersih)' },
   { value: 'on_bank', label: 'On Bank (agunan)' },
@@ -91,6 +98,31 @@ function coverSrc(url: string | null | undefined) {
     return `/api/admin/media?key=${encodeURIComponent(url)}`;
   }
   return url;
+}
+
+function convertToWebP(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { reject(new Error('Canvas tidak tersedia')); return; }
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob(blob => {
+        if (!blob) { reject(new Error('Konversi WebP gagal')); return; }
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('FileReader error'));
+        reader.readAsDataURL(blob);
+      }, 'image/webp', 0.85);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Gagal membaca gambar')); };
+    img.src = url;
+  });
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -135,6 +167,9 @@ export default function AdminPropertyDetailPage() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [coveringId, setCoveringId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadProperty = useCallback(async () => {
     if (id === 'new') {
@@ -172,6 +207,7 @@ export default function AdminPropertyDetailPage() {
         legalitas: data.legalitas,
         status_legalitas: data.status_legalitas,
         bank_agunan: data.bank_agunan,
+        outstanding_bank: data.outstanding_bank,
         furnished: data.furnished,
         provinsi: data.provinsi,
         kabupaten: data.kabupaten,
@@ -184,6 +220,8 @@ export default function AdminPropertyDetailPage() {
         info_tambahan: data.info_tambahan,
         alasan_dijual: data.alasan_dijual,
         video_youtube: data.video_youtube,
+        meta_title: data.meta_title,
+        meta_description: data.meta_description,
         income_per_bulan: data.income_per_bulan,
         pengeluaran_per_bulan: data.pengeluaran_per_bulan,
         harga_sewa_kamar_bulan: data.harga_sewa_kamar_bulan,
@@ -246,6 +284,7 @@ export default function AdminPropertyDetailPage() {
         legalitas: form.legalitas ?? null,
         status_legalitas: form.status_legalitas ?? null,
         bank_agunan: form.bank_agunan ?? null,
+        outstanding_bank: form.outstanding_bank ?? null,
         furnished: form.furnished ?? null,
         provinsi: form.provinsi ?? null,
         kabupaten: form.kabupaten ?? null,
@@ -258,6 +297,8 @@ export default function AdminPropertyDetailPage() {
         info_tambahan: form.info_tambahan ?? null,
         alasan_dijual: form.alasan_dijual ?? null,
         video_youtube: form.video_youtube ?? null,
+        meta_title: form.meta_title ?? null,
+        meta_description: form.meta_description ?? null,
         income_per_bulan: form.income_per_bulan ?? null,
         pengeluaran_per_bulan: form.pengeluaran_per_bulan ?? null,
         harga_sewa_kamar_bulan: form.harga_sewa_kamar_bulan ?? null,
@@ -355,6 +396,65 @@ export default function AdminPropertyDetailPage() {
       setPhotoError(err instanceof Error ? err.message : 'Gagal menghapus foto');
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  // ─── Upload photos ────────────────────────────────────────────────
+  const handleUploadPhotos = async (files: FileList) => {
+    if (photos.length >= 20) { setPhotoError('Maksimal 20 foto per properti'); return; }
+    setUploading(true);
+    setPhotoError('');
+    setPhotoMsg('');
+    const fileArr = Array.from(files).slice(0, Math.max(0, 20 - photos.length));
+    let errors = 0;
+    for (let i = 0; i < fileArr.length; i++) {
+      setUploadProgress(`Mengupload foto ${i + 1} dari ${fileArr.length}…`);
+      try {
+        const base64 = await convertToWebP(fileArr[i]);
+        const res = await fetch(`/api/admin/properties/${id}/photos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ photo: base64 }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+        setPhotos(prev => [...prev, json.data.image]);
+      } catch (err: unknown) {
+        errors++;
+        setPhotoError(`Foto ${i + 1} gagal: ${err instanceof Error ? err.message : 'Error'}`);
+      }
+    }
+    setUploading(false);
+    setUploadProgress('');
+    if (errors === 0) { setPhotoMsg('Upload selesai ✓'); setTimeout(() => setPhotoMsg(''), 3000); }
+  };
+
+  // ─── Reorder photos ───────────────────────────────────────────────
+  const handleReorder = async (photoId: number, direction: 'up' | 'down') => {
+    const idx = photos.findIndex(p => p.id === photoId);
+    if (idx === -1) return;
+    if (direction === 'up' && idx === 0) return;
+    if (direction === 'down' && idx === photos.length - 1) return;
+    const newPhotos = [...photos];
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    [newPhotos[idx], newPhotos[swapIdx]] = [newPhotos[swapIdx], newPhotos[idx]];
+    setPhotos(newPhotos);
+    setPhotoMsg('');
+    setPhotoError('');
+    const prevPhotos = photos;
+    try {
+      const res = await fetch(`/api/admin/properties/${id}/photos/reorder`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ order: newPhotos.map(p => p.id) }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+    } catch (err: unknown) {
+      setPhotos(prevPhotos);
+      setPhotoError(err instanceof Error ? err.message : 'Gagal reorder');
     }
   };
 
@@ -496,7 +596,7 @@ export default function AdminPropertyDetailPage() {
           <Field label="Legalitas">
             <select value={form.legalitas ?? ''} onChange={e => setForm(f => ({ ...f, legalitas: e.target.value || null }))} className={selectCls}>
               <option value="">— pilih —</option>
-              {LEGALITAS_OPTIONS.map(l => <option key={l} value={l}>{l.toUpperCase()}</option>)}
+              {LEGALITAS_OPTIONS.map(l => <option key={l} value={l}>{l}</option>)}
             </select>
           </Field>
 
@@ -544,6 +644,10 @@ export default function AdminPropertyDetailPage() {
 
           <Field label="Bank Agunan">
             <input type="text" value={form.bank_agunan ?? ''} onChange={e => setForm(f => ({ ...f, bank_agunan: e.target.value || null }))} className={inputCls} placeholder="Nama bank jika ada agunan" />
+          </Field>
+
+          <Field label="Sisa KPR / Hutang Bank (Rp)">
+            <input type="number" min={0} value={form.outstanding_bank ?? ''} onChange={e => setForm(f => ({ ...f, outstanding_bank: e.target.value ? parseInt(e.target.value) : null }))} className={inputCls} placeholder="Kosong jika lunas" />
           </Field>
         </div>
 
@@ -634,6 +738,17 @@ export default function AdminPropertyDetailPage() {
           </div>
         </div>
 
+        {/* SEO */}
+        <div className="mt-5 pt-4 border-t border-gray-100 space-y-4">
+          <h3 className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">SEO (Opsional)</h3>
+          <Field label="Meta Title">
+            <input type="text" value={form.meta_title ?? ''} onChange={e => setForm(f => ({ ...f, meta_title: e.target.value || null }))} className={inputCls} placeholder="Judul halaman untuk mesin pencari" />
+          </Field>
+          <Field label="Meta Description">
+            <textarea value={form.meta_description ?? ''} onChange={e => setForm(f => ({ ...f, meta_description: e.target.value || null }))} rows={3} className={`${inputCls} resize-y`} placeholder="Deskripsi singkat untuk Google ~150 karakter" />
+          </Field>
+        </div>
+
         {/* Save button */}
         <div className="mt-5 pt-4 border-t border-gray-100 flex items-center gap-3">
           <button
@@ -671,7 +786,7 @@ export default function AdminPropertyDetailPage() {
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {photos.map(photo => {
+            {photos.map((photo, photoIdx) => {
               const src = coverSrc(photo.url_webp);
               const isProcessing = coveringId === photo.id || deletingId === photo.id;
               return (
@@ -689,6 +804,29 @@ export default function AdminPropertyDetailPage() {
                       <Star size={10} fill="currentColor" /> Cover
                     </div>
                   ) : null}
+
+                  {!isProcessing && photos.length > 1 && (
+                    <div className="absolute top-1.5 right-1.5 flex flex-col gap-0.5 z-10">
+                      {photoIdx > 0 && (
+                        <button
+                          onClick={() => handleReorder(photo.id, 'up')}
+                          className="p-0.5 rounded bg-white/80 text-gray-700 hover:bg-white shadow-sm transition-colors"
+                          title="Pindah ke atas"
+                        >
+                          <ChevronUp size={13} />
+                        </button>
+                      )}
+                      {photoIdx < photos.length - 1 && (
+                        <button
+                          onClick={() => handleReorder(photo.id, 'down')}
+                          className="p-0.5 rounded bg-white/80 text-gray-700 hover:bg-white shadow-sm transition-colors"
+                          title="Pindah ke bawah"
+                        >
+                          <ChevronDown size={13} />
+                        </button>
+                      )}
+                    </div>
+                  )}
 
                   {isProcessing && (
                     <div className="absolute inset-0 bg-white/70 flex items-center justify-center">
@@ -736,7 +874,28 @@ export default function AdminPropertyDetailPage() {
         )}
 
         <div className="mt-4 pt-3 border-t border-gray-100">
-          <p className="text-xs text-[#94A3B8] italic">Upload foto baru: segera tersedia (G3b)</p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            className="hidden"
+            onChange={e => { if (e.target.files?.length) handleUploadPhotos(e.target.files); e.target.value = ''; }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading || photos.length >= 20}
+            className="w-full flex flex-col items-center gap-1.5 py-4 border-2 border-dashed border-gray-200 rounded-xl text-center cursor-pointer hover:border-[#1565C0]/50 hover:bg-blue-50/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Upload size={20} className="text-[#94A3B8]" />
+            <span className="text-xs font-medium text-[#64748B]">
+              {photos.length >= 20 ? 'Batas 20 foto tercapai' : 'Klik untuk tambah foto'}
+            </span>
+            <span className="text-xs text-[#94A3B8]">JPEG, PNG, WebP • Dikonversi ke WebP otomatis</span>
+          </button>
+          {uploadProgress && (
+            <p className="mt-2 text-xs text-[#1565C0] font-medium">{uploadProgress}</p>
+          )}
         </div>
       </div>
       )}
