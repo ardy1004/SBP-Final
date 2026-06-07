@@ -1321,6 +1321,13 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 
 ---
 
+## FASE I — Hard Delete Properti (branch feat/admin-delete-property)
+
+- Tambah hard delete properti di AdminListingPage (tombol Trash, konfirmasi, hapus foto R2, DELETE endpoint)
+- Endpoint: `DELETE /api/admin/properties/:id` — hapus properti + foto R2, cascade DB
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |
