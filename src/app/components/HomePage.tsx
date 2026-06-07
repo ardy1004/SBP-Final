@@ -529,7 +529,7 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts 
             }}
           />
           {/* Layer 2: Overlay */}
-          <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(6,27,53,0.92) 0%, rgba(11,36,71,0.72) 45%, rgba(6,27,53,0.88) 100%)' }} />
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(6,27,53,0.72) 0%, rgba(11,36,71,0.50) 45%, rgba(6,27,53,0.68) 100%)' }} />
           {/* Layer 3: Orbs */}
           <div className="hero-orb-1 absolute" style={{ width: 600, height: 600, background: 'radial-gradient(circle, rgba(41,182,246,0.18), transparent 70%)', borderRadius: '50%', filter: 'blur(60px)', bottom: -100, right: -100 }} />
           <div className="hero-orb-2 absolute" style={{ width: 400, height: 400, background: 'radial-gradient(circle, rgba(245,166,35,0.12), transparent 70%)', borderRadius: '50%', filter: 'blur(80px)', top: -80, left: '5%' }} />
