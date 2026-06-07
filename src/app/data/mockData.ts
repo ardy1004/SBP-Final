@@ -23,6 +23,7 @@ export interface Property {
   kamar_tidur?: number;
   kamar_mandi?: number;
   legalitas: string;
+  status_legalitas?: string;
   furnished?: string;
   deskripsi: string;
   images: string[];

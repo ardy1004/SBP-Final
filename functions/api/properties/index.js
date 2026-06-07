@@ -87,7 +87,7 @@ export async function onRequestGet(context) {
       p.nego, p.nett, p.harga_per_m2,
       p.jumlah_kamar_tidur, p.jumlah_kamar_mandi,
       p.luas_tanah, p.luas_bangunan, p.lebar_depan, p.lantai,
-      p.legalitas, p.furnished,
+      p.legalitas, p.status_legalitas, p.furnished,
       p.kecamatan, p.kabupaten, p.provinsi,
       p.badge_premium, p.badge_featured, p.badge_hot,
       p.status_sold, p.properti_pilihan, p.verified,

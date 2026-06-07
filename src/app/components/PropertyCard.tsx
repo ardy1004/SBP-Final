@@ -231,6 +231,11 @@ export default function PropertyCard({ property, className = '' }: Props) {
           {property.legalitas && (
             <span className="flex items-center gap-1">📋 {property.legalitas}</span>
           )}
+          {property.status_legalitas && (
+            <span className="flex items-center gap-1">
+              📜 {property.status_legalitas === 'on_hand' ? 'Sertif Di Tangan' : 'Sertif Di Bank'}
+            </span>
+          )}
         </div>
 
         <div className="text-[10px] text-gray-400 flex items-center justify-end mb-3">
