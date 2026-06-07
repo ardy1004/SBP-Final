@@ -7,13 +7,13 @@ import { PROPERTY_TYPES } from '../../lib/propertyTypes';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Step1State {
-  nama_pemilik: string;
   nama_ktp: string;
   nik: string;
   alamat_ktp: string;
   rt_rw: string;
   kelurahan: string;
   kecamatan: string;
+  prov_owner: string;
   bertindak: string;
   ahli_waris_jumlah: string;
   ahli_waris_sepakat: boolean;
@@ -82,16 +82,16 @@ function Stepper({ step }: { step: number }) {
 // ─── STEP 1: Data Diri ────────────────────────────────────────────────────────
 
 const BERTINDAK_OPTIONS = [
-  { value: 'owner_sah',  label: 'Pemilik Langsung' },
-  { value: 'pasangan',   label: 'Pasangan (Suami/Istri)' },
-  { value: 'ahli_waris', label: 'Ahli Waris' },
-  { value: 'lainnya',    label: 'Dikuasakan / Perantara' },
+  { value: 'pemilik_sertifikat', label: 'Pemilik A/n Sertifikat' },
+  { value: 'suami_istri',        label: 'Suami/Istri (Bukan A/n Sertifikat)' },
+  { value: 'ahli_waris',         label: 'Ahli Waris' },
+  { value: 'lainnya',            label: 'Lainnya' },
 ];
 
 function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
   const [form, setForm] = useState<Step1State>({
-    nama_pemilik: '', nama_ktp: '', nik: '', alamat_ktp: '', rt_rw: '',
-    kelurahan: '', kecamatan: '', bertindak: '',
+    nama_ktp: '', nik: '', alamat_ktp: '', rt_rw: '',
+    kelurahan: '', kecamatan: '', prov_owner: '', bertindak: '',
     ahli_waris_jumlah: '', ahli_waris_sepakat: false, ahli_waris_kuasa: false, ahli_waris_turun: false,
     gmaps: '', no_wa: '', no_wa_2: '',
   });
@@ -104,7 +104,6 @@ function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
 
   const validate = () => {
     const e: Record<string, string> = {};
-    if (!form.nama_pemilik) e.nama_pemilik = 'Nama pemilik wajib diisi';
     if (!form.nama_ktp) e.nama_ktp = 'Nama sesuai KTP wajib diisi';
     if (!form.nik) e.nik = 'NIK wajib diisi';
     else if (!/^\d{16}$/.test(form.nik)) e.nik = 'NIK harus tepat 16 digit angka';
@@ -130,14 +129,6 @@ function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
       <p className="text-sm text-[#64748B] mb-6">Isi sesuai KTP yang masih berlaku.</p>
 
       <div className="space-y-4">
-        {/* Nama Pemilik */}
-        <div>
-          <label className="block text-xs font-semibold text-[#64748B] mb-1">Nama Pemilik *</label>
-          <input value={form.nama_pemilik} onChange={e => { f('nama_pemilik', e.target.value); clearErr('nama_pemilik'); }}
-            placeholder="Nama Anda sebagai pemilik" className={inputCls(errors.nama_pemilik)} />
-          <FieldErr msg={errors.nama_pemilik} />
-        </div>
-
         {/* Nama KTP */}
         <div>
           <label className="block text-xs font-semibold text-[#64748B] mb-1">Nama Lengkap Sesuai KTP *</label>
@@ -183,6 +174,13 @@ function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
           </div>
           <div />
         </div>
+        {/* Provinsi KTP */}
+        <div>
+          <label className="block text-xs font-semibold text-[#64748B] mb-1">Provinsi (KTP) <span className="font-normal text-gray-400">(Opsional)</span></label>
+          <input value={form.prov_owner} onChange={e => f('prov_owner', e.target.value)}
+            placeholder="Mis: Jawa Timur" className={inputCls()} />
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-semibold text-[#64748B] mb-1">Kelurahan/Desa *</label>
@@ -480,11 +478,11 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     try {
       const payload: Record<string, unknown> = {
         // owner (step 1)
-        nama_pemilik:     step1.nama_pemilik,
         nama_ktp:         step1.nama_ktp,
         nik:              step1.nik,
         alamat_ktp:       step1.alamat_ktp,
         rt_rw:            step1.rt_rw || undefined,
+        prov_owner:       step1.prov_owner || undefined,
         kelurahan_owner:  step1.kelurahan,
         kecamatan_owner:  step1.kecamatan,
         bertindak_sebagai: step1.bertindak,
