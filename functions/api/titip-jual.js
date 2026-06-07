@@ -287,7 +287,7 @@ export async function onRequestPost(context) {
       const binaryStr = atob(base64Data);
       const rawBytes = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
       const bytes = stripExif(rawBytes);
-      // TODO PRODUKSI: konversi ke WebP via Cloudflare Images sebelum simpan
+      // WebP conversion dilakukan client-side di admin upload (G3b); titip-jual publik tetap JPEG-only
       const r2Key = `property-photos/${crypto.randomUUID()}.${ext}`;
       await env.MEDIA.put(r2Key, bytes.buffer, { httpMetadata: { contentType: `image/${ext}` } });
       await env.DB.prepare(`

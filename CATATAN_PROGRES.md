@@ -1135,6 +1135,57 @@ Mengembalikan:
 
 ---
 
+## Admin Gelombang 1 — Modul G3b: Upload Foto + WebP ✅ SELESAI (lokal)
+
+**Branch:** `feat/admin-g3b`
+**Tanggal:** 7 Juni 2026
+
+### Yang dibangun:
+
+| File | Perubahan |
+|---|---|
+| `functions/api/admin/properties/[id]/photos/index.js` | Baru — POST upload foto (base64 WebP → R2 + DB) |
+| `functions/api/admin/properties/[id]/photos/reorder.js` | Baru — PATCH reorder (array ID → update urutan) |
+| `src/app/components/admin/AdminPropertyDetailPage.tsx` | Diubah — UI upload + handler + tombol ↑↓ reorder |
+| `functions/api/titip-jual.js` | Diubah — update komentar TODO WebP (selesai via G3b) |
+
+### Endpoint baru:
+
+| Endpoint | Method | Fungsi |
+|---|---|---|
+| `POST /api/admin/properties/:id/photos` | POST | Upload 1 foto WebP per request (base64 JSON body) |
+| `PATCH /api/admin/properties/:id/photos/reorder` | PATCH | Ubah urutan foto (body: `{ order: number[] }`) |
+
+### Keputusan desain:
+- **WebP conversion client-side** via Canvas `toBlob('image/webp', 0.85)` — tidak perlu Cloudflare Images berbayar, EXIF otomatis bersih
+- **Upload satu-per-request** (loop `await`) — lebih aman, mudah debug, progress per-foto
+- **Tombol ↑↓ reorder** di kartu foto — tanpa library drag-drop baru
+- **Accept**: `image/jpeg,image/png,image/webp` — Canvas handle konversi ke WebP sebelum kirim
+- **R2 key**: `property-photos/${uuid}.webp` — selalu `.webp` untuk upload admin
+- **Batas 20 foto** dicek di frontend (disable tombol) dan backend (validasi COUNT)
+- **TODO WebP titip-jual.js** ditandai selesai untuk admin; titip-jual publik tetap JPEG-only
+
+### Hasil verifikasi lokal:
+
+| Test | Hasil |
+|---|---|
+| `npm run build` | ✅ 0 error |
+| POST /api/admin/properties/:id/photos tanpa auth | ⬜ perlu uji wrangler dev |
+| Upload foto JPEG → cek R2 key .webp | ⬜ perlu uji wrangler dev |
+| PATCH reorder → urutan berubah di DB | ⬜ perlu uji wrangler dev |
+| UI upload muncul, progress tampil, foto di grid | ⬜ perlu uji wrangler dev |
+| Tombol ↑↓ berfungsi | ⬜ perlu uji wrangler dev |
+
+### Modul admin berikutnya (Gelombang 2):
+
+| Prioritas | Modul | Status |
+|---|---|---|
+| 1 | **CSV Import** — bulk import listing via CSV | Belum |
+| 2 | **Tracking Klik** — analytics kunjungan properti | Belum |
+| 3 | **Testimoni** — CRUD + reorder | Belum |
+
+---
+
 ## Admin Gelombang 1 — Modul 2: Leads/CRM ✅ SELESAI (lokal)
 
 **Branch:** `feat/admin-leads`
