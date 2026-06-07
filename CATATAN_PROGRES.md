@@ -1321,6 +1321,109 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 
 ---
 
+## Admin Gelombang 2 Modul 1 — Testimoni CRUD ✅ SELESAI (lokal, committed)
+
+**Branch:** `feat/admin-testimoni`
+**Tanggal:** 7 Juni 2026
+
+### Yang dibangun:
+
+| File | Perubahan |
+|---|---|
+| `functions/api/admin/testimonials/index.js` | Baru — GET list + POST tambah (validasi nama_klien, isi_testimoni, rating 1–5) |
+| `functions/api/admin/testimonials/[id]/index.js` | Baru — PATCH edit (partial update) + DELETE |
+| `src/app/components/admin/AdminTestimoniPage.tsx` | Baru — table list, modal tambah/edit, toggle tampilkan optimistic, delete confirm |
+| `src/app/routes.ts` | Diubah — route `admin/testimoni` → `AdminTestimoniPage.tsx` |
+
+### Keputusan desain:
+- Tidak perlu migrasi (tabel `testimonials` sudah ada di schema 0001)
+- Foto via URL (bukan upload R2 — sesuai spec foto slider eksternal)
+- Toggle `tampilkan` dilakukan optimistic (setState dulu, PATCH background)
+- Edit via modal (bukan navigasi ke halaman baru)
+
+### Verifikasi lokal:
+- ✅ Build sukses (0 error)
+- ✅ GET list, POST tambah, PATCH edit, DELETE, toggle tampilkan — semua lulus
+
+---
+
+## Admin Gelombang 2 Modul 2 — Tracking Views + WA Clicks ✅ SELESAI (lokal, committed)
+
+**Branch:** `feat/admin-tracking`
+**Tanggal:** 7 Juni 2026
+
+### Yang dibangun:
+
+| File | Perubahan |
+|---|---|
+| `migrations/0010_add_property_view_daily.sql` | Baru — tabel `property_view_daily` (property_id, tanggal, views, wa_clicks), UNIQUE(property_id, tanggal) + 2 index |
+| `functions/api/properties/[slug].js` | Diubah — upsert `property_view_daily.views + 1` via `context.waitUntil` (parallel dengan views_count increment) |
+| `functions/api/properties/[slug]/wa-click.js` | Baru — POST publik, lookup slug, upsert wa_clicks+1, return `{success:true, wa_url}` |
+| `src/app/routes/property-detail.tsx` | Diubah — tambah `await` upsert views harian di loader (SSR path), try/catch non-fatal |
+| `src/app/components/PropertyDetailPage.tsx` | Diubah — sticky bar mobile: fetch wa-click → open WA direct (tracking) + fallback wa.me |
+| `functions/api/admin/overview.js` | Diubah — tambah query views_per_hari 30 hari, wa_hari_ini dari property_view_daily, fill-gap array |
+| `src/app/components/admin/AdminOverviewPage.tsx` | Diubah — tambah tabbed chart (Leads bar / Views line), LineChart Recharts |
+
+### Keputusan desain:
+- Tabel `property_view_daily` (UPSERT) menggantikan views_count untuk data per-hari (views_count tetap ada untuk kumulatif)
+- Tracking di SSR loader (`property-detail.tsx`) karena browser tidak memanggil REST API saat SSR
+- Sticky bar langsung buka WA (tidak harus scroll ke form contact) + sekaligus tracking
+
+### Migrasi:
+- ✅ Diterapkan ke DB **lokal** saja
+- ⚠️ **Setelah merge ke master:** jalankan ke remote DB produksi:
+  ```bash
+  wrangler d1 execute sbp-db --remote --file=migrations/0010_add_property_view_daily.sql
+  ```
+
+### Verifikasi lokal:
+- ✅ Build sukses (0 error)
+- ✅ View tracking SSR loader, WA click endpoint, chart tabbed di Overview — semua lulus
+
+---
+
+## Admin Gelombang 3 Modul 1 — Pengaturan Ganti Password (lokal, belum commit)
+
+**Branch:** `feat/admin-settings`
+**Tanggal:** 7 Juni 2026
+**Status:** ✅ Build sukses + API test lulus — **BELUM DI-COMMIT**
+
+### Yang dibangun:
+
+| File | Perubahan |
+|---|---|
+| `functions/api/admin/password.js` | Baru — PUT: bcrypt verify password lama, hash baru cost 12, UPDATE admins |
+| `src/app/components/admin/AdminSettingsPage.tsx` | Baru — info akun (nama, email, role) + form ganti password (3 field, toggle show/hide) |
+| `src/app/routes.ts` | Diubah — route `admin/pengaturan` → `AdminSettingsPage.tsx` |
+
+### Spesifikasi endpoint PUT /api/admin/password:
+- Auth: via `_middleware.js` otomatis (cookie JWT → `context.data.admin`)
+- Body: `{ password_lama, password_baru, password_baru_konfirmasi }`
+- Validasi: semua field wajib, password_baru === konfirmasi, minimal 8 karakter
+- Verifikasi wajib: `bcrypt.compare(password_lama, stored_hash)` → 401 jika salah
+- Hash baru: `bcrypt.hash(password_baru, 12)` — cost 12, konsisten dengan login.js
+- Response: `{ success: true, data: { message: "Password berhasil diubah" } }`
+
+### Hasil API test (wrangler port 8790):
+
+| Test | Hasil |
+|---|---|
+| PUT tanpa konfirmasi | ✅ 400 "Semua field wajib diisi" |
+| PUT password_baru ≠ konfirmasi | ✅ 400 "Password baru dan konfirmasi tidak cocok" |
+| PUT password_baru < 8 karakter | ✅ 400 "Password baru minimal 8 karakter" |
+| PUT password_lama salah | ✅ 401 "Password lama salah" |
+| PUT berhasil (uji → SbpTest2024!) | ✅ 200 "Password berhasil diubah" |
+| Login dengan password baru | ✅ 200 login sukses |
+| Restore ke SbpAdmin2024! | ✅ 200 password dikembalikan |
+| Login dengan password asli | ✅ 200 login sukses |
+| npm run build | ✅ 0 error |
+
+### Catatan keamanan:
+- Password uji sudah dikembalikan ke password semula setelah pengujian. WAJIB ganti password via /admin/pengaturan sebelum go-live.
+- WAJIB ganti password sebelum produksi via `/admin/pengaturan`
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |
