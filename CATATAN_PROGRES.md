@@ -1280,6 +1280,27 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 
 ---
 
+## Fix URL Properti + Gambar Publik ✅ SELESAI (lokal)
+
+**Branch:** `feat/admin-field-sync`
+**Tanggal:** 7 Juni 2026
+
+### Yang diperbaiki:
+
+| # | Isu | File | Fix |
+|---|---|---|---|
+| 1 | **kecamatan kosong → URL tidak match route** | `PropertyCard.tsx`, `HomePage.tsx` (2 Link), `property-detail.tsx` (canonical) | Fallback `kecamatan \|\| 'jogja'` di 4 lokasi URL generation |
+| 2 | **Public media proxy R2** | `functions/api/media.js` (baru) | Proxy GET `/api/media?key=...` ke R2, prefix `property-photos/` only, `Cache-Control: immutable` |
+| 3 | **og:image tidak absolut** | `src/app/routes/property-detail.tsx` | Path relatif di-prefix `https://salambumi.xyz`; fallback ke `/materai/hg.png` |
+
+### Verifikasi:
+
+| Test | Hasil |
+|---|---|
+| `npm run build` | ✅ 0 error, built in 660ms |
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |

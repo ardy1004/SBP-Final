@@ -175,7 +175,7 @@ function FeaturedBanner({ items }: { items: NormalizedProperty[] }) {
                     <div className="text-white/70 text-sm mb-3">📍 {prop.kecamatan}, {prop.kabupaten}</div>
                     <div className="text-2xl font-bold font-display text-[#29B6F6] mb-4">{formatRupiah(prop.harga)}</div>
                     <Link
-                      to={`/${prop.tujuan === 'disewa' ? 'disewa' : 'dijual'}/${prop.jenis.toLowerCase()}/${prop.provinsi.toLowerCase().replace(/\s+/g, '-')}/${prop.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${prop.kecamatan.toLowerCase().replace(/\s+/g, '-')}/${prop.slug}`}
+                      to={`/${prop.tujuan === 'disewa' ? 'disewa' : 'dijual'}/${prop.jenis.toLowerCase()}/${prop.provinsi.toLowerCase().replace(/\s+/g, '-')}/${prop.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${(prop.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-')}/${prop.slug}`}
                       className="inline-block px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
                       style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
                     >
@@ -693,7 +693,7 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts 
                     <span className="text-[#F5A623] text-xs font-bold">{yieldPct}%</span>
                   </div>
                   <Link
-                    to={`/${investProp.tujuan === 'disewa' ? 'disewa' : 'dijual'}/${investProp.jenis.toLowerCase()}/${investProp.provinsi.toLowerCase().replace(/\s+/g, '-')}/${investProp.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${investProp.kecamatan.toLowerCase().replace(/\s+/g, '-')}/${investProp.slug}`}
+                    to={`/${investProp.tujuan === 'disewa' ? 'disewa' : 'dijual'}/${investProp.jenis.toLowerCase()}/${investProp.provinsi.toLowerCase().replace(/\s+/g, '-')}/${investProp.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${(investProp.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-')}/${investProp.slug}`}
                     className="mt-4 block w-full text-center py-2 rounded-xl text-sm font-semibold text-[#0B2447] bg-[#29B6F6] hover:bg-[#1E88E5] transition-colors"
                   >
                     Lihat Detail →

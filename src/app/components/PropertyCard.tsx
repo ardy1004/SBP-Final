@@ -23,9 +23,10 @@ const JENIS_COLOR: Record<string, string> = {
 
 export default function PropertyCard({ property, className = '' }: Props) {
   const [imgError, setImgError] = useState(false);
+  const kec = (property.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-');
   const detailPath = property.tujuan === 'disewa'
-    ? `/disewa/${property.jenis.toLowerCase()}/${property.provinsi.toLowerCase().replace(/\s+/g, '-')}/${property.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${property.kecamatan.toLowerCase().replace(/\s+/g, '-')}/${property.slug}`
-    : `/dijual/${property.jenis.toLowerCase()}/${property.provinsi.toLowerCase().replace(/\s+/g, '-')}/${property.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${property.kecamatan.toLowerCase().replace(/\s+/g, '-')}/${property.slug}`;
+    ? `/disewa/${property.jenis.toLowerCase()}/${property.provinsi.toLowerCase().replace(/\s+/g, '-')}/${property.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${kec}/${property.slug}`
+    : `/dijual/${property.jenis.toLowerCase()}/${property.provinsi.toLowerCase().replace(/\s+/g, '-')}/${property.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${kec}/${property.slug}`;
 
   const hargaPerM2 = property.luas_tanah && property.harga
     ? Math.round(property.harga / property.luas_tanah)
