@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router';
 import {
   LayoutDashboard, List, Users, LogOut, Menu, X, Bell, Shield,
@@ -17,6 +17,14 @@ export default function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [admin, setAdmin] = useState<AdminUser | null>(null);
   const [checking, setChecking] = useState(true);
+  const [leadsBadge, setLeadsBadge] = useState(0);
+
+  const fetchBadge = useCallback(() => {
+    fetch('/api/admin/leads?count=1', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.count !== undefined) setLeadsBadge(d.count); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch('/api/admin/me', { credentials: 'include' })
@@ -33,6 +41,16 @@ export default function AdminLayout() {
       });
   }, [navigate]);
 
+  // Fetch badge saat mount + setiap 60 detik
+  useEffect(() => {
+    if (checking) return;
+    fetchBadge();
+    const id = setInterval(fetchBadge, 60_000);
+    const onFocus = () => fetchBadge();
+    window.addEventListener('focus', onFocus);
+    return () => { clearInterval(id); window.removeEventListener('focus', onFocus); };
+  }, [checking, fetchBadge]);
+
   const logout = async () => {
     try {
       await fetch('/api/admin/logout', { method: 'POST', credentials: 'include' });
@@ -41,15 +59,15 @@ export default function AdminLayout() {
   };
 
   const navItems = [
-    { to: '/admin', label: 'Ringkasan', icon: LayoutDashboard, end: true },
-    { to: '/admin/agreements', label: 'Titip Jual', icon: FileText, end: false },
-    { to: '/admin/listing', label: 'Properti', icon: List, end: false },
-    { to: '/admin/leads', label: 'Leads', icon: Users, end: false },
-    { to: '/admin/testimoni', label: 'Testimoni', icon: Star, end: false },
-    { to: '/admin/blog', label: 'Blog', icon: BookOpen, end: false },
-    { to: '/admin/portfolio', label: 'Portfolio', icon: Briefcase, end: false },
-    { to: '/admin/media', label: 'Media', icon: Image, end: false },
-    { to: '/admin/pengaturan', label: 'Pengaturan', icon: Settings, end: false },
+    { to: '/admin', label: 'Ringkasan', icon: LayoutDashboard, end: true,  badge: 0 },
+    { to: '/admin/agreements', label: 'Titip Jual', icon: FileText, end: false, badge: 0 },
+    { to: '/admin/listing', label: 'Properti', icon: List, end: false, badge: 0 },
+    { to: '/admin/leads', label: 'Leads', icon: Users, end: false, badge: leadsBadge },
+    { to: '/admin/testimoni', label: 'Testimoni', icon: Star, end: false, badge: 0 },
+    { to: '/admin/blog', label: 'Blog', icon: BookOpen, end: false, badge: 0 },
+    { to: '/admin/portfolio', label: 'Portfolio', icon: Briefcase, end: false, badge: 0 },
+    { to: '/admin/media', label: 'Media', icon: Image, end: false, badge: 0 },
+    { to: '/admin/pengaturan', label: 'Pengaturan', icon: Settings, end: false, badge: 0 },
   ];
 
   const initials = admin?.nama
@@ -85,7 +103,7 @@ export default function AdminLayout() {
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {navItems.map(({ to, label, icon: Icon, end }) => (
+        {navItems.map(({ to, label, icon: Icon, end, badge }) => (
           <NavLink key={to} to={to} end={end}
             onClick={() => setSidebarOpen(false)}
             className={({ isActive }) =>
@@ -94,7 +112,12 @@ export default function AdminLayout() {
               }`
             }>
             <Icon size={17} />
-            {label}
+            <span className="flex-1">{label}</span>
+            {badge > 0 && (
+              <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#EF4444] text-white text-[10px] font-bold flex items-center justify-center">
+                {badge > 99 ? '99+' : badge}
+              </span>
+            )}
           </NavLink>
         ))}
       </nav>
@@ -138,7 +161,9 @@ export default function AdminLayout() {
 
           <button className="relative text-[#64748B] hover:text-[#0F172A] transition-colors">
             <Bell size={20} />
-            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#EF4444]" />
+            {leadsBadge > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#EF4444]" />
+            )}
           </button>
 
           <div className="flex items-center gap-2">

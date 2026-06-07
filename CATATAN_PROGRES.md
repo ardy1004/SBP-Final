@@ -1133,6 +1133,75 @@ Mengembalikan:
 
 ---
 
+---
+
+## Admin Gelombang 1 — Modul 2: Leads/CRM ✅ SELESAI (lokal)
+
+**Branch:** `feat/admin-leads`
+**Tanggal:** 6 Juni 2026
+
+### Yang dibangun:
+
+| File | Perubahan |
+|---|---|
+| `migrations/0009_update_leads_pipeline.sql` | Baru — update CHECK constraint pipeline (6 tahap → 5 tahap) |
+| `functions/api/admin/leads/index.js` | Baru — GET list leads + badge count |
+| `functions/api/admin/leads/[id]/index.js` | Baru — PATCH status_pipeline + append notes |
+| `src/app/components/admin/AdminLeadsPage.tsx` | Diubah — ganti mock ke API real, pipeline 5 kolom, PATCH on drag |
+| `src/app/components/ContactPage.tsx` | Diubah — form kini simpan ke DB via POST /api/leads, + pertahankan buka WA |
+| `src/app/components/admin/AdminLayout.tsx` | Diubah — badge count leads baru di sidebar (poll 60s + window focus) |
+
+### Migrasi 0009 — Pipeline baru (5 tahap):
+`baru → dihubungi → negosiasi → closing → arsip`
+
+Mapping dari pipeline lama saat migrasi data:
+- `viewing` → `dihubungi`
+- `nego` → `negosiasi`
+- `closed` → `closing`
+- `lost` → `arsip`
+
+**⚠️ WAJIB setelah merge ke master:** jalankan ke remote DB produksi:
+```bash
+wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline.sql
+```
+
+### Endpoint baru:
+
+| Endpoint | Method | Fungsi |
+|---|---|---|
+| `GET /api/admin/leads` | GET | List leads (filter `?status=`, `?limit=N`, default 50) |
+| `GET /api/admin/leads?count=1` | GET | Badge count `status_pipeline='baru'` |
+| `PATCH /api/admin/leads/:id` | PATCH | Update status_pipeline dan/atau append note |
+
+### Keputusan desain:
+- **Badge sidebar**: COUNT `status_pipeline='baru'` (tanpa migrasi kolom is_read)
+- **Contact form**: gabung ke `/api/leads` existing dengan `source_page='contact'`
+- **Notes**: append-only JSON array `[{teks, admin, waktu}]`
+- **AdminLeadsPage**: optimistic drag-drop (setState dulu, PATCH API background)
+
+### Hasil verifikasi lokal:
+
+| Test | Hasil |
+|---|---|
+| GET /api/admin/leads tanpa auth | ✅ 401 |
+| GET /api/admin/leads (auth Bearer) | ✅ 200, total=5 |
+| GET /api/admin/leads?count=1 | ✅ 200, count=5 |
+| PATCH status baru→dihubungi | ✅ 200, new_status=dihubungi |
+| PATCH append note | ✅ 200, notes_count=1, admin=Monica Vera S |
+| PATCH invalid status_pipeline | ✅ 422 |
+| POST /api/leads source_page=contact | ✅ 201 tersimpan ke DB |
+| npm run build | ✅ 0 error |
+
+### Modul admin berikutnya:
+
+| Prioritas | Modul | Status |
+|---|---|---|
+| 3 | **Upload Foto** (G3b + WebP resize) | Belum — menyusul |
+| 4 | **Testimoni** — CRUD + reorder | Belum |
+| 5 | **Blog** — CRUD draft/publish | Belum |
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |
