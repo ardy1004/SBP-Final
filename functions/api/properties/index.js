@@ -94,9 +94,9 @@ export async function onRequestGet(context) {
       p.income_per_bulan, p.pengeluaran_per_bulan,
       p.views_count, p.published_at, p.updated_at,
       (SELECT url_webp FROM property_images
-         WHERE property_id = p.id AND is_cover = 1 LIMIT 1) AS cover_url,
+         WHERE property_id = p.id ORDER BY is_cover DESC, urutan ASC LIMIT 1) AS cover_url,
       (SELECT alt_text  FROM property_images
-         WHERE property_id = p.id AND is_cover = 1 LIMIT 1) AS cover_alt
+         WHERE property_id = p.id ORDER BY is_cover DESC, urutan ASC LIMIT 1) AS cover_alt
     FROM properties p
     WHERE ${where}
     ORDER BY ${orderBy}
