@@ -38,6 +38,7 @@ export async function onRequestGet(context) {
       leadsRecentRes,
       agreementsRecentRes,
       listingsRecentRes,
+      viewsPerHariRes,
     ] = await Promise.all([
 
       // 1. Breakdown listing per status_publish
@@ -53,11 +54,11 @@ export async function onRequestGet(context) {
         FROM leads
       `).first(),
 
-      // 3. Kontak WA hari ini (wa_clicked_at = today)
+      // 3. Kontak WA hari ini — dari property_view_daily (lebih akurat: klik sticky bar)
       db.prepare(`
-        SELECT COUNT(*) AS cnt FROM leads
-        WHERE wa_clicked_at IS NOT NULL
-          AND DATE(wa_clicked_at,'localtime') = DATE('now','localtime')
+        SELECT COALESCE(SUM(wa_clicks), 0) AS cnt
+        FROM property_view_daily
+        WHERE tanggal = DATE('now','localtime')
       `).first(),
 
       // 4. Breakdown agreements per status
@@ -105,6 +106,15 @@ export async function onRequestGet(context) {
         FROM properties
         WHERE status_publish IN ('published','sold') AND published_at IS NOT NULL
         ORDER BY published_at DESC LIMIT 3
+      `).all(),
+
+      // 12. Views per hari — 30 hari terakhir (untuk chart)
+      db.prepare(`
+        SELECT tanggal, SUM(views) AS views, SUM(wa_clicks) AS wa_clicks
+        FROM property_view_daily
+        WHERE tanggal >= DATE('now','-29 days','localtime')
+        GROUP BY tanggal
+        ORDER BY tanggal ASC
       `).all(),
     ]);
 
@@ -180,7 +190,20 @@ export async function onRequestGet(context) {
     });
     const aktivitas_terbaru = activities.slice(0, 8).map(({ _ts, ...rest }) => rest);
 
-    return jsonOk({ kpi, leads_per_bulan, distribusi_jenis, aktivitas_terbaru });
+    // --- Views per Hari (fill missing days dengan 0) ---
+    const viewsMap = Object.fromEntries(
+      (viewsPerHariRes.results ?? []).map(r => [r.tanggal, { views: r.views, wa_clicks: r.wa_clicks }])
+    );
+    const today = new Date();
+    const views_per_hari = Array.from({ length: 30 }, (_, i) => {
+      const d = new Date(today);
+      d.setDate(today.getDate() - (29 - i));
+      const tgl = d.toISOString().slice(0, 10);
+      const entry = viewsMap[tgl] ?? { views: 0, wa_clicks: 0 };
+      return { tanggal: tgl, views: entry.views, wa_clicks: entry.wa_clicks };
+    });
+
+    return jsonOk({ kpi, leads_per_bulan, distribusi_jenis, aktivitas_terbaru, views_per_hari });
 
   } catch (err) {
     console.error('[admin/overview]', err.message);

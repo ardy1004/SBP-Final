@@ -92,12 +92,22 @@ export async function onRequestGet(context) {
     // Hitung Investment Intelligence (hanya bila ada data income)
     const investmentIntelligence = hitungInvestmentIntelligence(property);
 
-    // Increment views_count non-blocking — jangan tunda response
+    // Increment views_count + upsert daily tracker — non-blocking
     context.waitUntil(
-      env.DB.prepare('UPDATE properties SET views_count = views_count + 1 WHERE id = ?')
-        .bind(property.id)
-        .run()
-        .catch(err => console.error('[views] increment failed:', err.message))
+      Promise.all([
+        env.DB.prepare('UPDATE properties SET views_count = views_count + 1 WHERE id = ?')
+          .bind(property.id)
+          .run()
+          .catch(err => console.error('[views] increment failed:', err.message)),
+        env.DB.prepare(`
+          INSERT INTO property_view_daily (property_id, tanggal, views)
+          VALUES (?, DATE('now','localtime'), 1)
+          ON CONFLICT(property_id, tanggal) DO UPDATE SET views = views + 1
+        `)
+          .bind(property.id)
+          .run()
+          .catch(err => console.error('[views_daily] upsert failed:', err.message)),
+      ])
     );
 
     // Rakit response — hapus field internal, tambah computed fields

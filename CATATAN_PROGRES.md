@@ -1321,6 +1321,51 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 
 ---
 
+## Gelombang 2 Modul 2 — Tracking Klik Properti ✅ SELESAI (lokal, belum commit)
+
+**Branch:** `feat/admin-tracking`
+**Tanggal:** 7 Juni 2026
+
+### Yang dibangun:
+
+| File | Status | Keterangan |
+|---|---|---|
+| `migrations/0010_add_property_view_daily.sql` | ✅ Baru | Tabel + 2 index — sudah di-apply ke DB LOKAL |
+| `functions/api/properties/[slug].js` | ✅ Diubah | Tambah upsert `property_view_daily` di `waitUntil` existing |
+| `functions/api/properties/[slug]/wa-click.js` | ✅ Baru | `POST /api/properties/:slug/wa-click` — track + kembalikan `wa_url` |
+| `src/app/components/PropertyDetailPage.tsx` | ✅ Diubah | Sticky bar: dari scroll-ke-form → buka WA langsung + tracking |
+| `functions/api/admin/overview.js` | ✅ Diubah | Query `views_per_hari` 30 hari + `wa_hari_ini` dari `property_view_daily` |
+| `src/app/components/admin/AdminOverviewPage.tsx` | ✅ Diubah | Chart tabbed Leads/Views, LineChart views+wa_clicks 30 hari |
+
+### Tabel baru: `property_view_daily`
+
+```sql
+(id, property_id, tanggal DATE, views INT DEFAULT 0, wa_clicks INT DEFAULT 0, UNIQUE(property_id, tanggal))
+```
+
+### Flow tracking:
+- **View properti**: `GET /api/properties/:slug` → `waitUntil` upsert `views + 1` per hari
+- **Klik WA sticky bar**: `POST /api/properties/:slug/wa-click` → upsert `wa_clicks + 1` → response `wa_url`
+- **Overview chart**: `views_per_hari` array 30 hari dengan fill-gap 0 untuk hari tanpa data
+
+### ⚠️ PENTING — Migrasi remote wajib dijalankan setelah merge ke master:
+
+```bash
+npx wrangler d1 execute sbp-db --remote --file=migrations/0010_add_property_view_daily.sql
+```
+
+### Verifikasi:
+
+| Test | Hasil |
+|---|---|
+| `npm run build` | ✅ 0 error, 772ms |
+| `GET /api/properties/:slug` | ✅ 200, upsert `views=1` di `property_view_daily` |
+| `POST /api/properties/:slug/wa-click` | ✅ 200, `wa_clicks=1`, response `wa_url` |
+| `GET /api/admin/overview` | ✅ 200, field `views_per_hari` (30 elemen) hadir |
+| DB lokal | ✅ Row: `property_id=1, tanggal=2026-06-07, views=1, wa_clicks=1` |
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |
