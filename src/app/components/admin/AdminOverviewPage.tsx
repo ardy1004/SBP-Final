@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router';
 import { TrendingUp, Home, Users, Eye, MessageCircle, FileText, ArrowUpRight, ArrowDownRight } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 
 interface AdminUser { sub: number; email: string; nama: string; role: string; }
 
@@ -18,6 +18,7 @@ interface OverviewData {
   leads_per_bulan:  { bulan: string; leads: number }[];
   distribusi_jenis: { name: string; value: number; color: string }[];
   aktivitas_terbaru: { tipe: string; teks: string; waktu: string; warna: string }[];
+  views_per_hari:   { tanggal: string; views: number; wa_clicks: number }[];
 }
 
 function SkeletonCard() {
@@ -38,6 +39,7 @@ export default function AdminOverviewPage() {
   const [data, setData]       = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
+  const [chartTab, setChartTab] = useState<'leads' | 'views'>('leads');
 
   useEffect(() => {
     fetch('/api/admin/overview', { credentials: 'include' })
@@ -147,12 +149,31 @@ export default function AdminOverviewPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Bar Chart — Leads per Bulan */}
+        {/* Chart area dengan tab Leads / Views */}
         <div className="lg:col-span-2 bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-          <h2 className="font-display font-semibold text-[#0F172A] mb-4">Leads per Bulan</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-display font-semibold text-[#0F172A]">
+              {chartTab === 'leads' ? 'Leads per Bulan' : 'Views Harian (30 Hari)'}
+            </h2>
+            <div className="flex gap-1 bg-[#F1F5F9] rounded-lg p-0.5">
+              {(['leads', 'views'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setChartTab(tab)}
+                  className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                    chartTab === tab
+                      ? 'bg-white text-[#0F172A] shadow-sm'
+                      : 'text-[#64748B] hover:text-[#0F172A]'
+                  }`}
+                >
+                  {tab === 'leads' ? 'Leads' : 'Views'}
+                </button>
+              ))}
+            </div>
+          </div>
           {loading ? (
             <div className="h-[200px] bg-gray-50 rounded-xl animate-pulse" />
-          ) : (
+          ) : chartTab === 'leads' ? (
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={data?.leads_per_bulan ?? []} margin={{ top: 0, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
@@ -161,6 +182,26 @@ export default function AdminOverviewPage() {
                 <Tooltip contentStyle={{ borderRadius: 10, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontSize: 12 }} />
                 <Bar dataKey="leads" fill="#1565C0" radius={[6, 6, 0, 0]} />
               </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={data?.views_per_hari ?? []} margin={{ top: 0, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                <XAxis
+                  dataKey="tanggal"
+                  tick={{ fontSize: 10, fill: '#94A3B8' }}
+                  axisLine={false} tickLine={false}
+                  tickFormatter={v => v.slice(5)} // MM-DD
+                  interval={4}
+                />
+                <YAxis tick={{ fontSize: 11, fill: '#94A3B8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip
+                  contentStyle={{ borderRadius: 10, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontSize: 12 }}
+                  labelFormatter={v => `Tgl ${v}`}
+                />
+                <Line dataKey="views" name="Views" stroke="#7C3AED" strokeWidth={2} dot={false} />
+                <Line dataKey="wa_clicks" name="Klik WA" stroke="#10B981" strokeWidth={2} dot={false} />
+              </LineChart>
             </ResponsiveContainer>
           )}
         </div>

@@ -674,7 +674,17 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
               <div className="text-xs text-gray-500">{property.jenis} · {property.kecamatan}</div>
             </div>
             <button
-              onClick={() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+              onClick={() => {
+                // Track klik WA (fire-and-forget) + buka WA langsung
+                fetch(`/api/properties/${property.slug}/wa-click`, { method: 'POST' })
+                  .then(r => r.json())
+                  .then(d => { if (d?.data?.wa_url) window.open(d.data.wa_url, '_blank'); })
+                  .catch(() => {
+                    // Fallback: buka WA tanpa tracking jika fetch gagal
+                    const msg = `Halo, saya tertarik dengan properti: ${property.title}`;
+                    window.open(`https://wa.me/6281391278889?text=${encodeURIComponent(msg)}`, '_blank');
+                  });
+              }}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-white bg-[#10B981] hover:bg-[#059669] transition-colors"
             >
               <MessageCircle size={16} /> Hubungi via WA
