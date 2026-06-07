@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Filter, ChevronDown, Edit, Plus, FileUp } from 'lucide-react';
+import { Search, Filter, ChevronDown, Edit, Plus, FileUp, Trash2 } from 'lucide-react';
 import CsvImportModal from './CsvImportModal';
 
 interface PropertyRow {
@@ -59,6 +59,7 @@ export default function AdminListingPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('Semua');
   const [showCsvModal, setShowCsvModal] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -77,6 +78,20 @@ export default function AdminListingPage() {
   }, [statusFilter]);
 
   useEffect(() => { fetchProperties(); }, [fetchProperties]);
+
+  const handleDelete = useCallback(async (p: PropertyRow) => {
+    if (!window.confirm(`Hapus properti "${p.title}" permanen? Foto juga akan dihapus. Tidak bisa dibatalkan.`)) return;
+    setDeletingId(p.id);
+    try {
+      const res = await fetch(`/api/admin/properties/${p.id}`, { method: 'DELETE', credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await fetchProperties();
+    } catch (err) {
+      alert(`Gagal menghapus: ${err instanceof Error ? err.message : 'Error tidak diketahui'}`);
+    } finally {
+      setDeletingId(null);
+    }
+  }, [fetchProperties]);
 
   const filtered = properties.filter(p => {
     if (!search) return true;
@@ -237,6 +252,14 @@ export default function AdminListingPage() {
                           title="Edit"
                         >
                           <Edit size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(p)}
+                          disabled={deletingId === p.id}
+                          className="p-1.5 text-[#64748B] hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          title="Hapus permanen"
+                        >
+                          <Trash2 size={14} />
                         </button>
                       </div>
                     </td>

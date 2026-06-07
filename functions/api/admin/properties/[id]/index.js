@@ -222,6 +222,36 @@ export async function onRequestPatch(context) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// DELETE /api/admin/properties/:id — hapus properti + foto R2
+// ═══════════════════════════════════════════════════════════════════
+export async function onRequestDelete(context) {
+  const { env, params } = context;
+  const id = parseInt(params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return jsonError('ID tidak valid', 400);
+
+  try {
+    const exists = await env.DB.prepare('SELECT id FROM properties WHERE id = ?').bind(id).first();
+    if (!exists) return jsonError('Properti tidak ditemukan', 404);
+
+    const photos = await env.DB.prepare(
+      'SELECT url_webp FROM property_images WHERE property_id = ?'
+    ).bind(id).all();
+
+    for (const photo of (photos.results ?? [])) {
+      if (photo.url_webp) {
+        try { await env.MEDIA.delete(photo.url_webp); } catch { /* abaikan R2 error */ }
+      }
+    }
+
+    await env.DB.prepare('DELETE FROM properties WHERE id = ?').bind(id).run();
+    return jsonOk({ success: true });
+  } catch (err) {
+    console.error('[admin property DELETE]', err.message);
+    return jsonError('Gagal menghapus properti', 500);
+  }
+}
+
 export async function onRequestOptions() {
   return handleOptions();
 }
