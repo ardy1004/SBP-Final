@@ -119,8 +119,8 @@ export async function onRequestPost(context) {
     for (let i = 0; i < photos_raw.length; i++) {
       const p = photos_raw[i];
       if (typeof p !== 'string') { errors.photos = `Foto #${i + 1}: format tidak valid`; break; }
-      if (!p.match(/^data:image\/(jpeg|jpg);base64,/i)) {
-        errors.photos = `Foto #${i + 1}: Format foto harus JPG`; break;
+      if (!p.match(/^data:image\/(jpeg|jpg|webp|png);base64,/i)) {
+        errors.photos = `Foto #${i + 1}: Format foto tidak valid`; break;
       }
       const sizeEst = Math.ceil(p.slice(p.indexOf(',') + 1).length * 3 / 4);
       if (sizeEst > 8 * 1024 * 1024) { errors.photos = `Foto #${i + 1}: ukuran melebihi 8MB`; break; }

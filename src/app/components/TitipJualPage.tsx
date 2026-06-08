@@ -38,6 +38,31 @@ const readFileAsDataURL = (file: File): Promise<string> =>
     r.readAsDataURL(file);
   });
 
+function convertToWebP(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { reject(new Error('Canvas tidak tersedia')); return; }
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob(blob => {
+        if (!blob) { reject(new Error('Konversi WebP gagal')); return; }
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('FileReader error'));
+        reader.readAsDataURL(blob);
+      }, 'image/webp', 0.85);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Gagal membaca gambar')); };
+    img.src = url;
+  });
+}
+
 const inputCls = (err?: string) =>
   `w-full border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0] transition-all ${err ? 'border-red-400 bg-red-50' : 'border-gray-200'}`;
 
@@ -417,8 +442,8 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     let photoErr = '';
     for (const file of files) {
       if (photoFiles.length + toAdd.length >= 20) { photoErr = 'Maksimal 20 foto'; break; }
-      if (!['image/jpeg'].includes(file.type)) {
-        photoErr = `${file.name}: Hanya foto JPG yang didukung saat ini.`; continue;
+      if (!file.type.startsWith('image/')) {
+        photoErr = `${file.name}: Hanya file gambar yang didukung.`; continue;
       }
       if (file.size > 8 * 1024 * 1024) { photoErr = `${file.name}: ukuran melebihi 8MB`; continue; }
       toAdd.push(file);
@@ -426,7 +451,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     if (photoErr) setErrors(p => ({ ...p, photos: photoErr }));
     else clearErr('photos');
     if (!toAdd.length) { e.target.value = ''; return; }
-    const previews = await Promise.all(toAdd.map(readFileAsDataURL));
+    const previews = await Promise.all(toAdd.map(convertToWebP));
     setPhotoFiles(p => [...p, ...toAdd]);
     setPhotoPreviews(p => [...p, ...previews]);
     e.target.value = '';
@@ -798,9 +823,9 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
             className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${errors.photos ? 'border-red-400 bg-red-50' : 'border-gray-200 hover:border-[#1565C0]'}`}>
             <Upload size={28} className="mx-auto mb-2 text-gray-400" />
             <p className="text-sm text-[#64748B]">Klik atau drag foto ke sini</p>
-            <p className="text-xs text-gray-400 mt-1">JPG · Maks 20 foto · Maks 8MB/foto · Foto pertama jadi cover</p>
+            <p className="text-xs text-gray-400 mt-1">JPG/PNG/WebP · Maks 20 foto · Maks 8MB/foto · Foto pertama jadi cover</p>
           </div>
-          <input ref={fileInputRef} type="file" accept="image/jpeg"
+          <input ref={fileInputRef} type="file" accept="image/*"
             multiple className="hidden" onChange={handleFileSelect} />
           <FieldErr msg={errors.photos} />
 
