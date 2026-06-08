@@ -164,7 +164,6 @@ function FeaturedBanner({ items }: { items: NormalizedProperty[] }) {
                   className="absolute inset-0 w-full h-full object-cover"
                   onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80'; }}
                 />
-                <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(6,27,53,0.88) 0%, rgba(11,36,71,0.55) 50%, rgba(6,27,53,0.75) 100%)' }} />
                 <div className="absolute inset-0 flex items-end p-8 lg:p-12">
                   <div className="glass-dark rounded-2xl p-6 max-w-lg">
                     <div className="flex gap-2 mb-3">
