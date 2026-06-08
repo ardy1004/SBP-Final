@@ -63,6 +63,7 @@ export default function AdminListingPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkProgress, setBulkProgress] = useState('');
+  const [displayLimit, setDisplayLimit] = useState(20);
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -81,7 +82,7 @@ export default function AdminListingPage() {
   }, [statusFilter]);
 
   useEffect(() => { fetchProperties(); }, [fetchProperties]);
-  useEffect(() => { setSelectedIds(new Set()); }, [statusFilter, search]);
+  useEffect(() => { setSelectedIds(new Set()); setDisplayLimit(20); }, [statusFilter, search]);
 
   const handleDelete = useCallback(async (p: PropertyRow) => {
     if (!window.confirm(`Hapus properti "${p.title}" permanen? Foto juga akan dihapus. Tidak bisa dibatalkan.`)) return;
@@ -331,7 +332,7 @@ export default function AdminListingPage() {
                   </td>
                 </tr>
               )}
-              {!loading && filtered.map(p => {
+              {!loading && filtered.slice(0, displayLimit).map(p => {
                 const badge = STATUS_BADGE[p.status_publish] ?? { label: p.status_publish, cls: 'bg-gray-100 text-gray-500' };
                 const src = coverSrc(p.cover_url);
                 const isSelected = selectedIds.has(p.id);
@@ -416,9 +417,21 @@ export default function AdminListingPage() {
           </div>
         )}
 
+        {!loading && filtered.length > displayLimit && (
+          <div className="flex justify-center p-4 border-t border-gray-100">
+            <button
+              onClick={() => setDisplayLimit(prev => prev + 20)}
+              className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+              style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
+            >
+              Muat Lebih Banyak ({filtered.length - displayLimit} tersisa)
+            </button>
+          </div>
+        )}
+
         <div className="p-4 border-t border-gray-100 flex items-center justify-between">
           <span className="text-xs text-[#94A3B8]">
-            Menampilkan {filtered.length} dari {properties.length} properti
+            Menampilkan {Math.min(displayLimit, filtered.length)} dari {filtered.length} properti
           </span>
         </div>
       </div>

@@ -90,7 +90,7 @@ export default function PropertiesPage() {
   const [kabupatenId, setKabupatenId] = useState<number | null>(null);
   const [kecamatan, setKecamatan] = useState(searchParams.get('kecamatan') || '');
   const [sort, setSort] = useState('terbaru');
-  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
 
   // ── Location cascade state ────────────────────────────────────────────────
   const [provList, setProvList] = useState<ApiLocation[]>([]);
@@ -102,7 +102,6 @@ export default function PropertiesPage() {
   // ── Properties data state ─────────────────────────────────────────────────
   const [properties, setProperties] = useState<NormalizedProperty[]>([]);
   const [totalCount, setTotalCount] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -145,8 +144,7 @@ export default function PropertiesPage() {
 
     const params: PropertiesParams = {
       sort: sort as PropertiesParams['sort'],
-      page,
-      limit: PER_PAGE,
+      limit,
     };
     if (tujuan !== 'semua') params.tujuan = tujuan;
     if (selectedJenis.length > 0) params.jenis = selectedJenis.join(',');
@@ -162,26 +160,25 @@ export default function PropertiesPage() {
         if (res.success && res.data) {
           setProperties(res.data.items.map(normalizeProperty));
           setTotalCount(res.data.pagination.total);
-          setTotalPages(res.data.pagination.total_pages);
         } else {
           setError(res.error ?? 'Gagal memuat data properti');
         }
       })
       .catch(() => setError('Koneksi ke server gagal'))
       .finally(() => setLoading(false));
-  }, [tujuan, selectedJenis, hargaRange, kabupaten, kecamatan, sort, page]);
+  }, [tujuan, selectedJenis, hargaRange, kabupaten, kecamatan, sort, limit]);
 
   useEffect(() => { fetchProperties(); }, [fetchProperties]);
 
   // ── Filter handlers ───────────────────────────────────────────────────────
   const toggleJenis = (v: string) => {
     setSelectedJenis(prev => prev.includes(v) ? prev.filter(j => j !== v) : [...prev, v]);
-    setPage(1);
+    setLimit(20);
   };
 
   const handleProvChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const id = parseInt(e.target.value, 10) || null;
-    setProvId(id); setKabupaten(''); setKabupatenId(null); setKecamatan(''); setPage(1);
+    setProvId(id); setKabupaten(''); setKabupatenId(null); setKecamatan(''); setLimit(20);
   };
 
   const handleKabChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -190,7 +187,7 @@ export default function PropertiesPage() {
     setKabupaten(nama);
     setKabupatenId(found?.id ?? null);
     setKecamatan('');
-    setPage(1);
+    setLimit(20);
   };
 
   const resetFilters = () => {
@@ -202,15 +199,15 @@ export default function PropertiesPage() {
     setKabupatenId(null);
     setKecamatan('');
     setSort('terbaru');
-    setPage(1);
+    setLimit(20);
   };
 
   const activeChips = [
-    tujuan !== 'semua' ? { label: tujuan === 'dijual' ? 'Dijual' : 'Disewa', clear: () => { setTujuan('semua'); setPage(1); } } : null,
+    tujuan !== 'semua' ? { label: tujuan === 'dijual' ? 'Dijual' : 'Disewa', clear: () => { setTujuan('semua'); setLimit(20); } } : null,
     ...selectedJenis.map(j => ({ label: j, clear: () => toggleJenis(j) })),
-    hargaRange > 0 ? { label: HARGA_RANGES[hargaRange].label, clear: () => { setHargaRange(0); setPage(1); } } : null,
-    kabupaten ? { label: kabupaten, clear: () => { setKabupaten(''); setKabupatenId(null); setKecamatan(''); setPage(1); } } : null,
-    kecamatan ? { label: kecamatan, clear: () => { setKecamatan(''); setPage(1); } } : null,
+    hargaRange > 0 ? { label: HARGA_RANGES[hargaRange].label, clear: () => { setHargaRange(0); setLimit(20); } } : null,
+    kabupaten ? { label: kabupaten, clear: () => { setKabupaten(''); setKabupatenId(null); setKecamatan(''); setLimit(20); } } : null,
+    kecamatan ? { label: kecamatan, clear: () => { setKecamatan(''); setLimit(20); } } : null,
   ].filter(Boolean) as { label: string; clear: () => void }[];
 
   const selectClass = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0] appearance-none bg-white";
@@ -231,7 +228,7 @@ export default function PropertiesPage() {
           {[['semua', 'Semua'], ['dijual', 'Dijual'], ['disewa', 'Disewa']].map(([v, l]) => (
             <button
               key={v}
-              onClick={() => { setTujuan(v); setPage(1); }}
+              onClick={() => { setTujuan(v); setLimit(20); }}
               className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-all ${
                 tujuan === v ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'border-gray-200 text-gray-600 hover:border-[#1565C0]'
               }`}
@@ -266,7 +263,7 @@ export default function PropertiesPage() {
       <div className="mb-5">
         <label className="block text-xs font-semibold text-[#64748B] uppercase tracking-wide mb-2">Rentang Harga</label>
         <div className="relative">
-          <select value={hargaRange} onChange={e => { setHargaRange(Number(e.target.value)); setPage(1); }} className={selectClass}>
+          <select value={hargaRange} onChange={e => { setHargaRange(Number(e.target.value)); setLimit(20); }} className={selectClass}>
             {HARGA_RANGES.map((r, i) => <option key={i} value={i}>{r.label}</option>)}
           </select>
           <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
@@ -300,7 +297,7 @@ export default function PropertiesPage() {
             <div className="relative">
               <select
                 value={kecamatan}
-                onChange={e => { setKecamatan(e.target.value); setPage(1); }}
+                onChange={e => { setKecamatan(e.target.value); setLimit(20); }}
                 className={selectClass}
               >
                 <option value="">Semua Kecamatan</option>
@@ -390,7 +387,7 @@ export default function PropertiesPage() {
                 <div className="relative">
                   <select
                     value={sort}
-                    onChange={e => { setSort(e.target.value); setPage(1); }}
+                    onChange={e => { setSort(e.target.value); setLimit(20); }}
                     className="border border-gray-200 rounded-xl px-3 py-2 text-sm appearance-none bg-white pr-8 focus:outline-none focus:ring-2 focus:ring-[#1565C0]"
                   >
                     {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -424,7 +421,7 @@ export default function PropertiesPage() {
             )}
 
             {/* Konten utama: Loading / Error / Empty / Grid / List */}
-            {loading ? (
+            {loading && properties.length === 0 ? (
               viewMode === 'grid' ? <SkeletonCards /> : <SkeletonListItems />
             ) : error ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -487,36 +484,17 @@ export default function PropertiesPage() {
               </div>
             )}
 
-            {/* Pagination — server-side */}
-            {!loading && totalPages > 1 && (
-              <div className="flex justify-center gap-2 mt-8 flex-wrap items-center">
-                {page > 1 && (
-                  <button
-                    onClick={() => { setPage(p => p - 1); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                    className="px-3 h-9 rounded-xl text-sm font-medium bg-white border border-gray-200 text-gray-600 hover:border-[#1565C0] transition-colors"
-                  >
-                    ← Prev
-                  </button>
-                )}
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-                  <button
-                    key={p}
-                    onClick={() => { setPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                    className={`w-9 h-9 rounded-xl text-sm font-medium transition-all ${
-                      p === page ? 'bg-[#1565C0] text-white' : 'bg-white border border-gray-200 text-gray-600 hover:border-[#1565C0]'
-                    }`}
-                  >
-                    {p}
-                  </button>
-                ))}
-                {page < totalPages && (
-                  <button
-                    onClick={() => { setPage(p => p + 1); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                    className="px-3 h-9 rounded-xl text-sm font-medium bg-white border border-gray-200 text-gray-600 hover:border-[#1565C0] transition-colors"
-                  >
-                    Next →
-                  </button>
-                )}
+            {/* Muat Lebih Banyak — server-side load more (akumulatif) */}
+            {!error && properties.length > 0 && properties.length < totalCount && (
+              <div className="flex justify-center mt-8">
+                <button
+                  onClick={() => setLimit(prev => prev + 20)}
+                  disabled={loading}
+                  className="px-6 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
+                  style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
+                >
+                  {loading ? 'Memuat…' : `Muat Lebih Banyak (${totalCount - properties.length} tersisa)`}
+                </button>
               </div>
             )}
           </div>

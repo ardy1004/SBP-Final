@@ -1,7 +1,7 @@
 import { jsonOk, jsonError, handleOptions } from '../_shared/response.js';
 
 const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 50;
+const MAX_LIMIT = 500;
 
 // Whitelist ORDER BY — tidak boleh dari input user langsung (SQL injection guard)
 const ORDER_MAP = {
