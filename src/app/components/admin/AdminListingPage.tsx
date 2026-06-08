@@ -60,6 +60,8 @@ export default function AdminListingPage() {
   const [statusFilter, setStatusFilter] = useState<string>('Semua');
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -78,6 +80,7 @@ export default function AdminListingPage() {
   }, [statusFilter]);
 
   useEffect(() => { fetchProperties(); }, [fetchProperties]);
+  useEffect(() => { setSelectedIds(new Set()); }, [statusFilter, search]);
 
   const handleDelete = useCallback(async (p: PropertyRow) => {
     if (!window.confirm(`Hapus properti "${p.title}" permanen? Foto juga akan dihapus. Tidak bisa dibatalkan.`)) return;
@@ -101,6 +104,64 @@ export default function AdminListingPage() {
       (p.kode_listing ?? '').toLowerCase().includes(q)
     );
   });
+
+  const allSelected = filtered.length > 0 && filtered.every(p => selectedIds.has(p.id));
+  const someSelected = !allSelected && filtered.some(p => selectedIds.has(p.id));
+
+  const handleToggleAll = () => {
+    if (allSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(filtered.map(p => p.id)));
+  };
+
+  const handleToggleOne = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkPublish = async () => {
+    const ids = [...selectedIds];
+    if (!window.confirm(`Publish ${ids.length} properti sekarang?`)) return;
+    setBulkLoading(true);
+    try {
+      const res = await fetch('/api/admin/properties/bulk', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'publish', ids }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await fetchProperties();
+      setSelectedIds(new Set());
+    } catch (err) {
+      alert(`Gagal publish massal: ${err instanceof Error ? err.message : 'Error tidak diketahui'}`);
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = [...selectedIds];
+    if (!window.confirm(`Hapus ${ids.length} properti permanen? Semua foto juga dihapus. Tidak bisa dibatalkan.`)) return;
+    setBulkLoading(true);
+    try {
+      const res = await fetch('/api/admin/properties/bulk', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', ids }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await fetchProperties();
+      setSelectedIds(new Set());
+    } catch (err) {
+      alert(`Gagal hapus massal: ${err instanceof Error ? err.message : 'Error tidak diketahui'}`);
+    } finally {
+      setBulkLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -172,6 +233,41 @@ export default function AdminListingPage() {
         </div>
       </div>
 
+      {/* Bulk action bar — slide down when something is selected */}
+      <div
+        className="overflow-hidden transition-all duration-200"
+        style={{ maxHeight: selectedIds.size > 0 ? '80px' : '0px', opacity: selectedIds.size > 0 ? 1 : 0 }}
+      >
+        <div className="bg-[#EFF6FF] border border-[#1565C0]/20 rounded-2xl px-4 py-3 flex items-center gap-3 flex-wrap">
+          <span className="text-sm font-semibold text-[#1565C0]">
+            {selectedIds.size} properti dipilih
+          </span>
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              onClick={handleBulkPublish}
+              disabled={bulkLoading}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {bulkLoading ? 'Memproses…' : 'Publish Semua'}
+            </button>
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkLoading}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {bulkLoading ? 'Memproses…' : 'Hapus Semua'}
+            </button>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              disabled={bulkLoading}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-[#64748B] bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-40"
+            >
+              Batal
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Table */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {error && (
@@ -185,6 +281,16 @@ export default function AdminListingPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
+                <th className="p-3 w-10">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                    onChange={handleToggleAll}
+                    className="w-4 h-4 accent-[#1565C0] cursor-pointer"
+                    title="Pilih Semua"
+                  />
+                </th>
                 <th className="p-3 text-left text-xs font-semibold text-[#64748B] uppercase tracking-wide">Properti</th>
                 <th className="p-3 text-left text-xs font-semibold text-[#64748B] uppercase tracking-wide hidden md:table-cell">Lokasi</th>
                 <th className="p-3 text-left text-xs font-semibold text-[#64748B] uppercase tracking-wide hidden lg:table-cell">Harga</th>
@@ -195,7 +301,7 @@ export default function AdminListingPage() {
             <tbody className="divide-y divide-gray-50">
               {loading && (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-[#94A3B8] text-sm">
+                  <td colSpan={6} className="py-12 text-center text-[#94A3B8] text-sm">
                     <div className="w-6 h-6 border-2 border-[#1565C0]/20 border-t-[#1565C0] rounded-full animate-spin mx-auto mb-2" />
                     Memuat data…
                   </td>
@@ -204,12 +310,21 @@ export default function AdminListingPage() {
               {!loading && filtered.map(p => {
                 const badge = STATUS_BADGE[p.status_publish] ?? { label: p.status_publish, cls: 'bg-gray-100 text-gray-500' };
                 const src = coverSrc(p.cover_url);
+                const isSelected = selectedIds.has(p.id);
                 return (
                   <tr
                     key={p.id}
-                    className="hover:bg-gray-50 transition-colors cursor-pointer"
+                    className={`hover:bg-gray-50 transition-colors cursor-pointer ${isSelected ? 'bg-[#EFF6FF]' : ''}`}
                     onClick={() => navigate(`/admin/listing/${p.id}`)}
                   >
+                    <td className="p-3" onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleOne(p.id)}
+                        className="w-4 h-4 accent-[#1565C0] cursor-pointer"
+                      />
+                    </td>
                     <td className="p-3">
                       <div className="flex items-center gap-3">
                         {src ? (
