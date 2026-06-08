@@ -18,7 +18,15 @@ export async function onRequestPost(context) {
   if (!Array.isArray(ids)) return jsonError('ids harus berupa array', 400);
   if (ids.length === 0) return jsonError('ids tidak boleh kosong', 400);
   if (ids.length > 500) return jsonError('Maksimal 500 id per operasi', 400);
-  if (!['publish', 'delete', 'sold'].includes(action)) return jsonError('action harus "publish", "sold", atau "delete"', 400);
+  const BADGE_COL = {
+    premium:  'badge_premium',
+    featured: 'badge_featured',
+    hot:      'badge_hot',
+    pilihan:  'properti_pilihan',
+    verified: 'verified',
+  };
+  const VALID_ACTIONS = ['publish', 'delete', 'sold', ...Object.keys(BADGE_COL)];
+  if (!VALID_ACTIONS.includes(action)) return jsonError(`action tidak valid: "${action}"`, 400);
 
   const numericIds = ids.map(id => parseInt(String(id), 10)).filter(id => Number.isInteger(id) && id > 0);
   if (numericIds.length === 0) return jsonError('ids tidak mengandung ID valid', 400);
@@ -32,6 +40,18 @@ export async function onRequestPost(context) {
          SET status_publish = 'published',
              published_at   = COALESCE(published_at, CURRENT_TIMESTAMP),
              updated_at     = CURRENT_TIMESTAMP
+         WHERE id IN (${placeholders})`
+      ).bind(...numericIds).run();
+
+      return jsonOk({ success: true, affected: result.meta?.changes ?? numericIds.length });
+    }
+
+    if (BADGE_COL[action]) {
+      const col = BADGE_COL[action];
+      const result = await env.DB.prepare(
+        `UPDATE properties
+         SET ${col} = 1,
+             updated_at = CURRENT_TIMESTAMP
          WHERE id IN (${placeholders})`
       ).bind(...numericIds).run();
 

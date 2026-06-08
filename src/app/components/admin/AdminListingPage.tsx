@@ -37,6 +37,16 @@ const STATUS_LABELS: Record<string, string> = {
   Semua: 'Semua', published: 'Published', draft: 'Draft', sold: 'Sold', archived: 'Arsip',
 };
 
+// Opsi bulk "Tandai Sebagai" (badge + SOLD) — semua hanya UPDATE DB
+const BULK_MARKS: { action: string; label: string; cls: string }[] = [
+  { action: 'premium',  label: '⭐ Premium',  cls: 'text-indigo-600' },
+  { action: 'featured', label: '🔥 Featured', cls: 'text-orange-600' },
+  { action: 'hot',      label: '🏷️ Hot',      cls: 'text-red-500' },
+  { action: 'pilihan',  label: '⭐ Pilihan',  cls: 'text-yellow-600' },
+  { action: 'verified', label: '✓ Verified',  cls: 'text-teal-600' },
+  { action: 'sold',     label: 'SOLD',         cls: 'text-amber-700' },
+];
+
 function formatRupiah(n: number) {
   if (n >= 1_000_000_000) return `Rp ${(n / 1_000_000_000).toFixed(1).replace('.0', '')} M`;
   if (n >= 1_000_000)     return `Rp ${(n / 1_000_000).toFixed(0)} jt`;
@@ -64,6 +74,7 @@ export default function AdminListingPage() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkProgress, setBulkProgress] = useState('');
   const [displayLimit, setDisplayLimit] = useState(20);
+  const [markOpen, setMarkOpen] = useState(false);
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -155,32 +166,34 @@ export default function AdminListingPage() {
     }
   };
 
-  const handleBulkSold = async () => {
+  // Generic bulk "tandai sebagai" — dipakai untuk badge + SOLD (chunk 50, hanya UPDATE)
+  const handleBulkMark = async (action: string, label: string) => {
     const ids = [...selectedIds];
-    if (!window.confirm(`Tandai ${ids.length} properti sebagai SOLD?`)) return;
+    setMarkOpen(false);
+    if (!window.confirm(`Tandai ${ids.length} properti sebagai ${label}?`)) return;
     setBulkLoading(true);
     try {
       const CHUNK = 50;
       const chunks: number[][] = [];
       for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
-      let sold = 0;
+      let affected = 0;
       for (let i = 0; i < chunks.length; i++) {
-        setBulkProgress(`Tandai SOLD batch ${i + 1} dari ${chunks.length}…`);
+        setBulkProgress(`Tandai ${label} batch ${i + 1} dari ${chunks.length}…`);
         const res = await fetch('/api/admin/properties/bulk', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'sold', ids: chunks[i] }),
+          body: JSON.stringify({ action, ids: chunks[i] }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
-        sold += json.data?.affected ?? chunks[i].length;
+        affected += json.data?.affected ?? chunks[i].length;
       }
       await fetchProperties();
       setSelectedIds(new Set());
-      alert(`Berhasil menandai ${sold} properti sebagai SOLD.`);
+      alert(`Berhasil menandai ${affected} properti sebagai ${label}.`);
     } catch (err) {
-      alert(`Gagal tandai SOLD: ${err instanceof Error ? err.message : 'Error tidak diketahui'}`);
+      alert(`Gagal tandai ${label}: ${err instanceof Error ? err.message : 'Error tidak diketahui'}`);
     } finally {
       setBulkLoading(false);
       setBulkProgress('');
@@ -293,42 +306,59 @@ export default function AdminListingPage() {
       {/* Bulk action bar — slide down when something is selected */}
       <div
         className="overflow-hidden transition-all duration-200"
-        style={{ maxHeight: selectedIds.size > 0 ? '80px' : '0px', opacity: selectedIds.size > 0 ? 1 : 0 }}
+        style={{ maxHeight: selectedIds.size > 0 ? (markOpen ? '220px' : '80px') : '0px', opacity: selectedIds.size > 0 ? 1 : 0 }}
       >
-        <div className="bg-[#EFF6FF] border border-[#1565C0]/20 rounded-2xl px-4 py-3 flex items-center gap-3 flex-wrap">
-          <span className="text-sm font-semibold text-[#1565C0]">
-            {bulkProgress || `${selectedIds.size} properti dipilih`}
-          </span>
-          <div className="flex items-center gap-2 ml-auto">
-            <button
-              onClick={handleBulkPublish}
-              disabled={bulkLoading}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Publish Semua
-            </button>
-            <button
-              onClick={handleBulkSold}
-              disabled={bulkLoading}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              SOLD Semua
-            </button>
-            <button
-              onClick={handleBulkDelete}
-              disabled={bulkLoading}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Hapus Semua
-            </button>
-            <button
-              onClick={() => setSelectedIds(new Set())}
-              disabled={bulkLoading}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-[#64748B] bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-40"
-            >
-              Batal
-            </button>
+        <div className="bg-[#EFF6FF] border border-[#1565C0]/20 rounded-2xl px-4 py-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-sm font-semibold text-[#1565C0]">
+              {bulkProgress || `${selectedIds.size} properti dipilih`}
+            </span>
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={handleBulkPublish}
+                disabled={bulkLoading}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Publish Semua
+              </button>
+              <button
+                onClick={() => setMarkOpen(o => !o)}
+                disabled={bulkLoading}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-[#1565C0] hover:bg-[#1251A3] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Tandai Sebagai {markOpen ? '▲' : '▼'}
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkLoading}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Hapus Semua
+              </button>
+              <button
+                onClick={() => { setMarkOpen(false); setSelectedIds(new Set()); }}
+                disabled={bulkLoading}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-[#64748B] bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-40"
+              >
+                Batal
+              </button>
+            </div>
           </div>
+          {markOpen && (
+            <div className="flex items-center gap-2 flex-wrap mt-2.5 pt-2.5 border-t border-[#1565C0]/10">
+              <span className="text-xs text-[#64748B]">Tandai sebagai:</span>
+              {BULK_MARKS.map(m => (
+                <button
+                  key={m.action}
+                  onClick={() => handleBulkMark(m.action, m.label)}
+                  disabled={bulkLoading}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold bg-white border border-gray-200 hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${m.cls}`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
