@@ -1,16 +1,39 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router';
 import { Search } from 'lucide-react';
-import { BLOG_POSTS } from '../data/mockData';
+import { getBlogPosts, type ApiBlogPost } from '../../lib/api';
+
+function formatTanggal(s: string): string {
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return s.slice(0, 10);
+  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+}
 
 export default function BlogPage() {
   const [search, setSearch] = useState('');
   const [activeKat, setActiveKat] = useState('Semua');
+  const [posts, setPosts] = useState<ApiBlogPost[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const kategori = ['Semua', 'KPR', 'Investasi', 'Panduan'];
 
-  const filtered = BLOG_POSTS.filter(p =>
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    getBlogPosts({ limit: 50 })
+      .then(res => {
+        if (res.success && res.data) setPosts(res.data.items);
+        else setError(res.error ?? 'Gagal memuat artikel');
+      })
+      .catch(() => setError('Koneksi ke server gagal'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = posts.filter(p =>
     (activeKat === 'Semua' || p.kategori === activeKat) &&
-    (p.judul.toLowerCase().includes(search.toLowerCase()) || p.excerpt.toLowerCase().includes(search.toLowerCase()))
+    (p.judul.toLowerCase().includes(search.toLowerCase()) ||
+     (p.excerpt ?? '').toLowerCase().includes(search.toLowerCase()))
   );
 
   return (
@@ -44,10 +67,28 @@ export default function BlogPage() {
             ))}
           </div>
 
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="bg-white rounded-2xl overflow-hidden border border-gray-100 animate-pulse">
+                  <div className="w-full bg-gray-200" style={{ paddingTop: '56.25%' }} />
+                  <div className="p-5 space-y-3">
+                    <div className="h-5 w-20 bg-gray-200 rounded-full" />
+                    <div className="h-4 w-full bg-gray-200 rounded" />
+                    <div className="h-4 w-3/4 bg-gray-200 rounded" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : error ? (
+            <div className="text-center py-16">
+              <div className="text-5xl mb-4">⚠️</div>
+              <p className="text-[#64748B]">{error}</p>
+            </div>
+          ) : filtered.length === 0 ? (
             <div className="text-center py-16">
               <div className="text-5xl mb-4">📝</div>
-              <p className="text-[#64748B]">Artikel tidak ditemukan</p>
+              <p className="text-[#64748B]">Belum ada artikel{search || activeKat !== 'Semua' ? ' yang sesuai' : ''}</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -55,25 +96,27 @@ export default function BlogPage() {
                 <Link key={post.id} to={`/blog/${post.slug}`}
                   className="group bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm hover:shadow-lg transition-all duration-200 hover:-translate-y-1">
                   <div className="relative overflow-hidden" style={{ paddingTop: '56.25%' }}>
-                    <img src={post.cover} alt={post.judul}
+                    <img src={post.cover ?? ''} alt={post.judul}
                       className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=600&q=80'; }} />
                   </div>
                   <div className="p-5">
-                    <span className="inline-block px-3 py-1 bg-[#E3F2FD] text-[#1565C0] text-xs rounded-full font-medium mb-3">{post.kategori}</span>
+                    {post.kategori && (
+                      <span className="inline-block px-3 py-1 bg-[#E3F2FD] text-[#1565C0] text-xs rounded-full font-medium mb-3">{post.kategori}</span>
+                    )}
                     <h3 className="font-display font-bold text-[#0F172A] mb-2 line-clamp-2 group-hover:text-[#1565C0] transition-colors">{post.judul}</h3>
                     <p className="text-[#64748B] text-sm line-clamp-2 mb-4">{post.excerpt}</p>
                     <div className="flex items-center gap-3 text-xs text-[#64748B]">
-                      <div className="flex items-center gap-1">
-                        <div className="w-5 h-5 rounded-full bg-[#1565C0] flex items-center justify-center text-white text-[8px] font-bold">
-                          {post.author.charAt(0)}
+                      {post.author && (
+                        <div className="flex items-center gap-1">
+                          <div className="w-5 h-5 rounded-full bg-[#1565C0] flex items-center justify-center text-white text-[8px] font-bold">
+                            {post.author.charAt(0)}
+                          </div>
+                          <span>{post.author}</span>
                         </div>
-                        <span>{post.author}</span>
-                      </div>
-                      <span>·</span>
-                      <span>{post.tanggal}</span>
-                      <span>·</span>
-                      <span>{post.reading_time} mnt</span>
+                      )}
+                      {post.published_at && <><span>·</span><span>{formatTanggal(post.published_at)}</span></>}
+                      {post.reading_time_menit && <><span>·</span><span>{post.reading_time_menit} mnt</span></>}
                     </div>
                   </div>
                 </Link>

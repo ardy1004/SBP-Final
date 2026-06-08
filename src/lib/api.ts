@@ -156,6 +156,40 @@ export interface ApiBlogData {
   pagination: ApiPagination;
 }
 
+/** Detail artikel dari GET /api/blog/:slug */
+export interface ApiBlogDetail extends ApiBlogPost {
+  konten: string | null;
+  status: string;
+  meta_title: string | null;
+  meta_description: string | null;
+  author_nama: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Item list admin dari GET /api/admin/blog */
+export interface ApiBlogAdminItem {
+  id: number;
+  judul: string;
+  slug: string;
+  kategori: string | null;
+  status: string;
+  published_at: string | null;
+  created_at: string;
+}
+
+export interface BlogPostInput {
+  judul: string;
+  konten?: string;
+  excerpt?: string;
+  kategori?: string;
+  tags?: string[];
+  cover?: string;
+  status?: 'draft' | 'published' | 'scheduled';
+  meta_title?: string;
+  meta_description?: string;
+}
+
 export interface ApiLeadRequest {
   nama: string;
   no_wa: string;
@@ -358,6 +392,42 @@ export async function getBlogPosts(params: { limit?: number; page?: number } = {
   if (params.page)  q.set('page',  String(params.page));
   const qs = q.toString() ? `?${q.toString()}` : '';
   return apiFetch<ApiBlogData>(`/blog${qs}`);
+}
+
+/** GET /api/blog/:slug — detail 1 artikel publik */
+export async function getBlogBySlug(slug: string) {
+  return apiFetch<ApiBlogDetail>(`/blog/${slug}`);
+}
+
+/** GET /api/admin/blog — list semua artikel (admin) */
+export async function getBlogPostsAdmin() {
+  return apiFetch<{ items: ApiBlogAdminItem[]; total: number }>('/admin/blog');
+}
+
+/** POST /api/admin/blog — buat artikel baru */
+export async function createBlogPost(input: BlogPostInput) {
+  return apiFetch<{ id: number; slug: string }>('/admin/blog', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+/** GET /api/admin/blog/:id — detail artikel (admin, semua status) */
+export async function getBlogPostAdmin(id: number) {
+  return apiFetch<ApiBlogDetail>(`/admin/blog/${id}`);
+}
+
+/** PATCH /api/admin/blog/:id — update artikel */
+export async function updateBlogPost(id: number, input: Partial<BlogPostInput>) {
+  return apiFetch<{ pesan: string }>(`/admin/blog/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+/** DELETE /api/admin/blog/:id — hapus artikel */
+export async function deleteBlogPost(id: number) {
+  return apiFetch<{ success: boolean }>(`/admin/blog/${id}`, { method: 'DELETE' });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

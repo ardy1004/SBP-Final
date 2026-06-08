@@ -9,6 +9,26 @@
 
 ---
 
+## Blog CMS lengkap — list, detail SSR, admin CRUD ✅ (branch: feat/blog-cms)
+
+**Tanggal:** 8 Juni 2026
+
+### Yang dilakukan:
+
+- **Endpoint publik detail** `functions/api/blog/[slug].js` — GET artikel `status='published'`, JOIN `admins` untuk `author_nama`, parse `tags` JSON aman, 404 bila tidak ada. (`GET /api/blog` list sudah ada sebelumnya.)
+- **Endpoint admin** `functions/api/admin/blog/index.js` — GET list semua status + POST create (auto-slug `slugify+randHex4`, auto `reading_time_menit` = ceil(words/200), `author_id` dari `ctx.data.admin.sub`, `published_at` di-set saat status published).
+- **Endpoint admin** `functions/api/admin/blog/[id].js` — GET detail + PATCH partial update (re-hitung reading_time saat konten berubah, set published_at saat pertama publish) + DELETE.
+- **SSR detail** `src/app/routes/blog-detail.tsx` — loader query `env.DB` langsung (pola `property-detail.tsx`), throw 404 Response, meta SEO dari `meta_title`/`meta_description`/`excerpt`, render konten via `dangerouslySetInnerHTML`. Route `/blog/:slug`.
+- **BlogPage.tsx** — diganti dari mock `BLOG_POSTS` ke `getBlogPosts()` (fetch `GET /api/blog`), loading skeleton + error state, card link ke `/blog/:slug`.
+- **AdminBlogPage.tsx** — list dengan badge status, tombol Tulis Artikel, modal create/edit (judul, konten textarea besar, excerpt, kategori, tags comma-separated, cover URL, SEO, status), toggle publish langsung dari list, delete dengan konfirmasi. Menggantikan `AdminPlaceholderPage`.
+- **routes.ts** — tambah `/blog/:slug` → `blog-detail.tsx`; `admin/blog` → `AdminBlogPage.tsx`.
+- **api.ts** — tambah tipe `ApiBlogDetail`, `ApiBlogAdminItem`, `BlogPostInput` + fungsi `getBlogBySlug`, `getBlogPostsAdmin`, `getBlogPostAdmin`, `createBlogPost`, `updateBlogPost`, `deleteBlogPost`.
+- **Seed** 2 artikel published (`scripts/seed_blog.sql`) ke D1 remote untuk uji.
+- **DB:** tabel `blog_posts` sudah ada (migration 0001) — tidak perlu migrasi baru.
+- **Catatan V1:** cover = URL saja (belum upload R2), konten = HTML/teks (belum rich-text editor) — bisa ditingkatkan nanti.
+
+---
+
 ## PropertyCard upgrade: slider, SOLD stamp, specs, format harga ✅ (branch: feat/propertycard-upgrade)
 
 **Tanggal:** 8 Juni 2026
