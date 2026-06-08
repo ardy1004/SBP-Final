@@ -62,6 +62,7 @@ export default function AdminListingPage() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState('');
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -126,19 +127,30 @@ export default function AdminListingPage() {
     if (!window.confirm(`Publish ${ids.length} properti sekarang?`)) return;
     setBulkLoading(true);
     try {
-      const res = await fetch('/api/admin/properties/bulk', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'publish', ids }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const CHUNK = 50;
+      const chunks: number[][] = [];
+      for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+      let published = 0;
+      for (let i = 0; i < chunks.length; i++) {
+        setBulkProgress(`Publish batch ${i + 1} dari ${chunks.length}…`);
+        const res = await fetch('/api/admin/properties/bulk', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'publish', ids: chunks[i] }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        published += json.data?.affected ?? chunks[i].length;
+      }
       await fetchProperties();
       setSelectedIds(new Set());
+      alert(`Berhasil publish ${published} properti.`);
     } catch (err) {
       alert(`Gagal publish massal: ${err instanceof Error ? err.message : 'Error tidak diketahui'}`);
     } finally {
       setBulkLoading(false);
+      setBulkProgress('');
     }
   };
 
@@ -147,19 +159,31 @@ export default function AdminListingPage() {
     if (!window.confirm(`Hapus ${ids.length} properti permanen? Semua foto juga dihapus. Tidak bisa dibatalkan.`)) return;
     setBulkLoading(true);
     try {
-      const res = await fetch('/api/admin/properties/bulk', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'delete', ids }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const CHUNK = 20;
+      const chunks: number[][] = [];
+      for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+      let deleted = 0;
+      for (let i = 0; i < chunks.length; i++) {
+        setBulkProgress(`Menghapus batch ${i + 1} dari ${chunks.length}…`);
+        const res = await fetch('/api/admin/properties/bulk', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'delete', ids: chunks[i] }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        deleted += json.data?.affected ?? chunks[i].length;
+        if (i < chunks.length - 1) await new Promise(r => setTimeout(r, 500));
+      }
       await fetchProperties();
       setSelectedIds(new Set());
+      alert(`Berhasil menghapus ${deleted} properti.`);
     } catch (err) {
       alert(`Gagal hapus massal: ${err instanceof Error ? err.message : 'Error tidak diketahui'}`);
     } finally {
       setBulkLoading(false);
+      setBulkProgress('');
     }
   };
 
@@ -240,7 +264,7 @@ export default function AdminListingPage() {
       >
         <div className="bg-[#EFF6FF] border border-[#1565C0]/20 rounded-2xl px-4 py-3 flex items-center gap-3 flex-wrap">
           <span className="text-sm font-semibold text-[#1565C0]">
-            {selectedIds.size} properti dipilih
+            {bulkProgress || `${selectedIds.size} properti dipilih`}
           </span>
           <div className="flex items-center gap-2 ml-auto">
             <button
@@ -248,14 +272,14 @@ export default function AdminListingPage() {
               disabled={bulkLoading}
               className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {bulkLoading ? 'Memproses…' : 'Publish Semua'}
+              Publish Semua
             </button>
             <button
               onClick={handleBulkDelete}
               disabled={bulkLoading}
               className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {bulkLoading ? 'Memproses…' : 'Hapus Semua'}
+              Hapus Semua
             </button>
             <button
               onClick={() => setSelectedIds(new Set())}
