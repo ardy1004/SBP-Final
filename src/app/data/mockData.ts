@@ -690,11 +690,13 @@ export const LOCATION_HIERARCHY = {
 };
 
 export const formatRupiah = (amount: number): string => {
-  if (amount >= 1000000000) {
-    return `Rp ${(amount / 1000000000).toFixed(2)} M`;
+  if (amount >= 1_000_000_000) {
+    const s = (amount / 1_000_000_000).toFixed(1).replace('.', ',').replace(/,0$/, '');
+    return `Rp ${s}M`;
   }
-  if (amount >= 1000000) {
-    return `Rp ${(amount / 1000000).toFixed(0)} Jt`;
+  if (amount >= 1_000_000) {
+    const s = (amount / 1_000_000).toFixed(1).replace('.', ',').replace(/,0$/, '');
+    return `Rp ${s}Jt`;
   }
   return `Rp ${amount.toLocaleString('id-ID')}`;
 };

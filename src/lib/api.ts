@@ -192,6 +192,7 @@ export function normalizeProperty(p: ApiPropertyListItem) {
     slug: p.slug,
     title: p.title,
     jenis: getPropertyTypeLabel(jenis),
+    jenisRaw: jenis,
     jenisEmoji: getPropertyTypeEmoji(jenis),
     tujuan: p.tujuan,
     harga: p.harga,

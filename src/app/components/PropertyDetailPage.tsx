@@ -25,6 +25,9 @@ function KPRCalculatorClient({ defaultHarga }: { defaultHarga: number }) {
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
 
+// Jenis properti yang menghasilkan income sewa — analisis investasi relevan di sini
+const INCOME_TYPES = ['kost', 'hotel', 'homestay', 'villa', 'apartment', 'gudang', 'komersial'];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Investment Intelligence Panel — pakai nilai pre-computed dari API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -542,10 +545,19 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
               </div>
             </div>
 
-            {/* Investment Intelligence — dari API */}
-            {property.investment_intelligence && (
+            {/* Investment Intelligence — dari API (atau info bila data income belum ada) */}
+            {property.investment_intelligence ? (
               <InvestmentPanel ii={property.investment_intelligence} />
-            )}
+            ) : INCOME_TYPES.includes(property.jenisRaw) ? (
+              <div className="rounded-2xl p-6 my-6 bg-white border border-dashed border-gray-300">
+                <h3 className="font-display font-bold text-[#0F172A] flex items-center gap-2 mb-2">💡 Analisis Investasi</h3>
+                <p className="text-sm text-[#64748B] leading-relaxed">
+                  Estimasi yield, payback, dan cap rate belum dapat ditampilkan karena data{' '}
+                  <span className="font-medium text-[#0F172A]">income &amp; pengeluaran bulanan</span>{' '}
+                  properti ini belum tersedia. Hubungi admin untuk informasi potensi investasi lebih lanjut.
+                </p>
+              </div>
+            ) : null}
 
             {/* KPR Calculator — client-only via KPRCalculatorClient (mounted-flag pattern) */}
             {(property.tujuan === 'dijual' || property.tujuan === 'dijual_disewa') && (
