@@ -101,8 +101,12 @@ export async function onRequestPost(context) {
     const luas_bangunan       = toInt(r.luas_bangunan)       ?? null;
     const jumlah_kamar_tidur  = toInt(r.jumlah_kamar_tidur)  ?? null;
     const jumlah_kamar_mandi  = toInt(r.jumlah_kamar_mandi)  ?? null;
-    const nego = r.nego == 1 || r.nego === '1' ? 1 : 0;
-    const nett = r.nett == 1 || r.nett === '1' ? 1 : 0;
+    const nego          = r.nego          == 1 || r.nego          === '1' ? 1 : 0;
+    const nett          = r.nett          == 1 || r.nett          === '1' ? 1 : 0;
+    const badge_premium  = r.badge_premium  == 1 || r.badge_premium  === '1' ? 1 : 0;
+    const badge_featured = r.badge_featured == 1 || r.badge_featured === '1' ? 1 : 0;
+    const badge_hot      = r.badge_hot      == 1 || r.badge_hot      === '1' ? 1 : 0;
+    const status_sold    = r.status_sold    == 1 || r.status_sold    === '1' ? 1 : 0;
 
     // Generate kode_listing + slug (pola identik index.js)
     let kode_listing, slug;
@@ -117,26 +121,51 @@ export async function onRequestPost(context) {
     }
 
     // INSERT — partial insert intentional, tidak pakai transaction
+    let property_id = null;
     try {
-      await db.prepare(`
+      const result = await db.prepare(`
         INSERT INTO properties
           (kode_listing, title, slug, jenis_properti, tujuan, harga,
            provinsi, kabupaten, kecamatan, kelurahan, alamat,
            luas_tanah, luas_bangunan, jumlah_kamar_tidur, jumlah_kamar_mandi,
            legalitas, deskripsi, nego, nett,
+           badge_premium, badge_featured, badge_hot, status_sold,
            status_publish, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,  ?,?,?,?,?,  ?,?,?,?,  ?,?,?,?,  'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        VALUES (?,?,?,?,?,?,  ?,?,?,?,?,  ?,?,?,?,  ?,?,?,?,  ?,?,?,?,  'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
       `).bind(
         kode_listing, title, slug, jenis, tujuan, hargaRaw,
         provinsi, kabupaten, kecamatan, kelurahan, '',
         luas_tanah, luas_bangunan, jumlah_kamar_tidur, jumlah_kamar_mandi,
         legalitas || null, deskripsi || null, nego, nett,
+        badge_premium, badge_featured, badge_hot, status_sold,
       ).run();
+      property_id = result.meta?.last_row_id ?? null;
       inserted++;
     } catch (err) {
       const msg = err.message ?? '';
       const fieldHint = msg.includes('slug') ? 'slug' : msg.includes('kode_listing') ? 'kode_listing' : 'internal';
       errors.push({ row: rowNum, field: fieldHint, message: 'Gagal simpan ke DB: ' + msg });
+      continue;
+    }
+
+    // Upload foto dari image_url1–5
+    if (property_id && env.MEDIA) {
+      for (let pi = 1; pi <= 5; pi++) {
+        const imgUrl = (r[`image_url${pi}`] ?? '').trim();
+        if (!imgUrl) continue;
+        try {
+          const imgRes = await fetch(imgUrl);
+          if (!imgRes.ok) throw new Error(`HTTP ${imgRes.status}`);
+          const buf = await imgRes.arrayBuffer();
+          const r2Key = `property-photos/${crypto.randomUUID()}.webp`;
+          await env.MEDIA.put(r2Key, buf, { httpMetadata: { contentType: 'image/webp' } });
+          await db.prepare(
+            'INSERT INTO property_images (property_id, url_webp, urutan, is_cover) VALUES (?,?,?,?)'
+          ).bind(property_id, r2Key, pi - 1, pi === 1 ? 1 : 0).run();
+        } catch (imgErr) {
+          errors.push({ row: rowNum, field: `image_url${pi}`, message: `Foto ${pi} gagal: ${imgErr.message}` });
+        }
+      }
     }
   }
 

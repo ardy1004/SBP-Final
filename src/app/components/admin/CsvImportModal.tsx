@@ -30,7 +30,7 @@ interface ParsedRow {
 
 interface BatchError { row: number; field: string; message: string; }
 
-const CSV_HEADERS = 'title,jenis_properti,tujuan,harga,provinsi,kabupaten,kecamatan,kelurahan,luas_tanah,luas_bangunan,jumlah_kamar_tidur,jumlah_kamar_mandi,legalitas,deskripsi,nego,nett';
+const CSV_HEADERS = 'title,jenis_properti,tujuan,harga,provinsi,kabupaten,kecamatan,kelurahan,luas_tanah,luas_bangunan,jumlah_kamar_tidur,jumlah_kamar_mandi,legalitas,deskripsi,nego,nett,badge_premium,badge_featured,badge_hot,status_sold,image_url1,image_url2,image_url3,image_url4,image_url5';
 
 const VALID_JENIS  = new Set(['apartment','rumah','tanah','kost','hotel','homestay','villa','ruko','gudang','komersial']);
 const VALID_TUJUAN = new Set(['dijual','disewa','dijual_disewa']);
@@ -47,8 +47,8 @@ function rowError(r: ParsedRow): string | null {
 }
 
 function downloadTemplate() {
-  const example1 = 'Rumah Minimalis 3 Kamar Dekat UGM,rumah,dijual,850000000,DI Yogyakarta,Kabupaten Sleman,Depok,Caturtunggal,120,90,3,2,SHM & IMB/PBG Lengkap,Rumah minimalis modern dekat kampus UGM. Lingkungan tenang dan nyaman.,0,0';
-  const example2 = 'Tanah Kavling Strategis Bantul,tanah,dijual,450000000,DI Yogyakarta,Kabupaten Bantul,Sewon,Pendowoharjo,200,,,,Girik/Letter C/PPJB/dll,Tanah kavling siap bangun. Akses jalan lebar 6 meter.,1,0';
+  const example1 = 'Rumah Minimalis 3 Kamar Dekat UGM,rumah,dijual,850000000,DI Yogyakarta,Kabupaten Sleman,Depok,Caturtunggal,120,90,3,2,SHM & IMB/PBG Lengkap,Rumah minimalis modern dekat kampus UGM. Lingkungan tenang dan nyaman.,0,0,0,0,0,0,,,,,';
+  const example2 = 'Tanah Kavling Strategis Bantul,tanah,dijual,450000000,DI Yogyakarta,Kabupaten Bantul,Sewon,Pendowoharjo,200,,,,Girik/Letter C/PPJB/dll,Tanah kavling siap bangun. Akses jalan lebar 6 meter.,1,0,0,0,0,0,,,,,';
   const csv = [CSV_HEADERS, example1, example2].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url  = URL.createObjectURL(blob);
