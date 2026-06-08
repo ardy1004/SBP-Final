@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Filter, ChevronDown, Edit, Plus, FileUp, Trash2 } from 'lucide-react';
+import { Search, Filter, ChevronDown, Edit, Plus, FileUp, Trash2, ImageOff } from 'lucide-react';
 import CsvImportModal from './CsvImportModal';
 
 interface PropertyRow {
@@ -155,6 +155,38 @@ export default function AdminListingPage() {
     }
   };
 
+  const handleBulkSold = async () => {
+    const ids = [...selectedIds];
+    if (!window.confirm(`Tandai ${ids.length} properti sebagai SOLD?`)) return;
+    setBulkLoading(true);
+    try {
+      const CHUNK = 50;
+      const chunks: number[][] = [];
+      for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+      let sold = 0;
+      for (let i = 0; i < chunks.length; i++) {
+        setBulkProgress(`Tandai SOLD batch ${i + 1} dari ${chunks.length}…`);
+        const res = await fetch('/api/admin/properties/bulk', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'sold', ids: chunks[i] }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        sold += json.data?.affected ?? chunks[i].length;
+      }
+      await fetchProperties();
+      setSelectedIds(new Set());
+      alert(`Berhasil menandai ${sold} properti sebagai SOLD.`);
+    } catch (err) {
+      alert(`Gagal tandai SOLD: ${err instanceof Error ? err.message : 'Error tidak diketahui'}`);
+    } finally {
+      setBulkLoading(false);
+      setBulkProgress('');
+    }
+  };
+
   const handleBulkDelete = async () => {
     const ids = [...selectedIds];
     if (!window.confirm(`Hapus ${ids.length} properti permanen? Semua foto juga dihapus. Tidak bisa dibatalkan.`)) return;
@@ -276,6 +308,13 @@ export default function AdminListingPage() {
               Publish Semua
             </button>
             <button
+              onClick={handleBulkSold}
+              disabled={bulkLoading}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              SOLD Semua
+            </button>
+            <button
               onClick={handleBulkDelete}
               disabled={bulkLoading}
               className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
@@ -354,11 +393,13 @@ export default function AdminListingPage() {
                       <div className="flex items-center gap-3">
                         {src ? (
                           <img src={src} alt={p.title}
-                            className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+                            className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
                             onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                           />
                         ) : (
-                          <div className="w-10 h-10 rounded-lg bg-gray-100 flex-shrink-0" />
+                          <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
+                            <ImageOff size={16} className="text-gray-400" />
+                          </div>
                         )}
                         <div className="min-w-0">
                           <div className="font-medium text-[#0F172A] text-xs leading-snug line-clamp-2">{p.title}</div>

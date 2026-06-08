@@ -57,7 +57,7 @@ export async function onRequestGet(context) {
       p.status_publish,
       p.created_at, p.updated_at, p.published_at,
       (SELECT url_webp FROM property_images
-         WHERE property_id = p.id AND is_cover = 1 LIMIT 1) AS cover_url,
+         WHERE property_id = p.id ORDER BY is_cover DESC, urutan ASC LIMIT 1) AS cover_url,
       (SELECT COUNT(*) FROM property_images WHERE property_id = p.id) AS jumlah_foto
     FROM properties p
     ${where}

@@ -18,7 +18,7 @@ export async function onRequestPost(context) {
   if (!Array.isArray(ids)) return jsonError('ids harus berupa array', 400);
   if (ids.length === 0) return jsonError('ids tidak boleh kosong', 400);
   if (ids.length > 500) return jsonError('Maksimal 500 id per operasi', 400);
-  if (action !== 'publish' && action !== 'delete') return jsonError('action harus "publish" atau "delete"', 400);
+  if (!['publish', 'delete', 'sold'].includes(action)) return jsonError('action harus "publish", "sold", atau "delete"', 400);
 
   const numericIds = ids.map(id => parseInt(String(id), 10)).filter(id => Number.isInteger(id) && id > 0);
   if (numericIds.length === 0) return jsonError('ids tidak mengandung ID valid', 400);
@@ -32,6 +32,18 @@ export async function onRequestPost(context) {
          SET status_publish = 'published',
              published_at   = COALESCE(published_at, CURRENT_TIMESTAMP),
              updated_at     = CURRENT_TIMESTAMP
+         WHERE id IN (${placeholders})`
+      ).bind(...numericIds).run();
+
+      return jsonOk({ success: true, affected: result.meta?.changes ?? numericIds.length });
+    }
+
+    if (action === 'sold') {
+      const result = await env.DB.prepare(
+        `UPDATE properties
+         SET status_sold = 1,
+             status_publish = 'sold',
+             updated_at = CURRENT_TIMESTAMP
          WHERE id IN (${placeholders})`
       ).bind(...numericIds).run();
 
