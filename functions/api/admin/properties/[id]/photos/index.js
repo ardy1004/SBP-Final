@@ -18,28 +18,47 @@ export async function onRequestPost(context) {
   let body;
   try { body = await request.json(); } catch { return jsonError('Body tidak valid (harus JSON)', 400); }
 
-  const { photo } = body ?? {};
-  if (typeof photo !== 'string' || !photo) return jsonError('Field photo wajib diisi', 400);
-  if (!photo.startsWith('data:image/webp;base64,')) return jsonError('Foto harus berformat WebP (data:image/webp;base64,...)', 400);
-
   const countRow = await env.DB.prepare(
     'SELECT COUNT(*) as cnt FROM property_images WHERE property_id = ?'
   ).bind(propertyId).first();
   if ((countRow?.cnt ?? 0) >= 20) return jsonError('Maksimal 20 foto per properti', 400);
 
-  const base64Data = photo.slice('data:image/webp;base64,'.length);
-  let bytes;
-  try {
-    const binaryStr = atob(base64Data);
-    bytes = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
-  } catch {
-    return jsonError('Gagal decode base64', 400);
+  const r2Key = `property-photos/${crypto.randomUUID()}.webp`;
+  let uploadBuf, contentType;
+
+  // Mode 1: photo_url — fetch dari URL, simpan as-is
+  if (body?.photo_url) {
+    const photoUrl = String(body.photo_url).trim();
+    if (!photoUrl.startsWith('http://') && !photoUrl.startsWith('https://')) {
+      return jsonError('photo_url harus berupa URL http/https', 400);
+    }
+    let imgRes;
+    try {
+      imgRes = await fetch(photoUrl);
+      if (!imgRes.ok) throw new Error(`HTTP ${imgRes.status}`);
+    } catch (err) {
+      return jsonError(`Gagal fetch foto: ${err.message}`, 400);
+    }
+    contentType = imgRes.headers.get('content-type') ?? 'image/jpeg';
+    uploadBuf = await imgRes.arrayBuffer();
+
+  // Mode 2: photo base64 (existing)
+  } else {
+    const { photo } = body ?? {};
+    if (typeof photo !== 'string' || !photo) return jsonError('Field photo atau photo_url wajib diisi', 400);
+    if (!photo.startsWith('data:image/webp;base64,')) return jsonError('Foto harus berformat WebP (data:image/webp;base64,...)', 400);
+    contentType = 'image/webp';
+    const base64Data = photo.slice('data:image/webp;base64,'.length);
+    try {
+      const binaryStr = atob(base64Data);
+      uploadBuf = Uint8Array.from(binaryStr, c => c.charCodeAt(0)).buffer;
+    } catch {
+      return jsonError('Gagal decode base64', 400);
+    }
   }
 
-  const r2Key = `property-photos/${crypto.randomUUID()}.webp`;
-
   try {
-    await env.MEDIA.put(r2Key, bytes.buffer, { httpMetadata: { contentType: 'image/webp' } });
+    await env.MEDIA.put(r2Key, uploadBuf, { httpMetadata: { contentType } });
 
     const result = await env.DB.prepare(`
       INSERT INTO property_images (property_id, url_webp, urutan, is_cover)

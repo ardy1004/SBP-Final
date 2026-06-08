@@ -61,6 +61,7 @@ export async function onRequestPost(context) {
 
   let inserted = 0;
   const errors = [];
+  const inserted_rows = [];
 
   for (let i = 0; i < rows.length; i++) {
     const rowNum = i + 1;
@@ -141,35 +142,22 @@ export async function onRequestPost(context) {
       ).run();
       property_id = result.meta?.last_row_id ?? null;
       inserted++;
+      inserted_rows.push({
+        id: property_id,
+        kode_listing,
+        image_urls: [1,2,3,4,5]
+          .map(n => (r[`image_url${n}`] ?? '').trim())
+          .filter(u => u.startsWith('http://') || u.startsWith('https://')),
+      });
     } catch (err) {
       const msg = err.message ?? '';
       const fieldHint = msg.includes('slug') ? 'slug' : msg.includes('kode_listing') ? 'kode_listing' : 'internal';
       errors.push({ row: rowNum, field: fieldHint, message: 'Gagal simpan ke DB: ' + msg });
       continue;
     }
-
-    // Upload foto dari image_url1–5
-    if (property_id && env.MEDIA) {
-      for (let pi = 1; pi <= 5; pi++) {
-        const imgUrl = (r[`image_url${pi}`] ?? '').trim();
-        if (!imgUrl) continue;
-        try {
-          const imgRes = await fetch(imgUrl);
-          if (!imgRes.ok) throw new Error(`HTTP ${imgRes.status}`);
-          const buf = await imgRes.arrayBuffer();
-          const r2Key = `property-photos/${crypto.randomUUID()}.webp`;
-          await env.MEDIA.put(r2Key, buf, { httpMetadata: { contentType: 'image/webp' } });
-          await db.prepare(
-            'INSERT INTO property_images (property_id, url_webp, urutan, is_cover) VALUES (?,?,?,?)'
-          ).bind(property_id, r2Key, pi - 1, pi === 1 ? 1 : 0).run();
-        } catch (imgErr) {
-          errors.push({ row: rowNum, field: `image_url${pi}`, message: `Foto ${pi} gagal: ${imgErr.message}` });
-        }
-      }
-    }
   }
 
-  return jsonOk({ inserted, errors, total: rows.length });
+  return jsonOk({ inserted, errors, total: rows.length, inserted_rows });
 }
 
 export async function onRequestOptions() {

@@ -29,6 +29,7 @@ interface ParsedRow {
 }
 
 interface BatchError { row: number; field: string; message: string; }
+interface InsertedRow  { id: number; kode_listing: string; image_urls: string[]; }
 
 const CSV_HEADERS = 'title,jenis_properti,tujuan,harga,provinsi,kabupaten,kecamatan,kelurahan,luas_tanah,luas_bangunan,jumlah_kamar_tidur,jumlah_kamar_mandi,legalitas,deskripsi,nego,nett,badge_premium,badge_featured,badge_hot,status_sold,image_url1,image_url2,image_url3,image_url4,image_url5';
 
@@ -61,9 +62,10 @@ export default function CsvImportModal({ isOpen, onClose, onSuccess }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [rows, setRows]         = useState<ParsedRow[]>([]);
   const [fileName, setFileName] = useState('');
-  const [loading, setLoading]   = useState(false);
-  const [result, setResult]     = useState<{ inserted: number; errors: BatchError[]; total: number } | null>(null);
-  const [parseErr, setParseErr] = useState('');
+  const [loading, setLoading]       = useState(false);
+  const [photoProgress, setPhotoProgress] = useState('');
+  const [result, setResult]         = useState<{ inserted: number; errors: BatchError[]; total: number; photos_ok: number; photos_fail: number } | null>(null);
+  const [parseErr, setParseErr]     = useState('');
 
   if (!isOpen) return null;
 
@@ -81,6 +83,7 @@ export default function CsvImportModal({ isOpen, onClose, onSuccess }: Props) {
 
     Papa.parse<ParsedRow>(file, {
       header: true,
+      delimiter: '',
       skipEmptyLines: true,
       skipFirstNLines: 0,
       encoding: 'UTF-8',
@@ -103,7 +106,9 @@ export default function CsvImportModal({ isOpen, onClose, onSuccess }: Props) {
 
   const handleImport = async () => {
     setLoading(true);
+    setPhotoProgress('');
     try {
+      // Phase 1: batch insert properti
       const res = await fetch('/api/admin/properties/batch', {
         method: 'POST',
         credentials: 'include',
@@ -111,16 +116,36 @@ export default function CsvImportModal({ isOpen, onClose, onSuccess }: Props) {
         body: JSON.stringify({ rows }),
       });
       const data = await res.json();
-      if (data.success) {
-        setResult(data.data);
-        if (data.data.inserted > 0) onSuccess();
-      } else {
-        setParseErr(data.error ?? 'Import gagal');
+      if (!data.success) { setParseErr(data.error ?? 'Import gagal'); return; }
+
+      const batchResult = data.data as { inserted: number; errors: BatchError[]; total: number; inserted_rows: InsertedRow[] };
+      if (batchResult.inserted > 0) onSuccess();
+
+      // Phase 2: upload foto per properti (satu per satu)
+      const withPhotos = (batchResult.inserted_rows ?? []).filter(r => r.image_urls.length > 0);
+      let photos_ok = 0, photos_fail = 0;
+      for (let ri = 0; ri < withPhotos.length; ri++) {
+        const prop = withPhotos[ri];
+        setPhotoProgress(`Mengupload foto properti [${ri + 1}/${withPhotos.length}]...`);
+        for (const url of prop.image_urls) {
+          try {
+            const fRes = await fetch(`/api/admin/properties/${prop.id}/photos`, {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ photo_url: url }),
+            });
+            fRes.ok ? photos_ok++ : photos_fail++;
+          } catch { photos_fail++; }
+        }
       }
+
+      setResult({ inserted: batchResult.inserted, errors: batchResult.errors, total: batchResult.total, photos_ok, photos_fail });
     } catch {
       setParseErr('Koneksi ke server gagal');
     } finally {
       setLoading(false);
+      setPhotoProgress('');
     }
   };
 
@@ -244,6 +269,9 @@ export default function CsvImportModal({ isOpen, onClose, onSuccess }: Props) {
                   <p className="font-semibold text-sm text-[#0F172A]">
                     Berhasil import {result.inserted} dari {result.total} properti
                   </p>
+                  {result.photos_ok > 0 && (
+                    <p className="text-xs text-[#64748B] mt-0.5">{result.photos_ok} foto berhasil diupload{result.photos_fail > 0 ? `, ${result.photos_fail} gagal` : ''}</p>
+                  )}
                   {result.errors.length > 0 && (
                     <p className="text-xs text-[#64748B] mt-0.5">{result.errors.length} baris gagal — lihat detail di bawah</p>
                   )}
@@ -300,7 +328,7 @@ export default function CsvImportModal({ isOpen, onClose, onSuccess }: Props) {
                 disabled={!canImport}
                 className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-[#1565C0] rounded-xl hover:bg-[#1565C0]/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                {loading ? 'Mengimport…' : <><Upload size={14} /> Import Sekarang ({rows.length} baris)</>}
+                {loading ? (photoProgress || 'Mengimport…') : <><Upload size={14} /> Import Sekarang ({rows.length} baris)</>}
               </button>
             )}
           </div>
