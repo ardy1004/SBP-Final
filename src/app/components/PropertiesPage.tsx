@@ -113,9 +113,24 @@ export default function PropertiesPage() {
     }).catch(() => {}).finally(() => setLocLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Load kabupaten saat provinsi dipilih ──────────────────────────────────
+  // ── Hidrasi provId dari URL ?provinsi= (mis. dari hero filter homepage) ─────
+  // Tanpa ini, provId tetap null saat datang dari URL → cascade di bawah me-reset
+  // kabupaten/kecamatan yang sudah diisi dari URL → filter lokasi hilang.
   useEffect(() => {
-    if (!provId) { setKabList([]); setKecList([]); setKabupaten(''); setKabupatenId(null); setKecamatan(''); return; }
+    if (provId || provList.length === 0) return;
+    const urlProv = searchParams.get('provinsi');
+    if (!urlProv) return;
+    const found = provList.find(p => p.nama.toLowerCase() === urlProv.toLowerCase());
+    if (found) setProvId(found.id);
+  }, [provList]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Load kabupaten saat provinsi dipilih ──────────────────────────────────
+  // Catatan: effect ini HANYA mengisi/mengosongkan daftar dropdown (kabList/kecList),
+  // TIDAK me-reset nilai filter kabupaten/kecamatan. Reset nilai sudah ditangani oleh
+  // handler aksi user (handleProvChange, resetFilters, clear-chip). Mereset di sini akan
+  // menghapus filter lokasi yang datang dari URL (hero filter homepage).
+  useEffect(() => {
+    if (!provId) { setKabList([]); setKecList([]); return; }
     getLocations(provId).then(res => {
       if (res.success && res.data) {
         const list = res.data.items;
