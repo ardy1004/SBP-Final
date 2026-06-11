@@ -207,7 +207,7 @@ export async function onRequestGet(context) {
 
   } catch (err) {
     console.error('[admin/overview]', err.message);
-    return jsonError('Gagal mengambil data overview', 500);
+    return jsonError('Gagal mengambil data overview', 500, err.message);
   }
 }
 

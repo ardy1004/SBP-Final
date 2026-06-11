@@ -31,11 +31,17 @@ export async function onRequestPatch(context) {
   try { body = await request.json(); }
   catch { return jsonError('Body JSON tidak valid', 400); }
 
-  // Validasi row exists
-  const existing = await env.DB
-    .prepare('SELECT id FROM testimonials WHERE id = ?')
-    .bind(id)
-    .first();
+  // Validasi row exists (dibungkus try agar error DB tidak jadi 500 tak-terlog)
+  let existing;
+  try {
+    existing = await env.DB
+      .prepare('SELECT id FROM testimonials WHERE id = ?')
+      .bind(id)
+      .first();
+  } catch (err) {
+    console.error('[admin testimonials PATCH check]', err.message);
+    return jsonError('Gagal mengakses database', 500, err.message);
+  }
   if (!existing) return jsonError('Testimoni tidak ditemukan', 404);
 
   const setClauses = [];
@@ -89,17 +95,17 @@ export async function onRequestPatch(context) {
       .prepare(`UPDATE testimonials SET ${setClauses.join(', ')} WHERE id = ?`)
       .bind(...values)
       .run();
+
+    const updated = await env.DB
+      .prepare('SELECT * FROM testimonials WHERE id = ?')
+      .bind(id)
+      .first();
+
+    return jsonOk({ pesan: 'Testimoni berhasil diperbarui', testimoni: updated });
   } catch (err) {
     console.error('[admin testimonials PATCH]', err.message);
-    return jsonError('Gagal menyimpan perubahan', 500);
+    return jsonError('Gagal menyimpan perubahan', 500, err.message);
   }
-
-  const updated = await env.DB
-    .prepare('SELECT * FROM testimonials WHERE id = ?')
-    .bind(id)
-    .first();
-
-  return jsonOk({ pesan: 'Testimoni berhasil diperbarui', testimoni: updated });
 }
 
 export async function onRequestDelete(context) {
@@ -108,13 +114,13 @@ export async function onRequestDelete(context) {
   const id = parseInt(params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return jsonError('ID tidak valid', 400);
 
-  const existing = await env.DB
-    .prepare('SELECT id FROM testimonials WHERE id = ?')
-    .bind(id)
-    .first();
-  if (!existing) return jsonError('Testimoni tidak ditemukan', 404);
-
   try {
+    const existing = await env.DB
+      .prepare('SELECT id FROM testimonials WHERE id = ?')
+      .bind(id)
+      .first();
+    if (!existing) return jsonError('Testimoni tidak ditemukan', 404);
+
     await env.DB
       .prepare('DELETE FROM testimonials WHERE id = ?')
       .bind(id)
@@ -123,7 +129,7 @@ export async function onRequestDelete(context) {
     return jsonOk({ success: true, pesan: 'Testimoni berhasil dihapus' });
   } catch (err) {
     console.error('[admin testimonials DELETE]', err.message);
-    return jsonError('Gagal menghapus testimoni', 500);
+    return jsonError('Gagal menghapus testimoni', 500, err.message);
   }
 }
 

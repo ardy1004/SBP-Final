@@ -22,7 +22,11 @@ export default function AdminLayout() {
   const fetchBadge = useCallback(() => {
     fetch('/api/admin/leads?count=1', { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.count !== undefined) setLeadsBadge(d.count); })
+      .then(d => {
+        // Backend membungkus payload: { success, data: { count } }
+        const count = d?.data?.count ?? d?.count;
+        if (count !== undefined) setLeadsBadge(count);
+      })
       .catch(() => {});
   }, []);
 

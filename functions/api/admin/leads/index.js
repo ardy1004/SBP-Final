@@ -24,7 +24,7 @@ export async function onRequestGet(context) {
       return jsonOk({ count: row?.cnt ?? 0 });
     } catch (err) {
       console.error('[admin leads count]', err.message);
-      return jsonError('Gagal menghitung leads', 500);
+      return jsonError('Gagal menghitung leads', 500, err.message);
     }
   }
 

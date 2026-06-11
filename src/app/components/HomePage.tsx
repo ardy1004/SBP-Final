@@ -237,9 +237,13 @@ function SkeletonTestimonials() {
 }
 
 /* ── TESTIMONIALS ── */
-/** foto_url bisa berupa key R2 (testimonials/…) atau URL http(s). Resolusi ke src yang valid. */
+const TESTIMONI_FALLBACK_AVATAR =
+  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&q=80';
+
+/** foto_url bisa berupa key R2 (testimonials/…) atau URL http(s). Resolusi ke src yang valid.
+ *  Catatan: jangan kembalikan '' (src kosong = request liar + mutasi DOM saat hidrasi → mismatch). */
 function testimoniFotoSrc(u: string | null | undefined): string {
-  if (!u) return '';
+  if (!u) return TESTIMONI_FALLBACK_AVATAR;
   if (/^https?:\/\//i.test(u)) return u;
   return `/api/media?key=${encodeURIComponent(u)}`;
 }
