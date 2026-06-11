@@ -534,7 +534,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
             {/* Description */}
             <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm">
               <h2 className="font-display font-bold text-[#0F172A] mb-3">Deskripsi Properti</h2>
-              <p className="text-[#64748B] text-sm leading-relaxed">{property.deskripsi}</p>
+              <p className="text-[#64748B] text-sm leading-relaxed whitespace-pre-line">{property.deskripsi}</p>
               <div className="mt-4 p-4 bg-[#F0F4F8] rounded-xl">
                 <p className="text-sm text-[#64748B] leading-relaxed">
                   Properti {property.jenis.toLowerCase()} ini berlokasi di {property.kecamatan}, {property.kabupaten}, salah satu kawasan strategis di {property.provinsi}.
