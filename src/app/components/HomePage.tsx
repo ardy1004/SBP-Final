@@ -453,7 +453,8 @@ function HeroFilter() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+      {/* Grid jadi 1 kolom: Kel./Desa disembunyikan sementara, Kecamatan full-width */}
+      <div className="grid grid-cols-1 gap-3 mb-5">
         {/* Kecamatan — dari API, cascade dari kabupaten */}
         <div className="relative">
           <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Kecamatan</label>
@@ -469,7 +470,7 @@ function HeroFilter() {
           <ChevronDown size={14} className="absolute right-3 bottom-3 text-gray-400 pointer-events-none" />
         </div>
 
-        {/* Kel./Desa — placeholder, API tidak menyediakan level ini */}
+        {/* Kel./Desa — Disembunyikan sementara — TODO aktifkan kembali jika data kelurahan siap
         <div className="relative">
           <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Kel./Desa</label>
           <select className={selectClass} disabled>
@@ -477,6 +478,7 @@ function HeroFilter() {
           </select>
           <ChevronDown size={14} className="absolute right-3 bottom-3 text-gray-400 pointer-events-none" />
         </div>
+        */}
       </div>
 
       <button
