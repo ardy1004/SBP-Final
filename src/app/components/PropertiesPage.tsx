@@ -375,13 +375,13 @@ export default function PropertiesPage() {
                 >
                   <SlidersHorizontal size={16} /> Filter
                 </button>
-                <p className="text-sm text-[#64748B]">
+                <div className="text-sm text-[#64748B]">
                   {loading ? (
                     <Skeleton className="h-4 w-44 inline-block rounded" />
                   ) : (
                     <>Menampilkan <span className="font-bold text-[#0F172A]">{properties.length}</span> dari <span className="font-bold text-[#0F172A]">{totalCount}</span> properti</>
                   )}
-                </p>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <div className="relative">
