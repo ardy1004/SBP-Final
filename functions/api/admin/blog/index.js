@@ -3,7 +3,7 @@
 // Auth: otomatis via functions/api/admin/_middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
-import { sanitizeHtml } from '../../_lib/sanitize.js';
+import { sanitizeHtml } from '../../../_lib/sanitize.js';
 
 const VALID_STATUS = new Set(['draft', 'published', 'scheduled']);
 
