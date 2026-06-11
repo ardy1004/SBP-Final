@@ -1521,6 +1521,39 @@ wrangler d1 execute sbp-db --remote --file=migrations/0009_update_leads_pipeline
 
 ---
 
+## PRE-LAUNCH FIXES BATCH (branch `feat/prelaunch-fixes`)
+
+Enam perbaikan pra-rilis dari hasil audit komprehensif:
+
+| Kode | Fix | File / Aksi |
+|------|-----|-------------|
+| **S1** | **CORS `ALLOWED_ORIGIN` dikunci** ke `https://salambumi.xyz` | `wrangler.toml [vars]`; `functions/_middleware.js` sudah baca `env.ALLOWED_ORIGIN \|\| '*'` |
+| **S2** | **Sinkronkan `d1_migrations`** — INSERT manual 0006–0011 (skema sudah ter-apply out-of-band, tabel tracking ketinggalan) | DB remote `sbp-db`; before: 5 baris (0001–0005) → after: 11 baris (0001–0011) |
+| **S6** | **Aktifkan link Blog** di Navbar & Footer | `src/app/components/Navbar.tsx`, `Footer.tsx` (uncomment → `/blog`) |
+| **R1** | **StatsStrip homepage pakai angka real** dari DB (Listing Aktif = published, Transaksi Selesai = sold); % Dikurasi & Rating = konstanta brand (dikomentari jelas) | `src/app/routes/home.tsx` (SSR loader query count), `HomePage.tsx` (StatsStrip via props) |
+| **S7** | **Sanitasi HTML blog** — regex sanitizer tanpa dependency (Workers-safe; `sanitize-html`/`isomorphic-dompurify` butuh Node/jsdom yang tidak ada di Workers). Hapus `<script/iframe/object/embed/style>`, atribut `on*`, protokol `javascript:`/`vbscript:`/`data:` (kecuali `data:image/`). Diterapkan **saat simpan** (API) + **saat render** (defense-in-depth) | `functions/_lib/sanitize.js` (BARU), `src/lib/sanitize.ts` (BARU), `functions/api/admin/blog/index.js` & `[id].js` (POST/PATCH konten), `src/app/routes/blog-detail.tsx` (render) |
+| **R8** | **Bersihkan 29 file sampah** di root (fragmen kode jadi nama file: `0`, `{const`, `console.error('[views_daily]`, dll) via `git clean` ter-scope (exclude `.mcp.json`, `CLAUDE.md`, `pnpm-lock.yaml`; tanpa `-d` agar `.claude/` aman) | repo root |
+
+### ⚠️ S1 — LANGKAH MANUAL WAJIB di Cloudflare Dashboard
+
+Cloudflare **Pages TIDAK selalu membaca `[vars]` dari `wrangler.toml`** untuk project Pages.
+Maka selain commit `wrangler.toml`, set juga manual:
+
+> **Dashboard → Workers & Pages → `sbp-final` → Settings → Environment Variables**
+> Tambah `ALLOWED_ORIGIN = https://salambumi.xyz` untuk **Production** DAN **Preview**, lalu redeploy.
+
+Verifikasi pasca-deploy: `curl -I https://salambumi.xyz/api/health` → header `Access-Control-Allow-Origin: https://salambumi.xyz` (bukan `*`).
+
+### Verifikasi batch:
+
+| Test | Hasil |
+|---|---|
+| `npm run build` | ✅ 0 error |
+| `d1_migrations` after sync | ✅ 11 baris (0001–0011) |
+| Root junk files | ✅ 29 dihapus, 0 tersisa |
+
+---
+
 ## REFERENSI CEPAT
 
 | Item | Nilai |

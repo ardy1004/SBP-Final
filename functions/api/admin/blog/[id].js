@@ -4,6 +4,7 @@
 // Auth: otomatis via functions/api/admin/_middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+import { sanitizeHtml } from '../../_lib/sanitize.js';
 
 const VALID_STATUS = new Set(['draft', 'published', 'scheduled']);
 
@@ -57,7 +58,7 @@ export async function onRequestPatch(context) {
     pairs.push({ col: 'judul', val: v });
   }
   if (body.konten !== undefined) {
-    const v = typeof body.konten === 'string' ? body.konten.slice(0, 100000) : '';
+    const v = sanitizeHtml(typeof body.konten === 'string' ? body.konten.slice(0, 100000) : '');
     pairs.push({ col: 'konten', val: v });
     pairs.push({ col: 'reading_time_menit', val: readingTime(v) });
   }

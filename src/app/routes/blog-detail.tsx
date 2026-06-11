@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData, Link } from "react-router";
 import { Calendar, Clock, ChevronRight, ArrowLeft } from "lucide-react";
+import { sanitizeHtml } from "../../lib/sanitize";
 
 interface BlogDetail {
   id: number;
@@ -156,10 +157,10 @@ export default function BlogDetailRoute() {
             )}
           </div>
 
-          {/* Konten — HTML dari DB (V1: trusted admin input) */}
+          {/* Konten — HTML dari DB. Disanitasi saat simpan (API) + saat render (defense-in-depth) */}
           <div
             className="blog-content prose prose-sm sm:prose max-w-none text-[#334155] leading-relaxed"
-            dangerouslySetInnerHTML={{ __html: post.konten ?? '' }}
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(post.konten) }}
           />
 
           {/* Tags */}

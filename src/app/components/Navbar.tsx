@@ -7,7 +7,7 @@ const NAV_LINKS = [
   { label: 'Properties', href: '/properties' },
   // { label: 'Portofolio', href: '/portfolio' }, // disembunyikan sampai konten nyata — TODO aktifkan kembali
   { label: 'About Us', href: '/about' },
-  // { label: 'Blog', href: '/blog' }, // disembunyikan sampai konten nyata — TODO aktifkan kembali
+  { label: 'Blog', href: '/blog' },
   { label: 'FAQ', href: '/faq' },
   { label: 'Contact', href: '/contact' },
 ];

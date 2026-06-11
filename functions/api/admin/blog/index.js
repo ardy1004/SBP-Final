@@ -3,6 +3,7 @@
 // Auth: otomatis via functions/api/admin/_middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+import { sanitizeHtml } from '../../_lib/sanitize.js';
 
 const VALID_STATUS = new Set(['draft', 'published', 'scheduled']);
 
@@ -59,7 +60,7 @@ export async function onRequestPost(context) {
   const judul = sanitize(body.judul ?? '', 200);
   if (!judul) return jsonError('judul tidak boleh kosong', 422);
 
-  const konten   = typeof body.konten === 'string' ? body.konten.slice(0, 100000) : '';
+  const konten   = sanitizeHtml(typeof body.konten === 'string' ? body.konten.slice(0, 100000) : '');
   const excerpt  = sanitize(body.excerpt ?? '', 500) || null;
   const kategori = sanitize(body.kategori ?? '', 100) || null;
   const cover    = sanitize(body.cover ?? '', 1000) || null;

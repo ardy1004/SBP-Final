@@ -101,7 +101,7 @@ export default function Footer() {
             <ul className="space-y-2 text-sm mb-6">
               {[
                 { label: 'About Us', href: '/about' },
-                // { label: 'Blog & Tips Properti', href: '/blog' }, // disembunyikan sampai konten nyata — TODO aktifkan kembali
+                { label: 'Blog & Tips Properti', href: '/blog' },
                 { label: 'FAQ', href: '/faq' },
                 { label: 'Layanan Notaris', href: '/notaris' },
                 { label: 'Titip Jual', href: '/titip-jual' },

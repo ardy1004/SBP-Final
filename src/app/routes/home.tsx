@@ -9,11 +9,11 @@ export async function loader({ context }: LoaderFunctionArgs) {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const env = (context as any)?.cloudflare?.env;
-    if (!env?.DB) return { properties: [], testimonials: [], blogPosts: [] };
+    if (!env?.DB) return { properties: [], testimonials: [], blogPosts: [], stats: null };
 
     const db = env.DB as D1Database;
 
-    const [propsRes, testimRes, blogRes] = await Promise.all([
+    const [propsRes, testimRes, blogRes, statsRes] = await Promise.all([
       // Query identik dengan GET /api/properties — kolom dan filter sama persis
       db.prepare(`
         SELECT
@@ -63,6 +63,13 @@ export async function loader({ context }: LoaderFunctionArgs) {
         ORDER BY bp.published_at DESC
         LIMIT 3
       `).all(),
+
+      // StatsStrip — angka real dari DB (listing aktif & transaksi selesai)
+      db.prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM properties WHERE status_publish = 'published') AS published,
+          (SELECT COUNT(*) FROM properties WHERE status_publish = 'sold')      AS sold
+      `).first(),
     ]);
 
     // Normalisasi properties (integer → boolean, dll.)
@@ -104,10 +111,15 @@ export async function loader({ context }: LoaderFunctionArgs) {
       };
     });
 
-    return { properties, testimonials, blogPosts };
+    const stats = {
+      published: Number((statsRes as Record<string, unknown> | null)?.published ?? 0),
+      sold: Number((statsRes as Record<string, unknown> | null)?.sold ?? 0),
+    };
+
+    return { properties, testimonials, blogPosts, stats };
   } catch (e) {
     console.error("[home loader]", e);
-    return { properties: [], testimonials: [], blogPosts: [] };
+    return { properties: [], testimonials: [], blogPosts: [], stats: null };
   }
 }
 
@@ -158,12 +170,13 @@ export const meta: MetaFunction = () => [
 ];
 
 export default function HomeRoute() {
-  const { properties, testimonials, blogPosts } = useLoaderData<typeof loader>();
+  const { properties, testimonials, blogPosts, stats } = useLoaderData<typeof loader>();
   return (
     <HomePage
       ssrProperties={properties}
       ssrTestimonials={testimonials}
       ssrBlogPosts={blogPosts}
+      ssrStats={stats}
     />
   );
 }

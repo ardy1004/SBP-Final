@@ -13,9 +13,11 @@ import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
 
 /* ── STATS STRIP ── */
-function StatsStrip() {
+function StatsStrip({ published, sold }: { published: number; sold: number }) {
   const [counts, setCounts] = useState([0, 0, 0, 0]);
-  const targets = [150, 80, 100, 5];
+  // [0] Listing Aktif & [1] Transaksi Selesai = angka REAL dari DB (SSR loader).
+  // [2] % Dikurasi & [3] Rating Bintang = angka brand/marketing (BUKAN dari DB).
+  const targets = [published, sold, 100, 5];
   const labels = ['Listing Aktif', 'Transaksi Selesai', '% Dikurasi', 'Rating Bintang'];
   const icons = ['🏠', '✅', '🔍', '⭐'];
   const suffixes = ['+', '+', '%', '.0'];
@@ -488,15 +490,25 @@ function HeroFilter() {
   );
 }
 
+interface HomeStats {
+  published: number;
+  sold: number;
+}
+
 interface HomePageProps {
   ssrProperties?: NormalizedProperty[];
   ssrTestimonials?: ApiTestimonial[];
   ssrBlogPosts?: ApiBlogPost[];
+  ssrStats?: HomeStats | null;
 }
 
 /* ── MAIN HOMEPAGE ── */
-export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts }: HomePageProps) {
+export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts, ssrStats }: HomePageProps) {
   const hasSSR = ssrProperties !== undefined;
+
+  // Angka real dari DB; fallback ke angka brand hanya bila DB tak tersedia (mis. dev tanpa SSR)
+  const statPublished = ssrStats?.published ?? 150;
+  const statSold = ssrStats?.sold ?? 80;
 
   const [properties, setProperties] = useState<NormalizedProperty[]>(ssrProperties ?? []);
   const [loading, setLoading] = useState(!hasSSR);
@@ -594,7 +606,7 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts 
       </section>
 
       {/* STATS STRIP */}
-      <StatsStrip />
+      <StatsStrip published={statPublished} sold={statSold} />
 
       {/* BANNER CAROUSEL — properti_pilihan dari API */}
       {loading ? (

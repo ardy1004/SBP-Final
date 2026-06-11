@@ -43,6 +43,11 @@ ENVIRONMENT = "production"
 APP_URL = "https://salambumi.xyz"
 WA_ADMIN = "6281391278889"
 ADMIN_EMAIL = "salambumiproperty@gmail.com"
+# CORS: origin yang diizinkan. Dibaca oleh functions/_middleware.js (env.ALLOWED_ORIGIN || '*').
+# CATATAN: Cloudflare Pages TIDAK selalu membaca [vars] dari wrangler.toml untuk project Pages —
+# WAJIB juga di-set manual di Dashboard > Pages > sbp-final > Settings > Environment Variables
+# (Production + Preview) dengan nama ALLOWED_ORIGIN = https://salambumi.xyz.
+ALLOWED_ORIGIN = "https://salambumi.xyz"
 # NIK_ENC_KEY TIDAK DI SINI — set via .dev.vars (lokal) atau: wrangler secret put NIK_ENC_KEY (produksi)
 
 # =============================================================================
