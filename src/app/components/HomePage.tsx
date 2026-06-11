@@ -56,7 +56,7 @@ function StatsStrip({ published, sold }: { published: number; sold: number }) {
               >
                 {counts[i]}{suffixes[i]}
               </span>
-              <span className="text-white/70 text-sm mt-1 text-center">{label}</span>
+              <span className="text-[#0F172A] text-sm font-medium mt-1 text-center">{label}</span>
             </div>
           ))}
         </div>
