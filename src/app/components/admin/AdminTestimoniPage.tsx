@@ -292,7 +292,7 @@ function Modal({
 
           <div>
             <label className="block text-xs font-semibold text-[#475569] mb-1">Foto Klien</label>
-            <div className="flex items-center gap-3">
+            <div className="flex items-start gap-3">
               {form.foto_url ? (
                 <img
                   src={mediaSrc(form.foto_url)}
@@ -305,7 +305,14 @@ function Modal({
                   <User size={20} />
                 </div>
               )}
-              <div className="flex flex-col gap-1.5">
+              <div className="flex-1 flex flex-col gap-1.5">
+                <input
+                  type="url"
+                  value={form.foto_url}
+                  onChange={(e) => set('foto_url', e.target.value)}
+                  className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0]/30"
+                  placeholder="https://... atau upload file di bawah"
+                />
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -313,7 +320,7 @@ function Modal({
                   className="hidden"
                   onChange={handlePickFoto}
                 />
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -321,7 +328,7 @@ function Modal({
                     className="inline-flex items-center gap-1.5 border border-[#E2E8F0] text-[#475569] rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-[#F8FAFC] disabled:opacity-60 transition-colors"
                   >
                     {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                    {uploading ? 'Mengupload…' : form.foto_url ? 'Ganti Foto' : 'Upload Foto'}
+                    {uploading ? 'Mengupload…' : 'atau Upload File'}
                   </button>
                   {form.foto_url && !uploading && (
                     <button
@@ -333,7 +340,7 @@ function Modal({
                     </button>
                   )}
                 </div>
-                <span className="text-[11px] text-[#94A3B8]">JPG/PNG, dikonversi ke WebP otomatis.</span>
+                <span className="text-[11px] text-[#94A3B8]">Tempel URL gambar (Unsplash, Drive, dll) atau upload file lokal (dikonversi ke WebP otomatis).</span>
               </div>
             </div>
           </div>
