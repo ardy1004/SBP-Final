@@ -237,6 +237,13 @@ function SkeletonTestimonials() {
 }
 
 /* ── TESTIMONIALS ── */
+/** foto_url bisa berupa key R2 (testimonials/…) atau URL http(s). Resolusi ke src yang valid. */
+function testimoniFotoSrc(u: string | null | undefined): string {
+  if (!u) return '';
+  if (/^https?:\/\//i.test(u)) return u;
+  return `/api/media?key=${encodeURIComponent(u)}`;
+}
+
 function TestimonialsSection({ items }: { items: ApiTestimonial[] }) {
   const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true, align: 'start' });
   const [current, setCurrent] = useState(0);
@@ -277,7 +284,7 @@ function TestimonialsSection({ items }: { items: ApiTestimonial[] }) {
                   <span className="absolute top-4 left-5 text-7xl font-serif text-[#29B6F6] opacity-20 leading-none select-none">"</span>
                   <div className="flex items-center gap-3 mb-4 relative z-10">
                     <img
-                      src={t.foto_url ?? ''}
+                      src={testimoniFotoSrc(t.foto_url)}
                       alt={t.nama_klien}
                       className="w-12 h-12 rounded-full object-cover border-2 border-[#1565C0]"
                       onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&q=80'; }}

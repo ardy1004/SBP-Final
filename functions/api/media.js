@@ -1,6 +1,8 @@
 // GET /api/media?key=property-photos/uuid.webp
-// Public proxy untuk foto properti di R2. HANYA izinkan prefix property-photos/.
-// Tidak butuh auth — foto properti publik.
+// Public proxy untuk foto publik di R2 (foto properti & foto klien testimoni).
+// Tidak butuh auth — foto ini memang tampil di halaman publik.
+
+const PUBLIC_PREFIXES = ['property-photos/', 'testimonials/'];
 
 export async function onRequestGet(context) {
   const { request, env } = context;
@@ -11,7 +13,7 @@ export async function onRequestGet(context) {
     !key ||
     key.includes('..') ||
     key.includes('\0') ||
-    !key.startsWith('property-photos/')
+    !PUBLIC_PREFIXES.some(p => key.startsWith(p))
   ) {
     return new Response('Forbidden', { status: 403 });
   }

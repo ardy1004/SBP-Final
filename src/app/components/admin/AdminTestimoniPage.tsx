@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Star, Plus, Pencil, Trash2, Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Star, Plus, Pencil, Trash2, Loader2, AlertCircle, Eye, EyeOff, Upload, User } from 'lucide-react';
 
 interface Testimoni {
   id: number;
@@ -44,9 +44,51 @@ async function apiFetch(path: string, opts?: RequestInit) {
     headers: { 'Content-Type': 'application/json', ...(opts?.headers ?? {}) },
     ...opts,
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
-  return data;
+  const json = await res.json();
+  if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+  // Backend membungkus payload sebagai { success, data: {...} } (lihat _shared/response.js).
+  // Kembalikan isi `data` agar pemanggil bisa membaca field (mis. items) secara langsung.
+  return json.data ?? json;
+}
+
+/** Resolusi foto_url: key R2 (testimonials/…) → proxy publik; URL http(s) → apa adanya. */
+function mediaSrc(u: string | null | undefined): string {
+  if (!u) return '';
+  if (/^https?:\/\//i.test(u)) return u;
+  return `/api/media?key=${encodeURIComponent(u)}`;
+}
+
+const FALLBACK_AVATAR =
+  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&q=80';
+
+/** Konversi File gambar → data URL WebP (kualitas 0.85). */
+function convertToWebP(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { reject(new Error('Canvas tidak tersedia')); return; }
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) { reject(new Error('Konversi WebP gagal')); return; }
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error('FileReader error'));
+          reader.readAsDataURL(blob);
+        },
+        'image/webp',
+        0.85
+      );
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Gagal membaca gambar')); };
+    img.src = url;
+  });
 }
 
 function StarRow({ rating, onChange }: { rating: number; onChange?: (v: number) => void }) {
@@ -120,9 +162,36 @@ function Modal({
   );
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const set = (k: keyof FormData, v: FormData[keyof FormData]) =>
     setForm((f) => ({ ...f, [k]: v }));
+
+  async function handlePickFoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // izinkan pilih file yang sama lagi
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { setErr('File harus berupa gambar'); return; }
+    setUploading(true);
+    setErr(null);
+    try {
+      const base64 = await convertToWebP(file);
+      const res = await fetch('/api/admin/testimonials/foto', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photo: base64 }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
+      set('foto_url', json.data?.key ?? '');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Gagal mengupload foto');
+    } finally {
+      setUploading(false);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -222,14 +291,51 @@ function Modal({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-[#475569] mb-1">URL Foto Profil</label>
-            <input
-              value={form.foto_url}
-              onChange={(e) => set('foto_url', e.target.value)}
-              type="url"
-              className="w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0]/30"
-              placeholder="https://..."
-            />
+            <label className="block text-xs font-semibold text-[#475569] mb-1">Foto Klien</label>
+            <div className="flex items-center gap-3">
+              {form.foto_url ? (
+                <img
+                  src={mediaSrc(form.foto_url)}
+                  alt="Foto klien"
+                  className="w-14 h-14 rounded-full object-cover border border-[#E2E8F0] flex-shrink-0 bg-[#F1F5F9]"
+                  onError={(e) => { (e.target as HTMLImageElement).src = FALLBACK_AVATAR; }}
+                />
+              ) : (
+                <div className="w-14 h-14 rounded-full border border-dashed border-[#CBD5E1] flex items-center justify-center text-[#94A3B8] flex-shrink-0">
+                  <User size={20} />
+                </div>
+              )}
+              <div className="flex flex-col gap-1.5">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handlePickFoto}
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="inline-flex items-center gap-1.5 border border-[#E2E8F0] text-[#475569] rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-[#F8FAFC] disabled:opacity-60 transition-colors"
+                  >
+                    {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                    {uploading ? 'Mengupload…' : form.foto_url ? 'Ganti Foto' : 'Upload Foto'}
+                  </button>
+                  {form.foto_url && !uploading && (
+                    <button
+                      type="button"
+                      onClick={() => set('foto_url', '')}
+                      className="text-xs text-red-600 hover:underline px-1"
+                    >
+                      Hapus
+                    </button>
+                  )}
+                </div>
+                <span className="text-[11px] text-[#94A3B8]">JPG/PNG, dikonversi ke WebP otomatis.</span>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -379,12 +485,11 @@ export default function AdminTestimoniPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <img
-                          src={t.foto_url ?? ''}
+                          src={mediaSrc(t.foto_url)}
                           alt={t.nama_klien}
                           className="w-9 h-9 rounded-full object-cover bg-[#E2E8F0] flex-shrink-0"
                           onError={(e) => {
-                            (e.target as HTMLImageElement).src =
-                              'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&q=80';
+                            (e.target as HTMLImageElement).src = FALLBACK_AVATAR;
                           }}
                         />
                         <div>
