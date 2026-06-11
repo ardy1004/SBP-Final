@@ -30,6 +30,8 @@ export default [
     route("admin/agreements/:id", "./components/admin/AdminAgreementDetailPage.tsx", { id: "admin-agreement-detail" }),
     route("admin/listing", "./components/admin/AdminListingPage.tsx"),
     route("admin/listing/:id", "./components/admin/AdminPropertyDetailPage.tsx", { id: "admin-property-detail" }),
+    route("admin/viralframe", "./components/admin/AdminViralFramePage.tsx", { id: "admin-viralframe" }),
+    route("admin/viralframe/:id", "./components/admin/AdminViralFrameWorkspacePage.tsx", { id: "admin-viralframe-workspace" }),
     route("admin/leads", "./components/admin/AdminLeadsPage.tsx"),
     route("admin/testimoni", "./components/admin/AdminTestimoniPage.tsx", { id: "admin-testimoni" }),
     route("admin/blog", "./components/admin/AdminBlogPage.tsx", { id: "admin-blog" }),

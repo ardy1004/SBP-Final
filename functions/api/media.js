@@ -2,7 +2,7 @@
 // Public proxy untuk foto publik di R2 (foto properti & foto klien testimoni).
 // Tidak butuh auth — foto ini memang tampil di halaman publik.
 
-const PUBLIC_PREFIXES = ['property-photos/', 'testimonials/'];
+const PUBLIC_PREFIXES = ['property-photos/', 'testimonials/', 'viralframe-characters/'];
 
 export async function onRequestGet(context) {
   const { request, env } = context;
