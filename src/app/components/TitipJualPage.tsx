@@ -753,12 +753,15 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
                   {kecList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
                 </select>
               )}
+              {/* Disembunyikan sementara — TODO aktifkan kembali jika data kelurahan siap.
+                  State (kelList, kelProp, setKelProp) & handler (handleKelChange) sengaja dipertahankan.
               {kecId && (
                 <select onChange={handleKelChange} defaultValue="" className={selectCls()}>
                   <option value="">-- Pilih Kelurahan --</option>
                   {kelList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
                 </select>
               )}
+              */}
             </div>
           )}
         </div>
