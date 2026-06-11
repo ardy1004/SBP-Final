@@ -44,7 +44,7 @@ function StatsStrip({ published, sold }: { published: number; sold: number }) {
   }, []);
 
   return (
-    <div ref={ref} className="py-8" style={{ background: '#0B2447' }}>
+    <div ref={ref} className="py-8 bg-[#0B2447]/60 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-0 divide-x divide-white/10">
           {labels.map((label, i) => (
