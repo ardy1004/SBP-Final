@@ -9,7 +9,6 @@ import { PROPERTY_TYPES } from '../../lib/propertyTypes';
 interface Step1State {
   nama_ktp: string;
   nik: string;
-  alamat_ktp: string;
   rt_rw: string;
   kelurahan: string;
   kecamatan: string;
@@ -115,7 +114,7 @@ const BERTINDAK_OPTIONS = [
 
 function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
   const [form, setForm] = useState<Step1State>({
-    nama_ktp: '', nik: '', alamat_ktp: '', rt_rw: '',
+    nama_ktp: '', nik: '', rt_rw: '',
     kelurahan: '', kecamatan: '', prov_owner: '', kab_owner: '', bertindak: '',
     ahli_waris_jumlah: '', ahli_waris_sepakat: false, ahli_waris_kuasa: false, ahli_waris_turun: false,
     no_wa: '', no_wa_2: '',
@@ -131,9 +130,11 @@ function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
     if (!form.nama_ktp) e.nama_ktp = 'Nama sesuai KTP wajib diisi';
     if (!form.nik) e.nik = 'NIK wajib diisi';
     else if (!/^\d{16}$/.test(form.nik)) e.nik = 'NIK harus tepat 16 digit angka';
-    if (!form.alamat_ktp) e.alamat_ktp = 'Alamat KTP wajib diisi';
-    if (!form.kelurahan) e.kelurahan = 'Kelurahan wajib diisi';
+    if (!form.prov_owner) e.prov_owner = 'Provinsi wajib diisi';
+    if (!form.kab_owner) e.kab_owner = 'Kabupaten/Kota wajib diisi';
     if (!form.kecamatan) e.kecamatan = 'Kecamatan wajib diisi';
+    if (!form.kelurahan) e.kelurahan = 'Kelurahan wajib diisi';
+    if (!form.rt_rw) e.rt_rw = 'RT/RW wajib diisi';
     if (!form.bertindak) e.bertindak = 'Wajib dipilih';
     if (!form.no_wa) e.no_wa = 'Nomor WhatsApp wajib diisi';
     else if (!/^(0|62|8)\d{8,12}$/.test(form.no_wa.replace(/\D/g, ''))) e.no_wa = 'Nomor WhatsApp tidak valid';
@@ -174,50 +175,52 @@ function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
           <FieldErr msg={errors.nik} />
         </div>
 
-        {/* Alamat KTP */}
+        {/* Alamat Lengkap Sesuai KTP — label statis (input dihapus; detail alamat diisi via kolom lokasi di bawah) */}
         <div>
-          <label className="block text-xs font-semibold text-[#64748B] mb-1">Alamat Lengkap (KTP) *</label>
-          <textarea value={form.alamat_ktp} onChange={e => { f('alamat_ktp', e.target.value); clearErr('alamat_ktp'); }}
-            rows={3} placeholder="Alamat sesuai KTP" className={`${inputCls(errors.alamat_ktp)} resize-none`} />
-          <FieldErr msg={errors.alamat_ktp} />
+          <label className="block text-xs font-semibold text-[#64748B] mb-1">Alamat Lengkap Sesuai KTP</label>
         </div>
 
-        {/* RT/RW + Kelurahan + Kecamatan */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-[#64748B] mb-1">RT/RW <span className="font-normal text-gray-400">(Opsional)</span></label>
-            <input value={form.rt_rw} onChange={e => f('rt_rw', e.target.value)} placeholder="001/002"
-              className={inputCls()} />
-          </div>
-          <div />
-        </div>
         {/* Provinsi + Kab./Kota KTP */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-semibold text-[#64748B] mb-1">Provinsi (KTP) <span className="font-normal text-gray-400">(Opsional)</span></label>
-            <input value={form.prov_owner} onChange={e => f('prov_owner', e.target.value)}
-              placeholder="Mis: Jawa Timur" className={inputCls()} />
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">Provinsi (KTP) *</label>
+            <input value={form.prov_owner} onChange={e => { f('prov_owner', e.target.value); clearErr('prov_owner'); }}
+              placeholder="Mis: Jawa Timur" className={inputCls(errors.prov_owner)} />
+            <FieldErr msg={errors.prov_owner} />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-[#64748B] mb-1">Kab./Kota (KTP) <span className="font-normal text-gray-400">(Opsional)</span></label>
-            <input value={form.kab_owner} onChange={e => f('kab_owner', e.target.value)}
-              placeholder="Mis: Kabupaten Sleman" className={inputCls()} />
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">Kab./Kota (KTP) *</label>
+            <input value={form.kab_owner} onChange={e => { f('kab_owner', e.target.value); clearErr('kab_owner'); }}
+              placeholder="Mis: Kabupaten Sleman" className={inputCls(errors.kab_owner)} />
+            <FieldErr msg={errors.kab_owner} />
           </div>
         </div>
 
+        {/* Kecamatan + Kelurahan/Desa */}
         <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-[#64748B] mb-1">Kelurahan/Desa *</label>
-            <input value={form.kelurahan} onChange={e => { f('kelurahan', e.target.value); clearErr('kelurahan'); }}
-              placeholder="Kelurahan" className={inputCls(errors.kelurahan)} />
-            <FieldErr msg={errors.kelurahan} />
-          </div>
           <div>
             <label className="block text-xs font-semibold text-[#64748B] mb-1">Kecamatan *</label>
             <input value={form.kecamatan} onChange={e => { f('kecamatan', e.target.value); clearErr('kecamatan'); }}
               placeholder="Kecamatan" className={inputCls(errors.kecamatan)} />
             <FieldErr msg={errors.kecamatan} />
           </div>
+          <div>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">Kelurahan/Desa *</label>
+            <input value={form.kelurahan} onChange={e => { f('kelurahan', e.target.value); clearErr('kelurahan'); }}
+              placeholder="Kelurahan" className={inputCls(errors.kelurahan)} />
+            <FieldErr msg={errors.kelurahan} />
+          </div>
+        </div>
+
+        {/* RT/RW */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">RT/RW *</label>
+            <input value={form.rt_rw} onChange={e => { f('rt_rw', e.target.value); clearErr('rt_rw'); }} placeholder="001/002"
+              className={inputCls(errors.rt_rw)} />
+            <FieldErr msg={errors.rt_rw} />
+          </div>
+          <div />
         </div>
 
         {/* Bertindak Sebagai */}
@@ -496,7 +499,8 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         // owner (step 1)
         nama_ktp:         step1.nama_ktp,
         nik:              step1.nik,
-        alamat_ktp:       step1.alamat_ktp,
+        // alamat_ktp tidak lagi punya input sendiri — disusun dari field lokasi terstruktur (semua wajib)
+        alamat_ktp:       `Kel. ${step1.kelurahan}, Kec. ${step1.kecamatan}, ${step1.kab_owner}, ${step1.prov_owner} (RT/RW ${step1.rt_rw})`,
         rt_rw:            step1.rt_rw || undefined,
         prov_owner:       step1.prov_owner || undefined,
         kab_owner:        step1.kab_owner || undefined,
