@@ -14,6 +14,7 @@ interface Step1State {
   kelurahan: string;
   kecamatan: string;
   prov_owner: string;
+  kab_owner: string;
   bertindak: string;
   ahli_waris_jumlah: string;
   ahli_waris_sepakat: boolean;
@@ -115,7 +116,7 @@ const BERTINDAK_OPTIONS = [
 function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
   const [form, setForm] = useState<Step1State>({
     nama_ktp: '', nik: '', alamat_ktp: '', rt_rw: '',
-    kelurahan: '', kecamatan: '', prov_owner: '', bertindak: '',
+    kelurahan: '', kecamatan: '', prov_owner: '', kab_owner: '', bertindak: '',
     ahli_waris_jumlah: '', ahli_waris_sepakat: false, ahli_waris_kuasa: false, ahli_waris_turun: false,
     no_wa: '', no_wa_2: '',
   });
@@ -190,11 +191,18 @@ function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
           </div>
           <div />
         </div>
-        {/* Provinsi KTP */}
-        <div>
-          <label className="block text-xs font-semibold text-[#64748B] mb-1">Provinsi (KTP) <span className="font-normal text-gray-400">(Opsional)</span></label>
-          <input value={form.prov_owner} onChange={e => f('prov_owner', e.target.value)}
-            placeholder="Mis: Jawa Timur" className={inputCls()} />
+        {/* Provinsi + Kab./Kota KTP */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">Provinsi (KTP) <span className="font-normal text-gray-400">(Opsional)</span></label>
+            <input value={form.prov_owner} onChange={e => f('prov_owner', e.target.value)}
+              placeholder="Mis: Jawa Timur" className={inputCls()} />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">Kab./Kota (KTP) <span className="font-normal text-gray-400">(Opsional)</span></label>
+            <input value={form.kab_owner} onChange={e => f('kab_owner', e.target.value)}
+              placeholder="Mis: Kabupaten Sleman" className={inputCls()} />
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -491,6 +499,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         alamat_ktp:       step1.alamat_ktp,
         rt_rw:            step1.rt_rw || undefined,
         prov_owner:       step1.prov_owner || undefined,
+        kab_owner:        step1.kab_owner || undefined,
         kelurahan_owner:  step1.kelurahan,
         kecamatan_owner:  step1.kecamatan,
         bertindak_sebagai: step1.bertindak,
