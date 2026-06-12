@@ -2,14 +2,18 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
   ArrowLeft, ArrowRight, ImageOff, Check, Film, AlertCircle,
-  Copy, Download, Loader2,
+  Copy, Download, Loader2, FileCheck2, FileArchive, X,
 } from 'lucide-react';
+import JSZip from 'jszip';
 import {
   AI_TOOLS, RATIOS, LANGUAGES, HOOK_TYPES, CTA_TYPES, VISUAL_STYLES,
   TONES, PLATFORMS, PHOTO_LABELS, sceneRole,
+  sceneFileName, characterFileName,
 } from './viralframe/options';
 import CharacterStep, { type Step3State } from './viralframe/CharacterStep';
 import { compileMasterPrompt, estimateTokens } from './viralframe/masterPromptCompiler';
+import { validateSceneJson, type ParsedJSON, type ValidateResult } from './viralframe/jsonValidator';
+import SceneCards from './viralframe/SceneCards';
 
 // ─── Tipe data ────────────────────────────────────────────────────────────
 interface PropertyImage { id: number; url_webp: string; alt_text: string | null; urutan: number; is_cover: number }
@@ -168,6 +172,15 @@ export default function AdminViralFrameWorkspacePage() {
   const [saving, setSaving] = useState(false);
   const savedPromptRef = useRef<string>('');
 
+  // Step 4 — Tab Paste & Validate (Fase V4b)
+  const [step4Tab, setStep4Tab] = useState<'prompt' | 'validate'>('prompt');
+  const [pasteRaw, setPasteRaw] = useState('');
+  const [valResult, setValResult] = useState<ValidateResult | null>(null);
+  const [validData, setValidData] = useState<ParsedJSON | null>(null);
+  const [warningsDismissed, setWarningsDismissed] = useState(false);
+  const [zipBusy, setZipBusy] = useState(false);
+  const [zipError, setZipError] = useState('');
+
   // Fetch detail properti
   useEffect(() => {
     let cancel = false;
@@ -313,6 +326,99 @@ export default function AdminViralFrameWorkspacePage() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  };
+
+  // ─── Step 4b: durasi per scene (untuk validasi & scene cards) ─────────────
+  const durations = useMemo(
+    () => (s1.durationMode === 'uniform'
+      ? Array.from({ length: s1.sceneCount }, () => s1.uniformDuration)
+      : s1.manualDurations.slice(0, s1.sceneCount)),
+    [s1.durationMode, s1.sceneCount, s1.uniformDuration, s1.manualDurations],
+  );
+
+  // Reset hasil validasi bila prompt (param) berubah agar tidak stale.
+  useEffect(() => {
+    setValResult(null); setValidData(null); setWarningsDismissed(false); setZipError('');
+  }, [masterPrompt]);
+
+  const handleValidate = () => {
+    setZipError('');
+    const result = validateSceneJson(pasteRaw, {
+      sceneCount: s1.sceneCount, aiTool: s1.aiTool, scenes, durations,
+    });
+    setValResult(result);
+    setWarningsDismissed(false);
+    if (result.ok && result.data) {
+      setValidData(result.data);
+      // Simpan hasil JSON tervalidasi ke riwayat (non-blocking).
+      if (generationId) {
+        fetch(`/api/admin/viralframe/generations/${generationId}`, {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ result_json: JSON.stringify(result.data) }),
+        }).catch(() => {});
+      }
+    } else {
+      setValidData(null);
+    }
+  };
+
+  const handleDownloadZip = async () => {
+    if (!validData || !prop) return;
+    setZipBusy(true); setZipError('');
+    try {
+      const zip = new JSZip();
+      const photosFolder = zip.folder('photos');
+
+      // (a) Foto tiap scene → photos/sceneNN_label.webp (nama PERSIS dari options.ts)
+      const imgById = new Map(prop.images.map(im => [im.id, im]));
+      for (let i = 0; i < s1.sceneCount; i++) {
+        const sc = scenes[i];
+        if (!sc?.photoId) continue;
+        const img = imgById.get(sc.photoId);
+        if (!img) continue;
+        const res = await fetch(`/api/admin/media?key=${encodeURIComponent(img.url_webp)}`, { credentials: 'include' });
+        if (!res.ok) throw new Error(`Gagal unduh foto scene ${i + 1} (HTTP ${res.status})`);
+        const blob = await res.blob();
+        photosFolder?.file(sceneFileName(i, sc.label || ''), blob);
+      }
+
+      // (b) Foto karakter → character/character_nama.webp
+      if (s3.useCharacter && s3.character?.foto_url) {
+        const res = await fetch(`/api/admin/media?key=${encodeURIComponent(s3.character.foto_url)}`, { credentials: 'include' });
+        if (res.ok) {
+          const blob = await res.blob();
+          zip.folder('character')?.file(characterFileName(s3.character.nama), blob);
+        }
+      }
+
+      // (c) prompt.txt = Master Prompt
+      zip.file('prompt.txt', masterPrompt);
+
+      // (d) caption_hashtag.txt
+      const pn = validData.production_notes ?? {};
+      const caption = pn.caption ?? '';
+      const hashtags = Array.isArray(pn.hashtags)
+        ? pn.hashtags.map(h => `#${String(h).replace(/^#/, '')}`).join(' ')
+        : '';
+      zip.file('caption_hashtag.txt', `CAPTION:\n${caption}\n\nHASHTAGS:\n${hashtags}`);
+
+      // (e) generate + download
+      const out = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(out);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `viralframe_${prop.kode_listing}_${Date.now()}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: unknown) {
+      setZipError(err instanceof Error ? err.message : 'Gagal membuat ZIP');
+    } finally {
+      setZipBusy(false);
+    }
   };
 
   // ─── Render states ──────────────────────────────────────────────────────
@@ -586,50 +692,141 @@ export default function AdminViralFrameWorkspacePage() {
       {/* ─── STEP 3 — Pilih Karakter ─── */}
       {step === 3 && <CharacterStep value={s3} onChange={update3} />}
 
-      {/* ─── STEP 4 — Master Prompt ─── */}
+      {/* ─── STEP 4 — Generate & Validate ─── */}
       {step === 4 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="font-display font-bold text-[#0F172A]">Step 4 — Master Prompt</h2>
-            <div className="flex items-center gap-2">
-              <button onClick={handleCopy}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-                style={{ background: copied ? '#10B981' : 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
-                {copied ? <><Check size={15} /> Copied!</> : <><Copy size={15} /> Copy Master Prompt</>}
+          <h2 className="font-display font-bold text-[#0F172A]">Step 4 — Generate Prompt &amp; Validasi</h2>
+
+          {/* Tab toggle */}
+          <div className="flex gap-2 border-b border-gray-100 -mx-1 px-1">
+            {([
+              { v: 'prompt', label: 'Master Prompt', icon: <Copy size={14} /> },
+              { v: 'validate', label: 'Paste & Validate', icon: <FileCheck2 size={14} /> },
+            ] as const).map(t => (
+              <button key={t.v} type="button" onClick={() => setStep4Tab(t.v)}
+                className={`flex items-center gap-1.5 px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
+                  step4Tab === t.v
+                    ? 'border-[#1565C0] text-[#1565C0]'
+                    : 'border-transparent text-[#94A3B8] hover:text-[#64748B]'
+                }`}>
+                {t.icon} {t.label}
               </button>
-              <button onClick={handleDownload}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF] transition-colors">
-                <Download size={15} /> Download .txt
-              </button>
+            ))}
+          </div>
+
+          {/* ── TAB 1: MASTER PROMPT ── */}
+          {step4Tab === 'prompt' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-end gap-2 flex-wrap">
+                <button onClick={handleCopy}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  style={{ background: copied ? '#10B981' : 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+                  {copied ? <><Check size={15} /> Copied!</> : <><Copy size={15} /> Copy Master Prompt</>}
+                </button>
+                <button onClick={handleDownload}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF] transition-colors">
+                  <Download size={15} /> Download .txt
+                </button>
+              </div>
+
+              <p className="text-sm text-[#64748B]">
+                Salin teks di bawah, paste ke AI eksternal (mis. ChatGPT/Gemini/Claude) untuk menghasilkan JSON Scene.
+                Lalu buka tab <strong>Paste &amp; Validate</strong> untuk menempel hasilnya.
+              </p>
+
+              <textarea readOnly value={masterPrompt}
+                className="w-full h-96 max-h-[60vh] overflow-y-auto p-3 border border-gray-200 rounded-xl text-xs font-mono text-[#0F172A] bg-[#F8FAFC] outline-none resize-y leading-relaxed"
+              />
+
+              <div className="flex items-center gap-4 flex-wrap text-xs text-[#64748B]">
+                <span>Estimasi ~{estimateTokens(masterPrompt).toLocaleString('id-ID')} token</span>
+                <span>·</span>
+                <span>{s1.sceneCount} scene</span>
+                <span>·</span>
+                <span>Total {s1.durationMode === 'uniform'
+                  ? s1.uniformDuration * s1.sceneCount
+                  : s1.manualDurations.slice(0, s1.sceneCount).reduce((a, b) => a + (b || 0), 0)} detik</span>
+                <span>·</span>
+                <span className="flex items-center gap-1">
+                  {saving
+                    ? <><Loader2 size={12} className="animate-spin" /> menyimpan riwayat…</>
+                    : generationId
+                      ? <><Check size={12} className="text-emerald-500" /> riwayat tersimpan #{generationId}</>
+                      : 'riwayat belum tersimpan'}
+                </span>
+              </div>
             </div>
-          </div>
+          )}
 
-          <p className="text-sm text-[#64748B] -mt-1">
-            Salin teks di bawah, paste ke AI eksternal (mis. ChatGPT/Gemini/Claude) untuk menghasilkan JSON Scene.
-            Validasi JSON &amp; Scene Cards akan hadir di Fase V4b.
-          </p>
+          {/* ── TAB 2: PASTE & VALIDATE ── */}
+          {step4Tab === 'validate' && (
+            <div className="space-y-4">
+              <p className="text-sm text-[#64748B]">
+                Tempel hasil JSON dari AI eksternal di sini, lalu klik Validasi. Scene Cards &amp; tombol unduh ZIP akan muncul jika JSON valid.
+              </p>
 
-          <textarea readOnly value={masterPrompt}
-            className="w-full h-96 max-h-[60vh] overflow-y-auto p-3 border border-gray-200 rounded-xl text-xs font-mono text-[#0F172A] bg-[#F8FAFC] outline-none resize-y leading-relaxed"
-          />
+              <textarea value={pasteRaw} onChange={e => setPasteRaw(e.target.value)}
+                placeholder="Paste hasil JSON dari AI di sini (ChatGPT/Gemini/Claude)..."
+                className="w-full h-56 max-h-[50vh] p-3 border border-gray-200 rounded-xl text-xs font-mono text-[#0F172A] bg-[#F8FAFC] outline-none focus:border-[#1565C0] resize-y leading-relaxed"
+              />
 
-          <div className="flex items-center gap-4 flex-wrap text-xs text-[#64748B]">
-            <span>Estimasi ~{estimateTokens(masterPrompt).toLocaleString('id-ID')} token</span>
-            <span>·</span>
-            <span>{s1.sceneCount} scene</span>
-            <span>·</span>
-            <span>Total {s1.durationMode === 'uniform'
-              ? s1.uniformDuration * s1.sceneCount
-              : s1.manualDurations.slice(0, s1.sceneCount).reduce((a, b) => a + (b || 0), 0)} detik</span>
-            <span>·</span>
-            <span className="flex items-center gap-1">
-              {saving
-                ? <><Loader2 size={12} className="animate-spin" /> menyimpan riwayat…</>
-                : generationId
-                  ? <><Check size={12} className="text-emerald-500" /> riwayat tersimpan #{generationId}</>
-                  : 'riwayat belum tersimpan'}
-            </span>
-          </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button onClick={handleValidate} disabled={!pasteRaw.trim()}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                  style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+                  <FileCheck2 size={15} /> Validasi JSON
+                </button>
+
+                <button onClick={handleDownloadZip}
+                  disabled={!validData || zipBusy}
+                  title={!validData ? 'Validasi JSON dulu sebelum mengunduh ZIP' : 'Unduh foto + prompt + caption sebagai ZIP'}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                  {zipBusy ? <Loader2 size={15} className="animate-spin" /> : <FileArchive size={15} />}
+                  {zipBusy ? 'Menyiapkan ZIP…' : 'Download ZIP'}
+                </button>
+              </div>
+
+              {/* Error box (hard error) */}
+              {valResult && valResult.errors.length > 0 && (
+                <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
+                  <div className="flex items-center gap-2 text-red-700 font-semibold text-sm mb-1.5">
+                    <AlertCircle size={15} /> JSON tidak bisa diproses:
+                  </div>
+                  <ul className="list-disc list-inside text-sm text-red-600 space-y-0.5">
+                    {valResult.errors.map((e, i) => <li key={i}>{e}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {/* Warning box (dismissible, non-blocking) */}
+              {valResult && valResult.ok && valResult.warnings.length > 0 && !warningsDismissed && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 relative">
+                  <button onClick={() => setWarningsDismissed(true)}
+                    className="absolute top-3 right-3 text-amber-500 hover:text-amber-700"><X size={15} /></button>
+                  <div className="flex items-center gap-2 text-amber-700 font-semibold text-sm mb-1.5">
+                    <AlertCircle size={15} /> {valResult.warnings.length} peringatan (tidak menghalangi):
+                  </div>
+                  <ul className="list-disc list-inside text-sm text-amber-700 space-y-0.5">
+                    {valResult.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {zipError && (
+                <div className="bg-red-50 border border-red-100 rounded-xl p-3 text-sm text-red-600">{zipError}</div>
+              )}
+
+              {/* Scene Cards */}
+              {validData && (
+                <div className="pt-1">
+                  <div className="flex items-center gap-1.5 text-sm font-semibold text-emerald-600 mb-3">
+                    <Check size={15} /> JSON valid — {validData.scenes?.length ?? 0} scene
+                  </div>
+                  <SceneCards data={validData} scenes={scenes} durations={durations} />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
