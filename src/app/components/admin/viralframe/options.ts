@@ -119,3 +119,125 @@ export function sceneRole(index: number, total: number): 'Hook' | 'Body' | 'CTA'
   if (index === total - 1) return 'CTA';
   return 'Body';
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// LOOKUP DATA untuk Master Prompt Compiler (Fase V4) — disiapkan di V3, belum dipakai.
+// ════════════════════════════════════════════════════════════════════════════
+
+// (a) Format spec prompt per AI tool (PRD 7.4) + dukungan reference image.
+//     Veo3 / Sora / CogVideoX = TIDAK mendukung reference image (text-to-video murni).
+export interface ToolSpec { formatSpec: string; supportsRefImage: boolean }
+export const AI_TOOL_FORMAT_SPEC: Record<string, ToolSpec> = {
+  veo3: {
+    formatSpec: 'Natural language cinematic. Subject + action + environment + lighting + camera movement + mood. End with: [X]s, [ratio] vertical frame. English.',
+    supportsRefImage: false,
+  },
+  kling: {
+    formatSpec: 'Structured prompt + negative prompt. [Main subject], [motion], [camera], [style]. Reference image as first frame. Duration [X]s, ratio [ratio].',
+    supportsRefImage: true,
+  },
+  minimax: {
+    formatSpec: 'Concise cinematic description + camera directive. Reference image guides subject. [Action], [shot type], [mood]. [X]s, [ratio].',
+    supportsRefImage: true,
+  },
+  runway: {
+    formatSpec: 'Gen-4: short directive prompt + image input. [Camera move]: [subject doing action], [style]. Keep under ~1000 chars. [ratio].',
+    supportsRefImage: true,
+  },
+  luma: {
+    formatSpec: 'Dream Machine: natural language scene + keyframe image. Describe motion & camera flow. [X]s, [ratio].',
+    supportsRefImage: true,
+  },
+  pika: {
+    formatSpec: 'Short prompt + image. [subject], [action], [camera], -ar [ratio] -motion [1-4]. Keep under ~512 chars.',
+    supportsRefImage: true,
+  },
+  sora: {
+    formatSpec: 'Rich narrative cinematic paragraph. Detailed subject, environment, lighting, lens, camera choreography, mood. English. [X]s, [ratio].',
+    supportsRefImage: false,
+  },
+  jianying: {
+    formatSpec: 'Jianying/CapCut AI: simple descriptive prompt + reference image. [subject] [action] [scene], [style]. [ratio].',
+    supportsRefImage: true,
+  },
+  wan21: {
+    formatSpec: 'Wan 2.1: structured prompt + optional image. [subject], [motion], [environment], [camera]. Concise. [ratio].',
+    supportsRefImage: true,
+  },
+  cogvideox: {
+    formatSpec: 'CogVideoX: detailed English text-to-video paragraph. Subject + action + setting + camera + lighting. No image input. [X]s, [ratio].',
+    supportsRefImage: false,
+  },
+};
+
+// (b) Platform behavior note (PRD 7.3) — keyed by nilai PLATFORMS.
+export const PLATFORM_BEHAVIOR: Record<string, string> = {
+  tiktok: 'Hook 0–2 detik wajib kuat; native/UGC look; teks on-screen besar; trend-audio friendly; fast cut.',
+  ig_reels: 'Estetika rapi & aspiratif; transisi mulus; caption ringkas + CTA save/share; cocok luxury showcase.',
+  yt_shorts: 'Retensi penuh penting; struktur jelas hook-value-CTA; boleh sedikit lebih informatif/edukatif.',
+  fb_reels: 'Audiens lebih dewasa/keluarga; pesan jelas & langsung; subtitle wajib (sering ditonton tanpa suara).',
+};
+
+// (c) Konteks niche real_estate (fixed).
+export const REAL_ESTATE_CONTEXT = {
+  psikografis: 'Calon pembeli dalam fase riset, butuh keyakinan sebelum keputusan besar',
+  painPoint: 'Takut salah investasi, proses beli properti terasa rumit dan menakutkan',
+} as const;
+
+// (d) Hint visual per label foto (membantu AI menggambarkan scene).
+export const PHOTO_LABEL_HINT: Record<string, string> = {
+  'Fasad': 'tampak depan bangunan, pintu masuk utama, halaman depan, eksterior',
+  'Ruang Tamu': 'area duduk utama, sofa, meja, dekorasi ruang tamu',
+  'Kamar Tidur': 'kasur, headboard, pencahayaan kamar, suasana istirahat',
+  'Kamar Mandi': 'kloset, wastafel, shower, keramik, area mandi',
+  'Dapur': 'kitchen set, kompor, kabinet, area memasak',
+  'Taman/Halaman': 'rumput, tanaman, ruang terbuka hijau, area outdoor',
+  'Carport/Garasi': 'tempat parkir kendaraan, kanopi/garasi, akses mobil',
+  'Balkon/Teras': 'area teras/balkon, tempat duduk santai, pemandangan',
+  'Kolam Renang': 'kolam renang, deck, area berenang, suasana resort',
+  'Ruang Usaha': 'area komersial/usaha, ruang display, etalase, ruang kerja',
+  'Tampak Lokasi/Lingkungan': 'jalan akses, lingkungan sekitar, landmark terdekat, suasana area',
+  'Lainnya': 'detail tambahan properti yang relevan',
+};
+
+// (e) Ekspresi & Emosi Karakter (PRD 3.14).
+export interface ExprOpt extends Opt { desc: string }
+export const EXPRESSIONS: ExprOpt[] = [
+  { value: 'auto',          label: 'Auto',                     desc: 'AI menyesuaikan ekspresi dengan tone & peran scene' },
+  { value: 'excited_joyful', label: 'Excited & Joyful',        desc: 'antusias, gembira, energi tinggi, senyum lebar' },
+  { value: 'confident_auth', label: 'Confident & Authoritative', desc: 'percaya diri, berwibawa, meyakinkan' },
+  { value: 'surprised_amazed', label: 'Surprised & Amazed',     desc: 'terkejut, takjub, mata terbuka lebar' },
+  { value: 'warm_friendly',  label: 'Warm & Friendly',          desc: 'hangat, ramah, mengundang, approachable' },
+  { value: 'urgent_intense', label: 'Urgent & Intense',         desc: 'mendesak, serius, penuh tekanan waktu' },
+  { value: 'empathetic',     label: 'Empathetic & Relatable',   desc: 'empati, memahami, relatable dengan penonton' },
+  { value: 'playful_humor',  label: 'Playful & Humorous',       desc: 'jenaka, santai, menghibur' },
+  { value: 'mysterious',     label: 'Mysterious & Dramatic',    desc: 'misterius, dramatis, membangun rasa penasaran' },
+  { value: 'curious_invest', label: 'Curious & Investigative',  desc: 'penasaran, menelusuri, mengajak eksplorasi' },
+];
+
+// (f) Sub-form karakter (PRD 3.13).
+export const ETHNIC_OPTIONS: Opt[] = [
+  { value: 'asia_tenggara', label: 'Asia Tenggara' },
+  { value: 'asia_timur',    label: 'Asia Timur' },
+  { value: 'asia_selatan',  label: 'Asia Selatan' },
+  { value: 'kaukasia',      label: 'Kaukasia' },
+  { value: 'afrika',        label: 'Afrika' },
+  { value: 'latin',         label: 'Latin' },
+  { value: 'timur_tengah',  label: 'Timur Tengah' },
+  { value: 'mixed',         label: 'Mixed' },
+];
+
+export const STYLE_OPTIONS: Opt[] = [
+  { value: 'kasual_modern', label: 'Kasual Modern' },
+  { value: 'profesional',   label: 'Profesional' },
+  { value: 'trendy',        label: 'Trendy / Streetwear' },
+  { value: 'tradisional',   label: 'Tradisional' },
+  { value: 'sporty',        label: 'Sporty' },
+  { value: 'glamour',       label: 'Glamour' },
+];
+
+export const GENDER_OPTIONS: Opt[] = [
+  { value: 'Pria',   label: 'Pria' },
+  { value: 'Wanita', label: 'Wanita' },
+  { value: 'Duo',    label: 'Duo' },
+];

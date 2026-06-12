@@ -7,6 +7,7 @@ import {
   AI_TOOLS, RATIOS, LANGUAGES, HOOK_TYPES, CTA_TYPES, VISUAL_STYLES,
   TONES, PLATFORMS, PHOTO_LABELS, sceneRole,
 } from './viralframe/options';
+import CharacterStep, { type Step3State } from './viralframe/CharacterStep';
 
 // ─── Tipe data ────────────────────────────────────────────────────────────
 interface PropertyImage { id: number; url_webp: string; alt_text: string | null; urutan: number; is_cover: number }
@@ -83,7 +84,7 @@ function StepIndicator({ current }: { current: number }) {
   const steps = [
     { n: 1, label: 'Parameter Video', enabled: true },
     { n: 2, label: 'Pilih Foto per Scene', enabled: true },
-    { n: 3, label: 'Pilih Karakter', enabled: false },
+    { n: 3, label: 'Pilih Karakter', enabled: true },
     { n: 4, label: 'Generate Prompt', enabled: false },
   ];
   return (
@@ -149,6 +150,14 @@ export default function AdminViralFrameWorkspacePage() {
   const [scenes, setScenes] = useState<SceneAssign[]>(
     Array.from({ length: 4 }, () => ({ photoId: null, label: '' }))
   );
+  const [s3, setS3] = useState<Step3State>({
+    useCharacter: false,
+    characterId: null,
+    visualAnchor: '',
+    expression: 'auto',
+  });
+  const update3 = useCallback((patch: Partial<Step3State>) =>
+    setS3(prev => ({ ...prev, ...patch })), []);
 
   // Fetch detail properti
   useEffect(() => {
@@ -228,11 +237,21 @@ export default function AdminViralFrameWorkspacePage() {
     return e;
   }, [scenes, s1.sceneCount]);
 
+  const step3Errors = useMemo(() => {
+    const e: string[] = [];
+    if (s3.useCharacter && s3.characterId == null) {
+      e.push('Pilih atau upload karakter terlebih dahulu.');
+    }
+    return e;
+  }, [s3]);
+
+  const errorsFor = (st: number) => (st === 1 ? step1Errors : st === 2 ? step2Errors : st === 3 ? step3Errors : []);
+
   const goNext = () => {
-    const errs = step === 1 ? step1Errors : step2Errors;
+    const errs = errorsFor(step);
     if (errs.length > 0) { setShowErrors(true); return; }
     setShowErrors(false);
-    setStep(s => Math.min(3, s + 1));
+    setStep(s => Math.min(4, s + 1));
   };
   const goBack = () => { setShowErrors(false); setStep(s => Math.max(1, s - 1)); };
 
@@ -260,7 +279,7 @@ export default function AdminViralFrameWorkspacePage() {
 
   const cover = prop.images.find(im => im.is_cover) ?? prop.images[0];
   const coverUrl = mediaSrc(cover?.url_webp ?? null);
-  const activeErrors = step === 1 ? step1Errors : step2Errors;
+  const activeErrors = errorsFor(step);
 
   return (
     <div className="space-y-5 max-w-4xl mx-auto">
@@ -504,17 +523,20 @@ export default function AdminViralFrameWorkspacePage() {
         </div>
       )}
 
-      {/* ─── STEP 3 placeholder ─── */}
-      {step === 3 && (
+      {/* ─── STEP 3 — Pilih Karakter ─── */}
+      {step === 3 && <CharacterStep value={s3} onChange={update3} />}
+
+      {/* ─── STEP 4 placeholder ─── */}
+      {step === 4 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <div className="w-16 h-16 rounded-2xl bg-[#E3F2FD] flex items-center justify-center mb-4">
               <Clock size={28} className="text-[#1565C0]" />
             </div>
-            <h2 className="font-display text-lg font-bold text-[#0F172A] mb-2">Pilih Karakter — Segera</h2>
+            <h2 className="font-display text-lg font-bold text-[#0F172A] mb-2">Generate Prompt — Segera</h2>
             <p className="text-[#64748B] text-sm max-w-sm">
-              Pemilihan karakter (talent) untuk video akan tersedia pada Fase V3.
-              Parameter & foto scene Anda sudah tersimpan dalam sesi ini.
+              Master Prompt Compiler &amp; output Scene Cards akan tersedia pada Fase V4.
+              Semua parameter, foto scene, dan karakter Anda sudah tersimpan dalam sesi ini.
             </p>
           </div>
         </div>
@@ -526,14 +548,14 @@ export default function AdminViralFrameWorkspacePage() {
           className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-[#64748B] border border-gray-200 hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
           <ArrowLeft size={15} /> Kembali
         </button>
-        {step < 3 ? (
+        {step < 4 ? (
           <button onClick={goNext}
             className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
             style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
             Lanjut <ArrowRight size={15} />
           </button>
         ) : (
-          <span className="text-xs text-[#94A3B8]">Fase V3 — Coming Soon</span>
+          <span className="text-xs text-[#94A3B8]">Fase V4 — Coming Soon</span>
         )}
       </div>
     </div>
