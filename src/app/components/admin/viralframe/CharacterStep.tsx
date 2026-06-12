@@ -4,17 +4,18 @@ import {
   EXPRESSIONS, ETHNIC_OPTIONS, STYLE_OPTIONS, GENDER_OPTIONS,
 } from './options';
 
+export interface Character {
+  id: number; nama: string; foto_url: string;
+  gender: string | null; usia: number | null;
+  etnik: string | null; style: string | null; ciri_fisik: string | null;
+}
+
 export interface Step3State {
   useCharacter: boolean;
   characterId: number | null;
   visualAnchor: string;
   expression: string;
-}
-
-interface Character {
-  id: number; nama: string; foto_url: string;
-  gender: string | null; usia: number | null;
-  etnik: string | null; style: string | null; ciri_fisik: string | null;
+  character?: Character | null;  // snapshot karakter terpilih (dipakai compiler V4)
 }
 
 const selectCls =
@@ -131,9 +132,9 @@ export default function CharacterStep({ value, onChange }: {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-      const newId = json.data?.karakter?.id ?? null;
+      const created: Character | null = json.data?.karakter ?? null;
       await fetchChars();
-      if (newId) onChange({ characterId: newId });
+      if (created) onChange({ characterId: created.id, character: created });
       setShowForm(false);
       setForm(EMPTY_FORM);
     } catch (err: unknown) {
@@ -151,7 +152,7 @@ export default function CharacterStep({ value, onChange }: {
         method: 'DELETE', credentials: 'include',
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      if (value.characterId === c.id) onChange({ characterId: null });
+      if (value.characterId === c.id) onChange({ characterId: null, character: null });
       await fetchChars();
     } catch (err: unknown) {
       alert(`Gagal menghapus: ${err instanceof Error ? err.message : 'Error'}`);
@@ -236,7 +237,7 @@ export default function CharacterStep({ value, onChange }: {
                 const src = charSrc(c.foto_url);
                 return (
                   <div key={c.id} className="relative">
-                    <button type="button" onClick={() => onChange({ characterId: c.id })}
+                    <button type="button" onClick={() => onChange({ characterId: c.id, character: c })}
                       className={`w-full rounded-xl overflow-hidden border-2 transition-all ${
                         selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-transparent hover:border-gray-300'
                       }`}>

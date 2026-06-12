@@ -1,13 +1,15 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
-  ArrowLeft, ArrowRight, ImageOff, Clock, Check, Film, AlertCircle,
+  ArrowLeft, ArrowRight, ImageOff, Check, Film, AlertCircle,
+  Copy, Download, Loader2,
 } from 'lucide-react';
 import {
   AI_TOOLS, RATIOS, LANGUAGES, HOOK_TYPES, CTA_TYPES, VISUAL_STYLES,
   TONES, PLATFORMS, PHOTO_LABELS, sceneRole,
 } from './viralframe/options';
 import CharacterStep, { type Step3State } from './viralframe/CharacterStep';
+import { compileMasterPrompt, estimateTokens } from './viralframe/masterPromptCompiler';
 
 // ─── Tipe data ────────────────────────────────────────────────────────────
 interface PropertyImage { id: number; url_webp: string; alt_text: string | null; urutan: number; is_cover: number }
@@ -18,6 +20,7 @@ interface PropertyDetail {
   deskripsi: string | null;
   jumlah_kamar_tidur: number | null; jumlah_kamar_mandi: number | null;
   luas_tanah: number | null; luas_bangunan: number | null;
+  legalitas: string | null;
   images: PropertyImage[];
 }
 
@@ -159,6 +162,12 @@ export default function AdminViralFrameWorkspacePage() {
   const update3 = useCallback((patch: Partial<Step3State>) =>
     setS3(prev => ({ ...prev, ...patch })), []);
 
+  // Step 4 — compile + save history
+  const [copied, setCopied] = useState(false);
+  const [generationId, setGenerationId] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const savedPromptRef = useRef<string>('');
+
   // Fetch detail properti
   useEffect(() => {
     let cancel = false;
@@ -254,6 +263,57 @@ export default function AdminViralFrameWorkspacePage() {
     setStep(s => Math.min(4, s + 1));
   };
   const goBack = () => { setShowErrors(false); setStep(s => Math.max(1, s - 1)); };
+
+  // ─── Step 4: compile Master Prompt (pure, re-compile saat state berubah) ──
+  const masterPrompt = useMemo(
+    () => (prop ? compileMasterPrompt(prop, s1, scenes, s3) : ''),
+    [prop, s1, scenes, s3],
+  );
+
+  // Simpan riwayat otomatis saat Step 4 tampil; record baru bila prompt berubah.
+  useEffect(() => {
+    if (step !== 4 || !prop || !masterPrompt) return;
+    if (savedPromptRef.current === masterPrompt) return;
+    savedPromptRef.current = masterPrompt;
+    setGenerationId(null);
+    setSaving(true);
+    fetch('/api/admin/viralframe/generations', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        property_id: prop.id,
+        params_json: JSON.stringify({ s1, scenes, s3 }),
+        master_prompt: masterPrompt,
+      }),
+    })
+      .then(r => r.json())
+      .then(j => { if (j?.data?.id) setGenerationId(j.data.id); })
+      .catch(() => {})
+      .finally(() => setSaving(false));
+    // s1/scenes/s3 sengaja tidak di deps — perubahannya tercermin via masterPrompt
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, masterPrompt, prop]);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(masterPrompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard tidak tersedia */ }
+  };
+
+  const handleDownload = () => {
+    const blob = new Blob([masterPrompt], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `viralframe-${prop?.kode_listing ?? id}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
 
   // ─── Render states ──────────────────────────────────────────────────────
   if (loading) {
@@ -526,18 +586,49 @@ export default function AdminViralFrameWorkspacePage() {
       {/* ─── STEP 3 — Pilih Karakter ─── */}
       {step === 3 && <CharacterStep value={s3} onChange={update3} />}
 
-      {/* ─── STEP 4 placeholder ─── */}
+      {/* ─── STEP 4 — Master Prompt ─── */}
       {step === 4 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-[#E3F2FD] flex items-center justify-center mb-4">
-              <Clock size={28} className="text-[#1565C0]" />
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="font-display font-bold text-[#0F172A]">Step 4 — Master Prompt</h2>
+            <div className="flex items-center gap-2">
+              <button onClick={handleCopy}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                style={{ background: copied ? '#10B981' : 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+                {copied ? <><Check size={15} /> Copied!</> : <><Copy size={15} /> Copy Master Prompt</>}
+              </button>
+              <button onClick={handleDownload}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF] transition-colors">
+                <Download size={15} /> Download .txt
+              </button>
             </div>
-            <h2 className="font-display text-lg font-bold text-[#0F172A] mb-2">Generate Prompt — Segera</h2>
-            <p className="text-[#64748B] text-sm max-w-sm">
-              Master Prompt Compiler &amp; output Scene Cards akan tersedia pada Fase V4.
-              Semua parameter, foto scene, dan karakter Anda sudah tersimpan dalam sesi ini.
-            </p>
+          </div>
+
+          <p className="text-sm text-[#64748B] -mt-1">
+            Salin teks di bawah, paste ke AI eksternal (mis. ChatGPT/Gemini/Claude) untuk menghasilkan JSON Scene.
+            Validasi JSON &amp; Scene Cards akan hadir di Fase V4b.
+          </p>
+
+          <textarea readOnly value={masterPrompt}
+            className="w-full h-96 max-h-[60vh] overflow-y-auto p-3 border border-gray-200 rounded-xl text-xs font-mono text-[#0F172A] bg-[#F8FAFC] outline-none resize-y leading-relaxed"
+          />
+
+          <div className="flex items-center gap-4 flex-wrap text-xs text-[#64748B]">
+            <span>Estimasi ~{estimateTokens(masterPrompt).toLocaleString('id-ID')} token</span>
+            <span>·</span>
+            <span>{s1.sceneCount} scene</span>
+            <span>·</span>
+            <span>Total {s1.durationMode === 'uniform'
+              ? s1.uniformDuration * s1.sceneCount
+              : s1.manualDurations.slice(0, s1.sceneCount).reduce((a, b) => a + (b || 0), 0)} detik</span>
+            <span>·</span>
+            <span className="flex items-center gap-1">
+              {saving
+                ? <><Loader2 size={12} className="animate-spin" /> menyimpan riwayat…</>
+                : generationId
+                  ? <><Check size={12} className="text-emerald-500" /> riwayat tersimpan #{generationId}</>
+                  : 'riwayat belum tersimpan'}
+            </span>
           </div>
         </div>
       )}
