@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Filter, ChevronDown, Edit, Plus, FileUp, Trash2, ImageOff } from 'lucide-react';
+import { Search, Filter, ChevronDown, Edit, Plus, FileUp, Trash2, ImageOff, MapPin } from 'lucide-react';
+import { getLocations, type ApiLocation } from '../../../lib/api';
 import CsvImportModal from './CsvImportModal';
 
 interface PropertyRow {
@@ -76,6 +77,15 @@ export default function AdminListingPage() {
   const [displayLimit, setDisplayLimit] = useState(20);
   const [markOpen, setMarkOpen] = useState(false);
 
+  // ── Bulk "Set Lokasi" — cascade Provinsi → Kab./Kota → Kecamatan ──────────
+  const [locOpen, setLocOpen] = useState(false);
+  const [provList, setProvList] = useState<ApiLocation[]>([]);
+  const [kabList, setKabList] = useState<ApiLocation[]>([]);
+  const [kecList, setKecList] = useState<ApiLocation[]>([]);
+  const [provId, setProvId] = useState<number | null>(null);
+  const [kabId, setKabId] = useState<number | null>(null);
+  const [kecName, setKecName] = useState('');
+
   const fetchProperties = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -94,6 +104,27 @@ export default function AdminListingPage() {
 
   useEffect(() => { fetchProperties(); }, [fetchProperties]);
   useEffect(() => { setSelectedIds(new Set()); setDisplayLimit(20); }, [statusFilter, search]);
+
+  // Cascade lokasi: muat provinsi saat panel Set Lokasi pertama dibuka.
+  useEffect(() => {
+    if (locOpen && provList.length === 0) {
+      getLocations().then(res => { if (res.success && res.data) setProvList(res.data.items); }).catch(() => {});
+    }
+  }, [locOpen, provList.length]);
+
+  // Muat kabupaten saat provinsi dipilih; reset kab/kec.
+  useEffect(() => {
+    setKabList([]); setKabId(null); setKecList([]); setKecName('');
+    if (!provId) return;
+    getLocations(provId).then(res => { if (res.success && res.data) setKabList(res.data.items); }).catch(() => {});
+  }, [provId]);
+
+  // Muat kecamatan saat kabupaten dipilih; reset kec.
+  useEffect(() => {
+    setKecList([]); setKecName('');
+    if (!kabId) return;
+    getLocations(kabId).then(res => { if (res.success && res.data) setKecList(res.data.items); }).catch(() => {});
+  }, [kabId]);
 
   const handleDelete = useCallback(async (p: PropertyRow) => {
     if (!window.confirm(`Hapus properti "${p.title}" permanen? Foto juga akan dihapus. Tidak bisa dibatalkan.`)) return;
@@ -194,6 +225,50 @@ export default function AdminListingPage() {
       alert(`Berhasil menandai ${affected} properti sebagai ${label}.`);
     } catch (err) {
       alert(`Gagal tandai ${label}: ${err instanceof Error ? err.message : 'Error tidak diketahui'}`);
+    } finally {
+      setBulkLoading(false);
+      setBulkProgress('');
+    }
+  };
+
+  // Reset pilihan cascade lokasi + tutup panel.
+  const resetLocPanel = () => {
+    setLocOpen(false); setProvId(null); setKabId(null); setKecName('');
+    setKabList([]); setKecList([]);
+  };
+
+  const handleBulkSetLocation = async () => {
+    const provinsi  = provList.find(p => p.id === provId)?.nama ?? '';
+    const kabupaten = kabList.find(k => k.id === kabId)?.nama ?? '';
+    const kecamatan = kecName;
+    if (!provinsi || !kabupaten || !kecamatan) return;
+
+    const ids = [...selectedIds];
+    if (!window.confirm(`Set lokasi "${kecamatan}, ${kabupaten}, ${provinsi}" untuk ${ids.length} properti? Kolom lokasi lama akan ditimpa.`)) return;
+    setBulkLoading(true);
+    try {
+      const CHUNK = 50;
+      const chunks: number[][] = [];
+      for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+      let affected = 0;
+      for (let i = 0; i < chunks.length; i++) {
+        setBulkProgress(`Set lokasi batch ${i + 1} dari ${chunks.length}…`);
+        const res = await fetch('/api/admin/properties/bulk', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'set_location', ids: chunks[i], provinsi, kabupaten, kecamatan }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        affected += json.data?.affected ?? chunks[i].length;
+      }
+      await fetchProperties();
+      setSelectedIds(new Set());
+      resetLocPanel();
+      alert(`Lokasi berhasil diupdate untuk ${affected} properti.`);
+    } catch (err) {
+      alert(`Gagal set lokasi: ${err instanceof Error ? err.message : 'Error tidak diketahui'}`);
     } finally {
       setBulkLoading(false);
       setBulkProgress('');
@@ -306,7 +381,7 @@ export default function AdminListingPage() {
       {/* Bulk action bar — slide down when something is selected */}
       <div
         className="overflow-hidden transition-all duration-200"
-        style={{ maxHeight: selectedIds.size > 0 ? (markOpen ? '220px' : '80px') : '0px', opacity: selectedIds.size > 0 ? 1 : 0 }}
+        style={{ maxHeight: selectedIds.size > 0 ? (locOpen ? '400px' : markOpen ? '220px' : '80px') : '0px', opacity: selectedIds.size > 0 ? 1 : 0 }}
       >
         <div className="bg-[#EFF6FF] border border-[#1565C0]/20 rounded-2xl px-4 py-3">
           <div className="flex items-center gap-3 flex-wrap">
@@ -322,11 +397,18 @@ export default function AdminListingPage() {
                 Publish Semua
               </button>
               <button
-                onClick={() => setMarkOpen(o => !o)}
+                onClick={() => { setMarkOpen(o => !o); setLocOpen(false); }}
                 disabled={bulkLoading}
                 className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-[#1565C0] hover:bg-[#1251A3] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Tandai Sebagai {markOpen ? '▲' : '▼'}
+              </button>
+              <button
+                onClick={() => { setLocOpen(o => !o); setMarkOpen(false); }}
+                disabled={bulkLoading}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-violet-600 hover:bg-violet-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <MapPin size={13} /> Set Lokasi {locOpen ? '▲' : '▼'}
               </button>
               <button
                 onClick={handleBulkDelete}
@@ -357,6 +439,60 @@ export default function AdminListingPage() {
                   {m.label}
                 </button>
               ))}
+            </div>
+          )}
+
+          {/* Panel cascade Set Lokasi */}
+          {locOpen && (
+            <div className="mt-2.5 pt-2.5 border-t border-[#1565C0]/10">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-700 mb-2">
+                <MapPin size={13} /> Set lokasi untuk {selectedIds.size} properti terpilih (menimpa lokasi lama)
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <select
+                  value={provId ?? ''}
+                  onChange={e => setProvId(parseInt(e.target.value, 10) || null)}
+                  disabled={bulkLoading}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] bg-white"
+                >
+                  <option value="">{provList.length ? 'Pilih Provinsi' : 'Memuat…'}</option>
+                  {provList.map(p => <option key={p.id} value={p.id}>{p.nama}</option>)}
+                </select>
+                <select
+                  value={kabId ?? ''}
+                  onChange={e => setKabId(parseInt(e.target.value, 10) || null)}
+                  disabled={bulkLoading || !provId}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] bg-white disabled:bg-gray-50"
+                >
+                  <option value="">Pilih Kab./Kota</option>
+                  {kabList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
+                </select>
+                <select
+                  value={kecName}
+                  onChange={e => setKecName(e.target.value)}
+                  disabled={bulkLoading || !kabId}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] bg-white disabled:bg-gray-50"
+                >
+                  <option value="">Pilih Kecamatan</option>
+                  {kecList.map(k => <option key={k.id} value={k.nama}>{k.nama}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-2 mt-2.5">
+                <button
+                  onClick={handleBulkSetLocation}
+                  disabled={bulkLoading || !provId || !kabId || !kecName}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-violet-600 hover:bg-violet-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Terapkan ke {selectedIds.size} properti terpilih
+                </button>
+                <button
+                  onClick={resetLocPanel}
+                  disabled={bulkLoading}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold text-[#64748B] bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-40"
+                >
+                  Batal
+                </button>
+              </div>
             </div>
           )}
         </div>

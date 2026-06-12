@@ -25,7 +25,7 @@ export async function onRequestPost(context) {
     pilihan:  'properti_pilihan',
     verified: 'verified',
   };
-  const VALID_ACTIONS = ['publish', 'delete', 'sold', ...Object.keys(BADGE_COL)];
+  const VALID_ACTIONS = ['publish', 'delete', 'sold', 'set_location', ...Object.keys(BADGE_COL)];
   if (!VALID_ACTIONS.includes(action)) return jsonError(`action tidak valid: "${action}"`, 400);
 
   const numericIds = ids.map(id => parseInt(String(id), 10)).filter(id => Number.isInteger(id) && id > 0);
@@ -34,6 +34,24 @@ export async function onRequestPost(context) {
   const placeholders = numericIds.map(() => '?').join(',');
 
   try {
+    if (action === 'set_location') {
+      // Overwrite kolom lokasi (NAMA TEXT) untuk semua id terpilih.
+      const provinsi  = typeof body.provinsi  === 'string' ? body.provinsi.trim()  : '';
+      const kabupaten = typeof body.kabupaten === 'string' ? body.kabupaten.trim() : '';
+      const kecamatan = typeof body.kecamatan === 'string' ? body.kecamatan.trim() : '';
+      if (!provinsi || !kabupaten || !kecamatan) {
+        return jsonError('provinsi, kabupaten, dan kecamatan wajib diisi', 422);
+      }
+      const result = await env.DB.prepare(
+        `UPDATE properties
+         SET provinsi = ?, kabupaten = ?, kecamatan = ?,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id IN (${placeholders})`
+      ).bind(provinsi, kabupaten, kecamatan, ...numericIds).run();
+
+      return jsonOk({ success: true, affected: result.meta?.changes ?? numericIds.length });
+    }
+
     if (action === 'publish') {
       const result = await env.DB.prepare(
         `UPDATE properties
