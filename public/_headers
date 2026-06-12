@@ -1,0 +1,8 @@
+# Cloudflare Pages headers
+# Font self-hosted — immutable (nama file berubah jika font di-update)
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Asset hasil build Vite ber-hash — immutable
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
