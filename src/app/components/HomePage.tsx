@@ -45,7 +45,7 @@ function StatsStrip({ published, sold }: { published: number; sold: number }) {
   }, []);
 
   return (
-    <div ref={ref} className="relative z-20 -mt-20 py-8 bg-white/10 backdrop-blur-md border-y border-white/20">
+    <div ref={ref} className="relative z-20 sm:-mt-20 py-8 bg-white/10 backdrop-blur-md border-y border-white/20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-0 divide-x divide-white/10">
           {labels.map((label, i) => (
