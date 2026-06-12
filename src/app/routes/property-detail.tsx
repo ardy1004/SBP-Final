@@ -140,14 +140,19 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
 
     const property = normalizePropertyDetail(apiDetail);
 
-    // Track view harian — await langsung (loader sudah async, latensi DB kecil)
+    // Track view: increment counter kumulatif + upsert tracker harian.
+    // Replikasi logic functions/api/properties/[slug].js agar KEDUA jalur konsisten.
     try {
-      await db.prepare(`
-        INSERT INTO property_view_daily (property_id, tanggal, views)
-        VALUES (?, DATE('now','localtime'), 1)
-        ON CONFLICT(property_id, tanggal) DO UPDATE SET views = views + 1
-      `).bind(r.id).run();
-    } catch (e: any) { console.error('[views_daily]', e?.message); }
+      await Promise.all([
+        db.prepare('UPDATE properties SET views_count = views_count + 1 WHERE id = ?')
+          .bind(r.id).run(),
+        db.prepare(`
+          INSERT INTO property_view_daily (property_id, tanggal, views)
+          VALUES (?, DATE('now','localtime'), 1)
+          ON CONFLICT(property_id, tanggal) DO UPDATE SET views = views + 1
+        `).bind(r.id).run(),
+      ]);
+    } catch (e: any) { console.error('[views]', e?.message); }
 
     return { property };
   } catch (e) {
