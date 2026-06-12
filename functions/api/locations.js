@@ -12,6 +12,21 @@ export async function onRequestGet(context) {
   const { request, env } = context;
   const url = new URL(request.url);
   const parentIdRaw = url.searchParams.get('parent_id');
+  const wantAll = url.searchParams.get('all');
+
+  // all=1 → kembalikan SEMUA lokasi (semua level) untuk index parser/typeahead client.
+  if (wantAll === '1' || wantAll === 'true') {
+    try {
+      const rows = await env.DB.prepare(
+        `SELECT id, nama, tipe, slug, parent_id, latitude, longitude
+           FROM locations ORDER BY nama ASC`
+      ).all();
+      return jsonOk({ items: rows.results, total: rows.results.length });
+    } catch (err) {
+      console.error('[locations all] DB error:', err.message);
+      return jsonError('Gagal mengambil data lokasi', 500);
+    }
+  }
 
   // Validasi: parent_id harus integer positif jika disertakan
   if (parentIdRaw !== null && parentIdRaw !== '') {

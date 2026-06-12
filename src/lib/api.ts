@@ -321,6 +321,11 @@ export async function getLocations(parentId?: number) {
   return apiFetch<ApiLocationsData>(`/locations${qs}`);
 }
 
+/** GET /api/locations?all=1 — semua lokasi (semua level) untuk index smart-search */
+export async function getAllLocations() {
+  return apiFetch<ApiLocationsData>(`/locations?all=1`);
+}
+
 export interface PropertiesParams {
   tujuan?: string;
   jenis?: string;
@@ -332,6 +337,10 @@ export interface PropertiesParams {
   harga_max?: number;
   kt?: number;
   km?: number;
+  lantai?: number;
+  lt?: number;
+  lb?: number;
+  q?: string;
   sort?: 'terbaru' | 'termurah' | 'termahal' | 'luas' | 'yield';
   page?: number;
   limit?: number;

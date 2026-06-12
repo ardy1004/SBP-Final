@@ -1,12 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router';
-import { SlidersHorizontal, Grid3X3, List, X, ChevronDown, RotateCcw, MapPin, AlertCircle, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useSearchParams, useNavigate } from 'react-router';
+import { SlidersHorizontal, Grid3X3, List, X, ChevronDown, RotateCcw, MapPin, AlertCircle, RefreshCw, Search, Building2 } from 'lucide-react';
 import {
-  getProperties, getLocations, normalizeProperty,
+  getProperties, getLocations, getAllLocations, normalizeProperty,
   type NormalizedProperty, type ApiLocation, type PropertiesParams,
   formatRupiah,
 } from '../../lib/api';
-import { PROPERTY_TYPES } from '../../lib/propertyTypes';
+import { PROPERTY_TYPES, getPropertyTypeLabel } from '../../lib/propertyTypes';
+import { parseSmartQuery, type LocationIndex, type FlatLoc, type SmartFilters } from './smartSearchParser';
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
 
@@ -76,6 +77,7 @@ function SkeletonListItems({ count = 5 }: { count?: number }) {
 
 export default function PropertiesPage() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -85,12 +87,30 @@ export default function PropertiesPage() {
   const [selectedJenis, setSelectedJenis] = useState<string[]>(
     searchParams.get('jenis') ? [searchParams.get('jenis')!] : []
   );
-  const [hargaRange, setHargaRange] = useState(0);
+  // Harga sebagai SATU sumber kebenaran (min/max). Dropdown range menulis ke sini juga.
+  const [hargaMin, setHargaMin] = useState(0);
+  const [hargaMax, setHargaMax] = useState(0);
   const [kabupaten, setKabupaten] = useState(searchParams.get('kabupaten') || '');
   const [kabupatenId, setKabupatenId] = useState<number | null>(null);
   const [kecamatan, setKecamatan] = useState(searchParams.get('kecamatan') || '');
+  // Spek (dari smart search; minimum). 0 = tidak aktif.
+  const [kt, setKt] = useState(0);
+  const [km, setKm] = useState(0);
+  const [lantai, setLantai] = useState(0);
+  const [ltMin, setLtMin] = useState(0);
+  const [lbMin, setLbMin] = useState(0);
+  // Keyword teks bebas (remainder) → param q.
+  const [qKeyword, setQKeyword] = useState('');
   const [sort, setSort] = useState('terbaru');
   const [limit, setLimit] = useState(20);
+
+  // ── Smart search bar state ──────────────────────────────────────────────
+  const [query, setQuery] = useState('');
+  const [allLocs, setAllLocs] = useState<LocationIndex | null>(null);
+  const [showSuggest, setShowSuggest] = useState(false);
+  const [propSuggest, setPropSuggest] = useState<NormalizedProperty[]>([]);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
+  const propSuggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Location cascade state ────────────────────────────────────────────────
   const [provList, setProvList] = useState<ApiLocation[]>([]);
@@ -112,6 +132,23 @@ export default function PropertiesPage() {
       if (res.success && res.data) setProvList(res.data.items);
     }).catch(() => {}).finally(() => setLocLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Load SEMUA lokasi (flat) untuk index smart-search parser + typeahead ──
+  useEffect(() => {
+    getAllLocations().then(res => {
+      if (!res.success || !res.data) return;
+      const items = res.data.items as FlatLoc[];
+      const byId: Record<number, FlatLoc> = {};
+      items.forEach(l => { byId[l.id] = l; });
+      const provinces = items.filter(l => l.parent_id == null);
+      const kabupatens = items.filter(l => l.parent_id != null && byId[l.parent_id]?.parent_id == null);
+      const kecamatans = items.filter(l => {
+        const p = l.parent_id != null ? byId[l.parent_id] : null;
+        return !!p && p.parent_id != null && byId[p.parent_id]?.parent_id == null;
+      });
+      setAllLocs({ provinces, kabupatens, kecamatans, byId });
+    }).catch(() => {});
+  }, []);
 
   // ── Hidrasi provId dari URL ?provinsi= (mis. dari hero filter homepage) ─────
   // Tanpa ini, provId tetap null saat datang dari URL → cascade di bawah me-reset
@@ -165,10 +202,14 @@ export default function PropertiesPage() {
     if (selectedJenis.length > 0) params.jenis = selectedJenis.join(',');
     if (kabupaten) params.kabupaten = kabupaten;
     if (kecamatan) params.kecamatan = kecamatan;
-
-    const range = HARGA_RANGES[hargaRange];
-    if (range.min > 0) params.harga_min = range.min;
-    if (range.max > 0) params.harga_max = range.max;
+    if (hargaMin > 0) params.harga_min = hargaMin;
+    if (hargaMax > 0) params.harga_max = hargaMax;
+    if (kt > 0) params.kt = kt;
+    if (km > 0) params.km = km;
+    if (lantai > 0) params.lantai = lantai;
+    if (ltMin > 0) params.lt = ltMin;
+    if (lbMin > 0) params.lb = lbMin;
+    if (qKeyword.trim()) params.q = qKeyword.trim();
 
     getProperties(params)
       .then(res => {
@@ -181,7 +222,7 @@ export default function PropertiesPage() {
       })
       .catch(() => setError('Koneksi ke server gagal'))
       .finally(() => setLoading(false));
-  }, [tujuan, selectedJenis, hargaRange, kabupaten, kecamatan, sort, limit]);
+  }, [tujuan, selectedJenis, hargaMin, hargaMax, kabupaten, kecamatan, kt, km, lantai, ltMin, lbMin, qKeyword, sort, limit]);
 
   useEffect(() => { fetchProperties(); }, [fetchProperties]);
 
@@ -208,21 +249,131 @@ export default function PropertiesPage() {
   const resetFilters = () => {
     setTujuan('semua');
     setSelectedJenis([]);
-    setHargaRange(0);
+    setHargaMin(0); setHargaMax(0);
     setProvId(null);
     setKabupaten('');
     setKabupatenId(null);
     setKecamatan('');
+    setKt(0); setKm(0); setLantai(0); setLtMin(0); setLbMin(0);
+    setQKeyword(''); setQuery('');
     setSort('terbaru');
     setLimit(20);
   };
 
+  // ── Smart search: apply hasil parser ke STATE FILTER EXISTING (reuse) ──────
+  const applySmartFilters = (f: SmartFilters) => {
+    if (f.tujuan) setTujuan(f.tujuan);
+    if (f.jenis) setSelectedJenis([f.jenis]);
+    if (f.hargaMin != null) setHargaMin(f.hargaMin);
+    if (f.hargaMax != null) setHargaMax(f.hargaMax);
+    if (f.kt != null) setKt(f.kt);
+    if (f.km != null) setKm(f.km);
+    if (f.lantai != null) setLantai(f.lantai);
+    if (f.luasTanah != null) setLtMin(f.luasTanah);
+    if (f.luasBangunan != null) setLbMin(f.luasBangunan);
+    if (f.provId !== undefined) setProvId(f.provId ?? null);
+    if (f.kabupaten != null) setKabupaten(f.kabupaten);
+    if (f.kabupatenId !== undefined) setKabupatenId(f.kabupatenId ?? null);
+    if (f.kecamatan != null) setKecamatan(f.kecamatan);
+    setLimit(20);
+  };
+
+  const runSmartSearch = (raw: string) => {
+    const text = raw.trim();
+    setShowSuggest(false);
+    if (!text || !allLocs) {
+      setQKeyword(text);
+      return;
+    }
+    const { filters, remainder } = parseSmartQuery(text, allLocs);
+    applySmartFilters(filters);
+    setQKeyword(remainder);
+    setQuery(remainder); // sisa kata tak terdeteksi tetap jadi keyword di input
+  };
+
+  // Typeahead suggestions (lokasi + jenis) dari data yang sudah di-load.
+  const suggest = useMemo(() => {
+    const ql = query.trim().toLowerCase();
+    if (ql.length < 2) return { locs: [] as FlatLoc[], jenis: [] as { value: string; label: string }[] };
+    const locs = allLocs
+      ? [...allLocs.kecamatans, ...allLocs.kabupatens]
+          .filter(l => l.nama.toLowerCase().includes(ql))
+          .slice(0, 3)
+      : [];
+    const jenis = JENIS_OPTIONS
+      .filter(j => j.label.toLowerCase().includes(ql) || j.value.toLowerCase().includes(ql))
+      .slice(0, 3);
+    return { locs, jenis };
+  }, [query, allLocs]);
+
+  // Debounced fetch saran "Properti" (judul/kode) saat mengetik (min 2 char).
+  useEffect(() => {
+    if (propSuggestTimer.current) clearTimeout(propSuggestTimer.current);
+    const ql = query.trim();
+    if (ql.length < 2) { setPropSuggest([]); return; }
+    propSuggestTimer.current = setTimeout(() => {
+      getProperties({ q: ql, limit: 3 }).then(res => {
+        if (res.success && res.data) setPropSuggest(res.data.items.map(normalizeProperty));
+      }).catch(() => {});
+    }, 300);
+    return () => { if (propSuggestTimer.current) clearTimeout(propSuggestTimer.current); };
+  }, [query]);
+
+  // Tutup dropdown saat klik di luar.
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) setShowSuggest(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
+
+  const detailPathOf = (p: NormalizedProperty) => {
+    const seg = (v: string) => (v || '').toLowerCase().replace(/\s+/g, '-');
+    const dir = p.tujuan === 'disewa' ? 'disewa' : 'dijual';
+    return `/${dir}/${seg(p.jenisRaw ?? p.jenis)}/${seg(p.provinsi)}/${seg(p.kabupaten)}/${seg(p.kecamatan)}/${p.slug}`;
+  };
+
+  // Apply 1 saran lokasi (typeahead) → set cascade kabupaten/kecamatan.
+  const applyLocationSuggestion = (loc: FlatLoc) => {
+    if (!allLocs) return;
+    const parent = loc.parent_id != null ? allLocs.byId[loc.parent_id] : null;
+    const isKecamatan = !!parent && parent.parent_id != null; // parent = kabupaten
+    if (isKecamatan && parent) {
+      const prov = parent.parent_id != null ? allLocs.byId[parent.parent_id] : null;
+      setProvId(prov?.id ?? null);
+      setKabupaten(parent.nama); setKabupatenId(parent.id);
+      setKecamatan(loc.nama);
+    } else {
+      // loc = kabupaten
+      const prov = loc.parent_id != null ? allLocs.byId[loc.parent_id] : null;
+      setProvId(prov?.id ?? null);
+      setKabupaten(loc.nama); setKabupatenId(loc.id);
+      setKecamatan('');
+    }
+    setLimit(20); setShowSuggest(false); setQuery('');
+  };
+
+  // ── Chips aktif (derive dari state — SATU sumber, removable individual) ────
+  const hargaChipLabel = () => {
+    if (hargaMin > 0 && hargaMax > 0) return `Harga: ${formatRupiah(hargaMin)} – ${formatRupiah(hargaMax)}`;
+    if (hargaMax > 0) return `Harga: ≤ ${formatRupiah(hargaMax)}`;
+    if (hargaMin > 0) return `Harga: ≥ ${formatRupiah(hargaMin)}`;
+    return '';
+  };
+
   const activeChips = [
     tujuan !== 'semua' ? { label: tujuan === 'dijual' ? 'Dijual' : 'Disewa', clear: () => { setTujuan('semua'); setLimit(20); } } : null,
-    ...selectedJenis.map(j => ({ label: j, clear: () => toggleJenis(j) })),
-    hargaRange > 0 ? { label: HARGA_RANGES[hargaRange].label, clear: () => { setHargaRange(0); setLimit(20); } } : null,
-    kabupaten ? { label: kabupaten, clear: () => { setKabupaten(''); setKabupatenId(null); setKecamatan(''); setLimit(20); } } : null,
-    kecamatan ? { label: kecamatan, clear: () => { setKecamatan(''); setLimit(20); } } : null,
+    ...selectedJenis.map(j => ({ label: `Jenis: ${getPropertyTypeLabel(j)}`, clear: () => toggleJenis(j) })),
+    (hargaMin > 0 || hargaMax > 0) ? { label: hargaChipLabel(), clear: () => { setHargaMin(0); setHargaMax(0); setLimit(20); } } : null,
+    kabupaten ? { label: `Lokasi: ${kabupaten}`, clear: () => { setKabupaten(''); setKabupatenId(null); setKecamatan(''); setLimit(20); } } : null,
+    kecamatan ? { label: `Kec: ${kecamatan}`, clear: () => { setKecamatan(''); setLimit(20); } } : null,
+    kt > 0 ? { label: `Kamar Tidur: ${kt}+`, clear: () => { setKt(0); setLimit(20); } } : null,
+    km > 0 ? { label: `Kamar Mandi: ${km}+`, clear: () => { setKm(0); setLimit(20); } } : null,
+    lantai > 0 ? { label: `Lantai: ${lantai}+`, clear: () => { setLantai(0); setLimit(20); } } : null,
+    ltMin > 0 ? { label: `LT: ${ltMin}m²+`, clear: () => { setLtMin(0); setLimit(20); } } : null,
+    lbMin > 0 ? { label: `LB: ${lbMin}m²+`, clear: () => { setLbMin(0); setLimit(20); } } : null,
+    qKeyword.trim() ? { label: `Kata kunci: "${qKeyword.trim()}"`, clear: () => { setQKeyword(''); setQuery(''); setLimit(20); } } : null,
   ].filter(Boolean) as { label: string; clear: () => void }[];
 
   const selectClass = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0] appearance-none bg-white";
@@ -278,7 +429,10 @@ export default function PropertiesPage() {
       <div className="mb-5">
         <label className="block text-xs font-semibold text-[#64748B] uppercase tracking-wide mb-2">Rentang Harga</label>
         <div className="relative">
-          <select value={hargaRange} onChange={e => { setHargaRange(Number(e.target.value)); setLimit(20); }} className={selectClass}>
+          <select
+            value={(() => { const i = HARGA_RANGES.findIndex(r => r.min === hargaMin && r.max === hargaMax); return i >= 0 ? i : 0; })()}
+            onChange={e => { const r = HARGA_RANGES[Number(e.target.value)]; setHargaMin(r.min); setHargaMax(r.max); setLimit(20); }}
+            className={selectClass}>
             {HARGA_RANGES.map((r, i) => <option key={i} value={i}>{r.label}</option>)}
           </select>
           <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
@@ -381,6 +535,88 @@ export default function PropertiesPage() {
           {/* Main Content */}
           <div className="flex-1 min-w-0">
 
+            {/* ─── Smart Search Bar ─── */}
+            <div ref={searchBoxRef} className="relative mb-4">
+              <div className="relative">
+                <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={e => { setQuery(e.target.value); setShowSuggest(true); }}
+                  onFocus={() => setShowSuggest(true)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.preventDefault(); runSmartSearch(query); }
+                    else if (e.key === 'Escape') setShowSuggest(false);
+                  }}
+                  placeholder="Coba: rumah sleman 3 kamar 1-2M..."
+                  className="w-full pl-11 pr-28 py-3.5 bg-white border border-gray-200 rounded-2xl text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0] focus:border-transparent"
+                />
+                <button
+                  onClick={() => runSmartSearch(query)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
+                >
+                  Cari
+                </button>
+              </div>
+
+              {/* Typeahead dropdown */}
+              {showSuggest && query.trim().length >= 2 && (suggest.locs.length > 0 || suggest.jenis.length > 0 || propSuggest.length > 0) && (
+                <div className="absolute z-30 left-0 right-0 mt-2 bg-white border border-gray-100 rounded-2xl shadow-lg overflow-hidden">
+                  {suggest.locs.length > 0 && (
+                    <div className="py-1.5">
+                      <div className="px-4 py-1 text-[10px] font-bold uppercase tracking-wide text-gray-400">Lokasi</div>
+                      {suggest.locs.map(loc => (
+                        <button key={`loc-${loc.id}`} onMouseDown={e => { e.preventDefault(); applyLocationSuggestion(loc); }}
+                          className="w-full flex items-center gap-2 px-4 py-2 text-left text-sm hover:bg-[#F0F7FF]">
+                          <MapPin size={14} className="text-[#1565C0]" /> {loc.nama}
+                          <span className="text-xs text-gray-400 ml-auto">{loc.tipe}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {suggest.jenis.length > 0 && (
+                    <div className="py-1.5 border-t border-gray-50">
+                      <div className="px-4 py-1 text-[10px] font-bold uppercase tracking-wide text-gray-400">Jenis Properti</div>
+                      {suggest.jenis.map(j => (
+                        <button key={`jen-${j.value}`} onMouseDown={e => { e.preventDefault(); setSelectedJenis([j.value]); setLimit(20); setShowSuggest(false); setQuery(''); }}
+                          className="w-full flex items-center gap-2 px-4 py-2 text-left text-sm hover:bg-[#F0F7FF]">
+                          <Building2 size={14} className="text-[#1565C0]" /> {j.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {propSuggest.length > 0 && (
+                    <div className="py-1.5 border-t border-gray-50">
+                      <div className="px-4 py-1 text-[10px] font-bold uppercase tracking-wide text-gray-400">Properti</div>
+                      {propSuggest.map(p => (
+                        <button key={`prop-${p.id}`} onMouseDown={e => { e.preventDefault(); setShowSuggest(false); navigate(detailPathOf(p)); }}
+                          className="w-full flex items-center gap-2 px-4 py-2 text-left text-sm hover:bg-[#F0F7FF]">
+                          <span className="text-[10px] font-mono text-gray-400">{p.kode}</span>
+                          <span className="truncate">{p.title}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Chips hasil deteksi smart search + filter aktif (removable) */}
+            {activeChips.length > 0 && (
+              <div className="flex gap-2 flex-wrap mb-4">
+                {activeChips.map((chip, i) => (
+                  <button
+                    key={i}
+                    onClick={chip.clear}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#E3F2FD] text-[#1565C0] rounded-full text-xs font-medium hover:bg-[#1565C0] hover:text-white transition-colors"
+                  >
+                    {chip.label} <X size={12} />
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Topbar */}
             <div className="flex items-center justify-between mb-5 gap-4 flex-wrap">
               <div className="flex items-center gap-3">
@@ -419,21 +655,6 @@ export default function PropertiesPage() {
                 </div>
               </div>
             </div>
-
-            {/* Active Filter Chips */}
-            {activeChips.length > 0 && (
-              <div className="flex gap-2 flex-wrap mb-4">
-                {activeChips.map((chip, i) => (
-                  <button
-                    key={i}
-                    onClick={chip.clear}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#E3F2FD] text-[#1565C0] rounded-full text-xs font-medium hover:bg-[#1565C0] hover:text-white transition-colors"
-                  >
-                    {chip.label} <X size={12} />
-                  </button>
-                ))}
-              </div>
-            )}
 
             {/* Konten utama: Loading / Error / Empty / Grid / List */}
             {loading && properties.length === 0 ? (

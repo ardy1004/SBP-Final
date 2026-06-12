@@ -74,6 +74,22 @@ export async function onRequestGet(context) {
   if (kt > 0) { conditions.push('p.jumlah_kamar_tidur >= ?'); bindings.push(kt); }
   if (km > 0) { conditions.push('p.jumlah_kamar_mandi >= ?'); bindings.push(km); }
 
+  // Spek tambahan: lantai / luas tanah / luas bangunan (minimum)
+  const lantai = parseInt(q.get('lantai') ?? '', 10);
+  const ltMin  = parseInt(q.get('lt') ?? '', 10);
+  const lbMin  = parseInt(q.get('lb') ?? '', 10);
+  if (lantai > 0) { conditions.push('p.lantai >= ?');         bindings.push(lantai); }
+  if (ltMin > 0)  { conditions.push('p.luas_tanah >= ?');     bindings.push(ltMin); }
+  if (lbMin > 0)  { conditions.push('p.luas_bangunan >= ?');  bindings.push(lbMin); }
+
+  // Pencarian teks bebas (Level 1) — judul / deskripsi / alamat / kode listing.
+  const textQ = (q.get('q') ?? '').trim().slice(0, 100);
+  if (textQ) {
+    conditions.push('(LOWER(p.title) LIKE ? OR LOWER(p.deskripsi) LIKE ? OR LOWER(p.alamat) LIKE ? OR LOWER(p.kode_listing) LIKE ?)');
+    const like = `%${textQ.toLowerCase()}%`;
+    bindings.push(like, like, like, like);
+  }
+
   const where = conditions.join(' AND ');
 
   // --- Queries ---
