@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router';
+import { DualCTASection, CoverageAreaSection, HomeFAQSection, type CoverageArea } from './HomeSections';
 import { Search, ChevronDown, ChevronLeft, ChevronRight, Star, ArrowRight, Shield, CheckCircle, Scale, Handshake, TrendingUp, Clock, BarChart2, AlertCircle, RefreshCw } from 'lucide-react';
 import useEmblaCarousel from 'embla-carousel-react';
 import {
@@ -537,10 +538,11 @@ interface HomePageProps {
   ssrTestimonials?: ApiTestimonial[];
   ssrBlogPosts?: ApiBlogPost[];
   ssrStats?: HomeStats | null;
+  ssrCoverageAreas?: CoverageArea[];
 }
 
 /* ── MAIN HOMEPAGE ── */
-export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts, ssrStats }: HomePageProps) {
+export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts, ssrStats, ssrCoverageAreas }: HomePageProps) {
   const hasSSR = ssrProperties !== undefined;
 
   // Angka real dari DB; fallback ke angka brand hanya bila DB tak tersedia (mis. dev tanpa SSR)
@@ -704,6 +706,9 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
         </div>
       </section>
 
+      {/* DUAL CTA — Cari Properti & Titip Jual */}
+      <DualCTASection statPublished={statPublished} />
+
       {/* INVESTMENT INTELLIGENCE TEASER */}
       <section className="py-16" style={{ background: 'linear-gradient(160deg, #0B2447 0%, #1565C0 100%)' }}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -812,6 +817,9 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
         </div>
       </section>
 
+      {/* COVERAGE AREA */}
+      <CoverageAreaSection areas={ssrCoverageAreas ?? []} />
+
       {/* BLOG SPILL — data dari GET /api/blog?limit=3 */}
       <section className="py-16 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -897,6 +905,9 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
           </div>
         </div>
       </section>
+
+      {/* FAQ */}
+      <HomeFAQSection />
     </>
   );
 }

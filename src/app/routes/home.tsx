@@ -13,7 +13,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
 
     const db = env.DB as D1Database;
 
-    const [propsRes, testimRes, blogRes, statsRes] = await Promise.all([
+    const [propsRes, testimRes, blogRes, statsRes, coverageRes] = await Promise.all([
       // Query identik dengan GET /api/properties — kolom dan filter sama persis
       db.prepare(`
         SELECT
@@ -70,6 +70,17 @@ export async function loader({ context }: LoaderFunctionArgs) {
           (SELECT COUNT(*) FROM properties WHERE status_publish = 'published') AS published,
           (SELECT COUNT(*) FROM properties WHERE status_publish = 'sold')      AS sold
       `).first(),
+
+      // Coverage area chips — top 8 kecamatan dengan listing terbanyak
+      db.prepare(`
+        SELECT kecamatan, kabupaten, provinsi, COUNT(*) AS cnt
+        FROM properties
+        WHERE status_publish = 'published'
+          AND kecamatan IS NOT NULL AND kecamatan != ''
+        GROUP BY kecamatan
+        ORDER BY cnt DESC
+        LIMIT 8
+      `).all(),
     ]);
 
     // Normalisasi properties (integer → boolean, dll.)
@@ -116,10 +127,20 @@ export async function loader({ context }: LoaderFunctionArgs) {
       sold: Number((statsRes as Record<string, unknown> | null)?.sold ?? 0),
     };
 
-    return { properties, testimonials, blogPosts, stats };
+    const coverageAreas = (coverageRes.results ?? []).map((row: unknown) => {
+      const r = row as Record<string, unknown>;
+      return {
+        kecamatan: r.kecamatan as string,
+        kabupaten: r.kabupaten as string,
+        provinsi: r.provinsi as string,
+        cnt: Number(r.cnt),
+      };
+    });
+
+    return { properties, testimonials, blogPosts, stats, coverageAreas };
   } catch (e) {
     console.error("[home loader]", e);
-    return { properties: [], testimonials: [], blogPosts: [], stats: null };
+    return { properties: [], testimonials: [], blogPosts: [], stats: null, coverageAreas: [] };
   }
 }
 
@@ -170,13 +191,14 @@ export const meta: MetaFunction = () => [
 ];
 
 export default function HomeRoute() {
-  const { properties, testimonials, blogPosts, stats } = useLoaderData<typeof loader>();
+  const { properties, testimonials, blogPosts, stats, coverageAreas } = useLoaderData<typeof loader>();
   return (
     <HomePage
       ssrProperties={properties}
       ssrTestimonials={testimonials}
       ssrBlogPosts={blogPosts}
       ssrStats={stats}
+      ssrCoverageAreas={coverageAreas}
     />
   );
 }
