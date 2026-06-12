@@ -43,12 +43,6 @@ export default function PropertyCard({ property, className = '' }: Props) {
   const total = imgs.length;
   const isSold = property.status_sold || property.status_publish === 'sold';
 
-  // Debug sementara (dev only) — verifikasi data spec sampai ke card
-  if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
-    console.log('PropertyCard spec:', property.luas_tanah, property.kamar_tidur, property.legalitas);
-  }
-
   const kec = (property.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-');
   const detailPath = property.tujuan === 'disewa'
     ? `/disewa/${property.jenis.toLowerCase()}/${property.provinsi.toLowerCase().replace(/\s+/g, '-')}/${property.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${kec}/${property.slug}`
