@@ -145,7 +145,7 @@ export function compileMasterPrompt(
   if (prop.jumlah_kamar_mandi) spec.push(`${prop.jumlah_kamar_mandi} Kamar Mandi`);
   L.push(`SPESIFIKASI       : ${spec.length ? spec.join(', ') : 'Lihat deskripsi'}`);
   const desk = (prop.deskripsi ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
-  L.push(`DESKRIPSI SINGKAT : ${desk || '(tidak ada deskripsi)'}`);
+  if (desk) L.push(`DESKRIPSI SINGKAT : ${desk}`);
   L.push(`USP               : ${buildUSP(prop)}`);
   L.push(`PSIKOGRAFIS       : ${REAL_ESTATE_CONTEXT.psikografis}`);
   L.push(`PAIN POINT        : ${REAL_ESTATE_CONTEXT.painPoint}`);
