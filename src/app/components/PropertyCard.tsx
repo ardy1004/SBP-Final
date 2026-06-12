@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { MapPin, Maximize2, BedDouble, Bath, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import { type Property } from '../data/mockData';
 import { formatRibuan } from '../../lib/format';
+import { cfImg, cfSrcSet } from '../../lib/img';
 
 interface Props {
   property: Property;
@@ -87,10 +88,13 @@ export default function PropertyCard({ property, className = '' }: Props) {
       >
         {total > 0 ? (
           <img
-            src={imgs[slideIdx]!}
+            src={cfImg(imgs[slideIdx]!, 800)}
+            srcSet={cfSrcSet(imgs[slideIdx]!, [400, 800])}
+            sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 400px"
             alt={property.title}
             className="absolute inset-0 w-full h-full object-cover"
             loading="lazy"
+            decoding="async"
           />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-[#E3F2FD] to-[#BBDEFB] flex items-center justify-center">

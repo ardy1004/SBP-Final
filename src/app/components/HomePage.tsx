@@ -9,6 +9,7 @@ import {
   getBlogPosts, type ApiBlogPost,
 } from '../../lib/api';
 import { PROPERTY_TYPES } from '../../lib/propertyTypes';
+import { cfImg, cfSrcSet } from '../../lib/img';
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
 
@@ -161,9 +162,13 @@ function FeaturedBanner({ items }: { items: NormalizedProperty[] }) {
             {items.map((prop) => (
               <div key={prop.id} className="flex-none w-full relative" style={{ minHeight: '480px' }}>
                 <img
-                  src={prop.images[0] ?? ''}
+                  src={cfImg(prop.images[0] ?? '', 1200)}
+                  srcSet={cfSrcSet(prop.images[0] ?? '', [640, 960, 1200])}
+                  sizes="(max-width: 1280px) 100vw, 1216px"
                   alt={prop.title}
                   className="absolute inset-0 w-full h-full object-cover"
+                  loading="lazy"
+                  decoding="async"
                   onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80'; }}
                 />
                 <div className="absolute inset-0 flex items-end p-8 lg:p-12">
@@ -288,8 +293,12 @@ function TestimonialsSection({ items }: { items: ApiTestimonial[] }) {
                   <span className="absolute top-4 left-5 text-7xl font-serif text-[#29B6F6] opacity-20 leading-none select-none">"</span>
                   <div className="flex items-center gap-3 mb-4 relative z-10">
                     <img
-                      src={testimoniFotoSrc(t.foto_url)}
+                      src={cfImg(testimoniFotoSrc(t.foto_url), 96)}
                       alt={t.nama_klien}
+                      width={48}
+                      height={48}
+                      loading="lazy"
+                      decoding="async"
                       className="w-12 h-12 rounded-full object-cover border-2 border-[#1565C0]"
                       onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&q=80'; }}
                     />
@@ -575,9 +584,13 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
         {/* Layer 1: BG Image */}
         <div className="absolute inset-0 overflow-hidden">
           <img
-            src="https://images.salambumi.xyz/kost%20dijual%20jogja.webp"
+            src={cfImg('https://images.salambumi.xyz/kost%20dijual%20jogja.webp', 1280)}
+            srcSet={cfSrcSet('https://images.salambumi.xyz/kost%20dijual%20jogja.webp', [640, 960, 1280, 1920])}
+            sizes="100vw"
             alt="Properti Jogja"
             className="hero-bg-img absolute inset-0 w-full h-full object-cover"
+            // @ts-expect-error fetchpriority belum ada di tipe React lama
+            fetchpriority="high"
             onError={(e) => {
               (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1675657144518-025804f1812c?w=1600&q=80';
             }}
@@ -828,10 +841,11 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
                 >
                   <div className="relative overflow-hidden" style={{ paddingTop: '56.25%' }}>
                     <img
-                      src={post.cover ?? ''}
+                      src={cfImg(post.cover ?? '', 600)}
                       alt={post.judul}
                       className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       loading="lazy"
+                      decoding="async"
                       onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=600&q=80'; }}
                     />
                   </div>

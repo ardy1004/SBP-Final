@@ -7,6 +7,7 @@ import {
   formatRupiah,
 } from '../../lib/api';
 import { PROPERTY_TYPES, getPropertyTypeLabel } from '../../lib/propertyTypes';
+import { cfImg } from '../../lib/img';
 import { parseSmartQuery, type LocationIndex, type FlatLoc, type SmartFilters } from './smartSearchParser';
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
@@ -694,10 +695,12 @@ export default function PropertiesPage() {
                   <div key={p.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex">
                     <div className="relative w-48 sm:w-64 flex-shrink-0">
                       <img
-                        src={p.images[0] ?? ''}
+                        src={cfImg(p.images[0] ?? '', 400)}
                         alt={p.title}
                         className="w-full h-full object-cover"
                         style={{ minHeight: 160 }}
+                        loading="lazy"
+                        decoding="async"
                         onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=400&q=80'; }}
                       />
                     </div>
