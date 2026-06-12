@@ -7,7 +7,8 @@ const ENABLED = import.meta.env.PROD;
 /**
  * Bungkus URL gambar dengan transformasi resize + format auto (webp/avif).
  * Mendukung: path relatif same-zone (/api/media?key=…) dan URL images.salambumi.xyz.
- * URL lain (unsplash dll. yang punya resizer sendiri) dikembalikan apa adanya.
+ * Unsplash: gunakan native resize API (CF Image Transforms tidak bisa proxy domain lain).
+ * URL lain dikembalikan apa adanya.
  */
 export function cfImg(src: string, width: number): string {
   if (!src || !ENABLED) return src;
@@ -18,6 +19,16 @@ export function cfImg(src: string, width: number): string {
   }
   if (src.startsWith('https://images.salambumi.xyz/')) {
     return `/cdn-cgi/image/${opts}/${src}`;
+  }
+  // Unsplash: gunakan parameter resize natif mereka (?w=N&q=75&auto=format)
+  if (src.includes('images.unsplash.com')) {
+    try {
+      const u = new URL(src);
+      u.searchParams.set('w', String(width));
+      u.searchParams.set('q', '75');
+      u.searchParams.set('auto', 'format');
+      return u.toString();
+    } catch { return src; }
   }
   return src;
 }

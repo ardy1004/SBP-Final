@@ -201,7 +201,7 @@ function FeaturedBanner({ items }: { items: NormalizedProperty[] }) {
               key={i}
               onClick={() => emblaApi?.scrollTo(i)}
               aria-label={`Lihat properti unggulan ${i + 1}`}
-              className="h-6 px-1 flex items-center"
+              className="w-6 h-6 flex items-center justify-center"
             >
               <span className={`h-2 rounded-full transition-all duration-300 ${i === current ? 'w-8 bg-[#1565C0]' : 'w-2 bg-[#1565C0]/30'}`} />
             </button>
@@ -249,10 +249,14 @@ const TESTIMONI_FALLBACK_AVATAR =
   'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&q=80';
 
 /** foto_url bisa berupa key R2 (testimonials/…) atau URL http(s). Resolusi ke src yang valid.
- *  Catatan: jangan kembalikan '' (src kosong = request liar + mutasi DOM saat hidrasi → mismatch). */
+ *  r2.dev URL dikonversi ke images.salambumi.xyz agar bisa diproses cfImg (CF Image Transforms
+ *  tidak bisa proxy r2.dev — domain berbeda). */
 function testimoniFotoSrc(u: string | null | undefined): string {
   if (!u) return TESTIMONI_FALLBACK_AVATAR;
-  if (/^https?:\/\//i.test(u)) return u;
+  if (/^https?:\/\//i.test(u)) {
+    // Konversi r2.dev bucket ke custom domain agar CF Image Transforms berjalan
+    return u.replace(/^https:\/\/pub-[a-f0-9]+\.r2\.dev\//, 'https://images.salambumi.xyz/');
+  }
   return `/api/media?key=${encodeURIComponent(u)}`;
 }
 
@@ -416,7 +420,7 @@ function HeroFilter() {
             key={t}
             onClick={() => setTab(t)}
             className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${
-              tab === t ? 'bg-[#1565C0] text-white shadow-md' : 'text-gray-500 hover:text-gray-700'
+              tab === t ? 'bg-[#1565C0] text-white shadow-md' : 'text-gray-700 hover:text-gray-900'
             }`}
           >
             {t === 'dijual' ? '🏠 Cari Properti Dijual' : '🔑 Cari Properti Disewa'}

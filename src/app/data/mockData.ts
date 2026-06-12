@@ -689,6 +689,11 @@ export const LOCATION_HIERARCHY = {
   },
 };
 
+// Locale-independent thousands separator (titik = id-ID style).
+// Sengaja tidak pakai toLocaleString('id-ID') — CF Workers ICU tidak dijamin
+// sama dengan browser client → mismatch React hydration error #418.
+const _ribuan = (n: number) => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+
 export const formatRupiah = (amount: number): string => {
   if (amount >= 1_000_000_000) {
     const s = (amount / 1_000_000_000).toFixed(1).replace('.', ',').replace(/,0$/, '');
@@ -698,11 +703,11 @@ export const formatRupiah = (amount: number): string => {
     const s = (amount / 1_000_000).toFixed(1).replace('.', ',').replace(/,0$/, '');
     return `Rp ${s}Jt`;
   }
-  return `Rp ${amount.toLocaleString('id-ID')}`;
+  return `Rp ${_ribuan(amount)}`;
 };
 
 export const formatRupiahFull = (amount: number): string => {
-  return `Rp ${amount.toLocaleString('id-ID')}`;
+  return `Rp ${_ribuan(amount)}`;
 };
 
 export const PORTFOLIO_ITEMS = [

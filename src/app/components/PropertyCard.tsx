@@ -32,7 +32,8 @@ function formatHargaShort(n: number): string {
     const s = (n / 1_000_000).toFixed(1).replace('.', ',').replace(/,0$/, '');
     return `Rp ${s}Jt`;
   }
-  return `Rp ${n.toLocaleString('id-ID')}`;
+  // Locale-independent: titik sebagai pemisah ribuan (id-ID style, tanpa toLocaleString)
+  return `Rp ${Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
 }
 
 export default function PropertyCard({ property, className = '' }: Props) {

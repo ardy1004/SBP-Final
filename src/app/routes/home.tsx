@@ -103,9 +103,9 @@ export async function loader({ context }: LoaderFunctionArgs) {
         slug: row.slug as string,
         cover: (row.cover as string | null) ?? null,
         excerpt: (row.excerpt as string | null) ?? null,
-        kategori: null,
+        kategori: (row.kategori as string | null) ?? null,
         tags,
-        reading_time_menit: null,
+        reading_time_menit: (row.reading_time_menit as number | null) ?? null,
         published_at: row.published_at as string,
         author: (row.author as string | null) ?? null,
       };
