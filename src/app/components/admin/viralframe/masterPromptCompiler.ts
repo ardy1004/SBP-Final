@@ -7,6 +7,7 @@ import {
   REAL_ESTATE_CONTEXT, PHOTO_LABEL_HINT, HOOK_TYPES, CTA_TYPES,
   VISUAL_STYLES, TONES, LANGUAGES, RATIOS, EXPRESSIONS,
   ETHNIC_EN, STYLE_EN, EXPRESSION_EN, getLipsync, sceneRole,
+  sceneFileName, characterFileName,
 } from './options';
 
 // ─── Tipe input (struktural, decoupled dari komponen React) ──────────────────
@@ -188,6 +189,12 @@ export function compileMasterPrompt(
     L.push(`  [CHARACTER_SPEC] ${desc}`);
     L.push('  PERINGATAN: Penampilan karakter ini WAJIB IDENTIK di semua scene tanpa pengecualian.');
     L.push('  JANGAN PARAFRASE deskripsi ini — COPY EXACT STRING [CHARACTER_SPEC] di setiap scene yang menampilkan karakter.');
+    L.push(`  File foto karakter: ${characterFileName(s3.character.nama)}`);
+    if (toolSpec?.supportsRefImage) {
+      L.push('  File ini bisa di-upload sebagai Character Reference Image (jika tool mendukung multiple reference) — pastikan [CHARACTER_SPEC] di setiap scene tetap konsisten dengan visual di file ini.');
+    } else {
+      L.push('  [CHARACTER_SPEC] (deskripsi teks) adalah SATU-SATUNYA jangkar konsistensi karakter — file ini hanya untuk referensi visual kamu sendiri saat memilih talent.');
+    }
   } else {
     L.push(`  Tidak ada karakter. Visual anchor: ${s3.visualAnchor?.trim() || 'tidak ada'}`);
     if (s3.visualAnchor?.trim()) {
@@ -207,10 +214,17 @@ export function compileMasterPrompt(
     const label = scenes[i]?.label || '(belum dilabeli)';
     const hint = PHOTO_LABEL_HINT[label] ?? 'elemen visual properti yang relevan';
     L.push(`Scene ${i + 1} — Foto referensi: ${label} (${hint}).`);
+    L.push(`  File foto: ${sceneFileName(i, label)}`);
     L.push(`  ai_ready_prompt WAJIB menggambarkan elemen visual konkret dari foto ini (ruangan/area: ${hint}), BUKAN deskripsi generik.`);
+    if (toolSpec?.supportsRefImage) {
+      L.push(`  Tool ini MENDUKUNG reference image. File ${sceneFileName(i, label)} akan di-upload sebagai Start Frame/Reference Image saat generate video. ai_ready_prompt scene ini WAJIB FOKUS pada MOTION, ACTION, dan CAMERA MOVEMENT yang terjadi PADA gambar referensi tersebut — JANGAN re-describe elemen statis (warna dinding, furnitur, layout) yang sudah terlihat jelas dari gambar, karena deskripsi yang berbeda dari gambar asli akan membuat AI menghasilkan visual yang melenceng dari foto.`);
+    } else {
+      L.push(`  Tool ini TIDAK mendukung reference image (text-to-video murni). File ${sceneFileName(i, label)} adalah RUJUKAN INTERNAL untuk kamu (tidak diupload ke AI) — ai_ready_prompt WAJIB mendeskripsikan visual SEDETAIL MUNGKIN agar hasil generate AI semirip mungkin dengan komposisi foto tersebut: sebutkan elemen ruangan, warna dominan, sudut pandang, pencahayaan secara konkret.`);
+    }
   }
   L.push('');
   L.push('ATURAN FOTO: Jika 2 scene memakai foto yang sama, ai_ready_prompt boleh berbeda angle/momen TAPI elemen ruangan/area HARUS tetap konsisten dengan foto tersebut.');
+  L.push('PENAMAAN FILE: semua nama file di atas (scene0N_xxx.webp, character_xxx.webp) akan tersedia dalam ZIP hasil export. Gunakan nama file ini sebagai acuan saat upload ke AI video generator — pastikan urutan dan penamaan tidak tertukar agar hasil video tetap konsisten dan sinkron antar scene.');
   L.push('');
 
   // ── BLOK 4: ATURAN VIRAL & KONSISTENSI + GUARDRAIL SBP ──

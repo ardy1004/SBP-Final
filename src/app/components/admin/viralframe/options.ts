@@ -296,3 +296,27 @@ export const EXPRESSION_EN: Record<string, string> = {
   mysterious:     'mysterious and dramatic',
   curious_invest: 'curious and investigative',
 };
+
+// ─── Penamaan file aset (dipakai Master Prompt + ZIP export Fase V4b) ─────────
+// PENTING (requirement Fase V4b): ZIP generation WAJIB memakai sceneFileName() &
+// characterFileName() yang SAMA PERSIS dengan compiler agar nama file di prompt
+// selaras dengan file yang ada di ZIP. Jangan duplikasi logika penamaan di tempat lain.
+export function slugifyLabel(label: string): string {
+  return (label || '')
+    .toLowerCase()
+    .replace(/[\s/]+/g, '-')        // spasi & slash → '-'
+    .replace(/[^a-z0-9-]/g, '')     // buang non-alfanumerik selain '-'
+    .replace(/-+/g, '-')            // rapikan '-' beruntun
+    .replace(/^-+|-+$/g, '')        // trim '-' di tepi
+    || 'untitled';
+}
+
+// scene01_fasad.webp, scene02_kamar-tidur.webp
+export function sceneFileName(sceneIndex: number, label: string): string {
+  return `scene${String(sceneIndex + 1).padStart(2, '0')}_${slugifyLabel(label)}.webp`;
+}
+
+// character_vina.webp
+export function characterFileName(nama: string): string {
+  return `character_${slugifyLabel(nama)}.webp`;
+}
