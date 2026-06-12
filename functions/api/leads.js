@@ -1,5 +1,5 @@
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
-import { buildPropertyUrl } from './_lib/propertyUrl.js';
+import { buildPropertyUrl } from '../_lib/propertyUrl.js';
 
 // ─── Sanitasi ─────────────────────────────────────────────────────────────────
 // Strip tag HTML + karakter < > untuk mencegah XSS bila data dirender di admin
