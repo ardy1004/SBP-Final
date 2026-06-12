@@ -28,6 +28,7 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+    dedupe: ['react', 'react-dom', 'react-router', 'react-router-dom'],
   },
 
   // Proxy /api/* ke Worker saat dev tanpa wrangler pages dev
