@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Phone, Mail, MapPin, Clock, MessageCircle, Send, AlertCircle } from 'lucide-react';
+import { useContactEmail } from './useContactEmail';
 
 function normalizeWA(raw: string): string {
   const d = raw.replace(/\D/g, '');
@@ -10,6 +11,7 @@ function normalizeWA(raw: string): string {
 }
 
 export default function ContactPage() {
+  const { display: emailDisplay, href: emailHref } = useContactEmail();
   const [nama, setNama]     = useState('');
   const [noWa, setNoWa]     = useState('');
   const [pesan, setPesan]   = useState('');
@@ -78,7 +80,7 @@ export default function ContactPage() {
               <div className="space-y-5">
                 {[
                   { icon: Phone, label: 'WhatsApp', value: '0813-9127-8889', href: 'https://wa.me/6281391278889' },
-                  { icon: Mail, label: 'Email', value: 'salambumiproperty@gmail.com', href: 'mailto:salambumiproperty@gmail.com' },
+                  { icon: Mail, label: 'Email', value: emailDisplay, href: emailHref ?? '#' },
                   { icon: MapPin, label: 'Alamat', value: 'Jl. Pajajaran, Catur Tunggal, Depok, Sleman, DI Yogyakarta (Virtual Office)', href: '#' },
                   { icon: Clock, label: 'Jam Operasional', value: 'Senin – Sabtu: 08.00 – 20.00 WIB', href: '#' },
                 ].map(({ icon: Icon, label, value, href }) => (

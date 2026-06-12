@@ -1,4 +1,7 @@
+import { useContactEmail } from './useContactEmail';
+
 export default function PrivacyPage() {
+  const { display: emailDisplay } = useContactEmail();
   return (
     <div className="pt-16">
       <section className="py-16" style={{ background: 'linear-gradient(160deg, #0B2447 0%, #1565C0 100%)' }}>
@@ -46,7 +49,7 @@ export default function PrivacyPage() {
               },
               {
                 title: '9. Kontak Data Protection',
-                content: 'Untuk pertanyaan seputar privasi, permintaan penghapusan data, atau melaporkan insiden privasi:\n\nEmail: salambumiproperty@gmail.com\nWhatsApp: 0813-9127-8889\nAlamat: Jl. Pajajaran, Catur Tunggal, Depok, Sleman, DI Yogyakarta',
+                content: `Untuk pertanyaan seputar privasi, permintaan penghapusan data, atau melaporkan insiden privasi:\n\nEmail: ${emailDisplay}\nWhatsApp: 0813-9127-8889\nAlamat: Jl. Pajajaran, Catur Tunggal, Depok, Sleman, DI Yogyakarta`,
               },
             ].map(({ title, content }) => (
               <div key={title}>

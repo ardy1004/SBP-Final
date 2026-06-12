@@ -1,7 +1,9 @@
 import { Link } from 'react-router';
 import { Shield, CheckCircle, Scale, Handshake, ArrowRight, Star } from 'lucide-react';
+import { useContactEmail } from './useContactEmail';
 
 export default function AboutPage() {
+  const { display: emailDisplay } = useContactEmail();
   return (
     <div className="pt-16">
       {/* Hero */}
@@ -135,7 +137,7 @@ export default function AboutPage() {
               <div><strong className="text-[#0F172A]">Nama Perusahaan:</strong> CV Salam Bumi Property</div>
               <div><strong className="text-[#0F172A]">Alamat:</strong> Jl. Pajajaran, Catur Tunggal, Depok, Sleman, DI Yogyakarta (Virtual Office)</div>
               <div><strong className="text-[#0F172A]">WhatsApp:</strong> 0813-9127-8889</div>
-              <div><strong className="text-[#0F172A]">Email:</strong> salambumiproperty@gmail.com</div>
+              <div><strong className="text-[#0F172A]">Email:</strong> {emailDisplay}</div>
               <div><strong className="text-[#0F172A]">Website:</strong> salambumi.xyz</div>
             </div>
           </div>

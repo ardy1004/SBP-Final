@@ -1,7 +1,9 @@
 import { Link } from 'react-router';
 import { Phone, Mail, MapPin, Instagram, Facebook, Youtube } from 'lucide-react';
+import { useContactEmail } from './useContactEmail';
 
 export default function Footer() {
+  const { display: emailDisplay, href: emailHref } = useContactEmail();
   return (
     <footer style={{ background: '#061B35' }} className="text-white/70">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14">
@@ -28,9 +30,9 @@ export default function Footer() {
                 className="flex items-center gap-2 hover:text-[#29B6F6] transition-colors">
                 <Phone size={14} /> 0813-9127-8889
               </a>
-              <a href="mailto:salambumiproperty@gmail.com"
+              <a href={emailHref}
                 className="flex items-center gap-2 hover:text-[#29B6F6] transition-colors">
-                <Mail size={14} /> salambumiproperty@gmail.com
+                <Mail size={14} /> {emailDisplay}
               </a>
               <div className="flex items-start gap-2">
                 <MapPin size={14} className="mt-0.5 flex-shrink-0" />
