@@ -56,6 +56,7 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
         badge_premium, badge_featured, badge_hot,
         status_sold, properti_pilihan, verified,
         views_count, published_at, updated_at,
+        meta_title, meta_description,
         details
       FROM properties
       WHERE slug = ? AND status_publish = 'published'
@@ -130,6 +131,8 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
       updated_at: r.updated_at as string,
       cover_url: coverImg?.url_webp ?? null,
       cover_alt: coverImg?.alt_text ?? null,
+      meta_title: r.meta_title as string | null,
+      meta_description: r.meta_description as string | null,
       details: detailsParsed,
       images,
       investment_intelligence,
@@ -169,21 +172,32 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const kecSlug = (p.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-');
   const canonicalUrl = `https://salambumi.xyz/${tujuanPath}/${jenisSlug}/${provSlug}/${kabSlug}/${kecSlug}/${p.slug}`;
 
-  const titleSeo = `${p.title} ${p.kecamatan} ${p.kabupaten} | Salam Bumi Property`;
+  // Title: pakai meta_title admin bila terisi, jika tidak → fallback computed (identik perilaku lama).
+  const fallbackTitle = `${p.title} ${p.kecamatan} ${p.kabupaten} | Salam Bumi Property`;
+  const titleSeo = p.meta_title?.trim() ? p.meta_title.trim() : fallbackTitle;
+
+  // Description: pakai meta_description admin bila terisi, jika tidak → fallback deskripsi/lokasi (identik perilaku lama).
   const rawDesc = p.deskripsi ||
     `${p.jenis} ${tujuanPath === 'dijual' ? 'dijual' : 'disewa'} di ${p.kecamatan}, ${p.kabupaten}, ${p.provinsi}.`;
-  const desc = rawDesc.length > 158 ? rawDesc.slice(0, 155) + '...' : rawDesc;
+  const fallbackDesc = rawDesc.length > 158 ? rawDesc.slice(0, 155) + '...' : rawDesc;
+  const desc = p.meta_description?.trim() ? p.meta_description.trim() : fallbackDesc;
   const ogImage = p.images[0] ? (p.images[0].startsWith('http') ? p.images[0] : `https://salambumi.xyz${p.images[0]}`) : 'https://images.salambumi.xyz/materai/hg.png';
 
   return [
     { title: titleSeo },
     { name: "description", content: desc },
     { name: "robots", content: "index, follow" },
+    { tagName: "link", rel: "canonical", href: canonicalUrl },
+    { property: "og:site_name", content: "Salam Bumi Property" },
     { property: "og:title", content: titleSeo },
     { property: "og:description", content: desc },
     { property: "og:image", content: ogImage },
     { property: "og:type", content: "website" },
     { property: "og:url", content: canonicalUrl },
+    { name: "twitter:card", content: "summary_large_image" },
+    { name: "twitter:title", content: titleSeo },
+    { name: "twitter:description", content: desc },
+    { name: "twitter:image", content: ogImage },
     {
       "script:ld+json": {
         "@context": "https://schema.org",

@@ -285,6 +285,8 @@ export function normalizePropertyDetail(p: ApiPropertyDetail) {
     imagesData: p.images,
     investment_intelligence: p.investment_intelligence ?? undefined,
     video_youtube: p.video_youtube ?? undefined,
+    meta_title: p.meta_title ?? null,
+    meta_description: p.meta_description ?? null,
   };
 }
 

@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
-import { ArrowLeft, Save, AlertTriangle, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Save, AlertTriangle, ChevronDown, Sparkles } from 'lucide-react';
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
 import PropertyPhotosCard from './PropertyPhotosCard';
 import { getLocations, type ApiLocation } from '../../../lib/api';
+// Reuse logic generate meta SEO yang sama dengan endpoint CREATE (jangan duplikasi).
+import { generateMetaSeo } from '../../../../functions/_lib/metaSeo.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -112,6 +114,19 @@ const SHOW_PENGELUARAN   = new Set(['kost','hotel','homestay','villa']);
 
 // ─── UI primitives ────────────────────────────────────────────────────────────
 
+// Counter karakter dengan indikator warna: hijau ≤ ideal, kuning ≤ +10%, merah > +10%.
+function CharCounter({ value, ideal }: { value: string; ideal: number }) {
+  const len = value.length;
+  const cls = len === 0
+    ? 'text-[#94A3B8]'
+    : len <= ideal
+      ? 'text-emerald-600'
+      : len <= Math.ceil(ideal * 1.1)
+        ? 'text-amber-600'
+        : 'text-red-600';
+  return <div className={`text-[11px] mt-1 ${cls}`}>{len} / {ideal} karakter{len > ideal ? ' (melebihi ideal)' : ''}</div>;
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -163,6 +178,21 @@ export default function AdminPropertyDetailPage() {
   const [statusError, setStatusError]     = useState('');
 
   const setF        = (patch: Partial<PropertyDetail>) => setForm(f => ({ ...f, ...patch }));
+
+  // Auto-fill Meta Title/Description dari data form (reuse generateMetaSeo, hanya isi — tidak auto-save).
+  const handleAutoFillSeo = () => {
+    const { meta_title, meta_description } = generateMetaSeo({
+      jenis_properti: form.jenis_properti ?? '',
+      tujuan: form.tujuan ?? '',
+      harga: form.harga ?? 0,
+      kecamatan: form.kecamatan ?? '',
+      kabupaten: form.kabupaten ?? '',
+      luas_tanah: form.luas_tanah ?? null,
+      luas_bangunan: form.luas_bangunan ?? null,
+      nego: form.nego ?? 0,
+    });
+    setF({ meta_title, meta_description });
+  };
   const getDetail   = (key: string) => detailsMap[key] ?? '';
   const setDetail   = (key: string, value: unknown) => setDetailsMap(prev => ({ ...prev, [key]: value }));
 
@@ -759,12 +789,25 @@ export default function AdminPropertyDetailPage() {
           <Field label="Alasan Dijual">
             <textarea value={form.alasan_dijual ?? ''} onChange={e => setF({ alasan_dijual: e.target.value || null })} rows={2} className={`${inputCls} resize-y`} />
           </Field>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">SEO</span>
+            <button
+              type="button"
+              onClick={handleAutoFillSeo}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF] transition-colors"
+              title="Isi otomatis dari jenis, lokasi, harga, & luas (bisa diedit sebelum Simpan)"
+            >
+              <Sparkles size={13} /> Auto-fill dari data properti
+            </button>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Meta Title (SEO)">
               <input type="text" value={form.meta_title ?? ''} onChange={e => setF({ meta_title: e.target.value || null })} className={inputCls} />
+              <CharCounter value={form.meta_title ?? ''} ideal={60} />
             </Field>
             <Field label="Meta Description (SEO)">
               <textarea value={form.meta_description ?? ''} onChange={e => setF({ meta_description: e.target.value || null })} rows={2} className={`${inputCls} resize-y`} placeholder="~150 karakter" />
+              <CharCounter value={form.meta_description ?? ''} ideal={160} />
             </Field>
           </div>
         </section>
