@@ -4,6 +4,7 @@
 // Response: { success: true, wa_url: "https://wa.me/..." }
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+import { buildPropertyUrl } from '../../../_lib/propertyUrl.js';
 
 export async function onRequestPost(context) {
   const { env, params } = context;
@@ -16,14 +17,16 @@ export async function onRequestPost(context) {
   // Cari property_id — hanya properti published yang bisa di-track
   let propertyId;
   let propertyTitle;
+  let propertyRow;
   try {
     const row = await env.DB
-      .prepare("SELECT id, title FROM properties WHERE slug = ? AND status_publish = 'published' LIMIT 1")
+      .prepare("SELECT id, title, slug, jenis_properti, tujuan, provinsi, kabupaten, kecamatan FROM properties WHERE slug = ? AND status_publish = 'published' LIMIT 1")
       .bind(slug)
       .first();
     if (!row) return jsonError('Properti tidak ditemukan', 404);
     propertyId    = row.id;
     propertyTitle = row.title;
+    propertyRow   = row;
   } catch (err) {
     console.error('[wa-click] lookup failed:', err.message);
     return jsonError('Gagal memproses permintaan', 500);
@@ -43,7 +46,8 @@ export async function onRequestPost(context) {
   // Kembalikan wa_url agar frontend bisa langsung buka WA
   const waAdmin  = (env.WA_ADMIN ?? '6281391278889').replace(/\D/g, '');
   const appUrl   = env.APP_URL ?? 'https://salambumi.xyz';
-  const waPesan  = `Halo, saya tertarik dengan properti:\n*${propertyTitle}*\n${appUrl}/properties/${slug}\n\nBisakah saya mendapatkan info lebih lanjut?`;
+  const propUrl  = buildPropertyUrl(propertyRow, appUrl);
+  const waPesan  = `Halo, saya tertarik dengan properti:\n*${propertyTitle}*\n${propUrl}\n\nBisakah saya mendapatkan info lebih lanjut?`;
   const waUrl    = `https://wa.me/${waAdmin}?text=${encodeURIComponent(waPesan)}`;
 
   return jsonOk({ success: true, wa_url: waUrl });

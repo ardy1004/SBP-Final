@@ -1,4 +1,5 @@
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
+import { buildPropertyUrl } from './_lib/propertyUrl.js';
 
 // ─── Sanitasi ─────────────────────────────────────────────────────────────────
 // Strip tag HTML + karakter < > untuk mencegah XSS bila data dirender di admin
@@ -116,12 +117,12 @@ export async function onRequestPost(context) {
   if (property_id) {
     try {
       const prop = await env.DB
-        .prepare('SELECT title, slug FROM properties WHERE id = ? AND status_publish = ?')
+        .prepare('SELECT title, slug, jenis_properti, tujuan, provinsi, kabupaten, kecamatan FROM properties WHERE id = ? AND status_publish = ?')
         .bind(property_id, 'published')
         .first();
       if (prop) {
         propertyTitle = prop.title;
-        propertyUrl   = `${env.APP_URL ?? 'https://salambumi.xyz'}/properties/${prop.slug}`;
+        propertyUrl   = buildPropertyUrl(prop, env.APP_URL ?? 'https://salambumi.xyz');
       }
     } catch {
       // Tidak fatal — lead tetap disimpan walau lookup gagal
