@@ -109,13 +109,15 @@ export default function PropertyCard({ property, className = '' }: Props) {
           <>
             <button
               onClick={prevSlide}
-              className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/40 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity z-20"
+              aria-label="Foto sebelumnya"
+              className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/40 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-20"
             >
               <ChevronLeft size={14} />
             </button>
             <button
               onClick={nextSlide}
-              className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/40 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity z-20"
+              aria-label="Foto berikutnya"
+              className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/40 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-20"
             >
               <ChevronRight size={14} />
             </button>
@@ -124,13 +126,16 @@ export default function PropertyCard({ property, className = '' }: Props) {
 
         {/* Dots indicator */}
         {total > 1 && (
-          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex gap-1 z-20">
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex z-20">
             {Array.from({ length: dotsCount }).map((_, i) => (
               <button
                 key={i}
                 onClick={e => { e.preventDefault(); setSlideIdx(i); }}
-                className={`w-1.5 h-1.5 rounded-full transition-all ${i === slideIdx % dotsCount ? 'bg-white scale-125' : 'bg-white/50'}`}
-              />
+                aria-label={`Lihat foto ${i + 1}`}
+                className="w-6 h-6 flex items-center justify-center"
+              >
+                <span className={`w-1.5 h-1.5 rounded-full transition-all ${i === slideIdx % dotsCount ? 'bg-white scale-125' : 'bg-white/50'}`} />
+              </button>
             ))}
           </div>
         )}
@@ -168,7 +173,7 @@ export default function PropertyCard({ property, className = '' }: Props) {
         {/* Tujuan badges */}
         <div className="absolute bottom-3 left-3 flex gap-1 z-10">
           {(property.tujuan === 'dijual' || property.tujuan === 'dijual_disewa') && (
-            <span className="bg-[#10B981] text-white px-2 py-0.5 rounded-full text-[10px] font-bold">Dijual</span>
+            <span className="bg-[#047857] text-white px-2 py-0.5 rounded-full text-[10px] font-bold">Dijual</span>
           )}
           {(property.tujuan === 'disewa' || property.tujuan === 'dijual_disewa') && (
             <span className="bg-[#29B6F6] text-white px-2 py-0.5 rounded-full text-[10px] font-bold">Disewa</span>
@@ -187,7 +192,7 @@ export default function PropertyCard({ property, className = '' }: Props) {
 
         {property.verified && (
           <div className="absolute bottom-3 right-3 z-10">
-            <span className="bg-[#10B981]/90 text-white px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1">
+            <span className="bg-[#047857] text-white px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1">
               ✅ Terverifikasi
             </span>
           </div>
@@ -196,7 +201,7 @@ export default function PropertyCard({ property, className = '' }: Props) {
 
       {/* Card Body */}
       <div className="p-4">
-        <p className="text-[10px] text-gray-400 font-mono mb-1">{property.kode}</p>
+        <p className="text-[10px] text-gray-500 font-mono mb-1">{property.kode}</p>
         <h3 className="font-display font-bold text-[#0F172A] text-sm leading-tight mb-2 line-clamp-2 hover:text-[#1565C0] transition-colors">
           <Link to={detailPath}>{property.title}</Link>
         </h3>
@@ -215,7 +220,7 @@ export default function PropertyCard({ property, className = '' }: Props) {
           </span>
           {property.nego && <span className="ml-1 text-xs text-gray-500">(Nego)</span>}
           {hargaPerM2 && (
-            <div className="text-xs text-gray-400 mt-0.5">
+            <div className="text-xs text-gray-500 mt-0.5">
               ~{formatHargaShort(hargaPerM2)}/m²
             </div>
           )}
@@ -248,7 +253,7 @@ export default function PropertyCard({ property, className = '' }: Props) {
           )}
         </div>
 
-        <div className="text-[10px] text-gray-400 flex items-center justify-end mb-3">
+        <div className="text-[10px] text-gray-500 flex items-center justify-end mb-3">
           <span className="flex items-center gap-1"><Eye size={10} /> {formatRibuan(property.views_count)}</span>
         </div>
 
@@ -257,7 +262,7 @@ export default function PropertyCard({ property, className = '' }: Props) {
           to={detailPath}
           className={`block w-full text-center py-2.5 rounded-xl text-sm font-semibold transition-all duration-200
             ${isSold
-              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+              ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
               : 'bg-[#0B2447] text-white hover:bg-[#1565C0]'}`}
         >
           {isSold ? '🔒 Sudah Terjual' : 'Lihat Detail →'}

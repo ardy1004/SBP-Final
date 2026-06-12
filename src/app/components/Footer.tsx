@@ -40,13 +40,14 @@ export default function Footer() {
               </div>
             </div>
             <div className="flex gap-3 mt-4">
-              <a href="#" className="p-2 rounded-lg bg-white/10 hover:bg-[#1565C0] transition-colors">
+              {/* TODO: ganti href="#" dengan URL sosmed resmi saat tersedia */}
+              <a href="#" aria-label="Instagram Salam Bumi Property" className="p-2 rounded-lg bg-white/10 hover:bg-[#1565C0] transition-colors">
                 <Instagram size={16} />
               </a>
-              <a href="#" className="p-2 rounded-lg bg-white/10 hover:bg-[#1565C0] transition-colors">
+              <a href="#" aria-label="Facebook Salam Bumi Property" className="p-2 rounded-lg bg-white/10 hover:bg-[#1565C0] transition-colors">
                 <Facebook size={16} />
               </a>
-              <a href="#" className="p-2 rounded-lg bg-white/10 hover:bg-[#1565C0] transition-colors">
+              <a href="#" aria-label="YouTube Salam Bumi Property" className="p-2 rounded-lg bg-white/10 hover:bg-[#1565C0] transition-colors">
                 <Youtube size={16} />
               </a>
             </div>

@@ -433,7 +433,7 @@ export default function PropertiesPage() {
           <select
             value={(() => { const i = HARGA_RANGES.findIndex(r => r.min === hargaMin && r.max === hargaMax); return i >= 0 ? i : 0; })()}
             onChange={e => { const r = HARGA_RANGES[Number(e.target.value)]; setHargaMin(r.min); setHargaMax(r.max); setLimit(20); }}
-            className={selectClass}>
+            className={selectClass} aria-label="Rentang harga">
             {HARGA_RANGES.map((r, i) => <option key={i} value={i}>{r.label}</option>)}
           </select>
           <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
@@ -445,7 +445,7 @@ export default function PropertiesPage() {
         <label className="block text-xs font-semibold text-[#64748B] uppercase tracking-wide mb-2">Lokasi</label>
         <div className="space-y-2">
           <div className="relative">
-            <select value={provId ?? ''} onChange={handleProvChange} className={selectClass} disabled={locLoading}>
+            <select value={provId ?? ''} onChange={handleProvChange} className={selectClass} disabled={locLoading} aria-label="Provinsi">
               <option value="">{locLoading ? 'Memuat…' : 'Semua Provinsi'}</option>
               {provList.map(p => <option key={p.id} value={p.id}>{p.nama}</option>)}
             </select>
@@ -457,6 +457,7 @@ export default function PropertiesPage() {
               onChange={handleKabChange}
               className={selectClass}
               disabled={!provId}
+              aria-label="Kabupaten atau kota"
             >
               <option value="">Semua Kab./Kota</option>
               {kabList.map(k => <option key={k.id} value={k.nama}>{k.nama}</option>)}
@@ -469,6 +470,7 @@ export default function PropertiesPage() {
                 value={kecamatan}
                 onChange={e => { setKecamatan(e.target.value); setLimit(20); }}
                 className={selectClass}
+                aria-label="Kecamatan"
               >
                 <option value="">Semua Kecamatan</option>
                 {kecList.map(k => <option key={k.id} value={k.nama}>{k.nama}</option>)}
@@ -640,6 +642,7 @@ export default function PropertiesPage() {
                   <select
                     value={sort}
                     onChange={e => { setSort(e.target.value); setLimit(20); }}
+                    aria-label="Urutkan properti"
                     className="border border-gray-200 rounded-xl px-3 py-2 text-sm appearance-none bg-white pr-8 focus:outline-none focus:ring-2 focus:ring-[#1565C0]"
                   >
                     {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}

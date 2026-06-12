@@ -175,7 +175,7 @@ function FeaturedBanner({ items }: { items: NormalizedProperty[] }) {
                   <div className="glass-dark rounded-2xl p-6 max-w-lg">
                     <div className="flex gap-2 mb-3">
                       {prop.badge_premium && <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: 'linear-gradient(135deg, #F5A623, #FFD54F)', color: '#461B00' }}>⭐ PREMIUM</span>}
-                      {prop.verified && <span className="bg-[#10B981]/80 text-white px-2 py-0.5 rounded-full text-[10px] font-bold">✅ Terverifikasi</span>}
+                      {prop.verified && <span className="bg-[#047857] text-white px-2 py-0.5 rounded-full text-[10px] font-bold">✅ Terverifikasi</span>}
                     </div>
                     <h3 className="font-display text-xl font-bold text-white mb-2">{prop.title}</h3>
                     <div className="text-white/70 text-sm mb-3">📍 {prop.kecamatan}, {prop.kabupaten}</div>
@@ -195,13 +195,16 @@ function FeaturedBanner({ items }: { items: NormalizedProperty[] }) {
         </div>
 
         {/* Dots */}
-        <div className="flex justify-center gap-2 mt-6">
+        <div className="flex justify-center mt-4">
           {items.map((_, i) => (
             <button
               key={i}
               onClick={() => emblaApi?.scrollTo(i)}
-              className={`h-2 rounded-full transition-all duration-300 ${i === current ? 'w-8 bg-[#1565C0]' : 'w-2 bg-[#1565C0]/30'}`}
-            />
+              aria-label={`Lihat properti unggulan ${i + 1}`}
+              className="h-6 px-1 flex items-center"
+            >
+              <span className={`h-2 rounded-full transition-all duration-300 ${i === current ? 'w-8 bg-[#1565C0]' : 'w-2 bg-[#1565C0]/30'}`} />
+            </button>
           ))}
         </div>
       </div>
@@ -325,6 +328,7 @@ function TestimonialsSection({ items }: { items: ApiTestimonial[] }) {
         <div className="flex justify-center gap-2 mt-8 items-center">
           <button
             onClick={() => emblaApi?.scrollPrev()}
+            aria-label="Testimoni sebelumnya"
             className="p-2 rounded-full border border-[#1565C0] text-[#1565C0] hover:bg-[#1565C0] hover:text-white transition-colors"
           >
             <ChevronLeft size={18} />
@@ -333,11 +337,15 @@ function TestimonialsSection({ items }: { items: ApiTestimonial[] }) {
             <button
               key={i}
               onClick={() => emblaApi?.scrollTo(i)}
-              className={`h-2 rounded-full transition-all duration-300 ${i === current ? 'w-6 bg-[#1565C0]' : 'w-2 bg-[#1565C0]/30'}`}
-            />
+              aria-label={`Lihat testimoni ${i + 1}`}
+              className="h-6 px-1 flex items-center"
+            >
+              <span className={`h-2 rounded-full transition-all duration-300 ${i === current ? 'w-6 bg-[#1565C0]' : 'w-2 bg-[#1565C0]/30'}`} />
+            </button>
           ))}
           <button
             onClick={() => emblaApi?.scrollNext()}
+            aria-label="Testimoni berikutnya"
             className="p-2 rounded-full border border-[#1565C0] text-[#1565C0] hover:bg-[#1565C0] hover:text-white transition-colors"
           >
             <ChevronRight size={18} />
@@ -421,7 +429,7 @@ function HeroFilter() {
         {/* Jenis */}
         <div className="relative">
           <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Jenis Properti</label>
-          <select value={jenis} onChange={e => setJenis(e.target.value)} className={selectClass}>
+          <select value={jenis} onChange={e => setJenis(e.target.value)} className={selectClass} aria-label="Jenis properti">
             <option value="">Semua Jenis</option>
             {PROPERTY_TYPES.map(t => (
               <option key={t.value} value={t.value}>{t.label}</option>
@@ -435,6 +443,7 @@ function HeroFilter() {
           <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Provinsi</label>
           <select
             value={provId ?? ''}
+            aria-label="Provinsi"
             onChange={e => {
               const id = parseInt(e.target.value, 10) || null;
               const found = provList.find(p => p.id === id);
@@ -456,6 +465,7 @@ function HeroFilter() {
           <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Kab./Kota</label>
           <select
             value={kab}
+            aria-label="Kabupaten atau kota"
             onChange={e => {
               const nama = e.target.value;
               const found = kabList.find(k => k.nama === nama);
@@ -482,6 +492,7 @@ function HeroFilter() {
             value={kec}
             onChange={e => setKec(e.target.value)}
             className={selectClass}
+            aria-label="Kecamatan"
             disabled={!kab}
           >
             <option value="">Semua Kecamatan</option>
@@ -493,7 +504,7 @@ function HeroFilter() {
         {/* Kel./Desa — Disembunyikan sementara — TODO aktifkan kembali jika data kelurahan siap
         <div className="relative">
           <label className="block text-xs font-semibold text-[#64748B] mb-1 uppercase tracking-wide">Kel./Desa</label>
-          <select className={selectClass} disabled>
+          <select className={selectClass} disabled aria-label="Kelurahan atau desa">
             <option value="">Semua Kel./Desa</option>
           </select>
           <ChevronDown size={14} className="absolute right-3 bottom-3 text-gray-400 pointer-events-none" />
