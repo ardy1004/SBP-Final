@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { Search, Filter, ChevronDown, Edit, Plus, FileUp, Trash2, ImageOff, MapPin } from 'lucide-react';
 import { getLocations, type ApiLocation } from '../../../lib/api';
+import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
 import CsvImportModal from './CsvImportModal';
 
 interface PropertyRow {
@@ -69,6 +70,7 @@ export default function AdminListingPage() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('Semua');
+  const [filterJenis, setFilterJenis] = useState<string>(''); // '' = semua jenis
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -90,7 +92,10 @@ export default function AdminListingPage() {
     setLoading(true);
     setError('');
     try {
-      const params = statusFilter !== 'Semua' ? `?status=${statusFilter}` : '';
+      const qs = new URLSearchParams();
+      if (statusFilter !== 'Semua') qs.set('status', statusFilter);
+      if (filterJenis) qs.set('jenis', filterJenis);
+      const params = qs.toString() ? `?${qs.toString()}` : '';
       const res = await fetch(`/api/admin/properties${params}`, { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
@@ -100,10 +105,10 @@ export default function AdminListingPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, filterJenis]);
 
   useEffect(() => { fetchProperties(); }, [fetchProperties]);
-  useEffect(() => { setSelectedIds(new Set()); setDisplayLimit(20); }, [statusFilter, search]);
+  useEffect(() => { setSelectedIds(new Set()); setDisplayLimit(20); }, [statusFilter, filterJenis, search]);
 
   // Cascade lokasi: muat provinsi saat panel Set Lokasi pertama dibuka.
   useEffect(() => {
@@ -345,6 +350,19 @@ export default function AdminListingPage() {
               placeholder="Cari judul atau kode listing…"
               className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] transition-colors"
             />
+          </div>
+          <div className="relative">
+            <select
+              value={filterJenis}
+              onChange={e => setFilterJenis(e.target.value)}
+              className="appearance-none pl-3 pr-7 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] bg-white cursor-pointer"
+            >
+              <option value="">Semua Jenis</option>
+              {PROPERTY_TYPES.map(t => (
+                <option key={t.value} value={t.value}>{t.emoji} {t.label}</option>
+              ))}
+            </select>
+            <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#94A3B8] pointer-events-none" />
           </div>
           <div className="relative">
             <select

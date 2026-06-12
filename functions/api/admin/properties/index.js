@@ -37,6 +37,7 @@ export async function onRequestGet(context) {
   const { request, env } = context;
   const url = new URL(request.url);
   const statusFilter = url.searchParams.get('status') ?? '';
+  const jenisFilter = (url.searchParams.get('jenis') ?? '').toLowerCase();
 
   const conditions = [];
   const bindings = [];
@@ -44,6 +45,11 @@ export async function onRequestGet(context) {
   if (statusFilter && VALID_STATUSES.has(statusFilter)) {
     conditions.push('p.status_publish = ?');
     bindings.push(statusFilter);
+  }
+
+  if (jenisFilter && VALID_JENIS.includes(jenisFilter)) {
+    conditions.push('LOWER(p.jenis_properti) = ?');
+    bindings.push(jenisFilter);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
