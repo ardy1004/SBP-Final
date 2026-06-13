@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router';
 import {
   LayoutDashboard, List, Users, LogOut, Menu, X, Bell, Shield,
@@ -12,12 +12,39 @@ interface AdminUser {
   role: string;
 }
 
+interface NotifLead {
+  id: number;
+  nama: string | null;
+  tipe_pengirim: string | null;
+  properti_title: string | null;
+  created_at: string;
+}
+
+const TIPE_COLORS: Record<string, string> = {
+  pembeli: '#1565C0', penjual: '#10B981', broker: '#7C3AED', quick_wa: '#F97316',
+};
+const TIPE_LABEL: Record<string, string> = {
+  pembeli: 'Pembeli', penjual: 'Penjual', broker: 'Broker', quick_wa: 'Klik Cepat WA',
+};
+
+function relTime(iso: string): string {
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60) return 'baru saja';
+  if (diff < 3600) return `${Math.floor(diff / 60)} mnt lalu`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} jam lalu`;
+  return `${Math.floor(diff / 86400)} hr lalu`;
+}
+
 export default function AdminLayout() {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [admin, setAdmin] = useState<AdminUser | null>(null);
   const [checking, setChecking] = useState(true);
   const [leadsBadge, setLeadsBadge] = useState(0);
+  const [showNotif, setShowNotif] = useState(false);
+  const [notifLeads, setNotifLeads] = useState<NotifLead[]>([]);
+  const [notifLoading, setNotifLoading] = useState(false);
+  const notifRef = useRef<HTMLDivElement>(null);
 
   const fetchBadge = useCallback(() => {
     fetch('/api/admin/leads?count=1', { credentials: 'include' })
@@ -61,6 +88,31 @@ export default function AdminLayout() {
     } catch {}
     navigate('/admin/login', { replace: true });
   };
+
+  const toggleNotif = () => {
+    if (!showNotif) {
+      setShowNotif(true);
+      setNotifLoading(true);
+      fetch('/api/admin/leads?limit=5', { credentials: 'include' })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => setNotifLeads(d?.data?.leads ?? d?.leads ?? []))
+        .catch(() => setNotifLeads([]))
+        .finally(() => setNotifLoading(false));
+    } else {
+      setShowNotif(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!showNotif) return;
+    const handler = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setShowNotif(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showNotif]);
 
   const navItems = [
     { to: '/admin', label: 'Ringkasan', icon: LayoutDashboard, end: true,  badge: 0 },
@@ -165,12 +217,59 @@ export default function AdminLayout() {
 
           <div className="flex-1" />
 
-          <button className="relative text-[#64748B] hover:text-[#0F172A] transition-colors">
-            <Bell size={20} />
-            {leadsBadge > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#EF4444]" />
+          <div ref={notifRef} className="relative">
+            <button onClick={toggleNotif} className="relative text-[#64748B] hover:text-[#0F172A] transition-colors p-1">
+              <Bell size={20} />
+              {leadsBadge > 0 && (
+                <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-[#EF4444]" />
+              )}
+            </button>
+
+            {showNotif && (
+              <div className="absolute right-0 top-10 w-72 bg-white rounded-xl shadow-xl border border-gray-100 z-50 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+                  <span className="text-sm font-semibold text-[#0F172A]">Notifikasi</span>
+                  <button
+                    onClick={() => { navigate('/admin/leads'); setShowNotif(false); }}
+                    className="text-xs text-[#1565C0] hover:underline font-medium"
+                  >
+                    Lihat Semua
+                  </button>
+                </div>
+
+                {notifLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="w-5 h-5 border-2 border-[#1565C0]/20 border-t-[#1565C0] rounded-full animate-spin" />
+                  </div>
+                ) : notifLeads.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-sm text-[#94A3B8]">Belum ada notifikasi baru</div>
+                ) : (
+                  <ul>
+                    {notifLeads.map(lead => (
+                      <li key={lead.id} className="border-b border-gray-50 last:border-0">
+                        <button
+                          onClick={() => { navigate('/admin/leads'); setShowNotif(false); }}
+                          className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors"
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold text-white"
+                              style={{ background: TIPE_COLORS[lead.tipe_pengirim ?? ''] ?? '#64748B' }}>
+                              {TIPE_LABEL[lead.tipe_pengirim ?? ''] ?? (lead.tipe_pengirim ?? '–')}
+                            </span>
+                            <span className="text-xs text-[#94A3B8] ml-auto">{relTime(lead.created_at)}</span>
+                          </div>
+                          <div className="text-sm font-medium text-[#0F172A] truncate">{lead.nama || '(tamu)'}</div>
+                          {lead.properti_title && (
+                            <div className="text-xs text-[#64748B] truncate mt-0.5">{lead.properti_title}</div>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             )}
-          </button>
+          </div>
 
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#1565C0] to-[#29B6F6] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
