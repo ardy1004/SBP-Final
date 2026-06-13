@@ -24,6 +24,7 @@ function KPRCalculatorClient({ defaultHarga }: { defaultHarga: number }) {
 }
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
+import ContactAdminSheet from './ContactAdminSheet';
 
 // Jenis properti yang menghasilkan income sewa — analisis investasi relevan di sini
 const INCOME_TYPES = ['kost', 'hotel', 'homestay', 'villa', 'apartment', 'gudang', 'komersial'];
@@ -345,7 +346,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
   const [favorited, setFavorited] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
   const [showStickyBar, setShowStickyBar] = useState(true);
-  const [waLoading, setWaLoading] = useState(false);
+  const [showSheet, setShowSheet] = useState(false);
 
   // Sync carousel index
   useEffect(() => {
@@ -596,10 +597,6 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
               </div>
             )}
 
-            {/* Lead Form — Mobile */}
-            <div className="lg:hidden mb-6" ref={formRef}>
-              <LeadForm property={property} />
-            </div>
           </div>
 
           {/* ── Sidebar Kanan ── */}
@@ -687,28 +684,21 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
               <div className="text-xs text-gray-500">{property.jenis} · {property.kecamatan}</div>
             </div>
             <button
-              disabled={waLoading}
-              onClick={async () => {
-                if (waLoading) return;
-                setWaLoading(true);
-                const fallback = `https://wa.me/6281391278889?text=${encodeURIComponent(`Halo, saya tertarik dengan properti: ${property.title}`)}`;
-                try {
-                  // Await agar lead tersimpan ke DB sebelum navigasi ke WA
-                  const r = await fetch(`/api/properties/${property.slug}/wa-click`, { method: 'POST' });
-                  const d = await r.json();
-                  // location.href (bukan window.open) agar tidak diblokir in-app browser
-                  window.location.href = d?.data?.wa_url ?? fallback;
-                } catch {
-                  window.location.href = fallback;
-                }
-              }}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-white bg-[#10B981] hover:bg-[#059669] transition-colors disabled:opacity-70"
+              onClick={() => setShowSheet(true)}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-white bg-[#10B981] hover:bg-[#059669] transition-colors"
             >
-              <MessageCircle size={16} /> {waLoading ? 'Menghubungi...' : 'Hubungi via WA'}
+              <MessageCircle size={16} /> Hubungi Admin Via WA
             </button>
           </div>
         </div>
       )}
+
+      {/* Contact Admin — Bottom Sheet (mobile) */}
+      <ContactAdminSheet
+        property={property}
+        isOpen={showSheet}
+        onClose={() => setShowSheet(false)}
+      />
 
       {/* Lightbox */}
       {lightbox && (
