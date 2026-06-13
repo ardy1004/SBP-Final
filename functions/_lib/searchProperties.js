@@ -38,9 +38,9 @@ export async function searchProperties(env, params = {}) {
     bindings.push(String(params.jenis).toLowerCase());
   }
 
-  // lokasi
-  if (params.kabupaten) { conditions.push('LOWER(p.kabupaten) = LOWER(?)'); bindings.push(String(params.kabupaten)); }
-  if (params.kecamatan) { conditions.push('LOWER(p.kecamatan) = LOWER(?)'); bindings.push(String(params.kecamatan)); }
+  // lokasi — pakai LIKE agar cocok dengan "Kabupaten Sleman" maupun "Sleman"
+  if (params.kabupaten) { conditions.push('LOWER(p.kabupaten) LIKE ?'); bindings.push(`%${String(params.kabupaten).toLowerCase()}%`); }
+  if (params.kecamatan) { conditions.push('LOWER(p.kecamatan) LIKE ?'); bindings.push(`%${String(params.kecamatan).toLowerCase()}%`); }
 
   // harga range
   const priceCol = tujuan === 'disewa' ? 'p.harga_sewa_tahun' : 'p.harga';
