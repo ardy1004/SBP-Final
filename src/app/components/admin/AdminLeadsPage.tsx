@@ -85,7 +85,7 @@ export default function AdminLeadsPage() {
     setError(null);
     fetch('/api/admin/leads?limit=200', { credentials: 'include' })
       .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); })
-      .then(d => setLeads(d.leads ?? []))
+      .then(d => setLeads(d.data?.leads ?? d.leads ?? []))
       .catch(e => setError(`Gagal memuat leads: ${e.message}`))
       .finally(() => setLoading(false));
   }, []);
