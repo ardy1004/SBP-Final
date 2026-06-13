@@ -10,12 +10,12 @@ interface Note { teks: string; admin: string; waktu: string; }
 
 interface Lead {
   id: number;
-  nama: string;
-  no_wa: string;
+  nama: string | null;
+  no_wa: string | null;
   pesan: string | null;
   asal_daerah: string | null;
   budget: string | null;
-  tipe_pengirim: string;
+  tipe_pengirim: string | null;
   source_page: string | null;
   status_pipeline: PipelineStatus;
   notes: Note[];
@@ -33,10 +33,10 @@ const COLUMNS: { id: PipelineStatus; label: string; color: string; bg: string }[
 ];
 
 const TIPE_COLORS: Record<string, string> = {
-  pembeli: '#1565C0', penjual: '#10B981', broker: '#7C3AED',
+  pembeli: '#1565C0', penjual: '#10B981', broker: '#7C3AED', quick_wa: '#F97316',
 };
 const TIPE_LABEL: Record<string, string> = {
-  pembeli: 'Pembeli', penjual: 'Penjual', broker: 'Broker',
+  pembeli: 'Pembeli', penjual: 'Penjual', broker: 'Broker', quick_wa: 'Klik Cepat WA',
 };
 
 function relativeTime(dtStr: string): string {
@@ -93,9 +93,9 @@ export default function AdminLeadsPage() {
   useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
   const filtered = leads.filter(l =>
-    l.nama.toLowerCase().includes(search.toLowerCase()) ||
+    (l.nama ?? '').toLowerCase().includes(search.toLowerCase()) ||
     (l.properti_title ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    l.no_wa.includes(search)
+    (l.no_wa ?? '').includes(search)
   );
 
   const byStatus = (s: PipelineStatus) => filtered.filter(l => l.status_pipeline === s);
@@ -209,7 +209,7 @@ export default function AdminLeadsPage() {
                             <div className="w-6 h-6 rounded-full bg-[#E3F2FD] flex items-center justify-center flex-shrink-0">
                               <User size={11} className="text-[#1565C0]" />
                             </div>
-                            <span className="font-semibold text-xs text-[#0F172A] leading-tight">{lead.nama}</span>
+                            <span className="font-semibold text-xs text-[#0F172A] leading-tight">{lead.nama ?? '(tamu)'}</span>
                           </div>
                           <GripVertical size={13} className="text-[#CBD5E1] flex-shrink-0" />
                         </div>
@@ -231,8 +231,8 @@ export default function AdminLeadsPage() {
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-1.5">
                             <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold text-white"
-                              style={{ background: TIPE_COLORS[lead.tipe_pengirim] ?? '#64748B' }}>
-                              {TIPE_LABEL[lead.tipe_pengirim] ?? lead.tipe_pengirim}
+                              style={{ background: TIPE_COLORS[lead.tipe_pengirim ?? ''] ?? '#64748B' }}>
+                              {TIPE_LABEL[lead.tipe_pengirim ?? ''] ?? (lead.tipe_pengirim ?? '–')}
                             </span>
                             {src && (
                               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">
@@ -248,17 +248,31 @@ export default function AdminLeadsPage() {
 
                         {/* Action buttons */}
                         <div className="flex items-center gap-1 pt-2 border-t border-gray-50">
-                          <a href={`tel:${lead.no_wa}`}
-                            className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[#64748B] hover:bg-gray-50 transition-colors">
-                            <Phone size={11} />
-                            <span style={{ fontSize: '10px' }}>Telepon</span>
-                          </a>
-                          <a href={`https://wa.me/${lead.no_wa.replace(/\D/g, '')}?text=Halo ${encodeURIComponent(lead.nama)}, saya dari SBP...`}
-                            target="_blank" rel="noopener noreferrer"
-                            className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[#10B981] hover:bg-[#F0FFF4] transition-colors">
-                            <MessageCircle size={11} />
-                            <span style={{ fontSize: '10px' }}>WhatsApp</span>
-                          </a>
+                          {lead.no_wa ? (
+                            <a href={`tel:${lead.no_wa}`}
+                              className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[#64748B] hover:bg-gray-50 transition-colors">
+                              <Phone size={11} />
+                              <span style={{ fontSize: '10px' }}>Telepon</span>
+                            </a>
+                          ) : (
+                            <span className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[#CBD5E1] cursor-not-allowed">
+                              <Phone size={11} />
+                              <span style={{ fontSize: '10px' }}>–</span>
+                            </span>
+                          )}
+                          {lead.no_wa ? (
+                            <a href={`https://wa.me/${lead.no_wa.replace(/\D/g, '')}?text=Halo ${encodeURIComponent(lead.nama ?? 'Tamu')}, saya dari SBP...`}
+                              target="_blank" rel="noopener noreferrer"
+                              className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[#10B981] hover:bg-[#F0FFF4] transition-colors">
+                              <MessageCircle size={11} />
+                              <span style={{ fontSize: '10px' }}>WhatsApp</span>
+                            </a>
+                          ) : (
+                            <span className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[#CBD5E1] cursor-not-allowed">
+                              <MessageCircle size={11} />
+                              <span style={{ fontSize: '10px' }}>–</span>
+                            </span>
+                          )}
                           <div className="relative group">
                             <button className="p-1 rounded-lg text-[#64748B] hover:bg-gray-50 transition-colors">
                               <ChevronDown size={11} />

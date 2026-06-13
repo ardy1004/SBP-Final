@@ -345,6 +345,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
   const [favorited, setFavorited] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
   const [showStickyBar, setShowStickyBar] = useState(true);
+  const [waLoading, setWaLoading] = useState(false);
 
   // Sync carousel index
   useEffect(() => {
@@ -686,20 +687,24 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
               <div className="text-xs text-gray-500">{property.jenis} · {property.kecamatan}</div>
             </div>
             <button
-              onClick={() => {
-                // Track klik WA (fire-and-forget) + buka WA langsung
-                fetch(`/api/properties/${property.slug}/wa-click`, { method: 'POST' })
-                  .then(r => r.json())
-                  .then(d => { if (d?.data?.wa_url) window.open(d.data.wa_url, '_blank'); })
-                  .catch(() => {
-                    // Fallback: buka WA tanpa tracking jika fetch gagal
-                    const msg = `Halo, saya tertarik dengan properti: ${property.title}`;
-                    window.open(`https://wa.me/6281391278889?text=${encodeURIComponent(msg)}`, '_blank');
-                  });
+              disabled={waLoading}
+              onClick={async () => {
+                if (waLoading) return;
+                setWaLoading(true);
+                const fallback = `https://wa.me/6281391278889?text=${encodeURIComponent(`Halo, saya tertarik dengan properti: ${property.title}`)}`;
+                try {
+                  // Await agar lead tersimpan ke DB sebelum navigasi ke WA
+                  const r = await fetch(`/api/properties/${property.slug}/wa-click`, { method: 'POST' });
+                  const d = await r.json();
+                  // location.href (bukan window.open) agar tidak diblokir in-app browser
+                  window.location.href = d?.data?.wa_url ?? fallback;
+                } catch {
+                  window.location.href = fallback;
+                }
               }}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-white bg-[#10B981] hover:bg-[#059669] transition-colors"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-white bg-[#10B981] hover:bg-[#059669] transition-colors disabled:opacity-70"
             >
-              <MessageCircle size={16} /> Hubungi via WA
+              <MessageCircle size={16} /> {waLoading ? 'Menghubungi...' : 'Hubungi via WA'}
             </button>
           </div>
         </div>
