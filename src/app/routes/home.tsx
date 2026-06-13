@@ -68,7 +68,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
       db.prepare(`
         SELECT
           (SELECT COUNT(*) FROM properties WHERE status_publish = 'published') AS published,
-          (SELECT COUNT(*) FROM properties WHERE status_publish = 'sold')      AS sold
+          (SELECT COUNT(*) FROM properties WHERE status_sold = 1)             AS sold
       `).first(),
 
       // Coverage area chips — top 8 kecamatan dengan listing terbanyak
