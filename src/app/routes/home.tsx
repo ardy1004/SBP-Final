@@ -144,15 +144,26 @@ export async function loader({ context }: LoaderFunctionArgs) {
   }
 }
 
+const OG_IMAGE = "https://images.salambumi.xyz/kost%20dijual%20jogja.webp";
+
 export const meta: MetaFunction = () => [
   { title: "Salam Bumi Property | Portal Properti Terpercaya Yogyakarta" },
   { name: "description", content: "Portal properti berbasis kepercayaan & kecerdasan investasi untuk Yogyakarta. Temukan rumah, kost, tanah terbaik — semua listing dikurasi dan diverifikasi langsung oleh tim SBP." },
   { name: "robots", content: "index, follow" },
-  { property: "og:title", content: "Salam Bumi Property | Portal Properti Terpercaya Yogyakarta" },
-  { property: "og:description", content: "Portal properti terpercaya di Yogyakarta — listing dikurasi, diverifikasi, analisis investasi cerdas." },
+  { property: "og:site_name", content: "Salam Bumi Property" },
+  { property: "og:title", content: "Salam Bumi Property | Agen Properti Terpercaya Yogyakarta" },
+  { property: "og:description", content: "Temukan rumah, kost, tanah & investasi properti terbaik di Yogyakarta. Semua listing dikurasi & diverifikasi langsung oleh tim SBP." },
   { property: "og:type", content: "website" },
-  { property: "og:url", content: "https://salambumi.xyz" },
-  { property: "og:image", content: "https://images.salambumi.xyz/kost%20dijual%20jogja.webp" },
+  { property: "og:url", content: "https://salambumi.xyz/" },
+  { property: "og:image", content: OG_IMAGE },
+  { property: "og:image:type", content: "image/webp" },
+  { property: "og:image:width", content: "2560" },
+  { property: "og:image:height", content: "1440" },
+  { property: "og:image:alt", content: "Properti pilihan di Yogyakarta — Salam Bumi Property" },
+  { name: "twitter:card", content: "summary_large_image" },
+  { name: "twitter:title", content: "Salam Bumi Property | Agen Properti Terpercaya Yogyakarta" },
+  { name: "twitter:description", content: "Temukan rumah, kost, tanah & investasi properti terbaik di Yogyakarta. Semua listing dikurasi & diverifikasi langsung oleh tim SBP." },
+  { name: "twitter:image", content: OG_IMAGE },
   // JSON-LD WebSite + Organization (SSR) — pass object langsung, bukan JSON.stringify
   {
     "script:ld+json": {
