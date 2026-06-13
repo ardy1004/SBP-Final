@@ -132,48 +132,31 @@ export async function onRequestPost(context) {
       return jsonOk({ reply: assistantMsg.content ?? '', properties: [] });
     }
 
-    // ── Ada tool_calls → eksekusi semua, lalu putaran 2 ─────────────────────
-    const toolResultMessages = [];
+    // ── Ada tool_calls → eksekusi search, lalu putaran 2 ───────────────────
     let lastSearchResults = [];
 
     for (const tc of toolCalls) {
       if (tc.function?.name !== 'search_properties') continue;
-
       let args = {};
       try { args = JSON.parse(tc.function.arguments ?? '{}'); } catch { args = {}; }
-
       const results = await searchProperties(env, args);
       lastSearchResults = results;
-
-      toolResultMessages.push({
-        role:         'tool',
-        tool_call_id: tc.id,
-        content:      JSON.stringify(results),
-      });
     }
 
-    // Kalau tidak ada tool yang dikenali
-    if (toolResultMessages.length === 0) {
-      return jsonOk({ reply: assistantMsg.content ?? '', properties: [] });
-    }
+    // ── Putaran 2: inject hasil search sebagai context, panggil Groq tanpa tools
+    // Pendekatan ini lebih robust: hindari tool-result message format yang
+    // menyebabkan masalah pada beberapa versi model Groq.
+    const resultContext = lastSearchResults.length > 0
+      ? `HASIL PENCARIAN PROPERTI (${lastSearchResults.length} listing):\n${JSON.stringify(lastSearchResults, null, 0)}\n\nBerdasarkan hasil di atas, rekomendasikan kepada user secara ringkas dan natural.`
+      : 'HASIL PENCARIAN: Tidak ada properti yang sesuai kriteria. Sampaikan dengan jujur dan tawarkan alternatif.';
 
-    // Sanitasi assistantMsg — hanya kirim field yang diterima Groq API
-    const assistantMsgClean = {
-      role:       'assistant',
-      content:    assistantMsg.content ?? null,
-      tool_calls: assistantMsg.tool_calls,
-    };
-
-    // ── Putaran 2: respons final — kirim tools + tool_choice:'none' ──────────
-    // OpenAI-compatible API mensyaratkan tools array tetap ada agar model bisa
-    // menginterpretasi tool result messages dalam history.
     const messages2 = [
-      ...messages,
-      assistantMsgClean,
-      ...toolResultMessages,
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...clientMessages,
+      { role: 'user', content: resultContext },
     ];
 
-    const round2 = await callGroq(env.GROQ_API_KEY, messages2, 'none');
+    const round2 = await callGroq(env.GROQ_API_KEY, messages2, false);
     const finalMsg = round2.choices?.[0]?.message;
 
     return jsonOk({
