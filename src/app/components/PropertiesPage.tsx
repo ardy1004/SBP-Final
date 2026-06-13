@@ -9,6 +9,7 @@ import {
 import { PROPERTY_TYPES, getPropertyTypeLabel } from '../../lib/propertyTypes';
 import { cfImg } from '../../lib/img';
 import { parseSmartQuery, type LocationIndex, type FlatLoc, type SmartFilters } from './smartSearchParser';
+import { trackEvent } from '../../lib/tracking';
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
 
@@ -112,6 +113,9 @@ export default function PropertiesPage() {
   const [propSuggest, setPropSuggest] = useState<NormalizedProperty[]>([]);
   const searchBoxRef = useRef<HTMLDivElement>(null);
   const propSuggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Guard untuk Search tracking: simpan key filter terakhir yang sudah di-fire
+  const lastSearchKeyRef = useRef<string | null>(null);
 
   // ── Location cascade state ────────────────────────────────────────────────
   const [provList, setProvList] = useState<ApiLocation[]>([]);
@@ -226,6 +230,46 @@ export default function PropertiesPage() {
   }, [tujuan, selectedJenis, hargaMin, hargaMax, kabupaten, kecamatan, kt, km, lantai, ltMin, lbMin, qKeyword, sort, limit]);
 
   useEffect(() => { fetchProperties(); }, [fetchProperties]);
+
+  // Search tracking — fire saat filter/query berubah dan ada setidaknya 1 filter aktif
+  useEffect(() => {
+    // Bangun key unik dari semua filter yang relevan (bukan sort/limit)
+    const keyParts: string[] = [];
+    if (qKeyword.trim()) keyParts.push(`q:${qKeyword.trim()}`);
+    if (tujuan !== 'semua') keyParts.push(`t:${tujuan}`);
+    if (selectedJenis.length) keyParts.push(`j:${selectedJenis.join(',')}`);
+    if (kabupaten) keyParts.push(`kab:${kabupaten}`);
+    if (kecamatan) keyParts.push(`kec:${kecamatan}`);
+    if (hargaMin > 0) keyParts.push(`mn:${hargaMin}`);
+    if (hargaMax > 0) keyParts.push(`mx:${hargaMax}`);
+    if (kt > 0) keyParts.push(`kt:${kt}`);
+    if (km > 0) keyParts.push(`km:${km}`);
+    if (lantai > 0) keyParts.push(`lt:${lantai}`);
+    if (ltMin > 0) keyParts.push(`ltm:${ltMin}`);
+    if (lbMin > 0) keyParts.push(`lbm:${lbMin}`);
+
+    if (keyParts.length === 0) return; // state default — bukan search nyata
+    const key = keyParts.join('|');
+    if (key === lastSearchKeyRef.current) return; // identik — skip
+    lastSearchKeyRef.current = key;
+
+    // Bangun search_string yang mudah dibaca manusia
+    const humanParts: string[] = [];
+    if (qKeyword.trim()) humanParts.push(qKeyword.trim());
+    if (selectedJenis.length) humanParts.push(selectedJenis.join('/'));
+    if (kecamatan) humanParts.push(kecamatan);
+    else if (kabupaten) humanParts.push(kabupaten);
+    if (hargaMin > 0 && hargaMax > 0)
+      humanParts.push(`${formatRupiah(hargaMin)}-${formatRupiah(hargaMax)}`);
+    else if (hargaMax > 0) humanParts.push(`<${formatRupiah(hargaMax)}`);
+    else if (hargaMin > 0) humanParts.push(`>${formatRupiah(hargaMin)}`);
+    if (tujuan !== 'semua') humanParts.push(tujuan);
+
+    trackEvent('Search', {
+      search_string: humanParts.join(' ') || key,
+      content_category: 'real_estate',
+    });
+  }, [tujuan, selectedJenis, hargaMin, hargaMax, kabupaten, kecamatan, kt, km, lantai, ltMin, lbMin, qKeyword]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Filter handlers ───────────────────────────────────────────────────────
   const toggleJenis = (v: string) => {

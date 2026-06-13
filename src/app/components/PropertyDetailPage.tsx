@@ -9,6 +9,7 @@ import {
   formatRupiah, formatRupiahFull,
 } from '../../lib/api';
 import { formatRibuan } from '../../lib/format';
+import { trackEvent } from '../../lib/tracking';
 // KPRCalculator dimuat hanya di klien — recharts akses window saat import, crash SSR.
 // Pola mounted-flag: server & render-klien-pertama tampilkan placeholder identik → no hydration mismatch.
 function KPRCalculatorClient({ defaultHarga }: { defaultHarga: number }) {
@@ -348,6 +349,9 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
   const [showStickyBar, setShowStickyBar] = useState(true);
   const [showSheet, setShowSheet] = useState(false);
 
+  // Guard: kode_listing yang sudah di-fire agar tidak double-fire di StrictMode / SPA nav
+  const viewContentFiredRef = useRef<string | null>(null);
+
   // Sync carousel index
   useEffect(() => {
     if (!emblaApi) return;
@@ -414,6 +418,20 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, ssrProperty]);
+
+  // ViewContent — fire sekali per kode_listing saat property pertama kali tersedia
+  useEffect(() => {
+    if (!property) return;
+    if (viewContentFiredRef.current === property.kode) return;
+    viewContentFiredRef.current = property.kode;
+    trackEvent('ViewContent', {
+      content_ids: [property.kode],
+      content_type: 'product',
+      content_name: property.title,
+      value: property.harga,
+      currency: 'IDR',
+    });
+  }, [property]);
 
   if (loading) return <DetailSkeleton />;
   if (notFound || !property) return <PropertyNotFound />;
