@@ -1,7 +1,7 @@
 // GET /api/properties/map — data minimal untuk map pins (lat/lng included)
 // Hanya properti published + punya koordinat. Static route prioritas di atas [slug].js.
 
-import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+import { jsonOk, jsonError, handleOptions } from '../_shared/response.js';
 
 const VALID_JENIS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
 const VALID_TUJUAN = ['dijual','disewa','dijual_disewa'];
