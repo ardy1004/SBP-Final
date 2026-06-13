@@ -587,7 +587,7 @@ export default function PropertiesPage() {
           <div className="flex-1 min-w-0">
 
             {/* ─── Smart Search Bar ─── */}
-            <div ref={searchBoxRef} className="relative mb-4">
+            <div ref={searchBoxRef} className="relative sticky top-16 z-20 bg-[#F0F4F8] pt-2 mb-4">
               <div className="relative">
                 <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                 <input
