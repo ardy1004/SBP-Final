@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, Link } from 'react-router';
 import { Search, Filter, ChevronDown, Edit, Plus, FileUp, Trash2, ImageOff, MapPin } from 'lucide-react';
 import { getLocations, type ApiLocation } from '../../../lib/api';
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
@@ -590,7 +590,11 @@ export default function AdminListingPage() {
                           </div>
                         )}
                         <div className="min-w-0">
-                          <div className="font-medium text-[#0F172A] text-xs leading-snug line-clamp-2">{p.title}</div>
+                          <Link
+                            to={`/admin/listing/${p.id}`}
+                            onClick={e => e.stopPropagation()}
+                            className="font-medium text-[#0F172A] text-xs leading-snug line-clamp-2 hover:text-[#1565C0]"
+                          >{p.title}</Link>
                           <div className="flex items-center gap-1.5 mt-0.5">
                             <span className="text-xs px-1.5 py-0.5 rounded-full text-white font-semibold"
                               style={{ background: JENIS_COLORS[p.jenis_properti] ?? '#64748B', fontSize: '10px' }}>
@@ -620,13 +624,14 @@ export default function AdminListingPage() {
                     </td>
                     <td className="p-3">
                       <div className="flex items-center justify-center gap-1" onClick={e => e.stopPropagation()}>
-                        <button
-                          onClick={() => navigate(`/admin/listing/${p.id}`)}
+                        <Link
+                          to={`/admin/listing/${p.id}`}
+                          onClick={e => e.stopPropagation()}
                           className="p-1.5 text-[#64748B] hover:text-[#F5A623] hover:bg-[#FFF9E6] rounded-lg transition-colors"
-                          title="Edit"
+                          title="Edit properti"
                         >
                           <Edit size={14} />
-                        </button>
+                        </Link>
                         <button
                           onClick={() => handleDelete(p)}
                           disabled={deletingId === p.id}
