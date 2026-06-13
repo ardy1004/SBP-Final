@@ -35,20 +35,17 @@ export default function ChatWidget() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLInputElement>(null);
 
-  // Hide on property detail pages (same rule as WhatsAppFAB)
-  if (/^\/(dijual|disewa)\/[^/]+\//.test(pathname)) return null;
+  const shouldHide = /^\/(dijual|disewa)\/[^/]+\//.test(pathname);
 
-  // Auto-scroll to bottom on new messages / loading
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  // Focus input when chat opens
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
     if (showChat) setTimeout(() => inputRef.current?.focus(), 50);
   }, [showChat]);
+
+  if (shouldHide) return null;
 
   async function sendMessage() {
     const text = input.trim();
