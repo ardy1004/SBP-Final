@@ -98,6 +98,7 @@ async function callGroq(apiKey, messages, useTools) {
       'Content-Type':  'application/json',
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(25000),
   });
 
   if (!res.ok) {
@@ -107,6 +108,17 @@ async function callGroq(apiKey, messages, useTools) {
   }
 
   return res.json();
+}
+
+// Retry 1x untuk network/timeout errors — tidak retry untuk 4xx (request errors)
+async function callGroqWithRetry(apiKey, messages, useTools) {
+  try {
+    return await callGroq(apiKey, messages, useTools);
+  } catch (err) {
+    if (/^Groq 4\d\d/.test(err.message)) throw err;
+    await new Promise(r => setTimeout(r, 300));
+    return callGroq(apiKey, messages, useTools);
+  }
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -146,7 +158,7 @@ export async function onRequestPost(context) {
 
   try {
     // ── Putaran 1: kemungkinan ada tool_calls ────────────────────────────────
-    const round1 = await callGroq(env.GROQ_API_KEY, messages, true);
+    const round1 = await callGroqWithRetry(env.GROQ_API_KEY, messages, true);
     const assistantMsg = round1.choices?.[0]?.message;
 
     if (!assistantMsg) {
@@ -201,7 +213,7 @@ export async function onRequestPost(context) {
       ...clientMessages,
     ];
 
-    const round2 = await callGroq(env.GROQ_API_KEY, messages2, false);
+    const round2 = await callGroqWithRetry(env.GROQ_API_KEY, messages2, false);
     const finalMsg = round2.choices?.[0]?.message;
 
     return jsonOk({
