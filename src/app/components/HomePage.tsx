@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router';
-import { DualCTASection, CoverageAreaSection, HomeFAQSection, type CoverageArea } from './HomeSections';
+import { DualCTASection, CoverageAreaSection, HomeFAQSection, ConsultationCTASection, type CoverageArea } from './HomeSections';
+import ContactAdminSheet from './ContactAdminSheet';
 import { Search, ChevronDown, ChevronLeft, ChevronRight, Star, ArrowRight, Shield, CheckCircle, Scale, Handshake, TrendingUp, Clock, BarChart2, AlertCircle, RefreshCw } from 'lucide-react';
 import useEmblaCarousel from 'embla-carousel-react';
 import {
@@ -558,6 +559,7 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
 
   const [blogPosts, setBlogPosts] = useState<ApiBlogPost[]>(ssrBlogPosts ?? []);
   const [blogLoading, setBlogLoading] = useState(!hasSSR);
+  const [showHomeSheet, setShowHomeSheet] = useState(false);
 
   const fetchProperties = () => {
     setLoading(true);
@@ -817,6 +819,9 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
         </div>
       </section>
 
+      {/* CONSULTATION CTA */}
+      <ConsultationCTASection onOpen={() => setShowHomeSheet(true)} />
+
       {/* COVERAGE AREA */}
       <CoverageAreaSection areas={ssrCoverageAreas ?? []} />
 
@@ -908,6 +913,9 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
 
       {/* FAQ */}
       <HomeFAQSection />
+
+      {/* Consultation Sheet — tanpa konteks properti */}
+      <ContactAdminSheet isOpen={showHomeSheet} onClose={() => setShowHomeSheet(false)} />
     </>
   );
 }

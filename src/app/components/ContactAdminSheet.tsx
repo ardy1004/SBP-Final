@@ -9,8 +9,10 @@ const RENCANA_MAP: Record<string, 'hard_cash' | 'soft_cash' | 'kpr'> = {
   'KPR': 'kpr',
 };
 
+const ADMIN_WA_GENERAL = `https://wa.me/6281391278889?text=${encodeURIComponent('Halo, saya ingin konsultasi kebutuhan properti')}`;
+
 interface Props {
-  property: NormalizedPropertyDetail;
+  property?: NormalizedPropertyDetail | null;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -39,7 +41,7 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
       no_wa: no_wa.trim(),
       tipe_pengirim: tipe as 'pembeli' | 'penjual' | 'broker',
       source_page: window.location.href,
-      property_id: property.id,
+      property_id: property?.id,
       asal_daerah: asal || undefined,
       budget: budget || undefined,
       rencana_pembayaran: RENCANA_MAP[rencana] ?? undefined,
@@ -49,10 +51,10 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
     if (res.success && res.data) {
       setSubmitted(true);
       trackEvent('Lead', {
-        content_name: property.title,
-        content_ids: [property.kode],
+        content_name: property?.title ?? 'Konsultasi',
+        content_ids: property ? [property.kode] : [],
         content_category: tipe,
-        value: property.harga,
+        value: property?.harga,
         currency: 'IDR',
       }, { eventID: res.data.event_id });
       window.location.href = res.data.wa_url;
@@ -65,6 +67,12 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
   const handleSkip = async () => {
     if (skipLoading) return;
     setSkipLoading(true);
+    if (!property) {
+      // Tanpa konteks properti — redirect WA umum langsung, tanpa API call
+      trackEvent('Contact', { content_ids: [] });
+      window.location.href = ADMIN_WA_GENERAL;
+      return;
+    }
     const fallback = `https://wa.me/6281391278889?text=${encodeURIComponent(`Halo, saya tertarik dengan properti: ${property.title}`)}`;
     let waUrl = fallback;
     let contactEventId: string | undefined;
@@ -101,22 +109,40 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
           <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-4" />
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 flex-1 min-w-0">
-              {property.images[0] && (
-                <img
-                  src={property.images[0]}
-                  alt={property.title}
-                  className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                />
+              {property ? (
+                <>
+                  {property.images[0] && (
+                    <img
+                      src={property.images[0]}
+                      alt={property.title}
+                      className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  )}
+                  <div className="min-w-0">
+                    <div className="font-semibold text-[#0F172A] text-sm line-clamp-1">{property.title}</div>
+                    <div className="text-xs text-[#1565C0] font-bold">{formatRupiah(property.harga)}</div>
+                  </div>
+                </>
+              ) : (
+                <div className="min-w-0">
+                  <div className="font-semibold text-[#0F172A] text-sm">Konsultasi Kebutuhan Properti Anda</div>
+                  <div className="text-xs text-[#64748B]">Gratis · Tim SBP siap membantu</div>
+                </div>
               )}
-              <div className="min-w-0">
-                <div className="font-semibold text-[#0F172A] text-sm line-clamp-1">{property.title}</div>
-                <div className="text-xs text-[#1565C0] font-bold">{formatRupiah(property.harga)}</div>
-              </div>
             </div>
-            <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500 flex-shrink-0 ml-2">
-              <X size={18} />
-            </button>
+            <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+              <button
+                onClick={handleSkip}
+                disabled={skipLoading}
+                className="text-xs text-[#1565C0] font-medium hover:underline disabled:opacity-50 whitespace-nowrap"
+              >
+                {skipLoading ? '...' : 'Langsung WA'}
+              </button>
+              <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500">
+                <X size={18} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -231,17 +257,7 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
           </button>
 
           {submitted && <p className="text-xs text-[#10B981] text-center mt-2">✅ Lead tersimpan! WhatsApp dibuka...</p>}
-
-          {/* Skip — jalur cadangan quick_wa */}
-          <div className="text-center mt-4 pb-4">
-            <button
-              onClick={handleSkip}
-              disabled={skipLoading}
-              className="text-xs text-[#94A3B8] hover:text-[#64748B] transition-colors disabled:opacity-50"
-            >
-              {skipLoading ? 'Menghubungkan...' : 'Langsung chat tanpa isi form →'}
-            </button>
-          </div>
+          <div className="pb-4" />
         </div>
       </div>
     </div>

@@ -710,9 +710,12 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
             </div>
             <button
               onClick={() => setShowSheet(true)}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-white bg-[#10B981] hover:bg-[#059669] transition-colors"
+              className="flex flex-col items-center px-5 py-2 rounded-xl font-bold text-white bg-[#10B981] hover:bg-[#059669] transition-colors"
             >
-              <MessageCircle size={16} /> Hubungi Admin Via WA
+              <span className="flex items-center gap-2 text-sm leading-tight">
+                <MessageCircle size={16} /> Hubungi Admin Via WA
+              </span>
+              <span className="text-[10px] font-normal text-white/75 leading-tight mt-0.5">Isi form singkat dulu</span>
             </button>
           </div>
         </div>

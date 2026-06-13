@@ -79,6 +79,29 @@ export function CoverageAreaSection({ areas }: { areas: CoverageArea[] }) {
   );
 }
 
+// ── CONSULTATION CTA ─────────────────────────────────────────────────────────
+export function ConsultationCTASection({ onOpen }: { onOpen: () => void }) {
+  return (
+    <section className="py-10 bg-[#F0F9FF]">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="rounded-2xl bg-gradient-to-r from-[#0B2447] to-[#1565C0] px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-5">
+          <div>
+            <p className="text-white/70 text-sm mb-1">Tidak menemukan yang sesuai?</p>
+            <h3 className="font-display text-xl font-bold text-white">Ceritakan Kebutuhan Properti Anda</h3>
+            <p className="text-white/60 text-sm mt-1">Tim SBP siap membantu — gratis, tanpa komitmen.</p>
+          </div>
+          <button
+            onClick={onOpen}
+            className="flex-shrink-0 inline-flex items-center gap-2 bg-white text-[#0B2447] font-semibold px-6 py-3 rounded-xl text-sm hover:bg-[#E3F2FD] transition-colors whitespace-nowrap"
+          >
+            💬 Konsultasi Sekarang
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ── HOME FAQ ──────────────────────────────────────────────────────────────────
 const FAQ_ITEMS = [
   {
@@ -95,7 +118,7 @@ const FAQ_ITEMS = [
   },
   {
     q: 'Bagaimana cara menghubungi pemilik properti?',
-    a: 'Anda cukup mengisi form "Kirim Pesan ke Admin" di halaman detail properti, lalu klik tombol WhatsApp. Data Anda akan tersimpan dan tim SBP akan segera menghubungi Anda melalui WhatsApp untuk proses selanjutnya.',
+    a: 'Buka halaman detail properti yang Anda minati, lalu klik tombol "Hubungi Admin Via WA" di bagian bawah layar. Sebuah form singkat akan muncul — isi nama, nomor WA, dan kebutuhan Anda, lalu klik "Hubungi via WhatsApp". Data Anda tersimpan otomatis dan tim SBP akan segera merespons.',
   },
 ];
 
