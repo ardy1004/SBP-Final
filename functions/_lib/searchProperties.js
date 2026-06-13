@@ -77,7 +77,7 @@ export async function searchProperties(env, params = {}) {
     SELECT
       p.id, p.slug, p.title, p.jenis_properti, p.tujuan,
       p.harga, p.harga_sewa_tahun, p.nego,
-      p.kecamatan, p.kabupaten,
+      p.provinsi, p.kecamatan, p.kabupaten,
       p.luas_tanah, p.luas_bangunan,
       p.jumlah_kamar_tidur, p.jumlah_kamar_mandi,
       p.legalitas,
