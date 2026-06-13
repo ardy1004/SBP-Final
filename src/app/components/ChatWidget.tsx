@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useLocation } from 'react-router';
-import { MessageCircle, Sparkles, X, Send } from 'lucide-react';
+import { MessageCircle, Sparkles, X, Send, CheckCircle } from 'lucide-react';
 import ChatPropertyCard, { type ChatPropItem } from './ChatPropertyCard';
 import { formatRupiah } from '../../lib/api';
 
@@ -13,6 +13,8 @@ type ChatMsg = {
   role: 'user' | 'assistant';
   content: string;
   properties?: ChatPropItem[];
+  leadSubmitted?: boolean;
+  waUrl?: string | null;
 };
 
 function WaIcon() {
@@ -65,12 +67,14 @@ export default function ChatWidget() {
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
         }),
       });
-      const json = await res.json() as { success: boolean; data?: { reply: string; properties: ChatPropItem[] }; error?: string };
+      const json = await res.json() as { success: boolean; data?: { reply: string; properties: ChatPropItem[]; leadSubmitted?: boolean; waUrl?: string | null }; error?: string };
       if (json.success && json.data) {
         setMessages(prev => [...prev, {
           role: 'assistant',
           content: json.data!.reply,
           properties: json.data!.properties ?? [],
+          leadSubmitted: json.data!.leadSubmitted ?? false,
+          waUrl: json.data!.waUrl ?? null,
         }]);
       } else {
         throw new Error(json.error ?? 'unknown');
@@ -146,6 +150,33 @@ export default function ChatWidget() {
                       {msg.properties.map(p => (
                         <ChatPropertyCard key={p.id} prop={p} />
                       ))}
+                    </div>
+                  )}
+                  {/* Lead confirmation */}
+                  {msg.role === 'assistant' && msg.leadSubmitted && msg.waUrl && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', maxWidth: 300 }}>
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        background: '#ecfdf5', color: '#059669',
+                        fontSize: 11, fontWeight: 600, padding: '4px 10px',
+                        borderRadius: 999, alignSelf: 'flex-start',
+                      }}>
+                        <CheckCircle size={12} />
+                        Data tersimpan
+                      </span>
+                      <button
+                        onClick={() => window.open(msg.waUrl!, '_blank', 'noopener,noreferrer')}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                          width: '100%', padding: '8px 0',
+                          background: '#25D366', color: '#fff',
+                          border: 'none', borderRadius: 8, cursor: 'pointer',
+                          fontSize: 13, fontWeight: 600,
+                        }}
+                      >
+                        <WaIcon />
+                        Hubungi via WhatsApp
+                      </button>
                     </div>
                   )}
                 </div>

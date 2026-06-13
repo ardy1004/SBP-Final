@@ -1,5 +1,6 @@
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { searchProperties } from '../_lib/searchProperties.js';
+import { createLead } from '../_lib/createLead.js';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODEL    = 'llama-3.3-70b-versatile';
@@ -11,7 +12,9 @@ PENTING - Konversi notasi harga Indonesia ke angka Rupiah penuh sebelum memanggi
 - 'Jt' atau 'jt' atau 'juta' = dikali 1.000.000. Contoh: '500jt' atau '500 Juta' = 500000000
 - 'rb' atau 'ribu' = dikali 1.000. Contoh: '500rb' = 500000
 - Kalau user sebut angka tanpa satuan dalam konteks properti (misal 'budget 800'), asumsikan dalam Milyar jika < 100, atau Juta jika antara 100-999, sesuai kewajaran harga properti.
-- SELALU kirim harga_min/harga_max sebagai angka Rupiah penuh (integer), BUKAN dalam notasi singkat.`;
+- SELALU kirim harga_min/harga_max sebagai angka Rupiah penuh (integer), BUKAN dalam notasi singkat.
+
+Jika user menunjukkan minat tinggi pada sebuah properti (misal bertanya cara membeli, ingin survei lokasi, ingin nego, atau bilang 'saya minat'/'serius'), TANYAKAN nama dan nomor WhatsApp mereka secara sopan jika belum disebutkan. SETELAH user memberikan nama DAN nomor WhatsApp, panggil tool submit_lead dengan data tersebut. JANGAN panggil submit_lead sebelum kedua data (nama dan nomor WA) tersedia di percakapan. Setelah submit_lead berhasil, beri konfirmasi ramah bahwa tim akan segera menghubungi via WhatsApp.`;
 
 const TOOLS = [
   {
@@ -48,6 +51,24 @@ const TOOLS = [
           },
         },
         required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'submit_lead',
+      description: 'Simpan data kontak user (calon pembeli/penyewa) ke database SBP untuk ditindaklanjuti oleh tim.',
+      parameters: {
+        type: 'object',
+        properties: {
+          nama:        { type: 'string',  description: 'Nama lengkap calon pembeli/penyewa, dari yang disebutkan user.' },
+          no_wa:       { type: 'string',  description: 'Nomor WhatsApp user, format bebas (08xx atau 628xx), akan dinormalisasi otomatis.' },
+          property_id: { type: 'integer', nullable: true, description: 'ID properti yang dibahas (dari hasil search_properties sebelumnya), jika relevan.' },
+          budget:      { type: 'string',  nullable: true, description: 'Budget yang disebutkan user, dalam format aslinya (misal "800jt", "1,5M").' },
+          pesan:       { type: 'string',  nullable: true, description: 'Ringkasan singkat kebutuhan/pertanyaan user untuk konteks admin.' },
+        },
+        required: ['nama', 'no_wa'],
       },
     },
   },
@@ -136,24 +157,44 @@ export async function onRequestPost(context) {
 
     // ── Tidak ada function call → kembalikan langsung ────────────────────────
     if (!toolCalls || toolCalls.length === 0) {
-      return jsonOk({ reply: assistantMsg.content ?? '', properties: [] });
+      return jsonOk({ reply: assistantMsg.content ?? '', properties: [], leadSubmitted: false, waUrl: null });
     }
 
-    // ── Ada tool_calls → eksekusi search, lalu putaran 2 ───────────────────
+    // ── Ada tool_calls → eksekusi tools, lalu putaran 2 ───────────────────
     let lastSearchResults = [];
+    let leadResult = null;
 
     for (const tc of toolCalls) {
-      if (tc.function?.name !== 'search_properties') continue;
       let args = {};
-      try { args = JSON.parse(tc.function.arguments ?? '{}'); } catch { args = {}; }
-      const results = await searchProperties(env, args);
-      lastSearchResults = results;
+      try { args = JSON.parse(tc.function?.arguments ?? '{}'); } catch { args = {}; }
+
+      if (tc.function?.name === 'search_properties') {
+        lastSearchResults = await searchProperties(env, args);
+      } else if (tc.function?.name === 'submit_lead') {
+        leadResult = await createLead(env, context, { ...args, source_page: 'chat' });
+      }
     }
 
-    // ── Putaran 2: inject hasil search ke system prompt, lalu Groq merespons
-    const resultContext = lastSearchResults.length > 0
-      ? `\n\nHASIL PENCARIAN PROPERTI (${lastSearchResults.length} listing ditemukan):\n${JSON.stringify(lastSearchResults)}\n\nGunakan data di atas untuk menjawab user. Sebutkan nama properti, harga, dan lokasi dari data yang tersedia.`
-      : '\n\nHASIL PENCARIAN: Tidak ada properti yang sesuai kriteria user. Sampaikan dengan jujur dan tawarkan alternatif (lokasi/budget berbeda).';
+    // ── Putaran 2: inject hasil tools ke system prompt, lalu Groq merespons
+    const contextParts = [];
+
+    if (toolCalls.some(tc => tc.function?.name === 'search_properties')) {
+      contextParts.push(lastSearchResults.length > 0
+        ? `HASIL PENCARIAN PROPERTI (${lastSearchResults.length} listing ditemukan):\n${JSON.stringify(lastSearchResults)}\n\nGunakan data di atas untuk menjawab user. Sebutkan nama properti, harga, dan lokasi dari data yang tersedia.`
+        : 'HASIL PENCARIAN: Tidak ada properti yang sesuai kriteria user. Sampaikan dengan jujur dan tawarkan alternatif (lokasi/budget berbeda).');
+    }
+
+    if (toolCalls.some(tc => tc.function?.name === 'submit_lead')) {
+      if (leadResult?.error === 'no_wa_invalid') {
+        contextParts.push('SUBMIT LEAD: Nomor WhatsApp yang diberikan tidak valid. Minta user memberikan nomor yang benar (format 08xx atau 628xx).');
+      } else if (leadResult?.success) {
+        contextParts.push('SUBMIT LEAD: Data lead berhasil disimpan. Beri konfirmasi ramah ke user bahwa tim SBP akan segera menghubungi mereka via WhatsApp.');
+      } else {
+        contextParts.push('SUBMIT LEAD: Terjadi kesalahan teknis saat menyimpan data. Sampaikan permintaan maaf dan minta user coba lagi.');
+      }
+    }
+
+    const resultContext = contextParts.length > 0 ? '\n\n' + contextParts.join('\n\n') : '';
 
     const messages2 = [
       { role: 'system', content: SYSTEM_PROMPT + resultContext },
@@ -164,8 +205,10 @@ export async function onRequestPost(context) {
     const finalMsg = round2.choices?.[0]?.message;
 
     return jsonOk({
-      reply:      finalMsg?.content ?? '',
-      properties: lastSearchResults,
+      reply:         finalMsg?.content ?? '',
+      properties:    lastSearchResults,
+      leadSubmitted: leadResult?.success === true,
+      waUrl:         leadResult?.wa_url ?? null,
     });
 
   } catch (err) {
