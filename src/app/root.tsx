@@ -130,6 +130,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Hero background — dipakai sebagai og:image fallback situs-wide (pages tanpa meta sendiri)
+const SITE_OG_IMAGE = "https://images.salambumi.xyz/kost%20dijual%20jogja.webp";
+
 export function meta() {
   return [
     { title: "Salam Bumi Property | Portal Properti Terpercaya Yogyakarta" },
@@ -137,6 +140,12 @@ export function meta() {
     { name: "robots", content: "index, follow" },
     { property: "og:site_name", content: "Salam Bumi Property" },
     { property: "og:type", content: "website" },
+    { property: "og:image", content: SITE_OG_IMAGE },
+    { property: "og:image:width", content: "2560" },
+    { property: "og:image:height", content: "1440" },
+    { property: "og:image:alt", content: "Properti pilihan di Yogyakarta — Salam Bumi Property" },
+    { name: "twitter:card", content: "summary_large_image" },
+    { name: "twitter:image", content: SITE_OG_IMAGE },
   ];
 }
 
