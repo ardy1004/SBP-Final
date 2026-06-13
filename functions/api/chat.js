@@ -153,10 +153,17 @@ export async function onRequestPost(context) {
       return jsonOk({ reply: assistantMsg.content ?? '', properties: [] });
     }
 
+    // Sanitasi assistantMsg — hanya kirim field yang diterima Groq API
+    const assistantMsgClean = {
+      role:       'assistant',
+      content:    assistantMsg.content ?? null,
+      tool_calls: assistantMsg.tool_calls,
+    };
+
     // ── Putaran 2: respons final tanpa tool ──────────────────────────────────
     const messages2 = [
       ...messages,
-      assistantMsg,
+      assistantMsgClean,
       ...toolResultMessages,
     ];
 
