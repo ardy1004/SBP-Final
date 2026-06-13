@@ -12,13 +12,13 @@ function extractCoords(url) {
   m = url.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
   if (m) return { latitude: parseFloat(m[1]), longitude: parseFloat(m[2]), source: 'embed_pattern' };
 
-  // ?q=lat,lng atau &q=lat,lng
-  m = url.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
+  // ?q=lat,lng atau &q=lat,lng — [+-]? non-capturing sebelum lng untuk handle tanda plus
+  m = url.match(/[?&]q=(-?\d+\.\d+),\s*[+-]?(\d+\.\d+)/);
   if (m) return { latitude: parseFloat(m[1]), longitude: parseFloat(m[2]), source: 'q_param' };
 
-  // /lat,lng di path (fallback generik)
-  m = url.match(/\/(-?\d{1,3}\.\d{4,}),(-?\d{1,3}\.\d{4,})/);
-  if (m) return { latitude: parseFloat(m[1]), longitude: parseFloat(m[2]), source: 'path_pattern' };
+  // /lat,lng di path (fallback generik) — handle tanda + eksplisit di depan koordinat
+  m = url.match(/\/([+-]?\d{1,3}\.\d{4,}),\s*[+-]?(\d{1,3}\.\d{4,})/);
+  if (m) return { latitude: parseFloat(m[1]), longitude: parseFloat(m[2]), source: 'generic_path' };
 
   return null;
 }
