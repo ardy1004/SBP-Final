@@ -89,13 +89,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Links />
         {scVerif && <meta name="google-site-verification" content={scVerif} suppressHydrationWarning />}
         {pixelScript && <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: pixelScript }} />}
-        {ga4Id && <script async src={`https://www.googletagmanager.com/gtag/js?id=${ga4Id}`} />}
+        {ga4Id && <script suppressHydrationWarning async src={`https://www.googletagmanager.com/gtag/js?id=${ga4Id}`} />}
         {gtagScript && <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: gtagScript }} />}
         {gtmHeadScript && <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: gtmHeadScript }} />}
       </head>
       <body>
         {gtmId && (
-          <noscript>
+          <noscript suppressHydrationWarning>
             <iframe
               src={`https://www.googletagmanager.com/ns.html?id=${gtmId}`}
               height="0" width="0"
