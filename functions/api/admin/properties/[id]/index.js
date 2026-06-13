@@ -3,6 +3,7 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
+import { parseGmapsCoords } from '../../../../_lib/parseGmapsCoords.js';
 
 const VALID_JENIS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
 const VALID_TUJUAN = ['dijual','disewa','dijual_disewa'];
@@ -207,6 +208,17 @@ export async function onRequestPatch(context) {
   if (Object.keys(errors).length > 0) return jsonError('Validasi gagal', 422, errors);
   if (pairs.length === 0) return jsonError('Tidak ada field yang dikirim', 400);
 
+  // Auto-extract lat/lng from gmaps_link jika field tersebut dikirim
+  if (body.gmaps_link !== undefined) {
+    const link = typeof body.gmaps_link === 'string' ? body.gmaps_link.trim() : null;
+    if (!link) {
+      pairs.push({ col: 'latitude', val: null }, { col: 'longitude', val: null });
+    } else {
+      const geo = await parseGmapsCoords(link);
+      pairs.push({ col: 'latitude', val: geo.latitude }, { col: 'longitude', val: geo.longitude });
+    }
+  }
+
   try {
     const setClauses = pairs.map(p => `${p.col} = ?`).join(', ');
     const vals = pairs.map(p => p.val);
@@ -214,7 +226,7 @@ export async function onRequestPatch(context) {
       `UPDATE properties SET ${setClauses}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
     ).bind(...vals, id).run();
 
-    const updated = await env.DB.prepare('SELECT id, title, status_publish, updated_at FROM properties WHERE id = ?').bind(id).first();
+    const updated = await env.DB.prepare('SELECT id, title, status_publish, updated_at, latitude, longitude FROM properties WHERE id = ?').bind(id).first();
     return jsonOk({ pesan: 'Properti berhasil diperbarui', properti: updated });
   } catch (err) {
     console.error('[admin property PATCH]', err.message);

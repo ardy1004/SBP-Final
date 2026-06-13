@@ -46,6 +46,8 @@ interface PropertyDetail {
   kelurahan: string | null;
   alamat: string | null;
   gmaps_link: string | null;
+  latitude: number | null;
+  longitude: number | null;
   lebar_jalan_m: number | null;
   jarak_sungai_m: number | null;
   jarak_makam_m: number | null;
@@ -164,6 +166,7 @@ export default function AdminPropertyDetailPage() {
   const [saving, setSaving]           = useState(false);
   const [saveMsg, setSaveMsg]         = useState('');
   const [saveError, setSaveError]     = useState('');
+  const [geoCoords, setGeoCoords]     = useState<{ latitude: number | null; longitude: number | null } | null>(null);
 
   // Location cascade
   const [provList, setProvList] = useState<ApiLocation[]>([]);
@@ -244,6 +247,7 @@ export default function AdminPropertyDetailPage() {
         badge_premium: d.badge_premium, badge_featured: d.badge_featured, badge_hot: d.badge_hot,
         properti_pilihan: d.properti_pilihan, verified: d.verified, status_sold: d.status_sold,
       });
+      setGeoCoords({ latitude: d.latitude ?? null, longitude: d.longitude ?? null });
       setStatusPending(d.status_publish as StatusValue);
     } catch (err: unknown) {
       setFetchError(err instanceof Error ? err.message : 'Gagal memuat properti');
@@ -397,6 +401,8 @@ export default function AdminPropertyDetailPage() {
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       setSaveMsg('Tersimpan ✓');
       setTimeout(() => setSaveMsg(''), 3000);
+      const saved = json.data?.properti;
+      if (saved) setGeoCoords({ latitude: saved.latitude ?? null, longitude: saved.longitude ?? null });
     } catch (err: unknown) {
       setSaveError(err instanceof Error ? err.message : 'Gagal menyimpan');
     } finally {
@@ -707,6 +713,11 @@ export default function AdminPropertyDetailPage() {
             </Field>
             <Field label="Link Google Maps">
               <input type="text" value={form.gmaps_link ?? ''} onChange={e => setForm(f => ({ ...f, gmaps_link: e.target.value || null }))} className={inputCls} />
+              {geoCoords?.latitude != null
+                ? <p className="text-xs mt-1 text-emerald-600">📍 Koordinat: {geoCoords.latitude}, {geoCoords.longitude}</p>
+                : form.gmaps_link
+                  ? <p className="text-xs mt-1 text-amber-600">⚠️ Koordinat tidak terdeteksi — simpan untuk mencoba lagi</p>
+                  : null}
             </Field>
           </div>
         </section>

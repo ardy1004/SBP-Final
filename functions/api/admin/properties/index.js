@@ -4,6 +4,7 @@
 
 import { jsonOk, jsonCreated, jsonError, handleOptions } from '../../_shared/response.js';
 import { generateMetaSeo } from '../../../_lib/metaSeo.js';
+import { parseGmapsCoords } from '../../../_lib/parseGmapsCoords.js';
 
 const VALID_STATUSES = new Set(['draft', 'published', 'sold', 'archived']);
 const VALID_JENIS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
@@ -110,6 +111,7 @@ export async function onRequestPost(context) {
   const luas_tanah   = parseInt(body.luas_tanah, 10) || null;
   const luas_bangunan = parseInt(body.luas_bangunan, 10) || null;
   const nego         = body.nego ? 1 : 0;
+  const gmaps_link   = body.gmaps_link ? sanitize(String(body.gmaps_link), 500) || null : null;
 
   const errors = {};
   if (!title)                    errors.title          = 'Judul properti wajib diisi';
@@ -134,6 +136,13 @@ export async function onRequestPost(context) {
     return jsonError('Gagal generate kode listing', 500);
   }
 
+  let geo_lat = null, geo_lng = null;
+  if (gmaps_link) {
+    const geo = await parseGmapsCoords(gmaps_link);
+    geo_lat = geo.latitude;
+    geo_lng = geo.longitude;
+  }
+
   let detailsVal = null;
   if (body.details != null && typeof body.details === 'object') {
     try { detailsVal = JSON.stringify(body.details); } catch { /* ignore */ }
@@ -148,12 +157,13 @@ export async function onRequestPost(context) {
       INSERT INTO properties
         (kode_listing, title, slug, jenis_properti, tujuan, harga,
          provinsi, kabupaten, kecamatan, kelurahan, alamat,
+         gmaps_link, latitude, longitude,
          details, meta_title, meta_description,
          status_publish, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,  ?,?,?,?,?,  ?, ?,?,  'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      VALUES (?,?,?,?,?,?,  ?,?,?,?,?,  ?,?,?,  ?,?,?,  'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     `).bind(kode_listing, title, slug, jenis, tujuan, harga,
-            provinsi, kabupaten, kecamatan, '', '', detailsVal,
-            meta.meta_title, meta.meta_description).run();
+            provinsi, kabupaten, kecamatan, '', '', gmaps_link, geo_lat, geo_lng,
+            detailsVal, meta.meta_title, meta.meta_description).run();
 
     const newId = result.meta?.last_row_id;
     return jsonCreated({ id: newId, kode_listing, slug });
