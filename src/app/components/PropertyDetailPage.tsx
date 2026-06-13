@@ -120,8 +120,8 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
 
     if (res.success && res.data) {
       setSubmitted(true);
-      // wa_url sudah mengandung pesan terformat dari Worker
-      window.open(res.data.wa_url, '_blank');
+      // Gunakan location.href (bukan window.open) agar tidak diblokir in-app browser (Meta Ads, IG)
+      window.location.href = res.data.wa_url;
     } else {
       setApiError(res.error ?? 'Gagal menyimpan pesan. Coba lagi.');
     }
