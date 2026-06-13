@@ -79,13 +79,6 @@ export default function AboutPage() {
                 desc: 'Berpengalaman dalam pemasaran properti dan pelayanan klien. Monica adalah wajah pertama yang akan Anda temui saat berinteraksi dengan SBP.',
                 wa: '6281391278889',
               },
-              {
-                nama: 'Ardy Salam',
-                jabatan: 'Founder & Principal Agent',
-                foto: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&q=80',
-                desc: 'Pendiri CV Salam Bumi Property dengan rekam jejak lebih dari 5 tahun di industri properti Yogyakarta. Spesialisasi investasi properti dan legalitas.',
-                wa: '6281391278889',
-              },
             ].map(t => (
               <div key={t.nama} className="text-center bg-[#F0F4F8] rounded-3xl p-8">
                 <img src={t.foto} alt={t.nama} className="w-28 h-28 rounded-full object-cover mx-auto mb-4 border-4 border-[#1565C0]"
