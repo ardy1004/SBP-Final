@@ -214,11 +214,18 @@ export default function AdminLeadsPage() {
                           <GripVertical size={13} className="text-[#CBD5E1] flex-shrink-0" />
                         </div>
 
-                        {/* Properti */}
+                        {/* Properti — judul jadi link jika ada source_page URL */}
                         {lead.properti_title && (
                           <div className="flex items-center gap-1 mb-1.5">
                             <Home size={10} className="text-[#94A3B8] flex-shrink-0" />
-                            <span className="text-xs text-[#64748B] line-clamp-1">{lead.properti_title}</span>
+                            {lead.source_page?.startsWith('http') ? (
+                              <a href={lead.source_page} target="_blank" rel="noopener noreferrer"
+                                className="text-xs text-[#1565C0] line-clamp-1 hover:underline">
+                                {lead.properti_title}
+                              </a>
+                            ) : (
+                              <span className="text-xs text-[#64748B] line-clamp-1">{lead.properti_title}</span>
+                            )}
                           </div>
                         )}
 
@@ -234,7 +241,7 @@ export default function AdminLeadsPage() {
                               style={{ background: TIPE_COLORS[lead.tipe_pengirim ?? ''] ?? '#64748B' }}>
                               {TIPE_LABEL[lead.tipe_pengirim ?? ''] ?? (lead.tipe_pengirim ?? '–')}
                             </span>
-                            {src && (
+                            {src && !lead.source_page?.startsWith('http') && (
                               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">
                                 {src}
                               </span>
@@ -249,28 +256,22 @@ export default function AdminLeadsPage() {
                         {/* Action buttons */}
                         <div className="flex items-center gap-1 pt-2 border-t border-gray-50">
                           {lead.no_wa ? (
-                            <a href={`tel:${lead.no_wa}`}
-                              className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[#64748B] hover:bg-gray-50 transition-colors">
-                              <Phone size={11} />
-                              <span style={{ fontSize: '10px' }}>Telepon</span>
-                            </a>
+                            <>
+                              <a href={`tel:${lead.no_wa}`}
+                                className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[#64748B] hover:bg-gray-50 transition-colors">
+                                <Phone size={11} />
+                                <span style={{ fontSize: '10px' }}>Telepon</span>
+                              </a>
+                              <a href={`https://wa.me/${lead.no_wa.replace(/\D/g, '')}?text=Halo ${encodeURIComponent(lead.nama ?? 'Tamu')}, saya dari SBP...`}
+                                target="_blank" rel="noopener noreferrer"
+                                className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[#10B981] hover:bg-[#F0FFF4] transition-colors">
+                                <MessageCircle size={11} />
+                                <span style={{ fontSize: '10px' }}>WhatsApp</span>
+                              </a>
+                            </>
                           ) : (
-                            <span className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[#CBD5E1] cursor-not-allowed">
-                              <Phone size={11} />
-                              <span style={{ fontSize: '10px' }}>–</span>
-                            </span>
-                          )}
-                          {lead.no_wa ? (
-                            <a href={`https://wa.me/${lead.no_wa.replace(/\D/g, '')}?text=Halo ${encodeURIComponent(lead.nama ?? 'Tamu')}, saya dari SBP...`}
-                              target="_blank" rel="noopener noreferrer"
-                              className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[#10B981] hover:bg-[#F0FFF4] transition-colors">
-                              <MessageCircle size={11} />
-                              <span style={{ fontSize: '10px' }}>WhatsApp</span>
-                            </a>
-                          ) : (
-                            <span className="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-[#CBD5E1] cursor-not-allowed">
-                              <MessageCircle size={11} />
-                              <span style={{ fontSize: '10px' }}>–</span>
+                            <span className="flex-1 text-[10px] text-[#94A3B8] italic py-1">
+                              Belum ada kontak
                             </span>
                           )}
                           <div className="relative group">
