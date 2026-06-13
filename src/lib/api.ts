@@ -373,8 +373,13 @@ export interface MapPinItem {
   harga: number;
   tujuan: string;
   jenis_properti: string;
+  provinsi: string;
   kecamatan: string;
   kabupaten: string;
+  luas_tanah: number | null;
+  luas_bangunan: number | null;
+  jumlah_kamar_tidur: number | null;
+  jumlah_kamar_mandi: number | null;
   latitude: number;
   longitude: number;
   cover_url: string | null;

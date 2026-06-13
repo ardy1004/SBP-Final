@@ -47,7 +47,8 @@ export async function onRequestGet(context) {
     const result = await env.DB.prepare(`
       SELECT
         p.id, p.slug, p.title, p.tujuan, p.jenis_properti,
-        p.harga, p.kecamatan, p.kabupaten,
+        p.harga, p.provinsi, p.kecamatan, p.kabupaten,
+        p.luas_tanah, p.luas_bangunan, p.jumlah_kamar_tidur, p.jumlah_kamar_mandi,
         p.latitude, p.longitude,
         (SELECT url_webp FROM property_images
            WHERE property_id = p.id ORDER BY is_cover DESC, urutan ASC LIMIT 1) AS cover_url
