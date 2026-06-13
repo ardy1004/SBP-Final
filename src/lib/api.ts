@@ -366,6 +366,30 @@ export async function getPropertyBySlug(slug: string) {
   return apiFetch<ApiPropertyDetail>(`/properties/${slug}`);
 }
 
+export interface MapPinItem {
+  id: number;
+  slug: string;
+  title: string;
+  harga: number;
+  tujuan: string;
+  jenis_properti: string;
+  kecamatan: string;
+  kabupaten: string;
+  latitude: number;
+  longitude: number;
+  cover_url: string | null;
+}
+
+/** GET /api/properties/map — pin peta (hanya properti berkoordinat) */
+export async function getMapProperties(params: { tujuan?: string; jenis?: string; kabupaten?: string } = {}) {
+  const q = new URLSearchParams();
+  if (params.tujuan) q.set('tujuan', params.tujuan);
+  if (params.jenis)  q.set('jenis', params.jenis);
+  if (params.kabupaten) q.set('kabupaten', params.kabupaten);
+  const qs = q.toString() ? `?${q.toString()}` : '';
+  return apiFetch<{ items: MapPinItem[] }>(`/properties/map${qs}`);
+}
+
 /** POST /api/leads ⚠️ K6 kritis */
 export async function postLead(body: ApiLeadRequest) {
   return apiFetch<ApiLeadResponse>('/leads', {

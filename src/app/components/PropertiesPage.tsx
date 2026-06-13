@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
-import { SlidersHorizontal, Grid3X3, List, X, ChevronDown, RotateCcw, MapPin, AlertCircle, RefreshCw, Search, Building2 } from 'lucide-react';
+import { SlidersHorizontal, Grid3X3, List, Map, X, ChevronDown, RotateCcw, MapPin, AlertCircle, RefreshCw, Search, Building2 } from 'lucide-react';
+
+const LazyPropertyMap = lazy(() => import('./PropertyMap'));
 import {
   getProperties, getLocations, getAllLocations, normalizeProperty,
   type NormalizedProperty, type ApiLocation, type PropertiesParams,
@@ -81,8 +83,10 @@ export default function PropertiesPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'map'>('grid');
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+  useEffect(() => { setIsMounted(true); }, []);
 
   // ── Filter state ──────────────────────────────────────────────────────────
   const [tujuan, setTujuan] = useState(searchParams.get('tujuan') || 'semua');
@@ -700,12 +704,22 @@ export default function PropertiesPage() {
                   <button onClick={() => setViewMode('list')} className={`p-1.5 rounded-lg ${viewMode === 'list' ? 'bg-[#1565C0] text-white' : 'text-gray-400'}`}>
                     <List size={16} />
                   </button>
+                  <button onClick={() => setViewMode('map')} className={`p-1.5 rounded-lg ${viewMode === 'map' ? 'bg-[#1565C0] text-white' : 'text-gray-400'}`} title="Tampilan Peta">
+                    <Map size={16} />
+                  </button>
                 </div>
               </div>
             </div>
 
+            {/* ─── Tampilan Peta ─── */}
+            {viewMode === 'map' && isMounted && (
+              <Suspense fallback={<div className="h-[560px] rounded-2xl bg-gray-50 flex items-center justify-center"><p className="text-gray-400 text-sm">Memuat peta…</p></div>}>
+                <LazyPropertyMap filters={{ tujuan, jenis: selectedJenis, kabupaten }} />
+              </Suspense>
+            )}
+
             {/* Konten utama: Loading / Error / Empty / Grid / List */}
-            {loading && properties.length === 0 ? (
+            {viewMode !== 'map' && (loading && properties.length === 0 ? (
               viewMode === 'grid' ? <SkeletonCards /> : <SkeletonListItems />
             ) : error ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -768,10 +782,10 @@ export default function PropertiesPage() {
                   </div>
                 ))}
               </div>
-            )}
+            ))}
 
             {/* Muat Lebih Banyak — server-side load more (akumulatif) */}
-            {!error && properties.length > 0 && properties.length < totalCount && (
+            {viewMode !== 'map' && !error && properties.length > 0 && properties.length < totalCount && (
               <div className="flex justify-center mt-8">
                 <button
                   onClick={() => setLimit(prev => prev + 20)}
