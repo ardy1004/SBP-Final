@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { Link } from 'react-router';
 import { MapPin, Maximize2, BedDouble, Bath, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import { type Property } from '../data/mockData';
@@ -38,6 +38,7 @@ function formatHargaShort(n: number): string {
 
 export default function PropertyCard({ property, className = '' }: Props) {
   const [slideIdx, setSlideIdx] = useState(0);
+  const [dragOffset, setDragOffset] = useState(0);
   const touchStartX = useRef(0);
   const imgs = property.images;
   const total = imgs.length;
@@ -60,15 +61,21 @@ export default function PropertyCard({ property, className = '' }: Props) {
     e.preventDefault();
     setSlideIdx(i => (i + 1) % total);
   }
-  function onTouchStart(e: React.TouchEvent) {
+  const onTouchStart = useCallback((e: React.TouchEvent) => {
     touchStartX.current = e.touches[0].clientX;
-  }
-  function onTouchEnd(e: React.TouchEvent) {
+    setDragOffset(0);
+  }, []);
+  const onTouchMove = useCallback((e: React.TouchEvent) => {
+    if (total <= 1) return;
+    setDragOffset(e.touches[0].clientX - touchStartX.current);
+  }, [total]);
+  const onTouchEnd = useCallback((e: React.TouchEvent) => {
     const dx = e.changedTouches[0].clientX - touchStartX.current;
     if (total > 1 && Math.abs(dx) > 40) {
       setSlideIdx(i => dx < 0 ? (i + 1) % total : (i - 1 + total) % total);
     }
-  }
+    setDragOffset(0);
+  }, [total]);
 
   const dotsCount = Math.min(total, 5);
 
@@ -76,21 +83,35 @@ export default function PropertyCard({ property, className = '' }: Props) {
     <div className={`property-card bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm ${className}`}>
       {/* Slider */}
       <div
-        className="relative group"
+        className="relative group overflow-hidden"
         style={{ paddingTop: '66.67%' }}
         onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
       >
         {total > 0 ? (
-          <img
-            src={cfImg(imgs[slideIdx]!, 800)}
-            srcSet={cfSrcSet(imgs[slideIdx]!, [400, 800])}
-            sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 400px"
-            alt={property.title}
-            className="absolute inset-0 w-full h-full object-cover"
-            loading="lazy"
-            decoding="async"
-          />
+          <div
+            className="absolute inset-0 flex"
+            style={{
+              width: `${total * 100}%`,
+              transform: `translateX(calc(-${slideIdx * (100 / total)}% + ${dragOffset}px))`,
+              transition: dragOffset !== 0 ? 'none' : 'transform 0.3s ease',
+            }}
+          >
+            {imgs.map((img, i) => (
+              <img
+                key={i}
+                src={cfImg(img!, 800)}
+                srcSet={cfSrcSet(img!, [400, 800])}
+                sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 400px"
+                alt={i === 0 ? property.title : `${property.title} foto ${i + 1}`}
+                className="h-full object-cover flex-shrink-0"
+                style={{ width: `${100 / total}%` }}
+                loading={i === 0 ? 'eager' : 'lazy'}
+                decoding="async"
+              />
+            ))}
+          </div>
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-[#E3F2FD] to-[#BBDEFB] flex items-center justify-center">
             <span className="text-4xl opacity-40">{property.jenisEmoji}</span>

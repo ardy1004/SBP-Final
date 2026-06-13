@@ -51,9 +51,9 @@ body {
   0%   { transform: translate(0, 0); }
   100% { transform: translate(20px, -25px); }
 }
-@keyframes goldPulse {
-  0%,100% { box-shadow: 0 0 0 0 rgba(245,166,35,0.4); }
-  50%      { box-shadow: 0 0 0 8px rgba(245,166,35,0); }
+@keyframes premiumPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(245,166,35,0.7); }
+  50%       { opacity: 0.85; box-shadow: 0 0 0 4px rgba(245,166,35,0); }
 }
 @keyframes skeletonSweep {
   0%   { background-position: -200% 0; }
@@ -86,7 +86,7 @@ body {
   animation: floatOrb3 10s ease-in-out infinite alternate;
 }
 .premium-pulse {
-  animation: goldPulse 2.5s infinite;
+  animation: premiumPulse 1.8s ease-in-out infinite;
 }
 .skeleton-shimmer {
   background: linear-gradient(90deg, #E3F2FD 25%, #EFF6FF 50%, #E3F2FD 75%);
