@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { MessageCircle, X, Star } from 'lucide-react';
 import { postLead, formatRupiah, type NormalizedPropertyDetail } from '../../lib/api';
+import { trackEvent } from '../../lib/tracking';
 
 const RENCANA_MAP: Record<string, 'hard_cash' | 'soft_cash' | 'kpr'> = {
   'Hard Cash': 'hard_cash',
@@ -47,6 +48,13 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
     setSending(false);
     if (res.success && res.data) {
       setSubmitted(true);
+      trackEvent('Lead', {
+        content_name: property.title,
+        content_ids: [property.kode],
+        content_category: tipe,
+        value: property.harga,
+        currency: 'IDR',
+      });
       window.location.href = res.data.wa_url;
     } else {
       setApiError(res.error ?? 'Gagal menyimpan pesan. Coba lagi.');
@@ -58,13 +66,19 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
     if (skipLoading) return;
     setSkipLoading(true);
     const fallback = `https://wa.me/6281391278889?text=${encodeURIComponent(`Halo, saya tertarik dengan properti: ${property.title}`)}`;
+    let waUrl = fallback;
     try {
       const r = await fetch(`/api/properties/${property.slug}/wa-click`, { method: 'POST' });
       const d = await r.json();
-      window.location.href = d?.data?.wa_url ?? fallback;
-    } catch {
-      window.location.href = fallback;
-    }
+      waUrl = d?.data?.wa_url ?? fallback;
+    } catch { /* pakai fallback */ }
+    trackEvent('Contact', {
+      content_name: property.title,
+      content_ids: [property.kode],
+      value: property.harga,
+      currency: 'IDR',
+    });
+    window.location.href = waUrl;
   };
 
   const inputClass = 'w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0] transition-all';

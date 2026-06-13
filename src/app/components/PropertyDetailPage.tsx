@@ -122,6 +122,13 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
 
     if (res.success && res.data) {
       setSubmitted(true);
+      trackEvent('Lead', {
+        content_name: property.title,
+        content_ids: [property.kode],
+        content_category: tipe,
+        value: property.harga,
+        currency: 'IDR',
+      });
       // Gunakan location.href (bukan window.open) agar tidak diblokir in-app browser (Meta Ads, IG)
       window.location.href = res.data.wa_url;
     } else {
