@@ -317,6 +317,7 @@ export default function AdminListingPage() {
 
   return (
     <div className="space-y-5">
+      <div className="sticky top-0 z-10 bg-[#F0F4F8] pb-2 space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-xl font-bold text-[#0F172A]">Manajemen Properti</h1>
@@ -396,6 +397,7 @@ export default function AdminListingPage() {
             </button>
           ))}
         </div>
+      </div>
       </div>
 
       {/* Bulk action bar — slide down when something is selected */}
