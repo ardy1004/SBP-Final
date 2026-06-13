@@ -1,10 +1,11 @@
 // POST /api/properties/:slug/wa-click
 // Publik — tanpa auth.
 // Track klik tombol WA (sticky bar mobile) + simpan lead minimal ke DB.
-// Response: { success: true, wa_url: "https://wa.me/..." }
+// Response: { success: true, wa_url, event_id }
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { buildPropertyUrl } from '../../../_lib/propertyUrl.js';
+import { sendCapiEvent } from '../../../_lib/metaCapi.js';
 
 export async function onRequestPost(context) {
   const { env, params } = context;
@@ -14,32 +15,33 @@ export async function onRequestPost(context) {
     return jsonError('Slug tidak valid', 400);
   }
 
-  // Cari property_id — hanya properti published yang bisa di-track
-  let propertyId;
-  let propertyTitle;
-  let propertyRow;
+  // Cari property — tambahkan harga & kode_listing untuk CAPI customData
+  let propertyId, propertyTitle, propertyRow, propertyHarga = 0, propertyKode = '';
   try {
     const row = await env.DB
-      .prepare("SELECT id, title, slug, jenis_properti, tujuan, provinsi, kabupaten, kecamatan FROM properties WHERE slug = ? AND status_publish = 'published' LIMIT 1")
+      .prepare("SELECT id, title, slug, jenis_properti, tujuan, provinsi, kabupaten, kecamatan, harga, kode_listing FROM properties WHERE slug = ? AND status_publish = 'published' LIMIT 1")
       .bind(slug)
       .first();
     if (!row) return jsonError('Properti tidak ditemukan', 404);
     propertyId    = row.id;
     propertyTitle = row.title;
     propertyRow   = row;
+    propertyHarga = row.harga  ?? 0;
+    propertyKode  = row.kode_listing ?? '';
   } catch (err) {
     console.error('[wa-click] lookup failed:', err.message);
     return jsonError('Gagal memproses permintaan', 500);
   }
 
-  const waAdmin  = (env.WA_ADMIN ?? '6281391278889').replace(/\D/g, '');
-  const appUrl   = env.APP_URL ?? 'https://salambumi.xyz';
-  const propUrl  = buildPropertyUrl(propertyRow, appUrl);
-  const waPesan  = `Halo, saya tertarik dengan properti:\n*${propertyTitle}*\n${propUrl}\n\nBisakah saya mendapatkan info lebih lanjut?`;
-  const waUrl    = `https://wa.me/${waAdmin}?text=${encodeURIComponent(waPesan)}`;
+  const waAdmin = (env.WA_ADMIN ?? '6281391278889').replace(/\D/g, '');
+  const appUrl  = env.APP_URL ?? 'https://salambumi.xyz';
+  const propUrl = buildPropertyUrl(propertyRow, appUrl);
+  const waPesan = `Halo, saya tertarik dengan properti:\n*${propertyTitle}*\n${propUrl}\n\nBisakah saya mendapatkan info lebih lanjut?`;
+  const waUrl   = `https://wa.me/${waAdmin}?text=${encodeURIComponent(waPesan)}`;
 
-  // Jalankan keduanya paralel — wa_clicks analytics + leads insert
-  // Promise.allSettled agar satu gagal tidak blokir yang lain
+  const timestamp = Date.now();
+
+  // Jalankan keduanya paralel
   const [clickResult, leadResult] = await Promise.allSettled([
     env.DB.prepare(`
       INSERT INTO property_view_daily (property_id, tanggal, wa_clicks)
@@ -64,7 +66,35 @@ export async function onRequestPost(context) {
     console.error('[wa-click] leads insert failed:', leadResult.reason?.message);
   }
 
-  return jsonOk({ success: true, wa_url: waUrl });
+  const leadId = leadResult.status === 'fulfilled' ? leadResult.value?.meta?.last_row_id : null;
+  const contactEventId = `contact_${leadId ?? 0}_${timestamp}`;
+
+  // CAPI Contact — fire best-effort via waitUntil (tidak blocking response)
+  context.waitUntil((async () => {
+    try {
+      const pixelRes = await env.DB
+        .prepare("SELECT pixel_id, capi_access_token, events_enabled FROM pixel_configs WHERE is_active = 1 AND capi_access_token IS NOT NULL AND capi_access_token != ''")
+        .all();
+      const capiPixels = (pixelRes.results ?? []).filter(px => {
+        try { return JSON.parse(px.events_enabled ?? '[]').includes('Contact'); } catch { return false; }
+      });
+      if (capiPixels.length > 0) {
+        await Promise.allSettled(capiPixels.map(px => sendCapiEvent(env, {
+          pixelId:        px.pixel_id,
+          accessToken:    px.capi_access_token,
+          eventName:      'Contact',
+          eventId:        contactEventId,
+          eventSourceUrl: propUrl,
+          userData:       {},
+          customData:     { content_ids: [propertyKode], value: propertyHarga, currency: 'IDR' },
+        })));
+      }
+    } catch (err) {
+      console.error('[wa-click] CAPI dispatch error:', err?.message);
+    }
+  })());
+
+  return jsonOk({ success: true, wa_url: waUrl, event_id: contactEventId });
 }
 
 export async function onRequestOptions() {

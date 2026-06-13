@@ -54,7 +54,7 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
         content_category: tipe,
         value: property.harga,
         currency: 'IDR',
-      });
+      }, { eventID: res.data.event_id });
       window.location.href = res.data.wa_url;
     } else {
       setApiError(res.error ?? 'Gagal menyimpan pesan. Coba lagi.');
@@ -67,17 +67,19 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
     setSkipLoading(true);
     const fallback = `https://wa.me/6281391278889?text=${encodeURIComponent(`Halo, saya tertarik dengan properti: ${property.title}`)}`;
     let waUrl = fallback;
+    let contactEventId: string | undefined;
     try {
       const r = await fetch(`/api/properties/${property.slug}/wa-click`, { method: 'POST' });
       const d = await r.json();
       waUrl = d?.data?.wa_url ?? fallback;
+      contactEventId = d?.data?.event_id;
     } catch { /* pakai fallback */ }
     trackEvent('Contact', {
       content_name: property.title,
       content_ids: [property.kode],
       value: property.harga,
       currency: 'IDR',
-    });
+    }, { eventID: contactEventId });
     window.location.href = waUrl;
   };
 

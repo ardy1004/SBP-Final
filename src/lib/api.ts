@@ -206,6 +206,7 @@ export interface ApiLeadResponse {
   lead_id: number;
   wa_url: string;
   wa_pesan: string;
+  event_id?: string; // untuk dedup CAPI ↔ client Pixel (P4)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

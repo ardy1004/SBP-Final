@@ -1,19 +1,18 @@
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { buildPropertyUrl } from '../_lib/propertyUrl.js';
+import { sendCapiEvent } from '../_lib/metaCapi.js';
 
 // ─── Sanitasi ─────────────────────────────────────────────────────────────────
-// Strip tag HTML + karakter < > untuk mencegah XSS bila data dirender di admin
 function sanitize(val, maxLen = 500) {
   if (typeof val !== 'string') return '';
   return val
-    .replace(/<[^>]*>/g, '')   // strip HTML tags
-    .replace(/[<>"'`]/g, '')   // strip karakter berbahaya
+    .replace(/<[^>]*>/g, '')
+    .replace(/[<>"'`]/g, '')
     .trim()
     .slice(0, maxLen);
 }
 
 // ─── Validasi & normalisasi nomor WA Indonesia ───────────────────────────────
-// Format yang diterima: 08xx, 628xx, +628xx, 8xx → dinormalisasi ke 628xxx
 function normalizeWA(raw) {
   const d = String(raw).replace(/\D/g, '');
   if (d.startsWith('62')) return d;
@@ -26,7 +25,7 @@ function isValidWA(raw) {
   return /^628[0-9]{8,12}$/.test(normalizeWA(raw));
 }
 
-// ─── Builder pesan WA terformat (spec 8.8) ────────────────────────────────────
+// ─── Builder pesan WA ────────────────────────────────────────────────────────
 function buildWaPesan({ tipe_pengirim, nama, asal_daerah, budget,
                         rencana_pembayaran, pesan,
                         propertyTitle, propertyUrl }) {
@@ -56,7 +55,6 @@ function buildWaPesan({ tipe_pengirim, nama, asal_daerah, budget,
 export async function onRequestPost(context) {
   const { request, env } = context;
 
-  // Tolak content-type selain JSON
   const ct = request.headers.get('content-type') ?? '';
   if (!ct.includes('application/json')) {
     return jsonError('Content-Type harus application/json', 415);
@@ -92,17 +90,18 @@ export async function onRequestPost(context) {
     return jsonError('Validasi gagal', 422, errors);
   }
 
-  // ── Field opsional (sanitasi) ────────────────────────────────────────────────
+  // ── Field opsional ────────────────────────────────────────────────────────
   const asal_daerah        = sanitize(body.asal_daerah ?? '', 100) || null;
   const budget             = sanitize(body.budget ?? '', 50)       || null;
   const pesan              = sanitize(body.pesan ?? '', 1000)       || null;
   const rencana_raw        = sanitize(body.rencana_pembayaran ?? '', 20);
   const rencana_pembayaran = ['hard_cash', 'soft_cash', 'kpr'].includes(rencana_raw) ? rencana_raw : null;
 
-  // property_id: opsional integer
-  let property_id    = null;
-  let propertyTitle  = null;
-  let propertyUrl    = null;
+  let property_id   = null;
+  let propertyTitle = null;
+  let propertyUrl   = null;
+  let propertyHarga = 0;
+  let propertyKode  = '';
 
   const pidRaw = body.property_id;
   if (pidRaw !== undefined && pidRaw !== null) {
@@ -113,25 +112,27 @@ export async function onRequestPost(context) {
     property_id = pid;
   }
 
-  // Jika property_id disertakan, ambil judul untuk pesan WA
   if (property_id) {
     try {
       const prop = await env.DB
-        .prepare('SELECT title, slug, jenis_properti, tujuan, provinsi, kabupaten, kecamatan FROM properties WHERE id = ? AND status_publish = ?')
+        .prepare('SELECT title, slug, jenis_properti, tujuan, provinsi, kabupaten, kecamatan, harga, kode_listing FROM properties WHERE id = ? AND status_publish = ?')
         .bind(property_id, 'published')
         .first();
       if (prop) {
         propertyTitle = prop.title;
         propertyUrl   = buildPropertyUrl(prop, env.APP_URL ?? 'https://salambumi.xyz');
+        propertyHarga = prop.harga  ?? 0;
+        propertyKode  = prop.kode_listing ?? '';
       }
     } catch {
-      // Tidak fatal — lead tetap disimpan walau lookup gagal
+      // Tidak fatal
     }
   }
 
   const no_wa = normalizeWA(no_wa_raw);
 
-  // ── K6: simpan lead ke DB SEBELUM apa pun ────────────────────────────────────
+  // ── Simpan lead ke DB ────────────────────────────────────────────────────────
+  const timestamp = Date.now();
   let leadId;
   try {
     const result = await env.DB.prepare(`
@@ -156,7 +157,39 @@ export async function onRequestPost(context) {
     return jsonError('Gagal menyimpan lead. Silakan coba lagi.', 500);
   }
 
-  // ── Build pesan WA + URL (agar frontend tinggal buka wa.me) ─────────────────
+  const leadEventId = `lead_${leadId}_${timestamp}`;
+
+  // CAPI Lead — fire best-effort via waitUntil (tidak blocking response)
+  context.waitUntil((async () => {
+    try {
+      const pixelRes = await env.DB
+        .prepare("SELECT pixel_id, capi_access_token, events_enabled FROM pixel_configs WHERE is_active = 1 AND capi_access_token IS NOT NULL AND capi_access_token != ''")
+        .all();
+      const capiPixels = (pixelRes.results ?? []).filter(px => {
+        try { return JSON.parse(px.events_enabled ?? '[]').includes('Lead'); } catch { return false; }
+      });
+      if (capiPixels.length > 0) {
+        await Promise.allSettled(capiPixels.map(px => sendCapiEvent(env, {
+          pixelId:        px.pixel_id,
+          accessToken:    px.capi_access_token,
+          eventName:      'Lead',
+          eventId:        leadEventId,
+          eventSourceUrl: source_page,
+          userData:       no_wa ? { ph: no_wa } : {},
+          customData:     {
+            content_ids:      [propertyKode],
+            content_category: tipe,
+            value:            propertyHarga,
+            currency:         'IDR',
+          },
+        })));
+      }
+    } catch (err) {
+      console.error('[leads] CAPI dispatch error:', err?.message);
+    }
+  })());
+
+  // ── Build pesan WA ───────────────────────────────────────────────────────────
   const waPesan = buildWaPesan({
     tipe_pengirim: tipe,
     nama, asal_daerah, budget, rencana_pembayaran, pesan,
@@ -170,6 +203,7 @@ export async function onRequestPost(context) {
     lead_id:  leadId,
     wa_url:   waUrl,
     wa_pesan: waPesan,
+    event_id: leadEventId,
   }, 201);
 }
 

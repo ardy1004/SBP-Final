@@ -4,9 +4,9 @@ import { Lock, User, CheckCircle, XCircle, Eye, EyeOff, BarChart2, Plus, Trash2,
 
 interface AdminUser { sub: number; email: string; nama: string; role: string; }
 interface PasswordForm { password_lama: string; password_baru: string; password_baru_konfirmasi: string; }
-interface PixelConfig { id: number; label: string; pixel_id: string; is_active: number; events_enabled: string; created_at: string; }
+interface PixelConfig { id: number; label: string; pixel_id: string; is_active: number; events_enabled: string; created_at: string; has_capi_token: 0 | 1; }
 interface TrackingSettings { ga4_measurement_id: string; gtm_container_id: string; search_console_verification: string; }
-interface PixelFormState { mode: 'add' | 'edit'; id?: number; label: string; pixel_id: string; events: string[]; }
+interface PixelFormState { mode: 'add' | 'edit'; id?: number; label: string; pixel_id: string; events: string[]; capi_access_token: string; }
 interface Msg { type: 'success' | 'error'; text: string; }
 
 const ALL_EVENTS = ['PageView', 'ViewContent', 'Search', 'Contact', 'Lead'];
@@ -36,6 +36,7 @@ export default function AdminSettingsPage() {
   const [pixelMsg, setPixelMsg] = useState<Msg | null>(null);
   const [pixelForm, setPixelForm] = useState<PixelFormState | null>(null);
   const [savingPixel, setSavingPixel] = useState(false);
+  const [showCapiToken, setShowCapiToken] = useState(false);
 
   const [tracking, setTracking] = useState<TrackingSettings>({ ga4_measurement_id: '', gtm_container_id: '', search_console_verification: '' });
   const [savingTracking, setSavingTracking] = useState(false);
@@ -77,11 +78,12 @@ export default function AdminSettingsPage() {
   };
 
   // ── Pixel handlers ──
-  const openAddPixel = () => setPixelForm({ mode: 'add', label: '', pixel_id: '', events: [...ALL_EVENTS] });
+  const openAddPixel = () => { setShowCapiToken(false); setPixelForm({ mode: 'add', label: '', pixel_id: '', events: [...ALL_EVENTS], capi_access_token: '' }); };
   const openEditPixel = (px: PixelConfig) => {
     let events: string[];
     try { events = JSON.parse(px.events_enabled); } catch { events = [...ALL_EVENTS]; }
-    setPixelForm({ mode: 'edit', id: px.id, label: px.label, pixel_id: px.pixel_id, events });
+    setShowCapiToken(false);
+    setPixelForm({ mode: 'edit', id: px.id, label: px.label, pixel_id: px.pixel_id, events, capi_access_token: '' });
   };
 
   const handleSavePixel = async () => {
@@ -93,7 +95,15 @@ export default function AdminSettingsPage() {
       const isEdit = pixelForm.mode === 'edit';
       const url = isEdit ? `/api/admin/pixel-configs/${pixelForm.id}` : '/api/admin/pixel-configs';
       const method = isEdit ? 'PATCH' : 'POST';
-      const res = await fetch(url, { method, credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label, pixel_id, events_enabled: pixelForm.events }) });
+      const patchBody: Record<string, unknown> = { label, pixel_id, events_enabled: pixelForm.events };
+      if (pixelForm.capi_access_token.trim()) {
+        patchBody.capi_access_token = pixelForm.capi_access_token.trim();
+      } else if (!isEdit) {
+        // add mode, blank = omit (stays NULL)
+      } else {
+        // edit mode, blank = no change (don't send key)
+      }
+      const res = await fetch(url, { method, credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patchBody) });
       const data = await res.json();
       if (data.success) {
         const saved: PixelConfig = data.data.pixel;
@@ -223,7 +233,10 @@ export default function AdminSettingsPage() {
                         <span className="text-sm font-medium text-[#0F172A] truncate">{px.label}</span>
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${px.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{px.is_active ? 'Aktif' : 'Nonaktif'}</span>
                       </div>
-                      <div className="text-[11px] text-[#64748B] font-mono">{px.pixel_id}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-[#64748B] font-mono">{px.pixel_id}</span>
+                        {px.has_capi_token ? <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">CAPI ✓</span> : null}
+                      </div>
                       <div className="flex flex-wrap gap-1 mt-1">
                         {evts.map(ev => <span key={ev} className="text-[9px] px-1.5 py-0.5 rounded bg-[#E3F2FD] text-[#1565C0] font-medium">{ev}</span>)}
                       </div>
@@ -254,6 +267,23 @@ export default function AdminSettingsPage() {
                   <label className="block text-xs font-medium text-[#374151] mb-1">Pixel ID *</label>
                   <input value={pixelForm.pixel_id} onChange={e => setPixelForm(f => f ? { ...f, pixel_id: e.target.value } : f)} placeholder="000000000000000" className={inputClassNoPR} />
                 </div>
+              </div>
+              <div className="mb-3">
+                <label className="block text-xs font-medium text-[#374151] mb-1">CAPI Access Token <span className="text-[#94A3B8] font-normal">(opsional)</span></label>
+                <div className="relative">
+                  <input
+                    type={showCapiToken ? 'text' : 'password'}
+                    value={pixelForm.capi_access_token}
+                    onChange={e => setPixelForm(f => f ? { ...f, capi_access_token: e.target.value } : f)}
+                    placeholder={pixelForm.mode === 'edit' ? '(kosong = tidak ubah)' : '(kosong = tidak dikonfigurasi)'}
+                    className={inputClass}
+                    autoComplete="off"
+                  />
+                  <button type="button" onClick={() => setShowCapiToken(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-[#64748B]">
+                    {showCapiToken ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-[#94A3B8] mt-0.5">Dapatkan dari Meta Events Manager → Settings → Conversions API</p>
               </div>
               <div className="mb-3">
                 <label className="block text-xs font-medium text-[#374151] mb-1.5">Events yang di-track</label>

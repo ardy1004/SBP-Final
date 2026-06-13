@@ -20,16 +20,27 @@ declare global {
  * Untuk GA4: fire ke semua jika ga4_measurement_id ada.
  *
  * Gunakan event names standar Meta: 'ViewContent', 'Search', 'Contact', 'Lead', 'PageView'.
+ * @param options.eventID - eventID untuk dedup dengan CAPI server-side (P4)
  */
-export function trackEvent(eventName: string, params?: Record<string, unknown>): void {
+export function trackEvent(
+  eventName: string,
+  params?: Record<string, unknown>,
+  options?: { eventID?: string },
+): void {
   if (typeof window === 'undefined') return;
 
   // Meta Pixel — fire per-pixel (hanya yang events_enabled include eventName)
   if (window.fbq && window._sbpTracking?.pixels?.length) {
     for (const px of window._sbpTracking.pixels) {
       if (px.events_enabled.includes(eventName)) {
-        // trackSingle agar hanya satu pixel yang menerima event ini (multi-pixel safe)
-        window.fbq('trackSingle', px.pixel_id, eventName, params ?? {});
+        // trackSingle: multi-pixel safe; 5th arg eventID untuk dedup CAPI
+        window.fbq(
+          'trackSingle',
+          px.pixel_id,
+          eventName,
+          params ?? {},
+          options?.eventID ? { eventID: options.eventID } : {},
+        );
       }
     }
   }

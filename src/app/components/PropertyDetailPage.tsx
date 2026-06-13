@@ -128,7 +128,7 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
         content_category: tipe,
         value: property.harga,
         currency: 'IDR',
-      });
+      }, { eventID: res.data.event_id });
       // Gunakan location.href (bukan window.open) agar tidak diblokir in-app browser (Meta Ads, IG)
       window.location.href = res.data.wa_url;
     } else {

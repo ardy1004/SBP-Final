@@ -1,4 +1,4 @@
-// PATCH /api/admin/pixel-configs/:id — update label/pixel_id/is_active/events_enabled
+// PATCH /api/admin/pixel-configs/:id — update label/pixel_id/is_active/events_enabled/capi_access_token
 // DELETE /api/admin/pixel-configs/:id — hapus pixel config
 // Auth: dilindungi _middleware.js
 
@@ -34,16 +34,26 @@ export async function onRequestPatch({ env, request, params }) {
     setClauses.push('events_enabled = ?');
     values.push(JSON.stringify(Array.isArray(body.events_enabled) ? body.events_enabled : []));
   }
+  // capi_access_token: '' atau null → hapus token; string non-kosong → simpan; undefined → tidak ubah
+  if (body.capi_access_token !== undefined) {
+    const token = (typeof body.capi_access_token === 'string' && body.capi_access_token.trim())
+      ? body.capi_access_token.trim()
+      : null;
+    setClauses.push('capi_access_token = ?'); values.push(token);
+  }
 
   if (setClauses.length === 0) return jsonError('Tidak ada field yang diupdate');
 
   values.push(id);
   try {
     const row = await env.DB
-      .prepare(`UPDATE pixel_configs SET ${setClauses.join(', ')} WHERE id = ? RETURNING id, label, pixel_id, is_active, events_enabled, created_at`)
+      .prepare(`UPDATE pixel_configs SET ${setClauses.join(', ')} WHERE id = ? RETURNING id, label, pixel_id, is_active, events_enabled, capi_access_token, created_at`)
       .bind(...values)
       .first();
-    return jsonOk({ pixel: row });
+
+    const hasCapiToken = (row.capi_access_token != null && row.capi_access_token !== '') ? 1 : 0;
+    const { capi_access_token: _ct, ...safeRow } = row;
+    return jsonOk({ pixel: { ...safeRow, has_capi_token: hasCapiToken } });
   } catch (err) {
     console.error('[pixel-configs PATCH]', err.message);
     return jsonError('Gagal mengupdate pixel config', 500);
