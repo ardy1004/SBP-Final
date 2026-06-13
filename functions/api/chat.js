@@ -4,7 +4,14 @@ import { searchProperties } from '../_lib/searchProperties.js';
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODEL    = 'llama-3.3-70b-versatile';
 
-const SYSTEM_PROMPT = `Kamu adalah Asisten SBP (Salam Bumi Property), asisten AI yang membantu calon pembeli/penyewa mencari properti di Yogyakarta. Gunakan tool search_properties untuk mencari listing berdasarkan kriteria yang disebutkan user (lokasi, jenis properti, budget, jumlah kamar, dll). JANGAN mengarang informasi properti yang tidak ada di hasil tool — hanya rekomendasikan dari hasil pencarian. Jika hasil kosong, sampaikan dengan jujur dan tawarkan kriteria alternatif. Jawab singkat, ramah, dan natural dalam Bahasa Indonesia.`;
+const SYSTEM_PROMPT = `Kamu adalah Asisten SBP (Salam Bumi Property), asisten AI yang membantu calon pembeli/penyewa mencari properti di Yogyakarta. Gunakan tool search_properties untuk mencari listing berdasarkan kriteria yang disebutkan user (lokasi, jenis properti, budget, jumlah kamar, dll). JANGAN mengarang informasi properti yang tidak ada di hasil tool — hanya rekomendasikan dari hasil pencarian. Jika hasil kosong, sampaikan dengan jujur dan tawarkan kriteria alternatif. Jawab singkat, ramah, dan natural dalam Bahasa Indonesia.
+
+PENTING - Konversi notasi harga Indonesia ke angka Rupiah penuh sebelum memanggil search_properties:
+- 'M' atau 'Milyar' atau 'Miliar' setelah angka = dikali 1.000.000.000. Contoh: '5M' atau '5 Milyar' = 5000000000
+- 'Jt' atau 'jt' atau 'juta' = dikali 1.000.000. Contoh: '500jt' atau '500 Juta' = 500000000
+- 'rb' atau 'ribu' = dikali 1.000. Contoh: '500rb' = 500000
+- Kalau user sebut angka tanpa satuan dalam konteks properti (misal 'budget 800'), asumsikan dalam Milyar jika < 100, atau Juta jika antara 100-999, sesuai kewajaran harga properti.
+- SELALU kirim harga_min/harga_max sebagai angka Rupiah penuh (integer), BUKAN dalam notasi singkat.`;
 
 const TOOLS = [
   {
@@ -27,8 +34,8 @@ const TOOLS = [
           },
           kabupaten: { type: 'string', description: 'Nama kabupaten/kota. Contoh: Sleman, Bantul, Gunung Kidul.' },
           kecamatan: { type: 'string', description: 'Nama kecamatan.' },
-          harga_min:  { type: 'integer', description: 'Harga minimum dalam Rupiah.' },
-          harga_max:  { type: 'integer', description: 'Harga maksimum dalam Rupiah.' },
+          harga_min:  { type: 'integer', description: 'Harga minimum dalam Rupiah penuh (integer), BUKAN notasi singkat. Misal budget "500jt" = 500000000, "1M" = 1000000000.' },
+          harga_max:  { type: 'integer', description: 'Harga maksimum dalam Rupiah penuh (integer), BUKAN notasi singkat. Misal budget "5M" (5 Milyar) = 5000000000, "800jt" = 800000000.' },
           kt: { type: 'integer', description: 'Jumlah kamar tidur minimum.' },
           km: { type: 'integer', description: 'Jumlah kamar mandi minimum.' },
           lt: { type: 'integer', description: 'Luas tanah minimum (m²).' },
