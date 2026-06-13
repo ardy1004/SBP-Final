@@ -16,6 +16,8 @@ interface PropertyRow {
   status_publish: string;
   kecamatan: string;
   kabupaten: string;
+  latitude: number | null;
+  longitude: number | null;
   cover_url: string | null;
   jumlah_foto: number;
   created_at: string;
@@ -599,6 +601,11 @@ export default function AdminListingPage() {
                     </td>
                     <td className="p-3 hidden md:table-cell">
                       <div className="text-xs text-[#64748B]">{p.kecamatan}, {p.kabupaten}</div>
+                      {p.latitude != null
+                        ? <span className="inline-flex items-center gap-0.5 text-[10px] text-emerald-600 mt-0.5">
+                            <MapPin size={10} /> GPS ✓
+                          </span>
+                        : <span className="text-[10px] text-gray-400 mt-0.5">— no GPS</span>}
                     </td>
                     <td className="p-3 hidden lg:table-cell">
                       <div className="font-semibold text-[#0F172A] text-xs">{formatRupiah(p.harga)}</div>

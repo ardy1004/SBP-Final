@@ -61,6 +61,7 @@ export async function onRequestGet(context) {
       p.jenis_properti, p.tujuan,
       p.harga, p.nego, p.nett,
       p.kecamatan, p.kabupaten, p.provinsi,
+      p.latitude, p.longitude,
       p.status_publish,
       p.created_at, p.updated_at, p.published_at,
       (SELECT url_webp FROM property_images
