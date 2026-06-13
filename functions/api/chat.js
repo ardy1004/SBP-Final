@@ -47,6 +47,7 @@ const TOOLS = [
 ];
 
 // ── Groq API call ──────────────────────────────────────────────────────────────
+// useTools: true = auto, 'none' = tools dikirим tapi tidak boleh dipanggil, false = tanpa tools
 async function callGroq(apiKey, messages, useTools) {
   const body = {
     model: MODEL,
@@ -54,9 +55,12 @@ async function callGroq(apiKey, messages, useTools) {
     temperature: 0.3,
     max_tokens: 600,
   };
-  if (useTools) {
-    body.tools        = TOOLS;
-    body.tool_choice  = 'auto';
+  if (useTools === true) {
+    body.tools       = TOOLS;
+    body.tool_choice = 'auto';
+  } else if (useTools === 'none') {
+    body.tools       = TOOLS;
+    body.tool_choice = 'none';
   }
 
   const res = await fetch(GROQ_URL, {
@@ -160,14 +164,16 @@ export async function onRequestPost(context) {
       tool_calls: assistantMsg.tool_calls,
     };
 
-    // ── Putaran 2: respons final tanpa tool ──────────────────────────────────
+    // ── Putaran 2: respons final — kirim tools + tool_choice:'none' ──────────
+    // OpenAI-compatible API mensyaratkan tools array tetap ada agar model bisa
+    // menginterpretasi tool result messages dalam history.
     const messages2 = [
       ...messages,
       assistantMsgClean,
       ...toolResultMessages,
     ];
 
-    const round2 = await callGroq(env.GROQ_API_KEY, messages2, false);
+    const round2 = await callGroq(env.GROQ_API_KEY, messages2, 'none');
     const finalMsg = round2.choices?.[0]?.message;
 
     return jsonOk({
