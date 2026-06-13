@@ -143,17 +143,14 @@ export async function onRequestPost(context) {
       lastSearchResults = results;
     }
 
-    // ── Putaran 2: inject hasil search sebagai context, panggil Groq tanpa tools
-    // Pendekatan ini lebih robust: hindari tool-result message format yang
-    // menyebabkan masalah pada beberapa versi model Groq.
+    // ── Putaran 2: inject hasil search ke system prompt, lalu Groq merespons
     const resultContext = lastSearchResults.length > 0
-      ? `HASIL PENCARIAN PROPERTI (${lastSearchResults.length} listing):\n${JSON.stringify(lastSearchResults, null, 0)}\n\nBerdasarkan hasil di atas, rekomendasikan kepada user secara ringkas dan natural.`
-      : 'HASIL PENCARIAN: Tidak ada properti yang sesuai kriteria. Sampaikan dengan jujur dan tawarkan alternatif.';
+      ? `\n\nHASIL PENCARIAN PROPERTI (${lastSearchResults.length} listing ditemukan):\n${JSON.stringify(lastSearchResults)}\n\nGunakan data di atas untuk menjawab user. Sebutkan nama properti, harga, dan lokasi dari data yang tersedia.`
+      : '\n\nHASIL PENCARIAN: Tidak ada properti yang sesuai kriteria user. Sampaikan dengan jujur dan tawarkan alternatif (lokasi/budget berbeda).';
 
     const messages2 = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: SYSTEM_PROMPT + resultContext },
       ...clientMessages,
-      { role: 'user', content: resultContext },
     ];
 
     const round2 = await callGroq(env.GROQ_API_KEY, messages2, false);
