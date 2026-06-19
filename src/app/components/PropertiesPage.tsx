@@ -763,6 +763,7 @@ export default function PropertiesPage() {
                         loading="lazy"
                         decoding="async"
                         onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=400&q=80'; }}
+                        suppressHydrationWarning
                       />
                     </div>
                     <div className="p-4 flex-1">

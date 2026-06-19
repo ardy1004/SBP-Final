@@ -147,6 +147,7 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
           alt="Monica Vera S"
           className="w-14 h-14 rounded-full object-cover border-2 border-[#1565C0]"
           onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&q=80'; }}
+          suppressHydrationWarning
         />
         <div>
           <div className="font-semibold text-[#0F172A]">Monica Vera S</div>
@@ -494,6 +495,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                         alt={`${property.title} ${i + 1}`}
                         className="absolute inset-0 w-full h-full object-cover"
                         onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80'; }}
+                        suppressHydrationWarning
                       />
                     </div>
                   ))}
@@ -734,7 +736,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
           <button onClick={() => setLightbox(false)} className="absolute top-4 right-4 p-2 text-white hover:text-gray-300">
             <X size={24} />
           </button>
-          <img src={images[currentImg]} alt="" className="max-w-full max-h-full object-contain rounded-xl" />
+          <img src={images[currentImg]} alt="" className="max-w-full max-h-full object-contain rounded-xl" suppressHydrationWarning />
         </div>
       )}
     </div>

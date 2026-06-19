@@ -117,6 +117,7 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
                       alt={property.title}
                       className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
                       onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      suppressHydrationWarning
                     />
                   )}
                   <div className="min-w-0">
@@ -155,6 +156,7 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
               alt="Monica Vera S"
               className="w-12 h-12 rounded-full object-cover border-2 border-[#1565C0]"
               onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&q=80'; }}
+              suppressHydrationWarning
             />
             <div>
               <div className="font-semibold text-[#0F172A] text-sm">Monica Vera S</div>

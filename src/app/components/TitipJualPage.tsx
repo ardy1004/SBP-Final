@@ -849,7 +849,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-3">
               {photoPreviews.map((src, i) => (
                 <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200">
-                  <img src={src} alt="" className="w-full h-full object-cover" />
+                  <img src={src} alt="" className="w-full h-full object-cover" suppressHydrationWarning />
                   {i === 0 && (
                     <span className="absolute top-1 left-1 bg-[#1565C0] text-white text-[10px] px-1.5 py-0.5 rounded font-semibold">Cover</span>
                   )}

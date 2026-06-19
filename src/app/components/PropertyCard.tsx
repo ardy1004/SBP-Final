@@ -109,6 +109,7 @@ export default function PropertyCard({ property, className = '' }: Props) {
                 style={{ width: `${100 / total}%` }}
                 loading={i === 0 ? 'eager' : 'lazy'}
                 decoding="async"
+                suppressHydrationWarning
               />
             ))}
           </div>

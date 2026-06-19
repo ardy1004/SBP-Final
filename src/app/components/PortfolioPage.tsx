@@ -36,7 +36,8 @@ export default function PortfolioPage() {
                 <div className="relative" style={{ paddingTop: '66.67%' }}>
                   <img src={item.foto} alt={item.judul}
                     className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=600&q=80'; }} />
+                    onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=600&q=80'; }}
+                    suppressHydrationWarning />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent" />
                   <div className="absolute top-3 right-3">
                     <span className="bg-[#EF4444] text-white px-3 py-1 rounded-full text-xs font-bold">✓ TERJUAL</span>

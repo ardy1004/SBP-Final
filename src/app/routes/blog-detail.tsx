@@ -117,6 +117,7 @@ export default function BlogDetailRoute() {
             alt={post.judul}
             className="w-full h-full object-cover"
             onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80'; }}
+            suppressHydrationWarning
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
         </div>

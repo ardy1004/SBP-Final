@@ -98,7 +98,8 @@ export default function BlogPage() {
                   <div className="relative overflow-hidden" style={{ paddingTop: '56.25%' }}>
                     <img src={post.cover ?? ''} alt={post.judul}
                       className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=600&q=80'; }} />
+                      onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=600&q=80'; }}
+                      suppressHydrationWarning />
                   </div>
                   <div className="p-5">
                     {post.kategori && (

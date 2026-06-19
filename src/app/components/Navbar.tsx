@@ -47,6 +47,7 @@ export default function Navbar() {
                 alt="Salam Bumi Property"
                 className="h-9 w-9 rounded-lg object-cover"
                 onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                suppressHydrationWarning
               />
               <div className="font-display">
                 <div className="text-white font-bold text-sm leading-tight">Salam Bumi</div>

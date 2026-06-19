@@ -333,6 +333,7 @@ function PerjanjianDocument({ data, today, canvasRef, hasSigned, onStart, onMove
             alt="TTD Ardy Salam"
             className="max-h-24 max-w-full object-contain"
             onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            suppressHydrationWarning
           />
         </div>
         <div className="border-t border-gray-400 pt-1">
@@ -373,6 +374,7 @@ function PerjanjianDocument({ data, today, canvasRef, hasSigned, onStart, onMove
             alt="TTD Ardy Salam"
             className="max-h-24 max-w-full object-contain"
             onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            suppressHydrationWarning
           />
         </div>
         {/* Materai — tengah layar di mobile, kiri-tengah Pihak Kedua di desktop */}
@@ -386,6 +388,7 @@ function PerjanjianDocument({ data, today, canvasRef, hasSigned, onStart, onMove
             transform: 'translate(-50%, -50%)',
             opacity: 0.9,
           }}
+          suppressHydrationWarning
         />
         {/* Kanvas — satu ref, bekerja akurat di mobile & desktop via getBoundingClientRect */}
         <canvas

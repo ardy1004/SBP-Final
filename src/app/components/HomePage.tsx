@@ -172,6 +172,7 @@ function FeaturedBanner({ items }: { items: NormalizedProperty[] }) {
                   loading="lazy"
                   decoding="async"
                   onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80'; }}
+                  suppressHydrationWarning
                 />
                 <div className="absolute inset-0 flex items-end p-8 lg:p-12">
                   <div className="glass-dark rounded-2xl p-6 max-w-lg">
@@ -310,6 +311,7 @@ function TestimonialsSection({ items }: { items: ApiTestimonial[] }) {
                       decoding="async"
                       className="w-12 h-12 rounded-full object-cover border-2 border-[#1565C0]"
                       onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&q=80'; }}
+                      suppressHydrationWarning
                     />
                     <div>
                       <div className="font-semibold text-[#0F172A] text-sm">{t.nama_klien}</div>
@@ -613,6 +615,7 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
             onError={(e) => {
               (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1675657144518-025804f1812c?w=1600&q=80';
             }}
+            suppressHydrationWarning
           />
           {/* Layer 2: Overlay */}
           <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(6,27,53,0.52) 0%, rgba(11,36,71,0.35) 45%, rgba(6,27,53,0.48) 100%)' }} />
@@ -875,6 +878,7 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
                       loading="lazy"
                       decoding="async"
                       onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=600&q=80'; }}
+                      suppressHydrationWarning
                     />
                   </div>
                   <div className="p-5">

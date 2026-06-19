@@ -81,6 +81,7 @@ function MapPopup({ pin }: { pin: MapPinItem }) {
             alt={pin.title}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
             loading="lazy"
+            suppressHydrationWarning
           />
         ) : (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>🏠</div>

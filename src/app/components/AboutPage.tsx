@@ -82,7 +82,8 @@ export default function AboutPage() {
             ].map(t => (
               <div key={t.nama} className="text-center bg-[#F0F4F8] rounded-3xl p-8">
                 <img src={t.foto} alt={t.nama} className="w-28 h-28 rounded-full object-cover mx-auto mb-4 border-4 border-[#1565C0]"
-                  onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&q=80'; }} />
+                  onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&q=80'; }}
+                  suppressHydrationWarning />
                 <h3 className="font-display font-bold text-[#0F172A] text-lg">{t.nama}</h3>
                 <p className="text-[#1565C0] text-sm font-medium mb-3">{t.jabatan}</p>
                 <p className="text-[#64748B] text-sm leading-relaxed mb-4">{t.desc}</p>

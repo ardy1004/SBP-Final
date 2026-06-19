@@ -16,6 +16,7 @@ export default function Footer() {
                 alt="SBP"
                 className="h-10 w-10 rounded-lg object-cover"
                 onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                suppressHydrationWarning
               />
               <div className="font-display">
                 <div className="text-white font-bold">Salam Bumi Property</div>
