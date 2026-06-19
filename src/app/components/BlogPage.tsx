@@ -7,7 +7,7 @@ function formatTanggal(s: string): string {
   if (!s) return '';
   const d = new Date(s);
   if (isNaN(d.getTime())) return s.slice(0, 10);
-  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Jakarta' });
 }
 
 export default function BlogPage() {

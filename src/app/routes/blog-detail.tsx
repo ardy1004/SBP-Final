@@ -101,7 +101,7 @@ function formatTanggal(s: string | null): string {
   if (!s) return '';
   const d = new Date(s);
   if (isNaN(d.getTime())) return s.slice(0, 10);
-  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Jakarta' });
 }
 
 export default function BlogDetailRoute() {

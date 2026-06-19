@@ -285,7 +285,7 @@ function PerjanjianDocument({ data, today, canvasRef, hasSigned, onStart, onMove
           Jenis Perjanjian: {labelJenisTransaksi(data.jenis_transaksi)}&nbsp;·&nbsp;
           Nomor: {data.kode_perjanjian}
         </p>
-        <p className="text-xs text-[#64748B]">Tanggal: {today}</p>
+        <p className="text-xs text-[#64748B]" suppressHydrationWarning>Tanggal: {today}</p>
       </div>
 
       {/* ── Para Pihak ── */}
