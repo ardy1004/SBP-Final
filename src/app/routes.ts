@@ -33,6 +33,7 @@ export default [
     route("admin/viralframe", "./components/admin/AdminViralFramePage.tsx", { id: "admin-viralframe" }),
     route("admin/viralframe/:id", "./components/admin/AdminViralFrameWorkspacePage.tsx", { id: "admin-viralframe-workspace" }),
     route("admin/leads", "./components/admin/AdminLeadsPage.tsx"),
+    route("admin/leads/:id", "./components/admin/AdminLeadDetailPage.tsx", { id: "admin-lead-detail" }),
     route("admin/testimoni", "./components/admin/AdminTestimoniPage.tsx", { id: "admin-testimoni" }),
     route("admin/blog", "./components/admin/AdminBlogPage.tsx", { id: "admin-blog" }),
     route("admin/portfolio", "./components/admin/AdminPlaceholderPage.tsx", { id: "admin-portfolio" }),

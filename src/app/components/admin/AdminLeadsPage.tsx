@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router';
 import {
   Search, Phone, MessageCircle, Clock, User, Home,
   ChevronDown, GripVertical, StickyNote, ChevronUp, Send, AlertCircle, Loader2,
@@ -70,6 +71,7 @@ async function patchLead(id: number, body: object): Promise<void> {
 }
 
 export default function AdminLeadsPage() {
+  const navigate = useNavigate();
   const [leads, setLeads]             = useState<Lead[]>([]);
   const [loading, setLoading]         = useState(true);
   const [error, setError]             = useState<string | null>(null);
@@ -205,12 +207,14 @@ export default function AdminLeadsPage() {
                         className={`bg-white rounded-xl p-3 shadow-sm border border-gray-100 cursor-grab active:cursor-grabbing transition-all ${dragging === lead.id ? 'opacity-50 scale-95' : 'hover:shadow-md'}`}>
                         {/* Header */}
                         <div className="flex items-start justify-between mb-1.5">
-                          <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => navigate(`/admin/leads/${lead.id}`)}
+                            className="flex items-center gap-1.5 hover:opacity-70 transition-opacity text-left">
                             <div className="w-6 h-6 rounded-full bg-[#E3F2FD] flex items-center justify-center flex-shrink-0">
                               <User size={11} className="text-[#1565C0]" />
                             </div>
                             <span className="font-semibold text-xs text-[#0F172A] leading-tight">{lead.nama ?? '(tamu)'}</span>
-                          </div>
+                          </button>
                           <GripVertical size={13} className="text-[#CBD5E1] flex-shrink-0" />
                         </div>
 
