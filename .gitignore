@@ -39,3 +39,8 @@ Thumbs.db
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# Claude Code / ruflo tooling (local only — not part of the website)
+.claude/
+.claude-flow/
+.mcp.json
