@@ -93,7 +93,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {gtagScript && <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: gtagScript }} />}
         {gtmHeadScript && <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: gtmHeadScript }} />}
       </head>
-      <body>
+      <body suppressHydrationWarning>
         {gtmId && (
           <noscript suppressHydrationWarning>
             <iframe
