@@ -113,7 +113,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 // Hero background — dipakai sebagai og:image fallback situs-wide (pages tanpa meta sendiri)
-const SITE_OG_IMAGE = "https://images.salambumi.xyz/kost%20dijual%20jogja.webp";
+const SITE_OG_IMAGE = "https://images.salambumi.xyz/salambumi.xyz.png";
 
 export function meta() {
   return [

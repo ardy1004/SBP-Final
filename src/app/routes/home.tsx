@@ -144,7 +144,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
   }
 }
 
-const OG_IMAGE = "https://images.salambumi.xyz/kost%20dijual%20jogja.webp";
+const OG_IMAGE = "https://images.salambumi.xyz/salambumi.xyz.png";
 
 export const meta: MetaFunction = () => [
   { title: "Salam Bumi Property | Portal Properti Terpercaya Yogyakarta" },
