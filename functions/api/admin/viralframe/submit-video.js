@@ -12,10 +12,10 @@ export async function onRequestPost(context) {
       return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
-    const { image_url, prompt, scene_index } = body;
+    const { image_base64, prompt, scene_index } = body;
 
-    if (!image_url || !image_url.startsWith('http')) {
-      return Response.json({ error: 'image_url tidak valid' }, { status: 400 });
+    if (!image_base64 || !image_base64.startsWith('data:image/')) {
+      return Response.json({ error: 'image_base64 tidak valid' }, { status: 400 });
     }
     if (!prompt || !String(prompt).trim()) {
       return Response.json({ error: 'prompt tidak boleh kosong' }, { status: 400 });
@@ -36,10 +36,9 @@ export async function onRequestPost(context) {
         },
         body: JSON.stringify({
           model: 'Wan-AI/Wan2.1-I2V-14B-720P-Turbo',
-          image: image_url,
+          image: image_base64,
           prompt: String(prompt),
-          duration: 5,
-          resolution: '720p',
+          image_size: '1280x720',
           seed: Math.floor(Math.random() * 999999),
         }),
       });

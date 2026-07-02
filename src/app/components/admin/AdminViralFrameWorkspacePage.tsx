@@ -212,10 +212,33 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
     }
   };
 
-  const getPhotoUrl = (foto_url: string): string => {
-    // Bangun public R2 URL via images.salambumi.xyz
-    const key = foto_url.startsWith('/') ? foto_url.slice(1) : foto_url;
-    return `https://images.salambumi.xyz/${key}`;
+  const photoToBase64 = async (foto_url: string): Promise<string> => {
+    const src = mediaSrc(foto_url);
+    if (!src) throw new Error('URL foto tidak valid');
+    const res = await fetch(src, { credentials: 'include' });
+    if (!res.ok) throw new Error(`Gagal fetch foto (HTTP ${res.status})`);
+    const blob = await res.blob();
+    return new Promise((resolve, reject) => {
+      const img = new window.Image();
+      const objectUrl = URL.createObjectURL(blob);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        const MAX = 960;
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if (w > MAX || h > MAX) {
+          if (w >= h) { h = Math.round(h * MAX / w); w = MAX; }
+          else { w = Math.round(w * MAX / h); h = MAX; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { reject(new Error('Canvas tidak tersedia')); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.82)); // return FULL data URL dengan prefix
+      };
+      img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Gagal load foto')); };
+      img.src = objectUrl;
+    });
   };
 
   const handleGenerateVideos = async () => {
@@ -226,10 +249,11 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
       for (let i = 0; i < voScenes.length; i++) {
         const scene = voScenes[i];
         if (!scene.foto_url || !scene.gaya_kamera) continue;
-        const image_url = getPhotoUrl(scene.foto_url);
+        const image_base64 = await photoToBase64(scene.foto_url);
+        console.log('[VideoVO] base64 prefix:', image_base64.slice(0, 30), 'len:', image_base64.length);
         const submitRes = await fetch('/api/admin/viralframe/submit-video', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-          body: JSON.stringify({ image_url, prompt: scene.prompt_en, scene_index: i }),
+          body: JSON.stringify({ image_base64, prompt: scene.prompt_en, scene_index: i }),
         });
         if (!submitRes.ok && submitRes.headers.get('content-type')?.includes('text/html')) {
           throw new Error(`Scene ${i + 1}: endpoint tidak ditemukan (HTTP ${submitRes.status}) — cek deployment`);
