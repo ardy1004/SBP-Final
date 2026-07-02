@@ -239,6 +239,9 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
           method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
           body: JSON.stringify({ image_base64, prompt: scene.prompt_en, scene_index: i }),
         });
+        if (!submitRes.ok && submitRes.headers.get('content-type')?.includes('text/html')) {
+          throw new Error(`Scene ${i + 1}: endpoint tidak ditemukan (HTTP ${submitRes.status}) — cek deployment`);
+        }
         const submitJson = await submitRes.json();
         if (!submitRes.ok) throw new Error(`Scene ${i + 1}: ${submitJson.error ?? 'Submit gagal'}`);
         const { request_id } = submitJson;

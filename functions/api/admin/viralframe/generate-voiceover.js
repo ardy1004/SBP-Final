@@ -39,16 +39,17 @@ export async function onRequestPost(context) {
 
   for (const url of urls) {
     let ttsRes;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
-      ttsRes = await fetch(url);
+      ttsRes = await fetch(url, { signal: controller.signal });
     } catch {
       continue;
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     if (!ttsRes.ok) continue;
-
-    const contentType = ttsRes.headers.get('Content-Type') ?? '';
-    if (!contentType.startsWith('audio/')) continue;
 
     const audioBuffer = await ttsRes.arrayBuffer();
     return new Response(audioBuffer, {
