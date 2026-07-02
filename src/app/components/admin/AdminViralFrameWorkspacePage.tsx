@@ -246,23 +246,37 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
     setGenError('');
     setVideoResults(voScenes.map((_, i) => ({ scene_index: i, request_id: null, status: 'idle', video_url: null, blob: null })));
     try {
+      const tokenRes = await fetch('/api/admin/viralframe/siliconflow-token', { credentials: 'include' });
+      if (!tokenRes.ok) throw new Error('Gagal ambil token SiliconFlow');
+      const { token: sfToken } = await tokenRes.json();
+
       for (let i = 0; i < voScenes.length; i++) {
         const scene = voScenes[i];
         if (!scene.foto_url || !scene.gaya_kamera) continue;
         const image_base64 = await photoToBase64(scene.foto_url);
         console.log('[VideoVO] base64 prefix:', image_base64.slice(0, 30), 'len:', image_base64.length);
-        const submitRes = await fetch('/api/admin/viralframe/submit-video', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-          body: JSON.stringify({ image_base64, prompt: scene.prompt_en, scene_index: i }),
+        const sfSubmitRes = await fetch('https://api.siliconflow.com/v1/video/submit', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${sfToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'Wan-AI/Wan2.1-I2V-14B-720P-Turbo',
+            image: image_base64,
+            prompt: scene.prompt_en,
+            image_size: '1280x720',
+            seed: Math.floor(Math.random() * 999999),
+          }),
         });
-        if (!submitRes.ok && submitRes.headers.get('content-type')?.includes('text/html')) {
-          throw new Error(`Scene ${i + 1}: endpoint tidak ditemukan (HTTP ${submitRes.status}) — cek deployment`);
+        if (!sfSubmitRes.ok) {
+          const errText = await sfSubmitRes.text();
+          throw new Error(`Scene ${i + 1}: SiliconFlow HTTP ${sfSubmitRes.status} — ${errText.slice(0, 200)}`);
         }
-        const submitJson = await submitRes.json();
-        if (!submitRes.ok) throw new Error(`Scene ${i + 1}: ${submitJson.error ?? 'Submit gagal'}`);
-        const { request_id } = submitJson;
+        const sfJson = await sfSubmitRes.json();
+        const request_id = sfJson.requestId ?? sfJson.request_id ?? null;
         if (!request_id) {
-          throw new Error(`Scene ${i + 1}: Server tidak return request_id. Full response: ${JSON.stringify(submitJson).slice(0, 300)}`);
+          throw new Error(`Scene ${i + 1}: SiliconFlow tidak return requestId: ${JSON.stringify(sfJson).slice(0, 200)}`);
         }
         setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, request_id, status: 'pending' } : r));
         // Poll until done (max 40 × 3s = 120s)
