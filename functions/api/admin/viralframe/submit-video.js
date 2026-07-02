@@ -14,8 +14,8 @@ export async function onRequestPost(context) {
 
     const { image_base64, prompt, scene_index } = body;
 
-    if (!image_base64 || !String(image_base64).startsWith('data:image/')) {
-      return Response.json({ error: 'image_base64 tidak valid — harus berupa data URL data:image/...' }, { status: 400 });
+    if (!image_base64 || image_base64.length < 100) {
+      return Response.json({ error: 'image_base64 tidak valid' }, { status: 400 });
     }
     if (image_base64.length > 5_000_000) {
       return Response.json({ error: 'Foto terlalu besar, max ~3.7MB sebelum base64' }, { status: 413 });
@@ -41,7 +41,7 @@ export async function onRequestPost(context) {
           model: 'Wan-AI/Wan2.1-I2V-14B-720P-Turbo',
           image: image_base64,
           prompt: String(prompt),
-          duration: 8,
+          duration: 5,
           resolution: '720p',
           seed: Math.floor(Math.random() * 999999),
         }),

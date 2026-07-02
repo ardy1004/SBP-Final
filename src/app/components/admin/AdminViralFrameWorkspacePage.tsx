@@ -219,10 +219,30 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
     if (!res.ok) throw new Error(`Gagal fetch foto (HTTP ${res.status})`);
     const blob = await res.blob();
     return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
+      const img = new window.Image();
+      const objectUrl = URL.createObjectURL(blob);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        const MAX = 960;
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if (w > MAX || h > MAX) {
+          if (w >= h) { h = Math.round(h * MAX / w); w = MAX; }
+          else { w = Math.round(w * MAX / h); h = MAX; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { reject(new Error('Canvas tidak tersedia')); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        // Ambil HANYA raw base64, tanpa prefix data:image/...
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        const base64 = dataUrl.split(',')[1]; // strip 'data:image/jpeg;base64,'
+        console.log(`[VideoVO] image base64 length: ${base64.length} chars (~${Math.round(base64.length * 0.75 / 1024)}KB)`);
+        resolve(base64);
+      };
+      img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Gagal load foto')); };
+      img.src = objectUrl;
     });
   };
 
@@ -234,10 +254,10 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
       for (let i = 0; i < voScenes.length; i++) {
         const scene = voScenes[i];
         if (!scene.foto_url || !scene.gaya_kamera) continue;
-        const image_base64 = await photoToBase64(scene.foto_url);
+        const image_raw_b64: string = await photoToBase64(scene.foto_url);
         const submitRes = await fetch('/api/admin/viralframe/submit-video', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-          body: JSON.stringify({ image_base64, prompt: scene.prompt_en, scene_index: i }),
+          body: JSON.stringify({ image_base64: image_raw_b64, prompt: scene.prompt_en, scene_index: i }),
         });
         if (!submitRes.ok && submitRes.headers.get('content-type')?.includes('text/html')) {
           throw new Error(`Scene ${i + 1}: endpoint tidak ditemukan (HTTP ${submitRes.status}) — cek deployment`);
