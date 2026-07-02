@@ -265,6 +265,9 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
         const submitJson = await submitRes.json();
         if (!submitRes.ok) throw new Error(`Scene ${i + 1}: ${submitJson.error ?? 'Submit gagal'}`);
         const { request_id } = submitJson;
+        if (!request_id) {
+          throw new Error(`Scene ${i + 1}: Server tidak return request_id. Full response: ${JSON.stringify(submitJson).slice(0, 300)}`);
+        }
         setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, request_id, status: 'pending' } : r));
         // Poll until done (max 40 × 3s = 120s)
         let done = false;

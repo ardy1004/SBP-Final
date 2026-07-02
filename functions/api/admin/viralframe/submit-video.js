@@ -24,9 +24,6 @@ export async function onRequestPost(context) {
       return Response.json({ error: 'prompt tidak boleh kosong' }, { status: 400 });
     }
 
-    // TEMP DEBUG — hapus setelah diagnosa selesai
-    return Response.json({ debug: 'checkpoint_1_body_parsed', image_len: image_base64.length, prompt_len: String(prompt).length });
-
     const apiKey = env.SILICONFLOW_API_KEY;
     if (!apiKey) {
       return Response.json({ error: 'SILICONFLOW_API_KEY tidak dikonfigurasi' }, { status: 500 });
