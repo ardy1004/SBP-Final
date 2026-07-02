@@ -180,7 +180,56 @@ export default function AdminPropertyDetailPage() {
   const [statusMsg, setStatusMsg]         = useState('');
   const [statusError, setStatusError]     = useState('');
 
+  const [isGenerating, setIsGenerating]   = useState(false);
+  const [aiNotif, setAiNotif]             = useState('');
+
   const setF        = (patch: Partial<PropertyDetail>) => setForm(f => ({ ...f, ...patch }));
+
+  const handleGenerateAI = async () => {
+    if (!form.kecamatan || !form.kabupaten) {
+      alert('Lengkapi data lokasi terlebih dahulu');
+      return;
+    }
+    setIsGenerating(true);
+    setAiNotif('');
+    try {
+      const res = await fetch('/api/admin/ai/generate-description', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          jenis_properti: form.jenis_properti,
+          tujuan: form.tujuan,
+          harga: form.harga,
+          kecamatan: form.kecamatan,
+          kabupaten: form.kabupaten,
+          provinsi: form.provinsi,
+          luas_tanah: form.luas_tanah,
+          luas_bangunan: form.luas_bangunan,
+          kamar_tidur: form.jumlah_kamar_tidur,
+          kamar_mandi: form.jumlah_kamar_mandi,
+          legalitas: form.legalitas,
+          nego: form.nego,
+          kondisi: null,
+          fasilitas: null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      setF({
+        title: json.judul,
+        deskripsi: json.deskripsi,
+        meta_title: json.meta_title,
+        meta_description: json.meta_description,
+      });
+      setAiNotif('Konten AI berhasil di-generate — silakan review sebelum menyimpan.');
+      setTimeout(() => setAiNotif(''), 5000);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Gagal generate konten AI');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   // Auto-fill Meta Title/Description dari data form (reuse generateMetaSeo, hanya isi — tidak auto-save).
   const handleAutoFillSeo = () => {
@@ -800,6 +849,35 @@ export default function AdminPropertyDetailPage() {
           <Field label="Alasan Dijual">
             <textarea value={form.alasan_dijual ?? ''} onChange={e => setF({ alasan_dijual: e.target.value || null })} rows={2} className={`${inputCls} resize-y`} />
           </Field>
+
+          {/* AI Generate: mengisi judul, deskripsi, meta_title, meta_description sekaligus */}
+          <div className="space-y-2 pt-1">
+            <button
+              type="button"
+              onClick={handleGenerateAI}
+              disabled={isGenerating}
+              className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-60 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+              style={{ background: 'linear-gradient(135deg, #7C3AED 0%, #4F46E5 100%)' }}
+            >
+              {isGenerating ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Sparkles size={15} />
+                  ✨ Generate Deskripsi &amp; SEO dengan AI
+                </>
+              )}
+            </button>
+            {aiNotif && (
+              <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                {aiNotif}
+              </p>
+            )}
+          </div>
+
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">SEO</span>
             <button
