@@ -51,24 +51,19 @@ export async function onRequestPost(context) {
       return Response.json({ error: `Gagal menghubungi SiliconFlow: ${err.message}` }, { status: 502 });
     }
 
-    const sfText = await sfRes.text();
-
-    if (!sfRes.ok) {
-      return Response.json({ error: `SiliconFlow error ${sfRes.status}: ${sfText.slice(0, 300)}` }, { status: 502 });
-    }
-
     let sfJson;
     try {
-      sfJson = JSON.parse(sfText);
+      sfJson = await sfRes.json();
     } catch {
-      return Response.json({ error: 'SiliconFlow return non-JSON: ' + sfText.slice(0, 200) }, { status: 502 });
+      return Response.json({ error: `SiliconFlow return non-JSON (status ${sfRes.status})` }, { status: 502 });
     }
-
+    if (!sfRes.ok) {
+      return Response.json({ error: `SiliconFlow error ${sfRes.status}: ${JSON.stringify(sfJson).slice(0, 300)}` }, { status: 502 });
+    }
     const request_id = sfJson.requestId ?? sfJson.request_id ?? null;
     if (!request_id) {
-      return Response.json({ error: 'SiliconFlow tidak return requestId. Response: ' + sfText.slice(0, 300) }, { status: 502 });
+      return Response.json({ error: `SiliconFlow tidak return requestId. Response: ${JSON.stringify(sfJson).slice(0, 300)}` }, { status: 502 });
     }
-
     return Response.json({ request_id, scene_index: scene_index ?? null });
   } catch (err) {
     return Response.json({ error: err.message ?? 'Internal error' }, { status: 500 });
