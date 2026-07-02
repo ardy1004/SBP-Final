@@ -20,6 +20,41 @@ function truncateAtWord(str, maxLen) {
   return cut > 0 ? str.slice(0, cut) : str.slice(0, maxLen);
 }
 
+// Menghasilkan deskripsi kamar yang tepat per jenis properti agar AI tidak salah sebut.
+function buildKamarDesc(jenis_properti, kamar_tidur, kamar_mandi) {
+  const kt = kamar_tidur ? Number(kamar_tidur) : null;
+  const km = kamar_mandi ? Number(kamar_mandi) : null;
+  const jenis = (jenis_properti ?? '').toLowerCase();
+
+  // Jenis yang tidak relevan dengan kamar — skip
+  if (['tanah', 'ruko', 'gudang', 'komersial'].includes(jenis)) return null;
+
+  if (!kt && !km) return null;
+
+  if (jenis === 'kost') {
+    if (kt && km && kt === km) {
+      return `${kt} kamar tidur masing-masing dengan kamar mandi dalam (en-suite)`;
+    }
+    const parts = [];
+    if (kt) parts.push(`${kt} kamar tidur`);
+    if (km) parts.push(`${km} kamar mandi`);
+    return parts.join(', ');
+  }
+
+  if (jenis === 'hotel') {
+    const parts = [];
+    if (kt) parts.push(`${kt} unit kamar`);
+    if (km) parts.push(`${km} kamar mandi`);
+    return parts.join(', ');
+  }
+
+  // rumah, villa, homestay, apartment
+  const parts = [];
+  if (kt) parts.push(`${kt} kamar tidur (KT)`);
+  if (km) parts.push(`${km} kamar mandi (KM)`);
+  return parts.join(', ');
+}
+
 export async function onRequestPost(context) {
   const { request, env } = context;
 
@@ -33,7 +68,7 @@ export async function onRequestPost(context) {
   const {
     jenis_properti, tujuan, harga, kecamatan, kabupaten, provinsi,
     luas_tanah, luas_bangunan, kamar_tidur, kamar_mandi,
-    legalitas, nego, kondisi, fasilitas,
+    legalitas, nego, furnished,
   } = body;
 
   if (!kecamatan || !kabupaten) {
@@ -48,22 +83,66 @@ export async function onRequestPost(context) {
     return Response.json({ error: 'DEEPSEEK_API_KEY tidak dikonfigurasi' }, { status: 500 });
   }
 
-  const hargaReadable = formatHarga(harga);
-  const parts = [
-    `Jenis properti: ${jenis_properti ?? '-'}`,
-    `Tujuan: ${tujuan ?? '-'}`,
-    hargaReadable ? `Harga: ${hargaReadable}${nego ? ' (nego)' : ''}` : 'Harga: -',
-    `Lokasi: ${kecamatan}, ${kabupaten}${provinsi ? ', ' + provinsi : ''}`,
-    luas_tanah    ? `Luas tanah: ${luas_tanah} m²` : null,
-    luas_bangunan ? `Luas bangunan: ${luas_bangunan} m²` : null,
-    kamar_tidur   ? `Kamar tidur: ${kamar_tidur}` : null,
-    kamar_mandi   ? `Kamar mandi: ${kamar_mandi}` : null,
-    legalitas     ? `Legalitas: ${legalitas}` : null,
-    kondisi       ? `Kondisi: ${kondisi}` : null,
-    fasilitas     ? `Fasilitas: ${fasilitas}` : null,
-  ].filter(Boolean).join('\n');
+  const hargaReadable = formatHarga(harga) ?? 'Harga tidak tersedia';
+  const kamarDesc = buildKamarDesc(jenis_properti, kamar_tidur, kamar_mandi);
+  const lokasiStr = [kecamatan, kabupaten, provinsi].filter(Boolean).join(', ');
 
-  const systemPrompt = `Kamu adalah copywriter properti profesional SEO Indonesia. Tugas: generate judul listing, deskripsi, meta_title, dan meta_description dari data properti. ATURAN WAJIB: (1) JUDUL: max 60 karakter, format [Jenis] [Tujuan] di [Kecamatan] [Kabupaten], keyword lokasi wajib ada di 5 kata pertama, DILARANG: ALL CAPS, tanda seru, kata murah/terbaik/nomor1. (2) META_TITLE: max 60 karakter, format [Judul singkat] | Salam Bumi Property, potong judul jika perlu tapi jangan potong suffix. (3) DESKRIPSI: 150-350 kata, WAJIB 4 paragraf: P1=opening dengan keyword+lokasi+harga jika ada (2-3 kalimat), P2=spesifikasi lengkap luas/kamar/fasilitas/legalitas (3-4 kalimat), P3=keunggulan lokasi dan akses (2-3 kalimat), P4=CTA soft tanpa harga (1-2 kalimat). Keyword lokasi max 3x pengulangan. Gunakan kalimat aktif. (4) META_DESCRIPTION: STRICT max 155 karakter, potong di batas kata bukan tengah kalimat, wajib mengandung jenis properti+lokasi+1 CTA singkat. Respond HANYA dengan JSON valid tanpa markdown, tanpa penjelasan: {"judul": "...", "deskripsi": "...", "meta_title": "...", "meta_description": "..."}`;
+  const userPrompt = [
+    'Data properti:',
+    `- Jenis: ${jenis_properti ?? '-'}`,
+    `- Tujuan: ${tujuan ?? '-'}`,
+    `- Harga: ${hargaReadable}${nego ? ' (bisa nego)' : ' (harga tetap)'}`,
+    `- Lokasi: ${lokasiStr}`,
+    `- Luas Tanah: ${luas_tanah ? luas_tanah + ' m²' : 'tidak tersedia'}`,
+    `- Luas Bangunan: ${luas_bangunan ? luas_bangunan + ' m²' : 'tidak tersedia'}`,
+    `- Kamar: ${kamarDesc ?? 'tidak tersedia'}`,
+    `- Legalitas: ${legalitas ?? 'tidak tersedia'}`,
+    `- Furnished: ${furnished ? String(furnished) : 'tidak disebutkan'}`,
+    '',
+    'Generate konten sesuai aturan system prompt.',
+  ].join('\n');
+
+  const systemPrompt = `Kamu adalah copywriter properti profesional Indonesia yang ahli SEO lokal. Tugas: hasilkan konten listing properti berkualitas tinggi dari data yang diberikan.
+
+ATURAN JUDUL (field: judul):
+- Max 60 karakter STRICT — hitung karakter sebelum output
+- Wajib mengandung: jenis properti + tujuan + lokasi (kecamatan/kabupaten)
+- Jika ada angka unit/kamar yang signifikan, WAJIB disebut (contoh: 23 Kamar, 5 Unit)
+- Jika ada keunggulan unik dari data (Fully Furnished, SHM, dekat landmark), MASUKKAN jika muat
+- DILARANG: tanda seru, ALL CAPS, kata murah/terbaik/nomor1/eksklusif/premium/mewah
+- Contoh BAIK: Kost 23 Kamar Furnished Dijual Depok Sleman
+- Contoh BURUK: KOST EKSKLUSIF MEWAH TERBAIK DI SLEMAN!
+
+ATURAN META_TITLE (field: meta_title):
+- Max 60 karakter STRICT
+- Format: [Judul dipersingkat] | Salam Bumi Property
+- Potong judul dari kanan jika melebihi, JANGAN potong suffix brand
+- Contoh: Kost 23 Kamar Furnished Depok | Salam Bumi Property
+
+ATURAN DESKRIPSI (field: deskripsi):
+- 150-350 kata total
+- WAJIB 4 paragraf terpisah dengan baris kosong antar paragraf:
+  P1 — Opening (2-3 kalimat): sebut jenis properti + tujuan + lokasi lengkap (kecamatan, kabupaten) + harga jika tersedia. Masukkan keyword lokasi di kalimat pertama.
+  P2 — Spesifikasi (3-4 kalimat): sebut luas tanah/bangunan (jika ada), detail kamar SESUAI JENIS PROPERTI (gunakan deskripsi kamar dari input persis seperti yang diberikan), legalitas, kondisi furnished/unfurnished jika ada.
+  P3 — Keunggulan Lokasi (2-3 kalimat): akses ke landmark/fasilitas terdekat, kemudahan transportasi, potensi investasi jika properti komersial/kost/hotel.
+  P4 — CTA Soft (1-2 kalimat): ajak kontak untuk survei. DILARANG: kata tidak boleh dilewatkan, segera, terbatas, investasi terbaik.
+- Kalimat aktif (bukan pasif). Keyword lokasi max 3x. Bahasa Indonesia formal namun tidak kaku.
+- KHUSUS PER JENIS:
+  Kost/Hotel/Homestay/Villa: P3 wajib sebut potensi pendapatan sewa atau yield investasi
+  Tanah: P2 tidak perlu sebut kamar, fokus luas + peruntukan + kontur
+  Ruko/Gudang/Komersial: P2 fokus luas + akses kendaraan + zonasi
+  Rumah/Apartment: P2 sebut KT dan KM terpisah, sebut furnished status
+
+ATURAN META_DESCRIPTION (field: meta_description):
+- Max 155 karakter STRICT — hitung karakter, potong di batas kata bukan tengah kata
+- Wajib mengandung: jenis properti + lokasi + 1 spesifikasi utama + 1 CTA singkat
+- JANGAN ulangi kesalahan: pastikan sebutan kamar sesuai jenis (kamar tidur bukan kamar mandi untuk kost)
+- Contoh BAIK (128 karakter): Kost dijual di Depok, Sleman. 23 kamar tidur en-suite, SHM, luas 800 m². Strategis dekat kampus. Hubungi untuk survei.
+- Contoh BURUK: Kost dijual di Depok Sleman, luas 800 m², 23 kamar mandi, legalitas SHM.
+
+FORMAT RESPONSE:
+Respond HANYA dengan JSON valid, tanpa markdown, tanpa komentar, tanpa penjelasan apapun di luar JSON:
+{"judul": "...", "deskripsi": "...", "meta_title": "...", "meta_description": "..."}`;
 
   let dsRes;
   try {
@@ -79,7 +158,7 @@ export async function onRequestPost(context) {
         temperature: 0.7,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: parts },
+          { role: 'user', content: userPrompt },
         ],
       }),
     });
