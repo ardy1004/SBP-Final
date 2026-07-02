@@ -87,6 +87,15 @@ export async function onRequestPost(context) {
   const kamarDesc = buildKamarDesc(jenis_properti, kamar_tidur, kamar_mandi);
   const lokasiStr = [kecamatan, kabupaten, provinsi].filter(Boolean).join(', ');
 
+  const isKostEnSuite = jenis_properti?.toLowerCase() === 'kost'
+    && kamar_tidur && kamar_mandi
+    && Number(kamar_tidur) === Number(kamar_mandi);
+  const kamarLine = kamarDesc
+    ? (isKostEnSuite
+        ? `- ⚠️ KAMAR (WAJIB IKUTI PERSIS): ${kamarDesc} — DILARANG menyebut jumlah kamar mandi sebagai unit properti`
+        : `- Kamar: ${kamarDesc}`)
+    : null;
+
   const userPrompt = [
     'Data properti:',
     `- Jenis: ${jenis_properti ?? '-'}`,
@@ -95,7 +104,7 @@ export async function onRequestPost(context) {
     `- Lokasi: ${lokasiStr}`,
     `- Luas Tanah: ${luas_tanah ? luas_tanah + ' m²' : 'tidak tersedia'}`,
     `- Luas Bangunan: ${luas_bangunan ? luas_bangunan + ' m²' : 'tidak tersedia'}`,
-    `- Kamar: ${kamarDesc ?? 'tidak tersedia'}`,
+    kamarLine ?? '- Kamar: tidak tersedia',
     `- Legalitas: ${legalitas ?? 'tidak tersedia'}`,
     `- Furnished: ${furnished ? String(furnished) : 'tidak disebutkan'}`,
     '',
@@ -155,7 +164,7 @@ Respond HANYA dengan JSON valid, tanpa markdown, tanpa komentar, tanpa penjelasa
       body: JSON.stringify({
         model: 'deepseek-chat',
         max_tokens: 1200,
-        temperature: 0.7,
+        temperature: 0.3,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -180,6 +189,14 @@ Respond HANYA dengan JSON valid, tanpa markdown, tanpa komentar, tanpa penjelasa
     parsed = JSON.parse(cleaned);
   } catch {
     return Response.json({ error: 'DeepSeek tidak mengembalikan JSON valid', raw }, { status: 502 });
+  }
+
+  // Safety net: untuk kost en-suite, koreksi penyebutan kamar mandi yang salah di deskripsi
+  if (isKostEnSuite) {
+    const wrongPattern = new RegExp(`${Number(kamar_tidur)}\\s*kamar\\s*mandi`, 'gi');
+    const correctText = `${Number(kamar_tidur)} kamar tidur`;
+    if (parsed.deskripsi) parsed.deskripsi = parsed.deskripsi.replace(wrongPattern, correctText);
+    if (parsed.meta_description) parsed.meta_description = parsed.meta_description.replace(wrongPattern, correctText);
   }
 
   const judul = truncateAtWord(String(parsed.judul ?? ''), 60);
