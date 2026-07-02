@@ -20,47 +20,47 @@ function buildUrls(naskah, voice) {
 }
 
 export async function onRequestPost(context) {
-  const { request } = context;
-
-  let body;
   try {
-    body = await request.json();
-  } catch {
-    return jsonError('Invalid JSON body', 400);
-  }
+    const { request } = context;
 
-  const { naskah, voice } = body;
-  if (!naskah || !String(naskah).trim()) {
-    return jsonError('naskah tidak boleh kosong', 400);
-  }
-
-  const voiceParam = voice || 'alloy';
-  const urls = buildUrls(String(naskah).trim(), voiceParam);
-
-  for (const url of urls) {
-    let ttsRes;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    let body;
     try {
-      ttsRes = await fetch(url, { signal: controller.signal });
+      body = await request.json();
     } catch {
-      continue;
-    } finally {
-      clearTimeout(timeoutId);
+      return jsonError('Invalid JSON body', 400);
     }
 
-    if (!ttsRes.ok) continue;
+    const { naskah, voice } = body;
+    if (!naskah || !String(naskah).trim()) {
+      return jsonError('naskah tidak boleh kosong', 400);
+    }
 
-    const audioBuffer = await ttsRes.arrayBuffer();
-    return new Response(audioBuffer, {
-      status: 200,
-      headers: {
-        ...CORS_HEADERS,
-        'Content-Type': 'audio/mpeg',
-        'Content-Disposition': 'attachment; filename=voiceover.mp3',
-      },
-    });
+    const voiceParam = voice || 'alloy';
+    const urls = buildUrls(String(naskah).trim(), voiceParam);
+
+    for (const url of urls) {
+      let ttsRes;
+      try {
+        ttsRes = await fetch(url);
+      } catch {
+        continue;
+      }
+
+      if (!ttsRes.ok) continue;
+
+      const audioBuffer = await ttsRes.arrayBuffer();
+      return new Response(audioBuffer, {
+        status: 200,
+        headers: {
+          ...CORS_HEADERS,
+          'Content-Type': 'audio/mpeg',
+          'Content-Disposition': 'attachment; filename=voiceover.mp3',
+        },
+      });
+    }
+
+    return jsonError('Pollinations TTS tidak tersedia', 502);
+  } catch (err) {
+    return Response.json({ error: err.message ?? 'Internal error' }, { status: 500 });
   }
-
-  return jsonError('Pollinations TTS tidak tersedia', 502);
 }
