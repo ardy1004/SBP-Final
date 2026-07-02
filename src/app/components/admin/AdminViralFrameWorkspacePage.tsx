@@ -262,7 +262,7 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'Wan-AI/Wan2.1-I2V-14B-720P-Turbo',
+            model: 'Wan-AI/Wan2.2-I2V-A14B',
             image: image_base64,
             prompt: scene.prompt_en,
             image_size: '1280x720',
