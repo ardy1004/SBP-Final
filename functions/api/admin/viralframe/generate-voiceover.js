@@ -1,7 +1,7 @@
 // POST /api/admin/viralframe/generate-voiceover
 // Auth via functions/api/admin/_middleware.js
 
-import { jsonError } from '../../../_shared/response.js';
+import { jsonError } from '../../_shared/response.js';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
