@@ -306,7 +306,7 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
         const err = await res.json();
         throw new Error(err.error ?? 'Gagal generate voiceover');
       }
-      const blob = await res.blob();
+      const blob = new Blob([await res.arrayBuffer()], { type: res.headers.get('Content-Type') || 'audio/mpeg' });
       setVoiceoverBlob(blob);
       setVoiceoverUrl(URL.createObjectURL(blob));
     } catch (err: unknown) {

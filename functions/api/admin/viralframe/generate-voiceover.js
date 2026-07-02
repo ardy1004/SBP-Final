@@ -49,11 +49,16 @@ export async function onRequestPost(context) {
       if (!ttsRes.ok) continue;
 
       const audioBuffer = await ttsRes.arrayBuffer();
+      if (audioBuffer.byteLength < 100) {
+        return jsonError('Pollinations TTS response kosong', 502);
+      }
+
+      const ct = ttsRes.headers.get('Content-Type') || 'audio/mpeg';
       return new Response(audioBuffer, {
         status: 200,
         headers: {
           ...CORS_HEADERS,
-          'Content-Type': 'audio/mpeg',
+          'Content-Type': ct,
           'Content-Disposition': 'attachment; filename=voiceover.mp3',
         },
       });
