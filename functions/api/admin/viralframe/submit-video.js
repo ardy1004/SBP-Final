@@ -51,18 +51,20 @@ export async function onRequestPost(context) {
       return Response.json({ error: `Gagal menghubungi SiliconFlow: ${err.message}` }, { status: 502 });
     }
 
+    // Cek status SEBELUM baca body — hindari crash CPU saat baca HTML error page
+    if (!sfRes.ok) {
+      return Response.json({ error: `SiliconFlow HTTP ${sfRes.status} — cek API key dan parameter` }, { status: 502 });
+    }
+    // Hanya baca body jika 200 OK — response kecil JSON
     let sfJson;
     try {
       sfJson = await sfRes.json();
     } catch {
-      return Response.json({ error: `SiliconFlow return non-JSON (status ${sfRes.status})` }, { status: 502 });
-    }
-    if (!sfRes.ok) {
-      return Response.json({ error: `SiliconFlow error ${sfRes.status}: ${JSON.stringify(sfJson).slice(0, 300)}` }, { status: 502 });
+      return Response.json({ error: 'SiliconFlow return non-JSON saat status 200' }, { status: 502 });
     }
     const request_id = sfJson.requestId ?? sfJson.request_id ?? null;
     if (!request_id) {
-      return Response.json({ error: `SiliconFlow tidak return requestId. Response: ${JSON.stringify(sfJson).slice(0, 300)}` }, { status: 502 });
+      return Response.json({ error: `SiliconFlow tidak return requestId: ${JSON.stringify(sfJson).slice(0, 200)}` }, { status: 502 });
     }
     return Response.json({ request_id, scene_index: scene_index ?? null });
   } catch (err) {
