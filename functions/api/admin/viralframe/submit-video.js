@@ -12,13 +12,10 @@ export async function onRequestPost(context) {
       return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
-    const { image_base64, prompt, scene_index } = body;
+    const { image_url, prompt, scene_index } = body;
 
-    if (!image_base64 || image_base64.length < 100) {
-      return Response.json({ error: 'image_base64 tidak valid' }, { status: 400 });
-    }
-    if (image_base64.length > 5_000_000) {
-      return Response.json({ error: 'Foto terlalu besar, max ~3.7MB sebelum base64' }, { status: 413 });
+    if (!image_url || !image_url.startsWith('http')) {
+      return Response.json({ error: 'image_url tidak valid' }, { status: 400 });
     }
     if (!prompt || !String(prompt).trim()) {
       return Response.json({ error: 'prompt tidak boleh kosong' }, { status: 400 });
@@ -29,14 +26,6 @@ export async function onRequestPost(context) {
       return Response.json({ error: 'SILICONFLOW_API_KEY tidak dikonfigurasi' }, { status: 500 });
     }
 
-    const sfPayload = JSON.stringify({
-      model: 'Wan-AI/Wan2.1-I2V-14B-720P-Turbo',
-      image: image_base64,
-      prompt: String(prompt),
-      duration: 5,
-      resolution: '720p',
-      seed: Math.floor(Math.random() * 999999),
-    });
     let sfRes;
     try {
       sfRes = await fetch('https://api.siliconflow.com/v1/video/submit', {
@@ -45,7 +34,14 @@ export async function onRequestPost(context) {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: sfPayload,
+        body: JSON.stringify({
+          model: 'Wan-AI/Wan2.1-I2V-14B-720P-Turbo',
+          image: image_url,
+          prompt: String(prompt),
+          duration: 5,
+          resolution: '720p',
+          seed: Math.floor(Math.random() * 999999),
+        }),
       });
     } catch (err) {
       return Response.json({ error: `Gagal menghubungi SiliconFlow: ${err.message}` }, { status: 502 });
