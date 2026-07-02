@@ -273,9 +273,16 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
     if (!naskah.trim() || isGeneratingVO) return;
     setIsGeneratingVO(true);
     try {
-      const encoded = encodeURIComponent(naskah.trim());
-      const res = await fetch(`https://text.pollinations.ai/${encoded}?model=openai-audio&voice=alloy`);
-      if (!res.ok) throw new Error(`Pollinations error: HTTP ${res.status}`);
+      const res = await fetch('/api/admin/viralframe/generate-voiceover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ naskah: naskah.trim(), voice: 'alloy' }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error ?? 'Gagal generate voiceover');
+      }
       const blob = await res.blob();
       setVoiceoverBlob(blob);
       setVoiceoverUrl(URL.createObjectURL(blob));
