@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
   ArrowLeft, ArrowRight, ImageOff, Check, Film, AlertCircle,
-  Copy, Download, Loader2, FileCheck2, FileArchive, X,
+  Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import {
@@ -127,6 +127,378 @@ function StepIndicator({ current }: { current: number }) {
   );
 }
 
+// ─── Jalur B: Video VO constants & component ────────────────────────────────
+
+const GAYA_KAMERA = [
+  { label: '🚁 Drone Pull-back', value: 'drone_pullback', prompt: 'cinematic drone shot slowly pulling back and ascending revealing the full facade of the property, smooth aerial motion, golden hour warm lighting, professional real estate videography, 4K quality' },
+  { label: '🔄 Aerial Orbit', value: 'aerial_orbit', prompt: 'smooth aerial orbit shot slowly circling around the property from elevated position, wide angle revealing surrounding environment, cinematic drone photography, clear sky' },
+  { label: '▶️ Dolly Push-in', value: 'dolly_pushin', prompt: 'cinematic dolly push-in shot from street level slowly approaching the property main entrance, smooth forward tracking motion, wide angle lens, professional architectural videography' },
+  { label: '⬆️ Crane Rise', value: 'crane_rise', prompt: 'camera crane rising smoothly from ground level to aerial view revealing full height of building and surroundings, slow upward motion, architectural real estate style' },
+  { label: '🏠 Walk-through', value: 'walkthrough', prompt: 'smooth steadicam walk-through shot moving forward through the interior space, first-person cinematic perspective, warm natural lighting, professional property tour style' },
+  { label: '📐 Establishing Wide', value: 'establishing', prompt: 'wide angle establishing shot from elevated position showing full property and surrounding neighborhood, static camera, golden hour lighting, cinematic real estate photography' },
+  { label: '🎯 Close Detail', value: 'close_detail', prompt: 'slow cinematic lateral pan across architectural details and surfaces, close-up macro style, shallow depth of field, smooth horizontal motion revealing textures and materials' },
+];
+
+interface VOScene {
+  foto_id: number | null;
+  foto_url: string | null;
+  gaya_kamera: string;
+  prompt_en: string;
+}
+
+interface VideoResult {
+  scene_index: number;
+  request_id: string | null;
+  status: 'idle' | 'pending' | 'processing' | 'succeed' | 'failed';
+  video_url: string | null;
+  blob: Blob | null;
+}
+
+interface VideoVOTabProps {
+  propertyId: number;
+  propertyTitle: string;
+  jenisProperti: string;
+  lokasi: string;
+  photos: PropertyImage[];
+}
+
+function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTabProps) {
+  const [voScenes, setVoScenes] = useState<VOScene[]>([
+    { foto_id: null, foto_url: null, gaya_kamera: '', prompt_en: '' },
+  ]);
+  const [naskah, setNaskah] = useState('');
+  const [isGeneratingNaskah, setIsGeneratingNaskah] = useState(false);
+  const [videoResults, setVideoResults] = useState<VideoResult[]>([]);
+  const [isGeneratingVideos, setIsGeneratingVideos] = useState(false);
+  const [voiceoverUrl, setVoiceoverUrl] = useState<string | null>(null);
+  const [voiceoverBlob, setVoiceoverBlob] = useState<Blob | null>(null);
+  const [isGeneratingVO, setIsGeneratingVO] = useState(false);
+  const [isMerging, setIsMerging] = useState(false);
+  const [mergeProgress, setMergeProgress] = useState('');
+  const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
+  const [genError, setGenError] = useState('');
+
+  const wordCount = naskah.trim() ? naskah.trim().split(/\s+/).length : 0;
+  const targetWords = Math.floor(voScenes.length * 8 * 1.9);
+  const wordPct = targetWords > 0 ? ((wordCount - targetWords) / targetWords) * 100 : 0;
+
+  const addScene = () => {
+    if (voScenes.length >= 6) return;
+    setVoScenes(prev => [...prev, { foto_id: null, foto_url: null, gaya_kamera: '', prompt_en: '' }]);
+  };
+  const removeScene = (idx: number) => {
+    if (voScenes.length <= 1) return;
+    setVoScenes(prev => prev.filter((_, i) => i !== idx));
+  };
+  const updateScene = (idx: number, patch: Partial<VOScene>) =>
+    setVoScenes(prev => prev.map((s, i) => i === idx ? { ...s, ...patch } : s));
+
+  const handleGenerateNaskah = async () => {
+    setIsGeneratingNaskah(true);
+    try {
+      const res = await fetch('/api/admin/viralframe/generate-naskah', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ property_title: propertyTitle, jenis_properti: jenisProperti, lokasi, jumlah_scene: voScenes.length, durasi_per_scene: 8 }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      setNaskah(json.naskah ?? '');
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Gagal generate naskah');
+    } finally {
+      setIsGeneratingNaskah(false);
+    }
+  };
+
+  const photoToBase64 = async (url_webp: string): Promise<string> => {
+    const src = mediaSrc(url_webp);
+    if (!src) throw new Error('URL foto tidak valid');
+    const res = await fetch(src, { credentials: 'include' });
+    if (!res.ok) throw new Error(`Gagal fetch foto (HTTP ${res.status})`);
+    const blob = await res.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  const handleGenerateVideos = async () => {
+    setIsGeneratingVideos(true);
+    setGenError('');
+    setVideoResults(voScenes.map((_, i) => ({ scene_index: i, request_id: null, status: 'idle', video_url: null, blob: null })));
+    try {
+      for (let i = 0; i < voScenes.length; i++) {
+        const scene = voScenes[i];
+        if (!scene.foto_url || !scene.gaya_kamera) continue;
+        const image_base64 = await photoToBase64(scene.foto_url);
+        const submitRes = await fetch('/api/admin/viralframe/submit-video', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+          body: JSON.stringify({ image_base64, prompt: scene.prompt_en, scene_index: i }),
+        });
+        const submitJson = await submitRes.json();
+        if (!submitRes.ok) throw new Error(`Scene ${i + 1}: ${submitJson.error ?? 'Submit gagal'}`);
+        const { request_id } = submitJson;
+        setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, request_id, status: 'pending' } : r));
+        // Poll until done (max 40 × 3s = 120s)
+        let done = false;
+        for (let p = 0; p < 40 && !done; p++) {
+          await new Promise(r => setTimeout(r, 3000));
+          const statusRes = await fetch(`/api/admin/viralframe/video-status/${request_id}`, { credentials: 'include' });
+          const statusJson = await statusRes.json();
+          const status: VideoResult['status'] = statusJson.status ?? 'pending';
+          setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, status, video_url: statusJson.video_url ?? null } : r));
+          if (status === 'succeed' && statusJson.video_url) {
+            const videoRes = await fetch(statusJson.video_url);
+            const videoBlob = await videoRes.blob();
+            setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, blob: videoBlob } : r));
+            done = true;
+          } else if (status === 'failed') {
+            done = true;
+          }
+        }
+        if (!done) setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, status: 'failed' } : r));
+      }
+    } catch (err: unknown) {
+      setGenError(err instanceof Error ? err.message : 'Gagal generate video');
+    } finally {
+      setIsGeneratingVideos(false);
+    }
+  };
+
+  const handleGenerateVO = async () => {
+    if (!naskah.trim() || isGeneratingVO) return;
+    setIsGeneratingVO(true);
+    try {
+      const encoded = encodeURIComponent(naskah.trim());
+      const res = await fetch(`https://text.pollinations.ai/${encoded}?model=openai-audio&voice=alloy`);
+      if (!res.ok) throw new Error(`Pollinations error: HTTP ${res.status}`);
+      const blob = await res.blob();
+      setVoiceoverBlob(blob);
+      setVoiceoverUrl(URL.createObjectURL(blob));
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Gagal generate voiceover');
+    } finally {
+      setIsGeneratingVO(false);
+    }
+  };
+
+  const handleMerge = async () => {
+    if (!voiceoverBlob || isMerging) return;
+    setIsMerging(true);
+    setMergeProgress('Loading FFmpeg…');
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { FFmpeg } = await import('@ffmpeg/ffmpeg') as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { fetchFile } = await import('@ffmpeg/util') as any;
+      const ffmpeg = new FFmpeg();
+      ffmpeg.on('log', ({ message }: { message: string }) => setMergeProgress(message));
+      await ffmpeg.load();
+      for (let i = 0; i < videoResults.length; i++) {
+        const r = videoResults[i];
+        if (!r.blob) throw new Error(`Scene ${i + 1} belum selesai`);
+        await ffmpeg.writeFile(`scene${i}.mp4`, await fetchFile(r.blob));
+      }
+      await ffmpeg.writeFile('voiceover.mp3', await fetchFile(voiceoverBlob));
+      const concatContent = videoResults.map((_, i) => `file 'scene${i}.mp4'`).join('\n');
+      await ffmpeg.writeFile('concat.txt', concatContent);
+      await ffmpeg.exec(['-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-c', 'copy', 'combined.mp4']);
+      await ffmpeg.exec(['-i', 'combined.mp4', '-i', 'voiceover.mp3', '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-shortest', 'final.mp4']);
+      const data = await ffmpeg.readFile('final.mp4');
+      const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+      setFinalVideoUrl(url);
+      setMergeProgress('✅ Selesai!');
+    } catch (err: unknown) {
+      setMergeProgress(`Error: ${err instanceof Error ? err.message : 'Gagal merge'}`);
+    } finally {
+      setIsMerging(false);
+    }
+  };
+
+  const canGenerateVideos = voScenes.every(s => s.foto_id !== null && s.gaya_kamera !== '');
+  const allVideosReady = videoResults.length === voScenes.length && videoResults.length > 0 && videoResults.every(r => r.blob !== null);
+
+  return (
+    <div className="space-y-6 pt-2">
+      {/* SECTION 1 — SCENE BUILDER */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <h3 className="font-semibold text-[#0F172A] text-sm">Susun Scene Video</h3>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-[#EFF6FF] text-[#1565C0] font-medium">
+            {voScenes.length} scene × 8 dtk = {voScenes.length * 8} dtk
+          </span>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-medium">
+            Target naskah: ~{targetWords} kata
+          </span>
+        </div>
+
+        {voScenes.map((scene, i) => {
+          const selectedPhoto = photos.find(p => p.id === scene.foto_id);
+          return (
+            <div key={i} className="border border-gray-100 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-sm text-[#0F172A]">Scene {i + 1}</span>
+                {voScenes.length > 1 && (
+                  <button type="button" onClick={() => removeScene(i)} className="text-[#94A3B8] hover:text-red-500 transition-colors p-1">
+                    <X size={15} />
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="flex items-center gap-2">
+                  {selectedPhoto && (
+                    <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200">
+                      <img src={mediaSrc(selectedPhoto.url_webp) ?? ''} alt="" className="w-full h-full object-cover" />
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-[#64748B] mb-1">Foto</label>
+                    <select
+                      value={scene.foto_id ?? ''}
+                      onChange={e => {
+                        const pid = Number(e.target.value) || null;
+                        const photo = photos.find(p => p.id === pid);
+                        updateScene(i, { foto_id: pid, foto_url: photo?.url_webp ?? null });
+                      }}
+                      className={selectCls}
+                    >
+                      <option value="">— Pilih foto —</option>
+                      {photos.map(p => (
+                        <option key={p.id} value={p.id}>Foto #{p.urutan}{p.is_cover ? ' (Cover)' : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-[#64748B] mb-1">Gaya Kamera</label>
+                  <select
+                    value={scene.gaya_kamera}
+                    onChange={e => {
+                      const gk = GAYA_KAMERA.find(g => g.value === e.target.value);
+                      updateScene(i, { gaya_kamera: e.target.value, prompt_en: gk?.prompt ?? '' });
+                    }}
+                    className={selectCls}
+                  >
+                    <option value="">— Pilih gaya kamera —</option>
+                    {GAYA_KAMERA.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        <button type="button" onClick={addScene} disabled={voScenes.length >= 6}
+          className="w-full py-2 rounded-xl text-sm font-medium text-[#1565C0] border border-dashed border-[#1565C0]/40 hover:bg-[#F0F7FF] disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+          + Tambah Scene{voScenes.length >= 6 ? ' (max 6)' : ''}
+        </button>
+      </div>
+
+      {/* SECTION 2 — NASKAH VOICEOVER */}
+      <div className="space-y-3 pt-4 border-t border-gray-100">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h3 className="font-semibold text-[#0F172A] text-sm">Naskah Voiceover</h3>
+          <button type="button" onClick={handleGenerateNaskah} disabled={isGeneratingNaskah}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+            style={{ background: 'linear-gradient(135deg, #7C3AED 0%, #4F46E5 100%)' }}>
+            {isGeneratingNaskah
+              ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Generating...</>
+              : <><Sparkles size={13} /> ✨ Generate Naskah (DeepSeek)</>}
+          </button>
+        </div>
+        <textarea value={naskah} onChange={e => setNaskah(e.target.value)} rows={6}
+          placeholder="Tulis atau generate naskah voiceover di sini…"
+          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] resize-y transition-colors" />
+        <div className="flex items-center gap-2 text-xs">
+          <span className={`font-medium ${wordCount === 0 ? 'text-[#94A3B8]' : Math.abs(wordPct) <= 10 ? 'text-emerald-600' : 'text-amber-600'}`}>
+            {wordCount} kata
+          </span>
+          <span className="text-[#94A3B8]">/ target ~{targetWords} kata</span>
+          {wordCount > 0 && (Math.abs(wordPct) <= 10
+            ? <span className="text-emerald-600">✅ Pas</span>
+            : wordCount < targetWords
+              ? <span className="text-amber-600">⚠️ Kurang {Math.round(Math.abs(wordPct))}%</span>
+              : <span className="text-amber-600">⚠️ Kelebihan {Math.round(wordPct)}%</span>)}
+        </div>
+      </div>
+
+      {/* SECTION 3 — GENERATE & OUTPUT */}
+      <div className="space-y-5 pt-4 border-t border-gray-100">
+
+        {/* 3A — Generate Video */}
+        <div className="space-y-3">
+          <h3 className="font-semibold text-[#0F172A] text-sm">Generate Video per Scene</h3>
+          {!canGenerateVideos && (
+            <p className="text-xs text-amber-600">⚠️ Lengkapi foto dan gaya kamera untuk semua scene.</p>
+          )}
+          <button type="button" onClick={handleGenerateVideos} disabled={!canGenerateVideos || isGeneratingVideos}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+            style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+            {isGeneratingVideos
+              ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Generating...</>
+              : '🎬 Generate Semua Video (SiliconFlow)'}
+          </button>
+          {videoResults.length > 0 && (
+            <div className="space-y-1.5 text-sm">
+              {videoResults.map((r, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-[#64748B] w-16 flex-shrink-0">Scene {i + 1}</span>
+                  <span className={r.status === 'succeed' ? 'text-emerald-600' : r.status === 'failed' ? 'text-red-600' : r.status === 'idle' ? 'text-[#94A3B8]' : 'text-amber-600'}>
+                    {r.status === 'succeed' ? '✅ Selesai' : r.status === 'failed' ? '❌ Gagal' : r.status === 'idle' ? '⬜ Menunggu' : r.status === 'pending' ? '⏳ Dalam antrian…' : '⚙️ Processing…'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {genError && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl p-3">{genError}</div>}
+        </div>
+
+        {/* 3B — Generate Voiceover */}
+        <div className="space-y-3 pt-3 border-t border-gray-100">
+          <h3 className="font-semibold text-[#0F172A] text-sm">Generate Voiceover</h3>
+          <button type="button" onClick={handleGenerateVO} disabled={!naskah.trim() || isGeneratingVO}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+            style={{ background: 'linear-gradient(135deg, #059669 0%, #10B981 100%)' }}>
+            {isGeneratingVO
+              ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Generating...</>
+              : '🎙️ Generate Voiceover (Pollinations)'}
+          </button>
+          {voiceoverUrl && <audio controls src={voiceoverUrl} className="w-full mt-1" />}
+        </div>
+
+        {/* 3C — Merge & Download */}
+        <div className="space-y-3 pt-3 border-t border-gray-100">
+          <h3 className="font-semibold text-[#0F172A] text-sm">Gabungkan &amp; Download</h3>
+          <button type="button" onClick={handleMerge} disabled={!allVideosReady || !voiceoverBlob || isMerging}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+            style={{ background: 'linear-gradient(135deg, #DC2626 0%, #F97316 100%)' }}>
+            {isMerging
+              ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Merging...</>
+              : '🔀 Gabungkan & Download Final.mp4'}
+          </button>
+          {mergeProgress && (
+            <p className="text-xs font-mono text-[#64748B] bg-gray-50 rounded-lg px-3 py-2 break-all">{mergeProgress}</p>
+          )}
+          {finalVideoUrl && (
+            <div className="space-y-2">
+              <video controls src={finalVideoUrl} className="w-full rounded-xl border border-gray-100" />
+              <a href={finalVideoUrl} download="final.mp4"
+                className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+                style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+                <Download size={15} /> Download final.mp4
+              </a>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Halaman utama ──────────────────────────────────────────────────────────
 export default function AdminViralFrameWorkspacePage() {
   const { id } = useParams();
@@ -173,7 +545,7 @@ export default function AdminViralFrameWorkspacePage() {
   const savedPromptRef = useRef<string>('');
 
   // Step 4 — Tab Paste & Validate (Fase V4b)
-  const [step4Tab, setStep4Tab] = useState<'prompt' | 'validate'>('prompt');
+  const [step4Tab, setStep4Tab] = useState<'prompt' | 'validate' | 'video_vo'>('prompt');
   const [pasteRaw, setPasteRaw] = useState('');
   const [valResult, setValResult] = useState<ValidateResult | null>(null);
   const [validData, setValidData] = useState<ParsedJSON | null>(null);
@@ -702,6 +1074,7 @@ export default function AdminViralFrameWorkspacePage() {
             {([
               { v: 'prompt', label: 'Master Prompt', icon: <Copy size={14} /> },
               { v: 'validate', label: 'Paste & Validate', icon: <FileCheck2 size={14} /> },
+              { v: 'video_vo', label: 'Video VO', icon: <Film size={14} /> },
             ] as const).map(t => (
               <button key={t.v} type="button" onClick={() => setStep4Tab(t.v)}
                 className={`flex items-center gap-1.5 px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
@@ -756,6 +1129,17 @@ export default function AdminViralFrameWorkspacePage() {
                 </span>
               </div>
             </div>
+          )}
+
+          {/* ── TAB 3: VIDEO VO ── */}
+          {step4Tab === 'video_vo' && prop && (
+            <VideoVOTab
+              propertyId={prop.id}
+              propertyTitle={prop.title}
+              jenisProperti={prop.jenis_properti}
+              lokasi={`${prop.kecamatan}, ${prop.kabupaten}`}
+              photos={prop.images}
+            />
           )}
 
           {/* ── TAB 2: PASTE & VALIDATE ── */}
