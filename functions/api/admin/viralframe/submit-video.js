@@ -37,9 +37,6 @@ export async function onRequestPost(context) {
       resolution: '720p',
       seed: Math.floor(Math.random() * 999999),
     });
-    // TEMP DEBUG 3: setelah JSON.stringify, sebelum fetch
-    return Response.json({ debug: 'checkpoint_3_stringify_ok', payload_len: sfPayload.length });
-
     let sfRes;
     try {
       sfRes = await fetch('https://api.siliconflow.com/v1/video/submit', {
@@ -50,6 +47,8 @@ export async function onRequestPost(context) {
         },
         body: sfPayload,
       });
+      // TEMP DEBUG 4: fetch berhasil dijawab SiliconFlow
+      return Response.json({ debug: 'checkpoint_4_fetch_ok', sf_status: sfRes.status, sf_ok: sfRes.ok });
     } catch (err) {
       return Response.json({ error: `Gagal menghubungi SiliconFlow: ${err.message}` }, { status: 502 });
     }
