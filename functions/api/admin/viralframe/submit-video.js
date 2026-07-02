@@ -29,8 +29,16 @@ export async function onRequestPost(context) {
       return Response.json({ error: 'SILICONFLOW_API_KEY tidak dikonfigurasi' }, { status: 500 });
     }
 
-    // TEMP DEBUG 2: setelah apiKey check
-    return Response.json({ debug: 'checkpoint_2_apikey_ok', key_len: apiKey.length });
+    const sfPayload = JSON.stringify({
+      model: 'Wan-AI/Wan2.1-I2V-14B-720P-Turbo',
+      image: image_base64,
+      prompt: String(prompt),
+      duration: 5,
+      resolution: '720p',
+      seed: Math.floor(Math.random() * 999999),
+    });
+    // TEMP DEBUG 3: setelah JSON.stringify, sebelum fetch
+    return Response.json({ debug: 'checkpoint_3_stringify_ok', payload_len: sfPayload.length });
 
     let sfRes;
     try {
@@ -40,14 +48,7 @@ export async function onRequestPost(context) {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: 'Wan-AI/Wan2.1-I2V-14B-720P-Turbo',
-          image: image_base64,
-          prompt: String(prompt),
-          duration: 5,
-          resolution: '720p',
-          seed: Math.floor(Math.random() * 999999),
-        }),
+        body: sfPayload,
       });
     } catch (err) {
       return Response.json({ error: `Gagal menghubungi SiliconFlow: ${err.message}` }, { status: 502 });
