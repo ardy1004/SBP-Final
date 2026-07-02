@@ -29,6 +29,9 @@ export async function onRequestPost(context) {
       return Response.json({ error: 'SILICONFLOW_API_KEY tidak dikonfigurasi' }, { status: 500 });
     }
 
+    // TEMP DEBUG 2: setelah apiKey check
+    return Response.json({ debug: 'checkpoint_2_apikey_ok', key_len: apiKey.length });
+
     let sfRes;
     try {
       sfRes = await fetch('https://api.siliconflow.com/v1/video/submit', {
