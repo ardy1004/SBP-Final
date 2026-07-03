@@ -245,20 +245,23 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
           sh = Math.round(img.naturalWidth / targetAspect);
           sy = Math.round((img.naturalHeight - sh) / 2);
         }
-        // Resize ke max 512px di sisi terpanjang, pertahankan rasio target
-        const MAX = 512;
-        let cw = opt.w, ch = opt.h;
-        if (cw > MAX || ch > MAX) {
-          if (cw >= ch) { ch = Math.round(ch * MAX / cw); cw = MAX; }
-          else { cw = Math.round(cw * MAX / ch); ch = MAX; }
+        // Gunakan dimensi penuh dari rasio option — tidak ada MAX limit
+        // karena SiliconFlow dipanggil langsung dari browser (tidak lewat Worker)
+        let cw = opt.w;
+        let ch = opt.h;
+        // Jika source crop area lebih kecil dari target, scale down proportionally
+        if (sw < cw || sh < ch) {
+          const scale = Math.min(sw / cw, sh / ch);
+          cw = Math.round(cw * scale);
+          ch = Math.round(ch * scale);
         }
         const canvas = document.createElement('canvas');
         canvas.width = cw; canvas.height = ch;
         const ctx = canvas.getContext('2d');
         if (!ctx) { reject(new Error('Canvas tidak tersedia')); return; }
         ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
-        const base64 = canvas.toDataURL('image/jpeg', 0.85); // return FULL data URL dengan prefix
-        console.log(`[VideoVO] rasio=${targetRatio} canvas=${cw}x${ch} len=${base64.length}`);
+        const base64 = canvas.toDataURL('image/jpeg', 0.80); // return FULL data URL dengan prefix
+        console.log(`[VideoVO] rasio=${targetRatio} canvas=${cw}x${ch} filesize=~${Math.round(base64.length * 0.75 / 1024)}KB`);
         resolve(base64);
       };
       img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Gagal load foto')); };
