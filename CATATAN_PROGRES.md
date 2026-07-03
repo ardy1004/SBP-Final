@@ -5,7 +5,134 @@
 
 ---
 
-## STATUS SAAT INI: Fase H — Deploy .pages.dev + uji produksi LULUS ✅ (H5 go-live domain pending)
+## STATUS SAAT INI: Domain `salambumi.xyz` LIVE di produksi (Fase H tuntas). Pengembangan aktif berlanjut pasca go-live — modul admin 13/13 area terisi (2 masih placeholder), G-MAP/G-CHAT/Meta CAPI/AI Description Generator sudah live, ViralFrame Jalur B (Video VO/SiliconFlow) dalam pengerjaan intensif. — Terakhir diupdate 3 Juli 2026
+
+---
+
+## AUDIT KOMPREHENSIF — 3 Juli 2026
+
+> Audit dilakukan langsung dari kode aktual (`src/app/components/admin/`, `functions/api/` rekursif, `routes.ts`, `package.json`, `wrangler.toml`, `git log`) — bukan dari asumsi atau dokumen lama. Section historis di bawah ini **tidak diubah**; ini murni tambahan untuk menyinkronkan dokumen dengan kondisi kode terkini.
+
+### A. Fitur yang selesai tapi belum tercatat di dokumen lama
+
+| Fitur | File utama | Commit terdekat | Status | Keterangan |
+|---|---|---|---|---|
+| **G-MAP** (peta interaktif + auto-extract koordinat) | `src/app/components/admin/AdminLokasiPage.tsx`, `functions/api/admin/locations/{import,proxy,stats}.js`, `functions/api/properties/map.js`, `react-leaflet` di `PropertiesPage.tsx` | `b0acf68`…`3a66787` (4 Juni) | Live | G-MAP-1: auto-extract lat/lng dari `gmaps_link` + badge GPS admin. G-MAP-2: peta Leaflet + pin warna per jenis + popup card di halaman publik. `react-leaflet` di-downgrade v5→v4.2.1 karena butuh React 19. |
+| **G-CHAT** (widget chat AI properti) | `functions/api/chat.js` (234 baris), `src/app/components/ChatWidget.tsx` | `3a0327f`…`e2d4ec5` (Juni) | Live | 3 tahap: G-CHAT-1 endpoint Groq function-calling `search_properties`; G-CHAT-2 combined FAB (Chat AI + WhatsApp); G-CHAT-3 tool `submit_lead` — deteksi minat tinggi, insert ke `leads`, WA backup CTA. Model: `llama-3.3-70b-versatile`. |
+| **Meta Pixel + CAPI (tracking)** | `functions/api/admin/pixel-configs/{index,[id]}.js`, `functions/api/admin/settings/tracking.js`, `functions/api/tracking-config.js`, `AdminSettingsPage.tsx` (21.7 KB) | `5b6b0ca`…`a3b0da7` (fase P1-P4) | Live | P1: schema `pixel_configs` + settings UI (multi-config Pixel + GA4 + GTM + Search Console). P2: event ViewContent/Search. P3: event Contact/Lead sebelum redirect WA. P4: Meta CAPI server-side dengan PII hashing + dedup `eventID`. |
+| **Lighthouse / perf fixes** | berbagai | `c269916`, `b80d3fd`, `a3b0da7`, `bdd8a6b`, dll | Live | Self-host font Inter+Plus Jakarta Sans (woff2, hapus Google Fonts render-blocking), Cloudflare image transform (resize+format auto+srcset+lazy+fetchpriority LCP), fix kontras & touch-target a11y, banyak `suppressHydrationWarning` untuk elemen yang terkena Cloudflare Zaraz injection. |
+| **Homepage sections baru** | `src/app/components/HomeSections.tsx`, `HomePage.tsx`, `ChatWidget.tsx` | `38b883a` (feat: tambah 4 section baru + WhatsApp FAB) | Live | `DualCTA`, `CoverageArea`, `HomeFAQ` + WhatsApp FAB. `HeroFilter` (di `HomePage.tsx`) **tidak lagi mock** — sudah cascade real via `getLocations()` API (kontradiksi tabel Fase D lama yang menandainya "⚠️ Mock"; sudah diperbaiki belakangan tanpa update dokumen). |
+| **AI Description Generator** | `functions/api/admin/ai/generate-description.js` (208 baris) | `7a76ec8`, `53b0df4`, `5648e05` | Live | Generate judul/deskripsi/meta_title/meta_description via DeepSeek (`deepseek-chat`). Sudah 2x tuning prompt (akurasi jumlah kamar, sanitasi kost en-suite, temperature diturunkan). |
+| **ViralFrame Jalur B — Video VO** | `AdminViralFrameWorkspacePage.tsx` (63.7 KB, tab `video_vo`), `functions/api/admin/viralframe/{submit-video,video-status/[requestId],generate-voiceover,siliconflow-token}.js` | `466aa4f` s.d. `5e809d3` (commit terakhir hari ini) | **Parsial/aktif dikerjakan** | Lihat detail di section D. |
+| **Admin Testimoni / Lokasi / Settings** | `AdminTestimoniPage.tsx` (24.6 KB), `AdminLokasiPage.tsx` (9.9 KB), `AdminSettingsPage.tsx` (21.7 KB) | berbagai (4-7 Juni) | Live | Ketiganya modul penuh (CRUD/reorder, cascade wilayah + import 1-klik, ganti password + tracking config) — bukan placeholder, meski tidak pernah dapat entry khusus di dokumen lama. |
+
+### B. Modul admin — status lengkap
+
+| Modul | File | Ukuran | Status | Keterangan |
+|---|---|---|---|---|
+| Login | `AdminLoginPage.tsx` | 4.8 KB | Selesai | Real auth via `/api/admin/login` |
+| Layout/Shell | `AdminLayout.tsx` | 12.4 KB | Selesai | Sidebar, auth guard, badge notifikasi lead |
+| Overview | `AdminOverviewPage.tsx` | 12.7 KB | Selesai | KPI + chart real dari `/api/admin/overview` |
+| Listing Properti | `AdminListingPage.tsx` | 31.5 KB | Selesai | List, filter, bulk badge/delete/publish, CSV import |
+| Detail/Edit Properti | `AdminPropertyDetailPage.tsx` | 47.8 KB | Selesai | Form dinamis per jenis, 37 field, create+edit |
+| Foto Properti (sub) | `PropertyPhotosCard.tsx` | 12.8 KB | Selesai | Upload WebP, reorder, set cover |
+| Import CSV (sub) | `CsvImportModal.tsx` | 15.4 KB | Selesai | Preview + partial insert |
+| Titip Jual / Agreements | `AdminAgreementsPage.tsx` | 8.0 KB | Selesai | List + filter status |
+| Detail Agreement | `AdminAgreementDetailPage.tsx` | 37.3 KB | Selesai | Edit Opsi X, configure, generate+kirim link TTD |
+| Leads/CRM | `AdminLeadsPage.tsx` | 18.1 KB | Selesai | Kanban 5-tahap, drag-drop |
+| Detail Lead | `AdminLeadDetailPage.tsx` | 14.2 KB | Selesai | Timeline catatan, ubah pipeline |
+| Testimoni | `AdminTestimoniPage.tsx` | 24.6 KB | Selesai | CRUD + reorder + upload foto |
+| Blog | `AdminBlogPage.tsx` | 16.8 KB | Selesai | CRUD draft/publish |
+| Lokasi (G-MAP admin) | `AdminLokasiPage.tsx` | 9.9 KB | Selesai | Import wilayah, stats, proxy koordinat |
+| Pengaturan | `AdminSettingsPage.tsx` | 21.7 KB | Selesai | Ganti password + Meta Pixel/GA4/GTM config |
+| ViralFrame (list) | `AdminViralFramePage.tsx` | 7.9 KB | Selesai | List generation + shortcut ke Video VO |
+| ViralFrame (workspace) | `AdminViralFrameWorkspacePage.tsx` | 63.7 KB | **Parsial** | Jalur A (naskah/prompt compiler, V1-V4b) selesai; Jalur B (Video VO/SiliconFlow) aktif di-debug |
+| Portfolio | `AdminPlaceholderPage.tsx` (shared) | 0.9 KB | **Placeholder** | Route `admin/portfolio` masih "Segera hadir" |
+| Media | `AdminPlaceholderPage.tsx` (shared) | 0.9 KB | **Placeholder** | Route `admin/media` masih "Segera hadir" |
+
+### C. Endpoint API — inventaris lengkap
+
+**Publik:**
+`health.js` · `locations.js` · `properties/index.js` · `properties/[slug].js` · `properties/[slug]/wa-click.js` · `properties/map.js` (G-MAP) · `leads.js` · `testimonials.js` · `blog.js` · `blog/[slug].js` · `titip-jual.js` · `sign/[token].js` · `sign/[token]/pdf.js` · `chat.js` (G-CHAT) · `media.js` (proxy R2 publik) · `tracking-config.js`
+
+**Admin — properties:** `admin/properties/index.js` · `[id]/index.js` · `[id]/status.js` · `[id]/photos/index.js` · `[id]/photos/[imageId]/index.js` · `[id]/photos/[imageId]/cover.js` · `[id]/photos/reorder.js` · `batch.js` (CSV) · `bulk.js`
+
+**Admin — leads:** `admin/leads/index.js` · `admin/leads/[id]/index.js`
+
+**Admin — agreements:** `admin/agreements/index.js` · `admin/agreements/[id]/index.js` · `admin/agreements/[id]/configure.js`
+
+**Admin — blog:** `admin/blog/index.js` · `admin/blog/[id].js`
+
+**Admin — testimonials:** `admin/testimonials/index.js` · `admin/testimonials/[id]/index.js` · `admin/testimonials/foto.js`
+
+**Admin — locations (G-MAP):** `admin/locations/import.js` · `admin/locations/proxy.js` · `admin/locations/stats.js`
+
+**Admin — settings/tracking:** `admin/settings/tracking.js` · `admin/pixel-configs/index.js` · `admin/pixel-configs/[id].js` · `admin/password.js`
+
+**Admin — AI:** `admin/ai/generate-description.js`
+
+**Admin — viralframe:** `admin/viralframe/characters/index.js` · `[id].js` · `generate-naskah.js` · `generate-voiceover.js` · `generations/index.js` · `[id].js` · `siliconflow-token.js` · `submit-video.js` · `video-status/[requestId].js`
+
+**Admin — umum:** `admin/login.js` · `admin/logout.js` · `admin/me.js` · `admin/overview.js` · `admin/media.js` · `admin/_middleware.js` (auth guard)
+
+### D. Fitur yang PARSIAL atau DALAM PENGERJAAN
+
+- **ViralFrame Jalur B (SiliconFlow Wan2.2-I2V-A14B + Pollinations TTS + FFmpeg.wasm merge)** — ~25 commit fix beruntun sejak `466aa4f`, termasuk commit hari ini (`5e809d3`, "hapus MAX limit yang membuat image terlalu kecil"). Sudah dipindah ke submit **client-side dari browser** (bukan lewat Worker) untuk menghindari limit 30 detik Cloudflare Workers. Masih dalam siklus debug aktif — anggap belum stabil untuk pemakaian produksi rutin.
+- **Voiceover audio 0:00** — dilaporkan user sebagai isu terbuka. Kode `generate-voiceover.js` mem-fetch Pollinations TTS dan mengecek `audioBuffer.byteLength < 100` sebagai guard minimal, tapi tidak ada validasi durasi/playability — konsisten dengan kemungkinan bug ini belum diperbaiki di kode.
+- **Hydration error "Plan B"** — tidak ditemukan rencana "Plan B" eksplisit di dokumen maupun kode. Yang ada: banyak mitigasi *reaktif* (32 pemakaian `suppressHydrationWarning` tersebar, dedupe `react`/`react-dom` di Vite, fix format angka locale-agnostic). Jika "Plan B" merujuk pada solusi arsitektural yang lebih permanen (mis. audit sumber injeksi Cloudflare Zaraz), itu **belum dieksekusi** — saat ini strategi masih tambal-sulam per elemen.
+- **HeroFilter cascade** — **SUDAH tidak mock** (lihat section A) — ini item lama dari tabel Fase D yang sekarang stale/keliru di dokumen historis, bukan gap aktual.
+
+### E. Yang belum dikerjakan sama sekali
+
+- **Social Media Queue** — tidak ada file/endpoint terkait sama sekali.
+- **Price Dashboard** — tidak ada file/endpoint terkait.
+- **Payment Gateway** — tidak ada integrasi payment di `package.json` maupun `functions/`.
+- **Portfolio (G6)** — route `admin/portfolio` masih `AdminPlaceholderPage`; halaman publik `PortfolioPage.tsx` masih pakai mock `PORTFOLIO_ITEMS`.
+- **Media Manager (G7)** — route `admin/media` masih `AdminPlaceholderPage`. `admin/media.js` yang ada hanya proxy foto R2 untuk kebutuhan lain (bukan file manager).
+
+---
+
+## G4 — Admin Leads: Detail Page + GET /api/admin/leads/:id ✅ SELESAI (20 Juni 2026)
+
+**Branch:** `master` (commit `68e4d36`, sudah di-push)
+
+### Konteks
+
+Modul Leads/CRM (Kanban 5-tahap, lihat "Admin Gelombang 1 — Modul 2: Leads/CRM" di bawah) sudah live di `master`, tapi belum punya halaman detail per-lead — kartu Kanban hanya bisa diubah status via drag-drop/dropdown, tanpa tempat melihat riwayat catatan dan info lead secara penuh.
+
+**Catatan penting — brief vs realita:** Spesifikasi tugas awal mendeskripsikan skema 6-tahap (`survei`, `closed_win`, `closed_lose`) dan kolom `email`/`source` yang **sudah tidak berlaku** — migration `0009` dan `0013` telah mengganti ke pipeline 5-tahap (`baru/dihubungi/negosiasi/closing/arsip`) dan field set berbeda (`tipe_pengirim`, `source_page`, dll). Endpoint list + Kanban UI yang diminta "dibuat baru" pun sudah ada. Setelah dikonfirmasi ke user, scope dipersempit: **hanya tambahkan yang benar-benar belum ada** (GET detail + halaman detail), tanpa mengubah pipeline/skema yang sudah live.
+
+### Yang dibangun:
+
+| File | Perubahan |
+|---|---|
+| `functions/api/admin/leads/[id]/index.js` | Tambah `onRequestGet` — detail satu lead + JOIN properti (title/slug/jenis_properti/tujuan/provinsi/kabupaten/kecamatan). Refactor: `fetchLeadById()` + `toLeadResponse()` dipakai bersama oleh GET dan PATCH (PATCH sebelumnya return shape ad-hoc dengan `properti_title` flat, sekarang konsisten `properti` nested object). |
+| `src/app/components/admin/AdminLeadDetailPage.tsx` | **Baru.** 2 kolom (desktop) / stack (mobile): kiri = info lead (avatar inisial, no WA, asal daerah, budget, rencana bayar, pesan, link properti terkait, tombol WA); kanan = dropdown ubah `status_pipeline` (konfirmasi sebelum `closing`/`arsip`) + timeline catatan + form tambah catatan. |
+| `src/app/components/admin/AdminLeadsPage.tsx` | Nama/avatar di kartu Kanban kini tombol → `navigate('/admin/leads/:id')`. |
+| `src/app/routes.ts` | Tambah route `admin/leads/:id` → `AdminLeadDetailPage.tsx`. |
+
+### Endpoint baru:
+
+| Endpoint | Method | Fungsi |
+|---|---|---|
+| `GET /api/admin/leads/:id` | GET | Detail satu lead + properti terkait (atau `null`), notes ter-parse JSON, 404 jika tidak ada |
+
+### Hasil verifikasi lokal (wrangler port 8790, JWT Bearer token manual karena tidak ada kredensial admin tersedia):
+
+| Test | Hasil |
+|---|---|
+| `npm run build` (clean) | ✅ 0 error |
+| `tsc --noEmit` | ✅ 0 error di file leads |
+| GET detail tanpa token | ✅ 401 |
+| GET detail id valid | ✅ 200, shape `{lead: {...,  properti: null}}` |
+| GET detail id tidak ada | ✅ 404 "Lead tidak ditemukan" |
+| GET detail dengan `property_id` terisi | ✅ `properti` ter-JOIN benar (title, slug, jenis_properti, tujuan, lokasi) |
+| PATCH `status_pipeline` valid | ✅ 200, response konsisten dengan GET |
+| PATCH `status_pipeline` invalid (`survei`) | ✅ 422 — ditolak CHECK constraint pipeline 5-tahap |
+| PATCH `note_baru` | ✅ 200, notes lama dipertahankan (append-only) |
+| Route `/admin/leads/:id` (SPA shell) | ✅ 200 |
+
+Data uji di D1 lokal (`property_id`, `status_pipeline`, `notes` pada lead id=5) dikembalikan ke nilai semula setelah verifikasi.
 
 ---
 
