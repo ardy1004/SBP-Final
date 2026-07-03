@@ -139,6 +139,13 @@ const GAYA_KAMERA = [
   { label: '🎯 Close Detail', value: 'close_detail', prompt: 'slow cinematic lateral pan across architectural details and surfaces, close-up macro style, shallow depth of field, smooth horizontal motion revealing textures and materials' },
 ];
 
+const RASIO_OPTIONS = [
+  { label: '16:9 — Landscape (YouTube/properti)', value: '1280x720', w: 1280, h: 720 },
+  { label: '9:16 — Portrait (TikTok/Reels)', value: '720x1280', w: 720, h: 1280 },
+  { label: '1:1 — Square (Instagram feed)', value: '960x960', w: 960, h: 960 },
+] as const;
+type RasioValue = typeof RASIO_OPTIONS[number]['value'];
+
 interface VOScene {
   foto_id: number | null;
   foto_url: string | null;
@@ -177,6 +184,7 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
   const [mergeProgress, setMergeProgress] = useState('');
   const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
   const [genError, setGenError] = useState('');
+  const [rasio, setRasio] = useState<RasioValue>('1280x720');
 
   const wordCount = naskah.trim() ? naskah.trim().split(/\s+/).length : 0;
   const targetWords = Math.floor(voScenes.length * 8 * 1.9);
@@ -212,7 +220,8 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
     }
   };
 
-  const photoToBase64 = async (foto_url: string): Promise<string> => {
+  const photoToBase64WithRatio = async (foto_url: string, targetRatio: RasioValue): Promise<string> => {
+    const opt = RASIO_OPTIONS.find(r => r.value === targetRatio)!;
     const src = mediaSrc(foto_url);
     if (!src) throw new Error('URL foto tidak valid');
     const res = await fetch(src, { credentials: 'include' });
@@ -223,18 +232,34 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
       const objectUrl = URL.createObjectURL(blob);
       img.onload = () => {
         URL.revokeObjectURL(objectUrl);
+        // Center crop ke target ratio
+        const targetAspect = opt.w / opt.h;
+        const srcAspect = img.naturalWidth / img.naturalHeight;
+        let sx = 0, sy = 0, sw = img.naturalWidth, sh = img.naturalHeight;
+        if (srcAspect > targetAspect) {
+          // sumber lebih lebar — crop kiri kanan
+          sw = Math.round(img.naturalHeight * targetAspect);
+          sx = Math.round((img.naturalWidth - sw) / 2);
+        } else {
+          // sumber lebih tinggi — crop atas bawah
+          sh = Math.round(img.naturalWidth / targetAspect);
+          sy = Math.round((img.naturalHeight - sh) / 2);
+        }
+        // Resize ke max 512px di sisi terpanjang, pertahankan rasio target
         const MAX = 512;
-        let w = img.naturalWidth, h = img.naturalHeight;
-        if (w > MAX || h > MAX) {
-          if (w >= h) { h = Math.round(h * MAX / w); w = MAX; }
-          else { w = Math.round(w * MAX / h); h = MAX; }
+        let cw = opt.w, ch = opt.h;
+        if (cw > MAX || ch > MAX) {
+          if (cw >= ch) { ch = Math.round(ch * MAX / cw); cw = MAX; }
+          else { cw = Math.round(cw * MAX / ch); ch = MAX; }
         }
         const canvas = document.createElement('canvas');
-        canvas.width = w; canvas.height = h;
+        canvas.width = cw; canvas.height = ch;
         const ctx = canvas.getContext('2d');
         if (!ctx) { reject(new Error('Canvas tidak tersedia')); return; }
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.75)); // return FULL data URL dengan prefix
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+        const base64 = canvas.toDataURL('image/jpeg', 0.85); // return FULL data URL dengan prefix
+        console.log(`[VideoVO] rasio=${targetRatio} canvas=${cw}x${ch} len=${base64.length}`);
+        resolve(base64);
       };
       img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Gagal load foto')); };
       img.src = objectUrl;
@@ -253,7 +278,7 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
       for (let i = 0; i < voScenes.length; i++) {
         const scene = voScenes[i];
         if (!scene.foto_url || !scene.gaya_kamera) continue;
-        const image_base64 = await photoToBase64(scene.foto_url);
+        const image_base64 = await photoToBase64WithRatio(scene.foto_url, rasio);
         console.log('[VideoVO] base64 prefix:', image_base64.slice(0, 30), 'len:', image_base64.length);
         const sfSubmitRes = await fetch('https://api.siliconflow.com/v1/video/submit', {
           method: 'POST',
@@ -265,7 +290,7 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
             model: 'Wan-AI/Wan2.2-I2V-A14B',
             image: image_base64,
             prompt: scene.prompt_en,
-            image_size: '1280x720',
+            image_size: rasio,
             seed: Math.floor(Math.random() * 999999),
           }),
         });
@@ -378,6 +403,19 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
           <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-medium">
             Target naskah: ~{targetWords} kata
           </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium text-[#64748B]">Rasio Video:</label>
+          <select
+            value={rasio}
+            onChange={e => setRasio(e.target.value as RasioValue)}
+            className={`${selectCls} w-auto`}
+          >
+            {RASIO_OPTIONS.map(r => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
         </div>
 
         {voScenes.map((scene, i) => {
