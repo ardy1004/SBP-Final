@@ -223,7 +223,7 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
       const objectUrl = URL.createObjectURL(blob);
       img.onload = () => {
         URL.revokeObjectURL(objectUrl);
-        const MAX = 960;
+        const MAX = 512;
         let w = img.naturalWidth, h = img.naturalHeight;
         if (w > MAX || h > MAX) {
           if (w >= h) { h = Math.round(h * MAX / w); w = MAX; }
@@ -234,7 +234,7 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
         const ctx = canvas.getContext('2d');
         if (!ctx) { reject(new Error('Canvas tidak tersedia')); return; }
         ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.82)); // return FULL data URL dengan prefix
+        resolve(canvas.toDataURL('image/jpeg', 0.75)); // return FULL data URL dengan prefix
       };
       img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Gagal load foto')); };
       img.src = objectUrl;
@@ -294,6 +294,7 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
             done = true;
           } else if (status === 'failed') {
             done = true;
+            throw new Error(`Scene ${i + 1}: SiliconFlow gagal — ${statusJson.reason ?? 'tidak ada detail'}`);
           }
         }
         if (!done) setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, status: 'failed' } : r));

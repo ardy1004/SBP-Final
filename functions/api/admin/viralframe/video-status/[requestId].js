@@ -46,8 +46,9 @@ export async function onRequestGet(context) {
     const sfStatus = sfJson.status ?? '';
     const status = STATUS_MAP[sfStatus] ?? 'pending';
     const video_url = status === 'succeed' && sfJson.videos?.[0]?.url ? sfJson.videos[0].url : null;
+    const reason = sfJson.reason ?? sfJson.message ?? sfJson.data?.reason ?? null;
 
-    return Response.json({ status, video_url });
+    return Response.json({ status, video_url, reason });
   } catch (err) {
     return Response.json({ status: 'failed', video_url: null, error: err.message ?? 'Internal error' });
   }
