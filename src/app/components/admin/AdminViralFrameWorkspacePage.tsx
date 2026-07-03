@@ -294,7 +294,7 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
             done = true;
           } else if (status === 'failed') {
             done = true;
-            throw new Error(`Scene ${i + 1}: SiliconFlow gagal — ${statusJson.reason ?? 'tidak ada detail'}`);
+            throw new Error(`Scene ${i + 1}: SiliconFlow gagal — ${JSON.stringify(statusJson._raw ?? statusJson.reason ?? 'no detail').slice(0, 400)}`);
           }
         }
         if (!done) setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, status: 'failed' } : r));
