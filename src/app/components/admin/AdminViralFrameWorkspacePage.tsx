@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router';
+import { useParams, useNavigate, useSearchParams } from 'react-router';
 import {
   ArrowLeft, ArrowRight, ImageOff, Check, Film, AlertCircle,
   Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles,
@@ -585,6 +585,8 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
 export default function AdminViralFrameWorkspacePage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const isVideoVOMode = searchParams.get('mode') === 'video-vo';
 
   const [prop, setProp] = useState<PropertyDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -653,6 +655,14 @@ export default function AdminViralFrameWorkspacePage() {
     })();
     return () => { cancel = true; };
   }, [id]);
+
+  // Shortcut dari list page (?mode=video-vo) — langsung ke Step 4, tab Video VO
+  useEffect(() => {
+    if (isVideoVOMode) {
+      setStep(4);
+      setStep4Tab('video_vo');
+    }
+  }, [isVideoVOMode]);
 
   // Ubah jumlah scene → resize manualDurations & scenes (pertahankan nilai lama)
   const setSceneCount = useCallback((raw: number) => {

@@ -153,6 +153,12 @@ export default function AdminViralFramePage() {
                   >
                     🎬 Buat Prompt Video
                   </button>
+                  <button
+                    onClick={() => navigate(`/admin/viralframe/${p.id}?mode=video-vo`)}
+                    className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-[#1565C0]/40 text-[#1565C0] text-sm font-medium hover:bg-[#F0F7FF] transition-colors"
+                  >
+                    🎬 Generate Video VO
+                  </button>
                 </div>
               </div>
             );
