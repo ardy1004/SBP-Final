@@ -1,12 +1,27 @@
 // POST /api/admin/viralframe/ai-generate — Jalur C: generate N video prompt via DeepSeek
 // Body: { property_id, jumlah_scene, platform, ai_tool, bahasa, musik_value, musik_prompt, karakter_id, foto_assignments }
-// foto_assignments: [{ scene: 1, foto_url: '...' }, ...] — dipilih manual oleh user, bukan auto-pick.
+// foto_assignments: [{ scene: 1, foto_url: '...', foto_label: '...' }, ...] — dipilih manual oleh user, bukan auto-pick.
 // Auth: otomatis via functions/api/admin/_middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 
 const PLATFORM_DURASI = {
   tiktok: 8, reels: 8, youtube_shorts: 10, facebook: 8,
+};
+
+const LABEL_MAP = {
+  fasad: 'tampak depan/fasad bangunan',
+  kamar_tidur: 'kamar tidur',
+  kamar_mandi: 'kamar mandi',
+  dapur: 'dapur',
+  ruang_tamu: 'ruang tamu',
+  ruang_santai: 'ruang santai/keluarga',
+  balkon: 'balkon',
+  kolam_renang: 'kolam renang',
+  koridor_tangga: 'koridor atau area tangga',
+  parkir: 'area parkir',
+  view_sekitar: 'pemandangan atau lingkungan sekitar',
+  lainnya: 'area properti',
 };
 
 const SCENE_CAMERA_HINTS = [
@@ -89,8 +104,8 @@ function buildUserPrompt({ property, karakter, jumlahScene, fotoAssignments }) {
     .slice()
     .sort((a, b) => a.scene - b.scene)
     .map(a => {
-      const basename = String(a.foto_url).split('/').pop();
-      return `- Scene ${a.scene} menggunakan foto: foto properti scene ${a.scene} (file: ${basename})`;
+      const deskripsi = LABEL_MAP[a.foto_label] ?? LABEL_MAP.lainnya;
+      return `- Scene ${a.scene} — foto ${deskripsi}: buat prompt yang menonjolkan area ini.`;
     })
     .join('\n');
 
@@ -135,6 +150,9 @@ function validateFotoAssignments(fotoAssignments, jumlahScene) {
     }
     if (typeof a?.foto_url !== 'string' || !a.foto_url.trim()) {
       return { ok: false, error: `Scene ${sceneNum} belum punya foto terpilih` };
+    }
+    if (typeof a?.foto_label !== 'string' || !a.foto_label.trim()) {
+      return { ok: false, error: `Scene ${sceneNum} belum punya label foto` };
     }
     scenesSeen.add(sceneNum);
   }
@@ -264,13 +282,23 @@ export async function onRequestPost(context) {
   const parsed = parseSceneJson(raw, jumlahScene);
   if (!parsed.ok) return jsonError(parsed.error, 502);
 
+  const fotoByScene = new Map(fotoAssignments.map(a => [Number(a.scene), a]));
+  const enrichedScenes = parsed.data.map(s => {
+    const assignment = fotoByScene.get(s.scene);
+    return {
+      ...s,
+      foto_label: assignment?.foto_label ?? null,
+      foto_deskripsi: assignment ? (LABEL_MAP[assignment.foto_label] ?? LABEL_MAP.lainnya) : null,
+    };
+  });
+
   const fotoUrls = fotoAssignments
     .slice()
     .sort((a, b) => a.scene - b.scene)
     .map(a => a.foto_url);
 
   return jsonOk({
-    scenes: parsed.data,
+    scenes: enrichedScenes,
     foto_urls: fotoUrls,
     karakter: { nama: karakter.nama, deskripsi: deskripsiKarakter, foto_url: karakter.foto_url },
     metadata: {
