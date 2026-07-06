@@ -590,6 +590,7 @@ export default function AdminViralFrameWorkspacePage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isVideoVOMode = searchParams.get('mode') === 'video-vo';
+  const isAIGenerateMode = searchParams.get('mode') === 'ai-generate';
 
   const [prop, setProp] = useState<PropertyDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -632,7 +633,7 @@ export default function AdminViralFrameWorkspacePage() {
   const savedPromptRef = useRef<string>('');
 
   // Step 4 — Tab Paste & Validate (Fase V4b)
-  const [step4Tab, setStep4Tab] = useState<'prompt' | 'validate' | 'video_vo'>('prompt');
+  const [step4Tab, setStep4Tab] = useState<'prompt' | 'validate' | 'video_vo' | 'ai_generate'>('prompt');
   const [pasteRaw, setPasteRaw] = useState('');
   const [valResult, setValResult] = useState<ValidateResult | null>(null);
   const [validData, setValidData] = useState<ParsedJSON | null>(null);
@@ -666,6 +667,14 @@ export default function AdminViralFrameWorkspacePage() {
       setStep4Tab('video_vo');
     }
   }, [isVideoVOMode]);
+
+  // Shortcut dari list page (?mode=ai-generate) — langsung ke Step 4, tab AI Generate
+  useEffect(() => {
+    if (isAIGenerateMode) {
+      setStep(4);
+      setStep4Tab('ai_generate');
+    }
+  }, [isAIGenerateMode]);
 
   // Ubah jumlah scene → resize manualDurations & scenes (pertahankan nilai lama)
   const setSceneCount = useCallback((raw: number) => {
@@ -1170,6 +1179,7 @@ export default function AdminViralFrameWorkspacePage() {
               { v: 'prompt', label: 'Master Prompt', icon: <Copy size={14} /> },
               { v: 'validate', label: 'Paste & Validate', icon: <FileCheck2 size={14} /> },
               { v: 'video_vo', label: 'Video VO', icon: <Film size={14} /> },
+              { v: 'ai_generate', label: 'AI Generate ✨', icon: <Sparkles size={14} /> },
             ] as const).map(t => (
               <button key={t.v} type="button" onClick={() => setStep4Tab(t.v)}
                 className={`flex items-center gap-1.5 px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
@@ -1235,6 +1245,14 @@ export default function AdminViralFrameWorkspacePage() {
               lokasi={`${prop.kecamatan}, ${prop.kabupaten}`}
               photos={prop.images}
             />
+          )}
+
+          {/* ── TAB 4: AI GENERATE (placeholder) ── */}
+          {step4Tab === 'ai_generate' && (
+            <div className="py-12 text-center text-[#94A3B8] text-sm">
+              <Sparkles size={24} className="mx-auto mb-2 text-[#1565C0]" />
+              Fitur AI Generate sedang dimuat...
+            </div>
           )}
 
           {/* ── TAB 2: PASTE & VALIDATE ── */}

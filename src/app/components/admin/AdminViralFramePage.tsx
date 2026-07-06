@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Filter, ImageOff, Video } from 'lucide-react';
+import { Search, Filter, ImageOff, Video, X, Sparkles, PenLine, Clapperboard } from 'lucide-react';
 
 interface PropertyRow {
   id: number;
@@ -35,6 +35,70 @@ function coverSrc(url: string | null) {
   return url;
 }
 
+interface SelectedProperty { id: number; judul: string }
+
+function ModeSelectionModal({ property, onClose, onPick }: {
+  property: SelectedProperty;
+  onClose: () => void;
+  onPick: (mode: 'ai-generate' | 'manual' | 'video-vo') => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-5 space-y-4">
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="font-display font-bold text-[#0F172A] flex items-center gap-2">
+              🎬 Buat Video
+            </h3>
+            <p className="text-sm text-[#64748B] mt-0.5 line-clamp-1">{property.judul}</p>
+          </div>
+          <button onClick={onClose} className="text-[#94A3B8] hover:text-[#0F172A]"><X size={18} /></button>
+        </div>
+
+        <div className="space-y-3">
+          <button
+            onClick={() => onPick('ai-generate')}
+            className="w-full text-left p-4 rounded-xl border-2 border-[#1565C0]/30 bg-[#F0F7FF] hover:border-[#1565C0] transition-colors"
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Sparkles size={16} className="text-[#1565C0]" />
+              <span className="font-semibold text-sm text-[#0F172A]">AI DeepSeek</span>
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white bg-[#1565C0]">REKOMENDASI</span>
+            </div>
+            <p className="text-xs text-[#64748B] mb-2">Otomatis: pilih foto, tulis prompt, download ZIP siap pakai. ~30 detik.</p>
+            <span className="text-xs font-semibold text-[#1565C0]">Mulai →</span>
+          </button>
+
+          <button
+            onClick={() => onPick('manual')}
+            className="w-full text-left p-4 rounded-xl border border-gray-200 hover:border-[#1565C0]/40 hover:bg-gray-50 transition-colors"
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <PenLine size={16} className="text-[#64748B]" />
+              <span className="font-semibold text-sm text-[#0F172A]">Manual (4 Step)</span>
+            </div>
+            <p className="text-xs text-[#64748B] mb-2">Kontrol penuh atas setiap detail.</p>
+            <span className="text-xs font-semibold text-[#1565C0]">Buat Manual →</span>
+          </button>
+
+          <button
+            onClick={() => onPick('video-vo')}
+            className="w-full text-left p-4 rounded-xl border border-gray-200 hover:border-[#1565C0]/40 hover:bg-gray-50 transition-colors"
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Clapperboard size={16} className="text-[#64748B]" />
+              <span className="font-semibold text-sm text-[#0F172A]">Generate Video VO</span>
+            </div>
+            <p className="text-xs text-[#64748B] mb-2">Video + voiceover AI langsung.</p>
+            <span className="text-xs font-semibold text-[#1565C0]">Generate →</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminViralFramePage() {
   const navigate = useNavigate();
   const [properties, setProperties] = useState<PropertyRow[]>([]);
@@ -42,6 +106,17 @@ export default function AdminViralFramePage() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [displayLimit, setDisplayLimit] = useState(24);
+  const [selectedProperty, setSelectedProperty] = useState<SelectedProperty | null>(null);
+
+  const openModeModal = (id: number, judul: string) => setSelectedProperty({ id, judul });
+  const closeModal = () => setSelectedProperty(null);
+  const handlePickMode = (mode: 'ai-generate' | 'manual' | 'video-vo') => {
+    if (!selectedProperty) return;
+    const id = selectedProperty.id;
+    closeModal();
+    if (mode === 'manual') navigate(`/admin/viralframe/${id}`);
+    else navigate(`/admin/viralframe/${id}?mode=${mode}`);
+  };
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -112,7 +187,7 @@ export default function AdminViralFramePage() {
 
       {/* Grid properti */}
       {!loading && !error && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.slice(0, displayLimit).map(p => {
             const badge = STATUS_BADGE[p.status_publish] ?? { label: p.status_publish, cls: 'bg-gray-100 text-gray-500' };
             const src = coverSrc(p.cover_url);
@@ -147,17 +222,11 @@ export default function AdminViralFramePage() {
                   <div className="font-medium text-[#0F172A] text-sm leading-snug line-clamp-2">{p.title}</div>
                   <div className="text-xs text-[#64748B] mt-0.5">{p.kecamatan}, {p.kabupaten}</div>
                   <button
-                    onClick={() => navigate(`/admin/viralframe/${p.id}`)}
+                    onClick={() => openModeModal(p.id, p.title)}
                     className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
                     style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
                   >
-                    🎬 Buat Prompt Video
-                  </button>
-                  <button
-                    onClick={() => navigate(`/admin/viralframe/${p.id}?mode=video-vo`)}
-                    className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-[#1565C0]/40 text-[#1565C0] text-sm font-medium hover:bg-[#F0F7FF] transition-colors"
-                  >
-                    🎬 Generate Video VO
+                    🎬 Buat Video
                   </button>
                 </div>
               </div>
@@ -183,6 +252,14 @@ export default function AdminViralFramePage() {
             Muat Lebih Banyak ({filtered.length - displayLimit} tersisa)
           </button>
         </div>
+      )}
+
+      {selectedProperty && (
+        <ModeSelectionModal
+          property={selectedProperty}
+          onClose={closeModal}
+          onPick={handlePickMode}
+        />
       )}
     </div>
   );

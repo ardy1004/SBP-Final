@@ -207,7 +207,10 @@ export default function CharacterStep({ value, onChange }: {
         <div className="space-y-4">
           {/* Grid karakter */}
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-[#0F172A]">Character Library</span>
+            <div>
+              <span className="text-sm font-medium text-[#0F172A]">Character Library</span>
+              <p className="text-xs text-[#64748B] mt-0.5">🌍 Tersedia di semua properti</p>
+            </div>
             <button type="button" onClick={() => { setShowForm(true); setFormError(''); }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF] transition-colors">
               <Plus size={14} /> Upload Karakter Baru
