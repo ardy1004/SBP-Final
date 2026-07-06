@@ -1,5 +1,6 @@
 // POST /api/admin/viralframe/ai-generate — Jalur C: generate N video prompt via DeepSeek
-// Body: { property_id, jumlah_scene, platform, ai_tool, bahasa, musik_value, musik_prompt, karakter_id }
+// Body: { property_id, jumlah_scene, platform, ai_tool, bahasa, musik_value, musik_prompt, karakter_id, foto_assignments }
+// foto_assignments: [{ scene: 1, foto_url: '...' }, ...] — dipilih manual oleh user, bukan auto-pick.
 // Auth: otomatis via functions/api/admin/_middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
@@ -78,11 +79,20 @@ FORMAT OUTPUT: JSON array murni. TIDAK ADA teks, komentar, atau markdown di luar
 ]`;
 }
 
-function buildUserPrompt({ property, karakter, jumlahScene }) {
+function buildUserPrompt({ property, karakter, jumlahScene, fotoAssignments }) {
   const fasilitas = 'tidak disebutkan';
   const deskripsi = (property.deskripsi ?? '').slice(0, 200);
   const hargaLabel = `${formatRupiah(property.harga)}${property.nego ? ' (nego)' : property.nett ? ' (nett)' : ''}`;
   const deskripsiKarakter = describeKarakter(karakter);
+
+  const fotoLines = fotoAssignments
+    .slice()
+    .sort((a, b) => a.scene - b.scene)
+    .map(a => {
+      const basename = String(a.foto_url).split('/').pop();
+      return `- Scene ${a.scene} menggunakan foto: foto properti scene ${a.scene} (file: ${basename})`;
+    })
+    .join('\n');
 
   return `Data properti:
 - Jenis: ${property.jenis_properti}
@@ -97,6 +107,9 @@ function buildUserPrompt({ property, karakter, jumlahScene }) {
 
 Karakter: ${karakter.nama} — ${deskripsiKarakter}
 
+Foto per scene (referensi visual):
+${fotoLines}
+
 Buat ${jumlahScene} video prompt sesuai aturan system prompt.`;
 }
 
@@ -110,17 +123,25 @@ function describeKarakter(k) {
   return parts.join(', ') || 'tidak ada deskripsi khusus';
 }
 
-function selectFotoUrls(images, jumlahScene) {
-  if (images.length === 0) return [];
-  const ordered = [...images].sort((a, b) => {
-    if (a.is_cover !== b.is_cover) return a.is_cover - b.is_cover;
-    return a.urutan - b.urutan;
-  });
-  const out = [];
-  for (let i = 0; i < jumlahScene; i++) {
-    out.push(ordered[i % ordered.length].url_webp);
+function validateFotoAssignments(fotoAssignments, jumlahScene) {
+  if (!Array.isArray(fotoAssignments) || fotoAssignments.length !== jumlahScene) {
+    return { ok: false, error: `foto_assignments harus berisi tepat ${jumlahScene} item` };
   }
-  return out;
+  const scenesSeen = new Set();
+  for (const a of fotoAssignments) {
+    const sceneNum = Number(a?.scene);
+    if (!Number.isInteger(sceneNum) || sceneNum < 1 || sceneNum > jumlahScene) {
+      return { ok: false, error: 'foto_assignments punya nomor scene tidak valid' };
+    }
+    if (typeof a?.foto_url !== 'string' || !a.foto_url.trim()) {
+      return { ok: false, error: `Scene ${sceneNum} belum punya foto terpilih` };
+    }
+    scenesSeen.add(sceneNum);
+  }
+  if (scenesSeen.size !== jumlahScene) {
+    return { ok: false, error: 'Semua scene harus punya foto terpilih' };
+  }
+  return { ok: true };
 }
 
 function parseSceneJson(raw, jumlahScene) {
@@ -158,6 +179,7 @@ export async function onRequestPost(context) {
   const { platform, ai_tool: aiTool, bahasa, musik_value: musikValue } = body;
   const musikPrompt = typeof body.musik_prompt === 'string' ? body.musik_prompt : '';
   const karakterId = parseInt(body.karakter_id, 10);
+  const fotoAssignments = body.foto_assignments;
 
   if (!Number.isInteger(propertyId) || propertyId <= 0) return jsonError('property_id wajib diisi', 422);
   if (!Number.isInteger(jumlahScene) || jumlahScene < 2 || jumlahScene > 6) return jsonError('jumlah_scene harus 2-6', 422);
@@ -165,6 +187,9 @@ export async function onRequestPost(context) {
   if (!aiTool || typeof aiTool !== 'string') return jsonError('ai_tool wajib diisi', 422);
   if (!bahasa || typeof bahasa !== 'string') return jsonError('bahasa wajib diisi', 422);
   if (!Number.isInteger(karakterId) || karakterId <= 0) return jsonError('karakter_id wajib diisi', 422);
+
+  const fotoCheck = validateFotoAssignments(fotoAssignments, jumlahScene);
+  if (!fotoCheck.ok) return jsonError(fotoCheck.error, 422);
 
   const apiKey = env.DEEPSEEK_API_KEY;
   if (!apiKey) return jsonError('DEEPSEEK_API_KEY tidak dikonfigurasi', 500);
@@ -182,18 +207,6 @@ export async function onRequestPost(context) {
     return jsonError('Gagal mengambil data properti', 500);
   }
   if (!property) return jsonError('Properti tidak ditemukan', 404);
-
-  let images;
-  try {
-    const res = await env.DB.prepare(`
-      SELECT url_webp, urutan, is_cover FROM property_images WHERE property_id = ?
-      ORDER BY is_cover ASC, urutan ASC, id ASC
-    `).bind(propertyId).all();
-    images = res.results ?? [];
-  } catch (err) {
-    console.error('[viralframe ai-generate images]', err.message);
-    return jsonError('Gagal mengambil foto properti', 500);
-  }
 
   let karakter;
   try {
@@ -215,7 +228,7 @@ export async function onRequestPost(context) {
     namaKarakter: karakter.nama, deskripsiKarakter,
     durasiDetik, musikValue, musikPrompt,
   });
-  const userPrompt = buildUserPrompt({ property, karakter, jumlahScene });
+  const userPrompt = buildUserPrompt({ property, karakter, jumlahScene, fotoAssignments });
 
   let dsRes;
   try {
@@ -251,7 +264,10 @@ export async function onRequestPost(context) {
   const parsed = parseSceneJson(raw, jumlahScene);
   if (!parsed.ok) return jsonError(parsed.error, 502);
 
-  const fotoUrls = selectFotoUrls(images, jumlahScene);
+  const fotoUrls = fotoAssignments
+    .slice()
+    .sort((a, b) => a.scene - b.scene)
+    .map(a => a.foto_url);
 
   return jsonOk({
     scenes: parsed.data,

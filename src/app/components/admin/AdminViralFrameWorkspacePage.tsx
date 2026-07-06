@@ -621,19 +621,22 @@ interface AIMetadata {
 }
 interface AIGeneratedResult { scenes: AIScene[]; foto_urls: string[]; karakter: AIKarakter; metadata: AIMetadata }
 interface AICharacter { id: number; nama: string; foto_url: string }
-interface AIGenerateTabProps { propertyId: number; propertyTitle: string }
+interface AIGenerateTabProps { propertyId: number; propertyTitle: string; photos: PropertyImage[] }
 
-function AIGenerateTab({ propertyId, propertyTitle }: AIGenerateTabProps) {
+function AIGenerateTab({ propertyId, propertyTitle, photos }: AIGenerateTabProps) {
   const [chars, setChars] = useState<AICharacter[]>([]);
   const [charsLoading, setCharsLoading] = useState(true);
   const [config, setConfig] = useState({
     jumlah_scene: 4, platform: 'tiktok', ai_tool: 'Veo3',
     bahasa: 'Indonesia', musik: 'corporate', karakter_id: null as number | null,
   });
+  const [scenePhotos, setScenePhotos] = useState<Record<number, string>>({});
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedResult, setGeneratedResult] = useState<AIGeneratedResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [zipBusy, setZipBusy] = useState(false);
+
+  const allScenesHavePhoto = Array.from({ length: config.jumlah_scene }, (_, i) => scenePhotos[i + 1]).every(Boolean);
 
   useEffect(() => {
     let cancel = false;
@@ -649,11 +652,15 @@ function AIGenerateTab({ propertyId, propertyTitle }: AIGenerateTabProps) {
   }, []);
 
   const handleGenerate = async () => {
-    if (config.karakter_id == null) return;
+    if (config.karakter_id == null || !allScenesHavePhoto) return;
     setIsGenerating(true);
     setError(null);
     try {
       const musik = MUSIK_OPTIONS.find(m => m.value === config.musik)!;
+      const foto_assignments = Array.from({ length: config.jumlah_scene }, (_, i) => ({
+        scene: i + 1,
+        foto_url: scenePhotos[i + 1] ?? '',
+      }));
       const res = await fetch('/api/admin/viralframe/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -667,6 +674,7 @@ function AIGenerateTab({ propertyId, propertyTitle }: AIGenerateTabProps) {
           musik_value: config.musik,
           musik_prompt: musik.prompt,
           karakter_id: config.karakter_id,
+          foto_assignments,
         }),
       });
       const json = await res.json();
@@ -693,37 +701,29 @@ function AIGenerateTab({ propertyId, propertyTitle }: AIGenerateTabProps) {
       const kode = (metadata.kode_listing ?? 'SBP').replace(/[^a-zA-Z0-9]/g, '-');
 
       for (const scene of scenes) {
-        const musikNote = metadata.musik_value !== 'none'
-          ? `⚠️  CATATAN MUSIK:\nDeskripsi audio dalam prompt optimal untuk Veo3.\nKling dan Wan menghasilkan efek suara saja, bukan musik.\nUntuk musik pasti: tambahkan via editor video (CapCut, dll).`
-          : '🔇 Mode: Tanpa Musik.';
-        const content = [
-          '═══════════════════════════════════════════',
-          `VIRALFRAME SCENE ${scene.scene} dari ${scenes.length}`,
-          '═══════════════════════════════════════════',
-          `Properti : ${metadata.judul_properti} (${metadata.kode_listing})`,
-          `Platform : ${platform?.label ?? metadata.platform} · Rasio: ${platform?.rasio ?? '-'} · Durasi: ${platform?.durasi ?? '-'} dtk`,
-          `AI Tool  : ${metadata.ai_tool}`,
-          `Bahasa   : ${metadata.bahasa}`,
-          `Musik    : ${musikLabel}`,
-          `Generated: ${metadata.generated_at} · Salam Bumi Property`,
-          '───────────────────────────────────────────',
-          'FILE TERLAMPIR DI ZIP INI:',
-          `  📸 Foto    : scene${scene.scene}_foto.webp`,
-          `  👤 Karakter: ${karakter.nama}.webp`,
-          '───────────────────────────────────────────',
-          '',
-          `🎬 VIDEO PROMPT — Copy-paste ke ${metadata.ai_tool}:`,
-          '',
-          scene.prompt,
-          '',
-          '───────────────────────────────────────────',
-          `💬 DIALOG KARAKTER (${metadata.bahasa}):`,
-          `"${scene.dialog_karakter}"`,
-          '',
-          musikNote,
-          '═══════════════════════════════════════════',
-        ].join('\n');
-        zip.file(`scene${scene.scene}.txt`, content);
+        const sceneData = {
+          scene: scene.scene,
+          total_scene: scenes.length,
+          properti: metadata.judul_properti,
+          kode_listing: metadata.kode_listing,
+          platform: platform?.label ?? metadata.platform,
+          rasio: platform?.rasio ?? null,
+          durasi_detik: platform?.durasi ?? null,
+          ai_tool: metadata.ai_tool,
+          bahasa: metadata.bahasa,
+          musik: musikLabel,
+          foto_file: `scene${scene.scene}_foto.webp`,
+          karakter_file: `${karakter.nama.replace(/\s+/g, '_')}.webp`,
+          kamera: scene.kamera,
+          prompt: scene.prompt,
+          dialog_karakter: scene.dialog_karakter,
+          catatan_musik: metadata.musik_value !== 'none'
+            ? 'Deskripsi audio optimal untuk Veo3. Kling/Wan: efek suara saja, tambahkan musik via CapCut.'
+            : 'Mode tanpa musik.',
+          generated_at: metadata.generated_at,
+          generator: 'ViralFrame AI · salambumi.xyz',
+        };
+        zip.file(`scene${scene.scene}.txt`, JSON.stringify(sceneData, null, 2));
       }
 
       for (let i = 0; i < foto_urls.length; i++) {
@@ -877,9 +877,60 @@ function AIGenerateTab({ propertyId, propertyTitle }: AIGenerateTabProps) {
             )}
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-[#0F172A] mb-1.5">📸 Pilih Foto per Scene <span className="text-red-500">*</span></label>
+            {photos.length === 0 ? (
+              <div className="text-center py-6 border border-dashed border-gray-200 rounded-xl text-sm text-[#64748B]">
+                Properti ini belum punya foto. Tambahkan foto di menu Properti dulu.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {Array.from({ length: config.jumlah_scene }, (_, i) => i + 1).map(sceneNum => {
+                  const chosen = scenePhotos[sceneNum];
+                  return (
+                    <div key={sceneNum} className="border border-gray-100 rounded-xl p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-[#0F172A] text-sm">Scene {sceneNum}</span>
+                        {chosen ? (
+                          <span className="text-xs text-emerald-600 flex items-center gap-1"><Check size={13} /> Foto dipilih</span>
+                        ) : (
+                          <span className="text-xs text-[#94A3B8]">Belum pilih foto</span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                        {photos.map(im => {
+                          const selected = chosen === im.url_webp;
+                          const src = mediaSrc(im.url_webp);
+                          return (
+                            <button key={im.id} type="button"
+                              onClick={() => setScenePhotos(prev => ({ ...prev, [sceneNum]: im.url_webp }))}
+                              className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${
+                                selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-transparent hover:border-gray-300'
+                              }`}>
+                              {src ? (
+                                <img src={src} alt="" className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full bg-gray-100 flex items-center justify-center"><ImageOff size={14} className="text-gray-300" /></div>
+                              )}
+                              {selected && (
+                                <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-[#1565C0] flex items-center justify-center">
+                                  <Check size={10} className="text-white" />
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {error && <p className="text-sm text-red-600">{error}</p>}
 
-          <button onClick={handleGenerate} disabled={config.karakter_id == null || isGenerating}
+          <button onClick={handleGenerate} disabled={config.karakter_id == null || !allScenesHavePhoto || isGenerating}
             className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
             style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
             {isGenerating
@@ -1588,7 +1639,7 @@ export default function AdminViralFrameWorkspacePage() {
 
           {/* ── TAB 4: AI GENERATE (Jalur C) ── */}
           {step4Tab === 'ai_generate' && prop && (
-            <AIGenerateTab propertyId={prop.id} propertyTitle={prop.title} />
+            <AIGenerateTab propertyId={prop.id} propertyTitle={prop.title} photos={prop.images} />
           )}
 
           {/* ── TAB 2: PASTE & VALIDATE ── */}
