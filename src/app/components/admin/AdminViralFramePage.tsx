@@ -196,14 +196,14 @@ export default function AdminViralFramePage() {
                 key={p.id}
                 className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
               >
-                <div className="relative aspect-video bg-gray-100">
+                <div className="relative w-full bg-gray-100" style={{ paddingBottom: '56.25%' }}>
                   {src ? (
                     <img src={src} alt={p.title}
-                      className="w-full h-full object-cover"
+                      className="absolute inset-0 w-full h-full object-cover"
                       onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                     />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center">
+                    <div className="absolute inset-0 flex items-center justify-center">
                       <ImageOff size={24} className="text-gray-300" />
                     </div>
                   )}
@@ -211,8 +211,8 @@ export default function AdminViralFramePage() {
                     {badge.label}
                   </span>
                 </div>
-                <div className="p-3 flex flex-col flex-1">
-                  <div className="flex items-center gap-1.5 mb-1">
+                <div className="p-3 flex-1 flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5">
                     <span className="text-xs px-1.5 py-0.5 rounded-full text-white font-semibold"
                       style={{ background: JENIS_COLORS[p.jenis_properti] ?? '#64748B', fontSize: '10px' }}>
                       {p.jenis_properti}
@@ -220,14 +220,16 @@ export default function AdminViralFramePage() {
                     <span className="text-xs text-[#94A3B8] truncate">{p.kode_listing}</span>
                   </div>
                   <div className="font-medium text-[#0F172A] text-sm leading-snug line-clamp-2">{p.title}</div>
-                  <div className="text-xs text-[#64748B] mt-0.5">{p.kecamatan}, {p.kabupaten}</div>
-                  <button
-                    onClick={() => openModeModal(p.id, p.title)}
-                    className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-                    style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
-                  >
-                    🎬 Buat Video
-                  </button>
+                  <div className="text-xs text-[#64748B]">{p.kecamatan}, {p.kabupaten}</div>
+                  <div className="mt-auto pt-2">
+                    <button
+                      onClick={() => openModeModal(p.id, p.title)}
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                      style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
+                    >
+                      🎬 Buat Video
+                    </button>
+                  </div>
                 </div>
               </div>
             );
