@@ -755,7 +755,7 @@ function AIGenerateTab({
           prompt: scene.prompt,
           dialog_karakter: scene.dialog_karakter,
           catatan_musik: metadata.musik_value !== 'none'
-            ? 'Deskripsi audio optimal untuk Veo3. Kling/Wan: efek suara saja, tambahkan musik via CapCut.'
+            ? 'Deskripsi audio optimal untuk Veo3/Google Flow. Kling/Wan: efek suara saja, tambahkan musik via CapCut.'
             : 'Mode tanpa musik.',
           generated_at: metadata.generated_at,
           generator: 'ViralFrame AI · salambumi.xyz',
@@ -791,7 +791,7 @@ function AIGenerateTab({
         '',
         '───────────────────────────────────────────',
         'CARA PAKAI:',
-        `1. Buka ${metadata.ai_tool} (misal: labs.google.com/video untuk Veo3)`,
+        `1. Buka ${metadata.ai_tool} (${metadata.ai_tool === 'google_flow' ? 'labs.google/fx/tools/flow' : 'misal: labs.google.com/video untuk Veo3'})`,
         '2. Upload foto: scene1_foto.webp',
         `3. Upload karakter: ${karakter.nama}.webp (sebagai reference/style)`,
         '4. Copy-paste prompt dari scene1.txt (bagian 🎬 VIDEO PROMPT)',
@@ -808,6 +808,7 @@ function AIGenerateTab({
         '',
         '───────────────────────────────────────────',
         'TENTANG MUSIK:',
+        '  Google Flow : Native audio & dialog lip-sync → menghasilkan musik ✅',
         '  Veo3  : Deskripsi musik dalam prompt → menghasilkan musik ✅',
         '  Kling : Efek suara saja, musik tidak terjamin ⚠️',
         '  Wan   : Efek suara saja, musik tidak terjamin ⚠️',
@@ -1003,10 +1004,10 @@ export default function AdminViralFrameWorkspacePage() {
   const [s1, setS1] = useState<Step1State>({
     sceneCount: 4,
     durationMode: 'uniform',
-    uniformDuration: 6,
-    manualDurations: [6, 6, 6, 6],
-    platforms: ['tiktok'],
-    aiTool: 'veo3',
+    uniformDuration: 10,
+    manualDurations: [10, 10, 10, 10],
+    platforms: ['tiktok', 'ig_reels', 'yt_shorts', 'fb_reels'],
+    aiTool: 'google_flow',
     ratio: '9:16',
     language: 'id',
     hookType: 'auto',

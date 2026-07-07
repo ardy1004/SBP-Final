@@ -4,9 +4,10 @@
 
 export interface Opt { value: string; label: string }
 
-// (d) AI Video Tool — 10 pilihan + perkiraan batas karakter prompt
+// (d) AI Video Tool — 11 pilihan + perkiraan batas karakter prompt
 export interface AiTool extends Opt { charLimit: number }
 export const AI_TOOLS: AiTool[] = [
+  { value: 'google_flow', label: 'Google Flow (Veo 3.1)', charLimit: 1500 },
   { value: 'veo3',      label: 'Veo 3 (Google)',        charLimit: 1000 },
   { value: 'kling',     label: 'Kling AI',              charLimit: 2500 },
   { value: 'minimax',   label: 'Minimax / Hailuo',      charLimit: 2000 },
@@ -129,6 +130,10 @@ export function sceneRole(index: number, total: number): 'Hook' | 'Body' | 'CTA'
 //     Veo3 / Sora / CogVideoX = TIDAK mendukung reference image (text-to-video murni).
 export interface ToolSpec { formatSpec: string; supportsRefImage: boolean }
 export const AI_TOOL_FORMAT_SPEC: Record<string, ToolSpec> = {
+  google_flow: {
+    formatSpec: 'Natural language cinematic dengan dukungan reference image (Ingredients). Subject + action + environment + lighting + camera movement + mood. Native audio & dialog lip-sync didukung. End with: [X]s, [ratio] vertical frame. English.',
+    supportsRefImage: true,
+  },
   veo3: {
     formatSpec: 'Natural language cinematic. Subject + action + environment + lighting + camera movement + mood. End with: [X]s, [ratio] vertical frame. English.',
     supportsRefImage: false,

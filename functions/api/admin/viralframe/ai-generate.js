@@ -84,6 +84,29 @@ function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone,
     ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n[2b] TONE, GAYA VISUAL & PERAN SCENE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${toneStyleSection}\nSetiap scene punya peran (Hook/Body/CTA, lihat "Role" di user prompt) — sesuaikan penekanan narasi dengan peran itu.\n`
     : '';
 
+  // Struktur retensi psikologis: versi simplified (scene sedikit, tidak ada ruang
+  // untuk open loop penuh) vs versi lengkap (open loop di scene 1, rehook di scene
+  // tengah, payoff sebelum CTA di scene terakhir).
+  const retensiBlock = jumlahScene <= 3
+    ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[6b] STRUKTUR RETENSI PSIKOLOGIS — WAJIB
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Versi simplified (jumlah scene ≤ 3 — TANPA open loop/rehook, ruang terlalu sempit):
+  • Scene 1: field 'kamera' HARUS berupa pattern interrupt (gerakan/angle yang langsung menarik perhatian di detik pertama).
+  • Scene tengah: sisipkan MINIMAL 1 micro-reward konkret (fakta/angka nyata properti yang terasa seperti temuan baru).
+  • Scene terakhir: payoff singkat (tegaskan nilai properti) LANGSUNG diikuti CTA — JANGAN buka open loop baru yang tidak terjawab.
+
+`
+    : `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[6b] STRUKTUR RETENSI PSIKOLOGIS — WAJIB
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Versi lengkap (jumlah scene ≥ 4):
+  • Scene 1 (Hook): field 'kamera' HARUS pattern interrupt, dan 'dialog_karakter' WAJIB membuka 1 open loop — janjikan sesuatu (info/reveal) yang BELUM dijawab di scene ini.
+  • Scene tengah (Body): 'dialog_karakter' WAJIB diawali kalimat rehook yang menyambung dari scene sebelumnya (bukan mulai topik baru begitu saja), lalu sisipkan 1 micro-reward konkret (fakta/angka nyata properti).
+  • Scene terakhir (CTA): WAJIB menjawab/menutup open loop dari Scene 1 (payoff) SEBELUM menyampaikan CTA — jangan biarkan open loop menggantung tanpa jawaban.
+
+`;
+
   return `Kamu adalah direktur kreatif video properti profesional Indonesia dengan keahlian sinematografi, copywriting, dan digital marketing. Tugasmu: buat ${jumlahScene} video prompt terpisah untuk AI video generator.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -146,7 +169,7 @@ Setiap scene HARUS berbeda dalam: gerakan kamera, posisi karakter, angle, pencah
 JANGAN copy-paste struktur prompt yang sama antar scene.
 Jika ada ${jumlahScene} scene → ${jumlahScene} suasana berbeda (misal: golden hour, natural daylight, warm ambient, dramatic sunset).
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${retensiBlock}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [7] KATA/FRASA TERLARANG
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DILARANG menggunakan kata/frasa ini (ganti dengan alternatif):
