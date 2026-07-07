@@ -245,7 +245,7 @@ export default function CharacterStep({ value, onChange }: {
                         selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-transparent hover:border-gray-300'
                       }`}>
                       <div className="aspect-square bg-gray-100">
-                        {src ? <img src={src} alt={c.nama} className="w-full h-full object-cover" />
+                        {src ? <img src={src} alt={c.nama} className="w-full h-full object-cover" loading="lazy" />
                           : <div className="w-full h-full flex items-center justify-center"><ImageOff size={16} className="text-gray-300" /></div>}
                       </div>
                       <div className="px-1.5 py-1 text-[11px] font-medium text-[#0F172A] truncate text-center">{c.nama}</div>

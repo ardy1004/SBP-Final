@@ -12,7 +12,7 @@ import {
 } from './viralframe/options';
 import CharacterStep, { type Step3State } from './viralframe/CharacterStep';
 import {
-  PLATFORM_OPTIONS, AI_TOOL_OPTIONS, BAHASA_OPTIONS, MUSIK_OPTIONS, FOTO_LABEL_OPTIONS,
+  PLATFORM_OPTIONS, AI_TOOL_OPTIONS, MUSIK_OPTIONS, FOTO_LABEL_OPTIONS,
 } from '../../lib/viralframe-constants';
 import { compileMasterPrompt, estimateTokens } from './viralframe/masterPromptCompiler';
 import { validateSceneJson, type ParsedJSON, type ValidateResult } from './viralframe/jsonValidator';
@@ -617,6 +617,17 @@ const PHOTO_LABEL_TO_FOTO_LABEL: Record<string, string> = {
   'Lainnya': 'lainnya',
 };
 
+// Bridge Step 1 (s1.language: id/en/id_en/en_id/jw) → bahasa dialog_karakter DeepSeek
+// (Indonesia/English/Jawa) — satu sumber (Step 1), bukan input terpisah di AIGenerateTab.
+// Bilingual (id_en/en_id) di-map ke Indonesia karena field dialog DeepSeek cuma menerima 1 bahasa.
+function mapLanguageToBahasa(lang: string): string {
+  switch (lang) {
+    case 'en': return 'English';
+    case 'jw': return 'Jawa';
+    default: return 'Indonesia';
+  }
+}
+
 interface ScenePhoto { foto_url: string; label: string }
 interface AISelectedKarakter { id: number; nama: string; deskripsi: string; foto_url: string }
 interface AIGenerateTabProps {
@@ -626,7 +637,14 @@ interface AIGenerateTabProps {
   // Data dari Step 1
   jumlahScene: number;
   platform: string;
+  platforms: string[];
   aiTool: string;
+  bahasa: string;
+  tone: string;
+  visualStyle: string;
+  hookType: string;
+  ctaType: string;
+  sceneRoles: Record<number, 'Hook' | 'Body' | 'CTA'>;
   // Data dari Step 2
   scenePhotos: Record<number, ScenePhoto>;
   // Data dari Step 3
@@ -636,10 +654,10 @@ interface AIGenerateTabProps {
 }
 
 function AIGenerateTab({
-  propertyId, propertyTitle, kodeListingStr, jumlahScene, platform, aiTool,
+  propertyId, propertyTitle, kodeListingStr, jumlahScene, platform, platforms, aiTool, bahasa,
+  tone, visualStyle, hookType, ctaType, sceneRoles,
   scenePhotos, selectedKarakter, onEditStep,
 }: AIGenerateTabProps) {
-  const [bahasa, setBahasa] = useState('Indonesia');
   const [musik, setMusik] = useState('corporate');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedResult, setGeneratedResult] = useState<AIGeneratedResult | null>(null);
@@ -663,6 +681,16 @@ function AIGenerateTab({
         foto_url: scenePhotos[i + 1]?.foto_url ?? '',
         foto_label: scenePhotos[i + 1]?.label ?? 'lainnya',
       }));
+      const scene_roles = Array.from({ length: jumlahScene }, (_, i) => ({
+        scene: i + 1,
+        role: sceneRoles[i + 1] ?? 'Body',
+      }));
+      // Kirim label yang sudah diresolve (bukan raw value) — backend tinggal
+      // menyisipkan teksnya, tidak perlu daftar terjemahan tone/style/hook/cta sendiri.
+      const toneLabel = TONES.find(t => t.value === tone)?.label ?? tone;
+      const visualStyleLabel = VISUAL_STYLES.find(v => v.value === visualStyle)?.label ?? visualStyle;
+      const hookTypeLabel = HOOK_TYPES.find(h => h.value === hookType)?.label ?? hookType;
+      const ctaTypeLabel = CTA_TYPES.find(c => c.value === ctaType)?.label ?? ctaType;
       const res = await fetch('/api/admin/viralframe/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -673,6 +701,11 @@ function AIGenerateTab({
           platform,
           ai_tool: aiTool,
           bahasa,
+          tone: toneLabel,
+          visual_style: visualStyleLabel,
+          hook_type: hookTypeLabel,
+          cta_type: ctaTypeLabel,
+          scene_roles,
           musik_value: musik,
           musik_prompt: musikOpt.prompt,
           karakter_id: selectedKarakter.id,
@@ -813,9 +846,25 @@ function AIGenerateTab({
               <span className="text-xs text-[#94A3B8]">dari Step 1–3 · {kodeListingStr}</span>
             </div>
             <div className="border border-gray-100 rounded-xl divide-y divide-gray-100">
-              <div className="flex items-center justify-between px-4 py-2.5">
-                <span className="text-xs text-[#64748B]">Platform</span>
-                <span className="text-sm font-medium text-[#0F172A]">{platformOpt?.label ?? platform}</span>
+              <div className="px-4 py-2.5">
+                <span className="text-xs text-[#64748B] block mb-1.5">Platform</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {platforms.map(p => {
+                    const opt = PLATFORM_OPTIONS.find(o => o.value === p);
+                    const isPrimer = p === platform;
+                    return (
+                      <span key={p} className={`text-xs px-2 py-1 rounded-lg flex items-center gap-1 ${
+                        isPrimer ? 'bg-[#1565C0] text-white font-semibold' : 'bg-[#F0F7FF] text-[#1565C0]'
+                      }`}>
+                        {opt?.label ?? p}
+                        {isPrimer && <span className="text-[9px] font-bold">PRIMER</span>}
+                      </span>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-[#94A3B8] mt-1">
+                  Prompt dioptimasi untuk {platformOpt?.label ?? platform} — platform lain di atas belum diproses terpisah.
+                </p>
               </div>
               <div className="flex items-center justify-between px-4 py-2.5">
                 <span className="text-xs text-[#64748B]">AI Tool</span>
@@ -824,6 +873,26 @@ function AIGenerateTab({
               <div className="flex items-center justify-between px-4 py-2.5">
                 <span className="text-xs text-[#64748B]">Jumlah Scene</span>
                 <span className="text-sm font-medium text-[#0F172A]">{jumlahScene} scene</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs text-[#64748B]">Bahasa Dialog Karakter</span>
+                <span className="text-sm font-medium text-[#0F172A]">{bahasa}</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs text-[#64748B]">Tone Narasi</span>
+                <span className="text-sm font-medium text-[#0F172A]">{TONES.find(t => t.value === tone)?.label ?? tone}</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs text-[#64748B]">Gaya Visual</span>
+                <span className="text-sm font-medium text-[#0F172A]">{VISUAL_STYLES.find(v => v.value === visualStyle)?.label ?? visualStyle}</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs text-[#64748B]">Tipe Hook (Scene 1)</span>
+                <span className="text-sm font-medium text-[#0F172A]">{HOOK_TYPES.find(h => h.value === hookType)?.label ?? hookType}</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs text-[#64748B]">CTA (Scene Terakhir)</span>
+                <span className="text-sm font-medium text-[#0F172A]">{CTA_TYPES.find(c => c.value === ctaType)?.label ?? ctaType}</span>
               </div>
               <div className="flex items-center justify-between px-4 py-2.5">
                 <span className="text-xs text-[#64748B]">Karakter</span>
@@ -858,19 +927,11 @@ function AIGenerateTab({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-[#0F172A] mb-1.5">⚙️ Bahasa Narasi</label>
-              <select value={bahasa} onChange={e => setBahasa(e.target.value)} className={selectCls}>
-                {BAHASA_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-[#0F172A] mb-1.5">Gaya Musik</label>
-              <select value={musik} onChange={e => setMusik(e.target.value)} className={selectCls}>
-                {MUSIK_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </div>
+          <div>
+            <label className="block text-sm font-medium text-[#0F172A] mb-1.5">⚙️ Gaya Musik</label>
+            <select value={musik} onChange={e => setMusik(e.target.value)} className={selectCls}>
+              {MUSIK_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
           </div>
 
           {!canGenerate && (
@@ -975,6 +1036,7 @@ export default function AdminViralFrameWorkspacePage() {
     const imgById = new Map(prop.images.map(im => [im.id, im]));
     scenes.forEach((sc, i) => {
       if (sc.photoId == null) return;
+      if (!sc.label) return; // belum dilabeli — jangan diam-diam fallback ke 'lainnya', treat sebagai belum lengkap
       const img = imgById.get(sc.photoId);
       if (!img) return;
       map[i + 1] = { foto_url: img.url_webp, label: PHOTO_LABEL_TO_FOTO_LABEL[sc.label] ?? 'lainnya' };
@@ -990,6 +1052,11 @@ export default function AdminViralFrameWorkspacePage() {
           .filter(Boolean).join(', ') || 'tidak ada deskripsi khusus',
       }
     : null;
+  const sceneRolesForAI = useMemo(() => {
+    const map: Record<number, 'Hook' | 'Body' | 'CTA'> = {};
+    for (let i = 0; i < s1.sceneCount; i++) map[i + 1] = sceneRole(i, s1.sceneCount);
+    return map;
+  }, [s1.sceneCount]);
 
   // Step 4 — compile + save history
   const [copied, setCopied] = useState(false);
@@ -1640,7 +1707,14 @@ export default function AdminViralFrameWorkspacePage() {
               kodeListingStr={prop.kode_listing}
               jumlahScene={s1.sceneCount}
               platform={platformForAI}
+              platforms={s1.platforms}
               aiTool={s1.aiTool}
+              bahasa={mapLanguageToBahasa(s1.language)}
+              tone={s1.tone}
+              visualStyle={s1.visualStyle}
+              hookType={s1.hookType}
+              ctaType={s1.ctaType}
+              sceneRoles={sceneRolesForAI}
               scenePhotos={scenePhotosForAI}
               selectedKarakter={selectedKarakterForAI}
               onEditStep={setStep}

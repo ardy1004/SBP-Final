@@ -34,6 +34,7 @@ export const LANGUAGES: Opt[] = [
   { value: 'en',    label: 'English' },
   { value: 'id_en', label: 'Bilingual ID + EN' },
   { value: 'en_id', label: 'Bilingual EN + ID' },
+  { value: 'jw',    label: 'Bahasa Jawa' },
 ];
 
 // (g) Tipe Hook (Scene 1) — 13 pilihan (PRD 3.11)

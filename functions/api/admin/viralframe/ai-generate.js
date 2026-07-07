@@ -1,6 +1,10 @@
 // POST /api/admin/viralframe/ai-generate — Jalur C: generate N video prompt via DeepSeek
-// Body: { property_id, jumlah_scene, platform, ai_tool, bahasa, musik_value, musik_prompt, karakter_id, foto_assignments }
+// Body: { property_id, jumlah_scene, platform, ai_tool, bahasa, tone, visual_style, hook_type,
+//         cta_type, scene_roles, musik_value, musik_prompt, karakter_id, foto_assignments }
 // foto_assignments: [{ scene: 1, foto_url: '...', foto_label: '...' }, ...] — dipilih manual oleh user, bukan auto-pick.
+// tone/visual_style/hook_type/cta_type: label sudah diresolve di frontend dari Step 1
+// (options.ts TONES/VISUAL_STYLES/HOOK_TYPES/CTA_TYPES) — "Auto" berarti tidak ada instruksi tambahan.
+// scene_roles: [{ scene: 1, role: 'Hook'|'Body'|'CTA' }, ...] — dari sceneRole() (options.ts), sama dengan Jalur A.
 // Auth: otomatis via functions/api/admin/_middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
@@ -47,7 +51,11 @@ function formatRupiah(n) {
   return `Rp ${Number(n).toLocaleString('id-ID')}`;
 }
 
-function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt }) {
+function isAutoValue(label) {
+  return !label || label.trim().toLowerCase().startsWith('auto');
+}
+
+function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType }) {
   // Bagian [8] MUSIK: rule abstrak di bawah butuh teks musik konkret disisipkan
   // agar bisa benar-benar dieksekusi DeepSeek — tanpa ini instruksi "tambahkan
   // tepat seperti yang diberikan" tidak merujuk ke apapun.
@@ -55,6 +63,26 @@ function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt }) {
     ? `Jika musik = none → JANGAN tambahkan instruksi audio apapun.`
     : `Jika musik tersedia, tambahkan di AKHIR setiap prompt, tepat seperti berikut ini (JANGAN dimodifikasi):
     ${musikPrompt}`;
+
+  // Tone/Gaya Visual: label sudah diresolve di frontend dari TONES/VISUAL_STYLES
+  // (options.ts) — backend cuma menyisipkan teks, tidak perlu daftar terjemahan baru.
+  // 'Auto' berarti biarkan DeepSeek memilih sendiri — tidak perlu instruksi tambahan.
+  const toneLine = isAutoValue(tone)
+    ? ''
+    : `Tone/nada narasi WAJIB: ${tone}. Terapkan konsisten di setiap dialog_karakter dan pemilihan kata dalam prompt.\n`;
+  const visualStyleLine = isAutoValue(visualStyle)
+    ? ''
+    : `Gaya visual WAJIB: ${visualStyle}. Terapkan konsisten di setiap scene (pencahayaan, komposisi, mood).\n`;
+  const hookLine = isAutoValue(hookType)
+    ? ''
+    : `Scene berperan HOOK WAJIB memakai gaya opening: ${hookType}.\n`;
+  const ctaLine = isAutoValue(ctaType)
+    ? ''
+    : `Scene berperan CTA WAJIB memakai gaya ajakan: ${ctaType}.\n`;
+  const toneStyleSection = (toneLine + visualStyleLine + hookLine + ctaLine).trim();
+  const toneStyleBlock = toneStyleSection
+    ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n[2b] TONE, GAYA VISUAL & PERAN SCENE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${toneStyleSection}\nSetiap scene punya peran (Hook/Body/CTA, lihat "Role" di user prompt) — sesuaikan penekanan narasi dengan peran itu.\n`
+    : '';
 
   return `Kamu adalah direktur kreatif video properti profesional Indonesia dengan keahlian sinematografi, copywriting, dan digital marketing. Tugasmu: buat ${jumlahScene} video prompt terpisah untuk AI video generator.
 
@@ -77,7 +105,7 @@ Kamu WAJIB membuat prompt yang sesuai dengan jenis foto scene tersebut.
 ✗ SALAH: scene kamar tidur → prompt menyebut eksterior bangunan
 ✓ BENAR: scene kamar tidur → prompt fokus pada interior, pencahayaan hangat, detail furnitur
 JANGAN mendeskripsikan konten yang tidak mungkin ada di foto tersebut.
-
+${toneStyleBlock}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [3] STRUKTUR PROMPT WAJIB PER SCENE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -152,10 +180,12 @@ Format yang diharapkan:
 Field WAJIB ada dan non-empty: scene (integer), kamera (string), prompt (string min 50 kata), dialog_karakter (string).`;
 }
 
-function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik }) {
+function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles }) {
   const fasilitas = 'tidak disebutkan';
   const deskripsi = (property.deskripsi ?? '').slice(0, 200);
   const hargaLabel = `${formatRupiah(property.harga)}${property.nego ? ' (nego)' : property.nett ? ' (nett)' : ''}`;
+
+  const roleByScene = new Map((sceneRoles ?? []).map(r => [Number(r.scene), r.role]));
 
   const sceneLines = fotoAssignments
     .slice()
@@ -163,7 +193,8 @@ function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments,
     .map(a => {
       const fotoDeskripsi = LABEL_MAP[a.foto_label] ?? LABEL_MAP.lainnya;
       const kameraHint = KAMERA_PER_LABEL[a.foto_label] ?? KAMERA_PER_LABEL.lainnya;
-      return `Scene ${a.scene}:\n  Foto    : ${fotoDeskripsi} (${a.foto_label})\n  Kamera  : ${kameraHint}\n  Durasi  : ${durasiDetik} detik`;
+      const role = roleByScene.get(a.scene) ?? 'Body';
+      return `Scene ${a.scene}:\n  Foto    : ${fotoDeskripsi} (${a.foto_label})\n  Kamera  : ${kameraHint}\n  Durasi  : ${durasiDetik} detik\n  Role    : ${role}`;
     })
     .join('\n\n');
 
@@ -271,7 +302,11 @@ export async function onRequestPost(context) {
 
   const propertyId = parseInt(body.property_id, 10);
   const jumlahScene = parseInt(body.jumlah_scene, 10);
-  const { platform, ai_tool: aiTool, bahasa, musik_value: musikValue } = body;
+  const {
+    platform, ai_tool: aiTool, bahasa, musik_value: musikValue,
+    tone, visual_style: visualStyle, hook_type: hookType, cta_type: ctaType,
+  } = body;
+  const sceneRoles = Array.isArray(body.scene_roles) ? body.scene_roles : [];
   const musikPrompt = typeof body.musik_prompt === 'string' ? body.musik_prompt : '';
   const karakterId = parseInt(body.karakter_id, 10);
   const fotoAssignments = body.foto_assignments;
@@ -319,8 +354,8 @@ export async function onRequestPost(context) {
   const deskripsiKarakter = describeKarakter(karakter);
   const karakterDesc = describeKarakterUntukPrompt(karakter);
 
-  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt });
-  const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik });
+  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType });
+  const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles });
 
   let dsRes;
   try {
