@@ -70,8 +70,9 @@ export async function onRequestGet(context) {
     FROM properties p
     ${where}
     ORDER BY p.created_at DESC
-    LIMIT 500
+    LIMIT 1000
   `;
+  // 529 properti per Juli 2026, LIMIT 1000 memberi headroom 2x.
 
   try {
     const stmt = env.DB.prepare(sql);

@@ -11,6 +11,9 @@ import {
   sceneFileName, characterFileName,
 } from './viralframe/options';
 import CharacterStep, { type Step3State } from './viralframe/CharacterStep';
+import {
+  PLATFORM_OPTIONS, AI_TOOL_OPTIONS, BAHASA_OPTIONS, MUSIK_OPTIONS, FOTO_LABEL_OPTIONS,
+} from '../../lib/viralframe-constants';
 import { compileMasterPrompt, estimateTokens } from './viralframe/masterPromptCompiler';
 import { validateSceneJson, type ParsedJSON, type ValidateResult } from './viralframe/jsonValidator';
 import SceneCards from './viralframe/SceneCards';
@@ -584,34 +587,10 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
   );
 }
 
-// ─── Jalur C: AI Generate constants & component ─────────────────────────────
-
-const PLATFORM_OPTIONS = [
-  { value: 'tiktok', label: '📱 TikTok', rasio: '9:16', durasi: 8 },
-  { value: 'reels', label: '📸 Instagram Reels', rasio: '9:16', durasi: 8 },
-  { value: 'youtube_shorts', label: '▶️ YouTube Shorts', rasio: '9:16', durasi: 10 },
-  { value: 'facebook', label: '👥 Facebook Reels', rasio: '9:16', durasi: 8 },
-];
-
-const AI_TOOL_OPTIONS = [
-  { value: 'Veo3', label: '🎬 Veo 3 (Google)' },
-  { value: 'Kling', label: '🎥 Kling AI' },
-  { value: 'Wan', label: '🌊 Wan (SiliconFlow)' },
-];
-
-const BAHASA_OPTIONS = [
-  { value: 'Indonesia', label: '🇮🇩 Bahasa Indonesia' },
-  { value: 'English', label: '🇬🇧 English' },
-  { value: 'Jawa', label: '🏛️ Bahasa Jawa' },
-];
-
-const MUSIK_OPTIONS = [
-  { value: 'corporate', label: '🎵 Professional Corporate', prompt: 'Background audio: subtle upbeat corporate instrumental music, confident professional atmosphere, moderate tempo, clean cinematic mix, no lyrics.' },
-  { value: 'chill', label: '🌊 Chill & Elegant', prompt: 'Background audio: soft ambient piano melody, relaxed sophisticated atmosphere, slow gentle tempo, soothing, no lyrics.' },
-  { value: 'energetic', label: '⚡ Energetic Modern', prompt: 'Background audio: upbeat modern pop instrumental, dynamic youthful energy, fast-paced rhythm, no lyrics.' },
-  { value: 'acoustic', label: '🎸 Acoustic Warm', prompt: 'Background audio: warm acoustic guitar melody, friendly inviting home atmosphere, moderate tempo, no lyrics.' },
-  { value: 'none', label: '🔇 Tanpa Musik', prompt: '' },
-];
+// ─── Jalur C: AI Generate component ─────────────────────────────────────────
+// Konstanta (PLATFORM_OPTIONS, AI_TOOL_OPTIONS, BAHASA_OPTIONS, MUSIK_OPTIONS,
+// FOTO_LABEL_OPTIONS) diimport dari ../../lib/viralframe-constants — sumber
+// tunggal yang sama dipakai Step 1/2 agar value enum tidak divergen lagi.
 
 interface AIScene { scene: number; kamera: string; prompt: string; dialog_karakter: string; foto_label?: string; foto_deskripsi?: string }
 interface AIKarakter { nama: string; deskripsi: string; foto_url: string }
@@ -620,61 +599,66 @@ interface AIMetadata {
   judul_properti: string; kode_listing: string; generated_at: string;
 }
 interface AIGeneratedResult { scenes: AIScene[]; foto_urls: string[]; karakter: AIKarakter; metadata: AIMetadata }
-interface AICharacter { id: number; nama: string; foto_url: string }
-const FOTO_LABEL_OPTIONS = [
-  { value: 'fasad', label: '🏠 Fasad / Eksterior' },
-  { value: 'kamar_tidur', label: '🛏️ Kamar Tidur' },
-  { value: 'kamar_mandi', label: '🚿 Kamar Mandi' },
-  { value: 'dapur', label: '🍳 Dapur' },
-  { value: 'ruang_tamu', label: '🛋️ Ruang Tamu' },
-  { value: 'ruang_santai', label: '🎮 Ruang Santai' },
-  { value: 'balkon', label: '🌿 Balkon' },
-  { value: 'kolam_renang', label: '🏊 Kolam Renang' },
-  { value: 'koridor_tangga', label: '🪜 Koridor / Tangga' },
-  { value: 'parkir', label: '🚗 Area Parkir' },
-  { value: 'view_sekitar', label: '🌆 View / Lingkungan' },
-  { value: 'lainnya', label: '📷 Lainnya' },
-];
+
+// Bridge Step 2 (PHOTO_LABELS, Title Case) → FOTO_LABEL_OPTIONS (snake_case)
+// agar Step 2 tidak perlu diubah tapi tetap bisa dipakai AIGenerateTab.
+const PHOTO_LABEL_TO_FOTO_LABEL: Record<string, string> = {
+  'Fasad': 'fasad',
+  'Ruang Tamu': 'ruang_tamu',
+  'Kamar Tidur': 'kamar_tidur',
+  'Kamar Mandi': 'kamar_mandi',
+  'Dapur': 'dapur',
+  'Taman/Halaman': 'lainnya',
+  'Carport/Garasi': 'parkir',
+  'Balkon/Teras': 'balkon',
+  'Kolam Renang': 'kolam_renang',
+  'Ruang Usaha': 'lainnya',
+  'Tampak Lokasi/Lingkungan': 'view_sekitar',
+  'Lainnya': 'lainnya',
+};
 
 interface ScenePhoto { foto_url: string; label: string }
-interface AIGenerateTabProps { propertyId: number; propertyTitle: string; photos: PropertyImage[] }
+interface AISelectedKarakter { id: number; nama: string; deskripsi: string; foto_url: string }
+interface AIGenerateTabProps {
+  propertyId: number;
+  propertyTitle: string;
+  kodeListingStr: string;
+  // Data dari Step 1
+  jumlahScene: number;
+  platform: string;
+  aiTool: string;
+  // Data dari Step 2
+  scenePhotos: Record<number, ScenePhoto>;
+  // Data dari Step 3
+  selectedKarakter: AISelectedKarakter | null;
+  // Navigasi balik ke step yang belum lengkap
+  onEditStep: (step: number) => void;
+}
 
-function AIGenerateTab({ propertyId, propertyTitle, photos }: AIGenerateTabProps) {
-  const [chars, setChars] = useState<AICharacter[]>([]);
-  const [charsLoading, setCharsLoading] = useState(true);
-  const [config, setConfig] = useState({
-    jumlah_scene: 4, platform: 'tiktok', ai_tool: 'Veo3',
-    bahasa: 'Indonesia', musik: 'corporate', karakter_id: null as number | null,
-  });
-  const [scenePhotos, setScenePhotos] = useState<Record<number, ScenePhoto>>({});
-  const [activeSceneAccordion, setActiveSceneAccordion] = useState<number>(1);
+function AIGenerateTab({
+  propertyId, propertyTitle, kodeListingStr, jumlahScene, platform, aiTool,
+  scenePhotos, selectedKarakter, onEditStep,
+}: AIGenerateTabProps) {
+  const [bahasa, setBahasa] = useState('Indonesia');
+  const [musik, setMusik] = useState('corporate');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedResult, setGeneratedResult] = useState<AIGeneratedResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [zipBusy, setZipBusy] = useState(false);
 
-  const allScenesHavePhoto = Array.from({ length: config.jumlah_scene }, (_, i) => scenePhotos[i + 1]?.foto_url).every(Boolean);
-
-  useEffect(() => {
-    let cancel = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/admin/viralframe/characters', { credentials: 'include' });
-        const json = await res.json();
-        if (!cancel) setChars(json.data?.items ?? []);
-      } catch { /* biarkan kosong, tampilkan pesan */ }
-      finally { if (!cancel) setCharsLoading(false); }
-    })();
-    return () => { cancel = true; };
-  }, []);
+  const missingScenes = Array.from({ length: jumlahScene }, (_, i) => i + 1)
+    .filter(n => !scenePhotos[n]?.foto_url);
+  const allScenesHavePhoto = missingScenes.length === 0;
+  const canGenerate = selectedKarakter != null && allScenesHavePhoto;
+  const platformOpt = PLATFORM_OPTIONS.find(p => p.value === platform);
 
   const handleGenerate = async () => {
-    if (config.karakter_id == null || !allScenesHavePhoto) return;
+    if (!canGenerate || !selectedKarakter) return;
     setIsGenerating(true);
     setError(null);
     try {
-      const musik = MUSIK_OPTIONS.find(m => m.value === config.musik)!;
-      const foto_assignments = Array.from({ length: config.jumlah_scene }, (_, i) => ({
+      const musikOpt = MUSIK_OPTIONS.find(m => m.value === musik)!;
+      const foto_assignments = Array.from({ length: jumlahScene }, (_, i) => ({
         scene: i + 1,
         foto_url: scenePhotos[i + 1]?.foto_url ?? '',
         foto_label: scenePhotos[i + 1]?.label ?? 'lainnya',
@@ -685,13 +669,13 @@ function AIGenerateTab({ propertyId, propertyTitle, photos }: AIGenerateTabProps
         credentials: 'include',
         body: JSON.stringify({
           property_id: propertyId,
-          jumlah_scene: config.jumlah_scene,
-          platform: config.platform,
-          ai_tool: config.ai_tool,
-          bahasa: config.bahasa,
-          musik_value: config.musik,
-          musik_prompt: musik.prompt,
-          karakter_id: config.karakter_id,
+          jumlah_scene: jumlahScene,
+          platform,
+          ai_tool: aiTool,
+          bahasa,
+          musik_value: musik,
+          musik_prompt: musikOpt.prompt,
+          karakter_id: selectedKarakter.id,
           foto_assignments,
         }),
       });
@@ -823,169 +807,80 @@ function AIGenerateTab({ propertyId, propertyTitle, photos }: AIGenerateTabProps
     <div className="space-y-5">
       {!generatedResult && (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-[#0F172A] mb-1.5">Jumlah Scene</label>
-              <div className="flex gap-2">
-                {[2, 3, 4, 5, 6].map(n => (
-                  <button key={n} type="button"
-                    onClick={() => setConfig(c => ({ ...c, jumlah_scene: n }))}
-                    className={`w-10 h-10 rounded-xl text-sm font-semibold border transition-colors ${
-                      config.jumlah_scene === n ? 'border-[#1565C0] bg-[#EFF6FF] text-[#1565C0]' : 'border-gray-200 text-[#64748B] hover:bg-gray-50'
-                    }`}>
-                    {n}
-                  </button>
-                ))}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-sm font-medium text-[#0F172A]">📋 Ringkasan Konfigurasi</label>
+              <span className="text-xs text-[#94A3B8]">dari Step 1–3 · {kodeListingStr}</span>
+            </div>
+            <div className="border border-gray-100 rounded-xl divide-y divide-gray-100">
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs text-[#64748B]">Platform</span>
+                <span className="text-sm font-medium text-[#0F172A]">{platformOpt?.label ?? platform}</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs text-[#64748B]">AI Tool</span>
+                <span className="text-sm font-medium text-[#0F172A]">{AI_TOOLS.find(t => t.value === aiTool)?.label ?? aiTool}</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs text-[#64748B]">Jumlah Scene</span>
+                <span className="text-sm font-medium text-[#0F172A]">{jumlahScene} scene</span>
+              </div>
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs text-[#64748B]">Karakter</span>
+                {selectedKarakter ? (
+                  <span className="flex items-center gap-2 text-sm font-medium text-[#0F172A]">
+                    <img src={`/api/admin/media?key=${encodeURIComponent(selectedKarakter.foto_url)}`} alt="" className="w-6 h-6 rounded-full object-cover" loading="lazy" />
+                    {selectedKarakter.nama}
+                  </span>
+                ) : (
+                  <span className="text-sm font-medium text-amber-600">⚠️ Belum pilih</span>
+                )}
+              </div>
+              <div className="px-4 py-2.5">
+                <span className="text-xs text-[#64748B] block mb-1.5">Foto per Scene</span>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                  {Array.from({ length: jumlahScene }, (_, i) => i + 1).map(n => {
+                    const sp = scenePhotos[n];
+                    const labelText = sp ? (FOTO_LABEL_OPTIONS.find(o => o.value === sp.label)?.label ?? sp.label) : null;
+                    return (
+                      <span key={n} className={`text-xs px-2 py-1 rounded-lg ${sp ? 'bg-[#F0F7FF] text-[#1565C0]' : 'bg-amber-50 text-amber-600'}`}>
+                        Scene {n}: {sp ? labelText : '⚠️ kosong'}
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-
-            <div>
-              <label className="block text-sm font-medium text-[#0F172A] mb-1.5">Platform</label>
-              <select value={config.platform} onChange={e => setConfig(c => ({ ...c, platform: e.target.value }))} className={selectCls}>
-                {PLATFORM_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+            <div className="flex gap-2 mt-2">
+              <button type="button" onClick={() => onEditStep(1)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Step 1</button>
+              <button type="button" onClick={() => onEditStep(2)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Step 2</button>
+              <button type="button" onClick={() => onEditStep(3)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Step 3</button>
             </div>
+          </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-[#0F172A] mb-1.5">AI Video Tool</label>
-              <select value={config.ai_tool} onChange={e => setConfig(c => ({ ...c, ai_tool: e.target.value }))} className={selectCls}>
-                {AI_TOOL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-[#0F172A] mb-1.5">Bahasa Narasi</label>
-              <select value={config.bahasa} onChange={e => setConfig(c => ({ ...c, bahasa: e.target.value }))} className={selectCls}>
+              <label className="block text-sm font-medium text-[#0F172A] mb-1.5">⚙️ Bahasa Narasi</label>
+              <select value={bahasa} onChange={e => setBahasa(e.target.value)} className={selectCls}>
                 {BAHASA_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
-
-            <div className="sm:col-span-2">
+            <div>
               <label className="block text-sm font-medium text-[#0F172A] mb-1.5">Gaya Musik</label>
-              <select value={config.musik} onChange={e => setConfig(c => ({ ...c, musik: e.target.value }))} className={selectCls}>
+              <select value={musik} onChange={e => setMusik(e.target.value)} className={selectCls}>
                 {MUSIK_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-[#0F172A] mb-1.5">Pilih Karakter <span className="text-red-500">*</span></label>
-            {charsLoading && <div className="text-sm text-[#94A3B8] py-4 text-center"><Loader2 size={18} className="animate-spin mx-auto" /></div>}
-            {!charsLoading && chars.length === 0 && (
-              <div className="text-center py-6 border border-dashed border-gray-200 rounded-xl text-sm text-[#64748B]">
-                Belum ada karakter. Upload dulu di Step 3 — Pilih Karakter.
-              </div>
-            )}
-            {chars.length > 0 && (
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
-                {chars.map(c => {
-                  const selected = config.karakter_id === c.id;
-                  return (
-                    <button key={c.id} type="button"
-                      onClick={() => setConfig(cfg => ({ ...cfg, karakter_id: c.id }))}
-                      className={`rounded-xl overflow-hidden border-2 transition-all ${
-                        selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-transparent hover:border-gray-300'
-                      }`}>
-                      <div className="aspect-square bg-gray-100">
-                        <img src={`/api/admin/media?key=${encodeURIComponent(c.foto_url)}`} alt={c.nama} className="w-full h-full object-cover" />
-                      </div>
-                      <div className="px-1.5 py-1 text-[11px] font-medium text-[#0F172A] truncate text-center bg-white">{c.nama}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-[#0F172A] mb-1.5">📸 Pilih Foto per Scene <span className="text-red-500">*</span></label>
-            {photos.length === 0 ? (
-              <div className="text-center py-6 border border-dashed border-gray-200 rounded-xl text-sm text-[#64748B]">
-                Properti ini belum punya foto. Tambahkan foto di menu Properti dulu.
-              </div>
-            ) : (
-              <div>
-                {Array.from({ length: config.jumlah_scene }, (_, i) => i + 1).map(sceneNum => {
-                  const chosen = scenePhotos[sceneNum];
-                  const isOpen = activeSceneAccordion === sceneNum;
-                  return (
-                    <div key={sceneNum} className="border border-gray-100 rounded-xl overflow-hidden mb-2">
-                      <button type="button"
-                        onClick={() => setActiveSceneAccordion(isOpen ? 0 : sceneNum)}
-                        className="w-full flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 transition-colors">
-                        <div className="flex items-center gap-3">
-                          <span className="font-semibold text-[#0F172A] text-sm">Scene {sceneNum}</span>
-                          {chosen ? (
-                            <div className="flex items-center gap-2">
-                              <img src={mediaSrc(chosen.foto_url) ?? ''} alt="" className="w-8 h-8 rounded object-cover" loading="lazy" />
-                              <span className="text-xs text-emerald-600 font-medium">
-                                {FOTO_LABEL_OPTIONS.find(o => o.value === chosen.label)?.label ?? chosen.label}
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-[#94A3B8]">Belum pilih foto</span>
-                          )}
-                        </div>
-                        <span className="text-[#94A3B8] text-xs">{isOpen ? '▲' : '▼'}</span>
-                      </button>
-
-                      {isOpen && (
-                        <div className="p-3 space-y-3">
-                          <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                            {photos.map(im => {
-                              const selected = chosen?.foto_url === im.url_webp;
-                              const src = mediaSrc(im.url_webp);
-                              return (
-                                <button key={im.id} type="button"
-                                  onClick={() => setScenePhotos(prev => ({
-                                    ...prev,
-                                    [sceneNum]: { foto_url: im.url_webp, label: prev[sceneNum]?.label ?? 'fasad' },
-                                  }))}
-                                  className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${
-                                    selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-transparent hover:border-gray-300'
-                                  }`}>
-                                  {src ? (
-                                    <img src={src} alt="" className="w-full h-full object-cover" loading="lazy" />
-                                  ) : (
-                                    <div className="w-full h-full bg-gray-100 flex items-center justify-center"><ImageOff size={14} className="text-gray-300" /></div>
-                                  )}
-                                  {selected && (
-                                    <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-[#1565C0] flex items-center justify-center">
-                                      <Check size={10} className="text-white" />
-                                    </span>
-                                  )}
-                                </button>
-                              );
-                            })}
-                          </div>
-
-                          {chosen && (
-                            <div>
-                              <label className="text-xs font-medium text-[#64748B] block mb-1">Jenis foto ini:</label>
-                              <select value={chosen.label}
-                                onChange={e => setScenePhotos(prev => ({ ...prev, [sceneNum]: { ...prev[sceneNum], label: e.target.value } }))}
-                                className={selectCls}>
-                                {FOTO_LABEL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                              </select>
-                              <button type="button"
-                                onClick={() => setActiveSceneAccordion(sceneNum < config.jumlah_scene ? sceneNum + 1 : 0)}
-                                className="mt-2 w-full text-xs text-[#1565C0] hover:text-[#0F4C9E] py-1 font-medium">
-                                {sceneNum < config.jumlah_scene ? `Lanjut ke Scene ${sceneNum + 1} →` : '✓ Semua scene selesai'}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
+          {!canGenerate && (
+            <p className="text-xs text-amber-600 bg-amber-50 rounded-xl px-3 py-2">
+              ⚠️ Lengkapi {!selectedKarakter && 'karakter (Step 3)'}{!selectedKarakter && !allScenesHavePhoto && ' dan '}{!allScenesHavePhoto && `foto (Step 2 — scene ${missingScenes.join(', ')})`} terlebih dahulu.
+            </p>
+          )}
           {error && <p className="text-sm text-red-600">{error}</p>}
 
-          <button onClick={handleGenerate} disabled={config.karakter_id == null || !allScenesHavePhoto || isGenerating}
+          <button onClick={handleGenerate} disabled={!canGenerate || isGenerating}
             className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
             style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
             {isGenerating
@@ -1042,6 +937,7 @@ export default function AdminViralFrameWorkspacePage() {
   const [error, setError] = useState('');
   const [step, setStep] = useState(1);
   const [showErrors, setShowErrors] = useState(false);
+  const [activeStep2Scene, setActiveStep2Scene] = useState(1);
 
   const [s1, setS1] = useState<Step1State>({
     sceneCount: 4,
@@ -1070,6 +966,30 @@ export default function AdminViralFrameWorkspacePage() {
   });
   const update3 = useCallback((patch: Partial<Step3State>) =>
     setS3(prev => ({ ...prev, ...patch })), []);
+
+  // ─── Jalur C: derivasi props AIGenerateTab dari state Step 1–3 (bukan form independen lagi) ──
+  const platformForAI = s1.platforms[0] ?? 'tiktok';
+  const scenePhotosForAI = useMemo(() => {
+    const map: Record<number, ScenePhoto> = {};
+    if (!prop) return map;
+    const imgById = new Map(prop.images.map(im => [im.id, im]));
+    scenes.forEach((sc, i) => {
+      if (sc.photoId == null) return;
+      const img = imgById.get(sc.photoId);
+      if (!img) return;
+      map[i + 1] = { foto_url: img.url_webp, label: PHOTO_LABEL_TO_FOTO_LABEL[sc.label] ?? 'lainnya' };
+    });
+    return map;
+  }, [scenes, prop]);
+  const selectedKarakterForAI: AISelectedKarakter | null = s3.character
+    ? {
+        id: s3.character.id,
+        nama: s3.character.nama,
+        foto_url: s3.character.foto_url,
+        deskripsi: [s3.character.gender, s3.character.usia ? `${s3.character.usia} tahun` : null, s3.character.etnik, s3.character.style ? `gaya ${s3.character.style}` : null, s3.character.ciri_fisik]
+          .filter(Boolean).join(', ') || 'tidak ada deskripsi khusus',
+      }
+    : null;
 
   // Step 4 — compile + save history
   const [copied, setCopied] = useState(false);
@@ -1561,48 +1481,68 @@ export default function AdminViralFrameWorkspacePage() {
             Array.from({ length: s1.sceneCount }).map((_, i) => {
               const sc = scenes[i];
               const role = sceneRole(i, s1.sceneCount);
+              const isOpen = activeStep2Scene === i + 1;
+              const selectedImg = sc?.photoId != null ? prop.images.find(im => im.id === sc.photoId) : null;
               return (
-                <div key={i} className="border border-gray-100 rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-[#0F172A] text-sm">
-                      Scene {i + 1} <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[#EFF6FF] text-[#1565C0] ml-1">{role}</span>
+                <div key={i} className="border border-gray-100 rounded-xl overflow-hidden">
+                  <button type="button"
+                    onClick={() => setActiveStep2Scene(isOpen ? 0 : i + 1)}
+                    className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors">
+                    <span className="font-semibold text-[#0F172A] text-sm flex items-center gap-2">
+                      Scene {i + 1} <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[#EFF6FF] text-[#1565C0]">{role}</span>
+                      {selectedImg && (
+                        <span className="flex items-center gap-1.5 text-xs text-emerald-600">
+                          <img src={mediaSrc(selectedImg.url_webp) ?? ''} alt="" className="w-6 h-6 rounded object-cover" loading="lazy" />
+                          <Check size={13} /> Foto dipilih
+                        </span>
+                      )}
                     </span>
-                    {sc?.photoId != null && <span className="text-xs text-emerald-600 flex items-center gap-1"><Check size={13} /> Foto dipilih</span>}
-                  </div>
+                    <span className="text-[#94A3B8] text-xs">{isOpen ? '▲' : '▼'}</span>
+                  </button>
 
-                  {/* Grid foto */}
-                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                    {prop.images.map(im => {
-                      const selected = sc?.photoId === im.id;
-                      const src = mediaSrc(im.url_webp);
-                      return (
-                        <button key={im.id} type="button" onClick={() => setScene(i, { photoId: im.id })}
-                          className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${
-                            selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-transparent hover:border-gray-300'
-                          }`}>
-                          {src ? (
-                            <img src={src} alt="" className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="w-full h-full bg-gray-100 flex items-center justify-center"><ImageOff size={14} className="text-gray-300" /></div>
-                          )}
-                          {selected && (
-                            <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-[#1565C0] flex items-center justify-center">
-                              <Check size={10} className="text-white" />
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  {isOpen && (
+                    <div className="p-4 space-y-3">
+                      {/* Grid foto */}
+                      <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                        {prop.images.map(im => {
+                          const selected = sc?.photoId === im.id;
+                          const src = mediaSrc(im.url_webp);
+                          return (
+                            <button key={im.id} type="button" onClick={() => setScene(i, { photoId: im.id })}
+                              className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${
+                                selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-transparent hover:border-gray-300'
+                              }`}>
+                              {src ? (
+                                <img src={src} alt="" className="w-full h-full object-cover" loading="lazy" />
+                              ) : (
+                                <div className="w-full h-full bg-gray-100 flex items-center justify-center"><ImageOff size={14} className="text-gray-300" /></div>
+                              )}
+                              {selected && (
+                                <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-[#1565C0] flex items-center justify-center">
+                                  <Check size={10} className="text-white" />
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
 
-                  {/* Label foto */}
-                  <div className="sm:w-64">
-                    <label className="block text-xs font-medium text-[#64748B] mb-1">Label Foto</label>
-                    <select value={sc?.label ?? ''} onChange={e => setScene(i, { label: e.target.value })} className={selectCls}>
-                      <option value="">— Pilih label —</option>
-                      {PHOTO_LABELS.map(l => <option key={l} value={l}>{l}</option>)}
-                    </select>
-                  </div>
+                      {/* Label foto */}
+                      <div className="sm:w-64">
+                        <label className="block text-xs font-medium text-[#64748B] mb-1">Label Foto</label>
+                        <select value={sc?.label ?? ''} onChange={e => setScene(i, { label: e.target.value })} className={selectCls}>
+                          <option value="">— Pilih label —</option>
+                          {PHOTO_LABELS.map(l => <option key={l} value={l}>{l}</option>)}
+                        </select>
+                      </div>
+
+                      <button type="button"
+                        onClick={() => setActiveStep2Scene(i + 1 < s1.sceneCount ? i + 2 : 0)}
+                        className="w-full text-xs text-[#1565C0] hover:text-[#0F4C9E] py-1 font-medium">
+                        {i + 1 < s1.sceneCount ? `Lanjut ke Scene ${i + 2} →` : '✓ Semua scene selesai'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })
@@ -1694,7 +1634,17 @@ export default function AdminViralFrameWorkspacePage() {
 
           {/* ── TAB 4: AI GENERATE (Jalur C) ── */}
           {step4Tab === 'ai_generate' && prop && (
-            <AIGenerateTab propertyId={prop.id} propertyTitle={prop.title} photos={prop.images} />
+            <AIGenerateTab
+              propertyId={prop.id}
+              propertyTitle={prop.title}
+              kodeListingStr={prop.kode_listing}
+              jumlahScene={s1.sceneCount}
+              platform={platformForAI}
+              aiTool={s1.aiTool}
+              scenePhotos={scenePhotosForAI}
+              selectedKarakter={selectedKarakterForAI}
+              onEditStep={setStep}
+            />
           )}
 
           {/* ── TAB 2: PASTE & VALIDATE ── */}

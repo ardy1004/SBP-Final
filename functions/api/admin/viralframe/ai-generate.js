@@ -31,6 +31,12 @@ const SCENE_CAMERA_HINTS = [
   'crane rise from ground level showing property and surroundings',
   'close-up detail pan across architectural features',
   'wide establishing shot from elevated position',
+  'slow lateral tracking shot along interior corridor',
+  'handheld walk-through reveal entering a room',
+  'orbit shot circling a key furniture or feature',
+  'low-angle tilt-up revealing ceiling height and lighting',
+  'rack focus shot from foreground detail to background space',
+  'gentle push-in toward a window or view reveal',
 ];
 
 function formatRupiah(n) {
@@ -51,6 +57,22 @@ function buildSystemPrompt({ jumlahScene, aiTool, platform, bahasa, namaKarakter
 Buat TEPAT ${jumlahScene} video prompt untuk properti di Yogyakarta.
 AI video tool target: ${aiTool}
 Platform: ${platform}
+
+KRITIS — ANTI-HALUSINASI:
+HANYA gunakan informasi yang SECARA EKSPLISIT ada di data properti yang diberikan.
+JANGAN mengarang, mengasumsikan, atau menambahkan fitur yang tidak disebutkan.
+Contoh SALAH: menyebut 'rooftop garden' padahal tidak ada di data.
+Contoh BENAR: hanya menyebut fitur yang tercantum di bagian Data Properti.
+Jika data properti minim, buat prompt berdasarkan foto yang dipilih dan lokasi saja.
+
+KONSISTENSI FOTO PER SCENE:
+Setiap scene memiliki foto spesifik yang telah dipilih user (lihat "Foto per scene" di user prompt).
+Prompt WAJIB mendeskripsikan gerakan kamera yang sesuai dengan jenis foto:
+- fasad/eksterior → drone/exterior shot
+- kamar tidur/mandi/dapur/ruang → interior tracking shot
+- balkon/view → reveal shot ke luar
+- tangga/koridor → tracking forward shot
+JANGAN mendeskripsikan konten yang tidak mungkin ada di foto tersebut.
 
 ATURAN KRITIS — WAJIB DIPATUHI TANPA PENGECUALIAN:
 
@@ -162,6 +184,14 @@ function validateFotoAssignments(fotoAssignments, jumlahScene) {
   return { ok: true };
 }
 
+function isValidScene(s) {
+  return typeof s === 'object' && s !== null &&
+    Number.isInteger(s.scene) &&
+    typeof s.kamera === 'string' && s.kamera.trim().length > 0 &&
+    typeof s.prompt === 'string' && s.prompt.trim().length > 20 &&
+    typeof s.dialog_karakter === 'string' && s.dialog_karakter.trim().length > 0;
+}
+
 function parseSceneJson(raw, jumlahScene) {
   let text = raw.trim();
   text = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
@@ -173,14 +203,11 @@ function parseSceneJson(raw, jumlahScene) {
     return { ok: false, error: 'Respons DeepSeek bukan JSON valid' };
   }
 
-  if (!Array.isArray(parsed)) return { ok: false, error: 'Respons DeepSeek harus berupa JSON array' };
-  if (parsed.length !== jumlahScene) {
-    return { ok: false, error: `Jumlah scene tidak sesuai: diminta ${jumlahScene}, diterima ${parsed.length}` };
-  }
-  for (const item of parsed) {
-    if (typeof item?.scene !== 'number' || typeof item?.prompt !== 'string' || !item.prompt.trim()) {
-      return { ok: false, error: 'Struktur scene JSON tidak lengkap (butuh scene, kamera, prompt, dialog_karakter)' };
-    }
+  if (!Array.isArray(parsed) || parsed.length !== jumlahScene || !parsed.every(isValidScene)) {
+    return {
+      ok: false,
+      error: `DeepSeek return JSON tidak valid. Dapat ${Array.isArray(parsed) ? parsed.length : 'non-array'} scene, dibutuhkan ${jumlahScene}. Field wajib: scene (integer), kamera (string), prompt (string >20 char), dialog_karakter (string).`,
+    };
   }
   return { ok: true, data: parsed };
 }
@@ -200,7 +227,7 @@ export async function onRequestPost(context) {
   const fotoAssignments = body.foto_assignments;
 
   if (!Number.isInteger(propertyId) || propertyId <= 0) return jsonError('property_id wajib diisi', 422);
-  if (!Number.isInteger(jumlahScene) || jumlahScene < 2 || jumlahScene > 6) return jsonError('jumlah_scene harus 2-6', 422);
+  if (!Number.isInteger(jumlahScene) || jumlahScene < 2 || jumlahScene > 12) return jsonError('jumlah_scene harus 2-12', 422);
   if (!platform || typeof platform !== 'string') return jsonError('platform wajib diisi', 422);
   if (!aiTool || typeof aiTool !== 'string') return jsonError('ai_tool wajib diisi', 422);
   if (!bahasa || typeof bahasa !== 'string') return jsonError('bahasa wajib diisi', 422);
@@ -259,7 +286,7 @@ export async function onRequestPost(context) {
       body: JSON.stringify({
         model: 'deepseek-chat',
         temperature: 0.7,
-        max_tokens: 2000,
+        max_tokens: Math.min(4000, 500 + jumlahScene * 350),
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
