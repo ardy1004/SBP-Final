@@ -8,7 +8,7 @@ import JSZip from 'jszip';
 import {
   AI_TOOLS, RATIOS, LANGUAGES, HOOK_TYPES, CTA_TYPES, VISUAL_STYLES,
   TONES, PLATFORMS, PHOTO_LABELS, sceneRole,
-  sceneFileName, characterFileName,
+  sceneFileName, characterFileName, AI_TOOL_FORMAT_SPEC,
 } from './viralframe/options';
 import CharacterStep, { type Step3State } from './viralframe/CharacterStep';
 import {
@@ -691,6 +691,7 @@ function AIGenerateTab({
       const visualStyleLabel = VISUAL_STYLES.find(v => v.value === visualStyle)?.label ?? visualStyle;
       const hookTypeLabel = HOOK_TYPES.find(h => h.value === hookType)?.label ?? hookType;
       const ctaTypeLabel = CTA_TYPES.find(c => c.value === ctaType)?.label ?? ctaType;
+      const supportsRefImage = AI_TOOL_FORMAT_SPEC[aiTool]?.supportsRefImage ?? false;
       const res = await fetch('/api/admin/viralframe/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -710,6 +711,7 @@ function AIGenerateTab({
           musik_prompt: musikOpt.prompt,
           karakter_id: selectedKarakter.id,
           foto_assignments,
+          supports_ref_image: supportsRefImage,
         }),
       });
       const json = await res.json();

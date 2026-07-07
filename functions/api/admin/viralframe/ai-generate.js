@@ -1,6 +1,7 @@
 // POST /api/admin/viralframe/ai-generate — Jalur C: generate N video prompt via DeepSeek
 // Body: { property_id, jumlah_scene, platform, ai_tool, bahasa, tone, visual_style, hook_type,
-//         cta_type, scene_roles, musik_value, musik_prompt, karakter_id, foto_assignments }
+//         cta_type, scene_roles, musik_value, musik_prompt, karakter_id, foto_assignments,
+//         supports_ref_image }
 // foto_assignments: [{ scene: 1, foto_url: '...', foto_label: '...' }, ...] — dipilih manual oleh user, bukan auto-pick.
 // tone/visual_style/hook_type/cta_type: label sudah diresolve di frontend dari Step 1
 // (options.ts TONES/VISUAL_STYLES/HOOK_TYPES/CTA_TYPES) — "Auto" berarti tidak ada instruksi tambahan.
@@ -46,6 +47,26 @@ const KAMERA_PER_LABEL = {
   lainnya: 'elegant cinematic reveal shot showing property space with smooth motion',
 };
 
+// Tabel lipsync — SAMA PERSIS dengan LIPSYNC_TABLE di
+// src/app/components/admin/viralframe/options.ts, supaya batas kata dialog
+// Jalur C konsisten dengan Jalur A (getLipsync).
+const LIPSYNC_MAXWORDS = [
+  { minSec: 2,  maxSec: 3,  maxWords: 8 },
+  { minSec: 4,  maxSec: 5,  maxWords: 16 },
+  { minSec: 6,  maxSec: 8,  maxWords: 26 },
+  { minSec: 9,  maxSec: 12, maxWords: 44 },
+  { minSec: 13, maxSec: 20, maxWords: 72 },
+  { minSec: 21, maxSec: 30, maxWords: 108 },
+];
+
+function getMaxWords(durasiDetik) {
+  const d = Math.max(2, Math.min(30, Math.round(durasiDetik || 0)));
+  for (const row of LIPSYNC_MAXWORDS) {
+    if (d >= row.minSec && d <= row.maxSec) return row.maxWords;
+  }
+  return d <= 3 ? LIPSYNC_MAXWORDS[0].maxWords : LIPSYNC_MAXWORDS[LIPSYNC_MAXWORDS.length - 1].maxWords;
+}
+
 function formatRupiah(n) {
   if (n === null || n === undefined) return 'Hubungi agen';
   return `Rp ${Number(n).toLocaleString('id-ID')}`;
@@ -55,7 +76,7 @@ function isAutoValue(label) {
   return !label || label.trim().toLowerCase().startsWith('auto');
 }
 
-function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType }) {
+function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage }) {
   // Bagian [8] MUSIK: rule abstrak di bawah butuh teks musik konkret disisipkan
   // agar bisa benar-benar dieksekusi DeepSeek — tanpa ini instruksi "tambahkan
   // tepat seperti yang diberikan" tidak merujuk ke apapun.
@@ -83,6 +104,25 @@ function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone,
   const toneStyleBlock = toneStyleSection
     ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n[2b] TONE, GAYA VISUAL & PERAN SCENE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${toneStyleSection}\nSetiap scene punya peran (Hook/Body/CTA, lihat "Role" di user prompt) — sesuaikan penekanan narasi dengan peran itu.\n`
     : '';
+
+  // Anti-halusinasi posisi karakter: perilaku beda tergantung apakah AI tool
+  // tujuan mendukung reference image (AI_TOOL_FORMAT_SPEC.supportsRefImage di
+  // options.ts) — kalau ya, jangan re-describe elemen statis yang sudah
+  // terlihat di foto; kalau tidak, deskripsikan ruangan detail tapi karakter
+  // tetap "sudah ada", bukan "muncul".
+  const antiHalusinasiPosisiBlock = `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2c] ANTI-HALUSINASI POSISI KARAKTER — WAJIB
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Karakter WAJIB dideskripsikan SUDAH BERADA di posisi/aktivitasnya sejak detik pertama shot dimulai.
+DILARANG MUTLAK mendeskripsikan proses karakter masuk, muncul, keluar, atau melintasi elemen ruangan manapun (pintu, dinding, cermin, sudut ruangan) — ini menghasilkan visual yang fisik tidak mungkin dan terlihat jelas sebagai AI generation yang buruk.
+✗ SALAH: 'Ayu walks in through the door and stands near the window'
+✗ SALAH: 'Character emerges from behind the wall into the bedroom'
+✓ BENAR: 'Ayu already standing near the window, gestures warmly toward the room'
+${supportsRefImage
+    ? `Tool AI tujuan MENDUKUNG reference image (foto scene jadi acuan visual langsung) — fokuskan prompt HANYA pada motion/aksi yang terjadi PADA foto referensi tersebut, JANGAN re-describe elemen statis ruangan yang sudah terlihat di foto (dinding, warna cat, furnitur latar belakang, dll).`
+    : `Tool AI tujuan TIDAK mendukung reference image (text-to-video murni) — deskripsikan ruangan SEDETAIL MUNGKIN (warna, furnitur, pencahayaan, tata letak) karena AI tidak punya gambar acuan, TAPI karakter tetap harus dideskripsikan 'sudah ada' di posisinya, bukan 'muncul' atau 'masuk'.`
+}
+`;
 
   // Struktur retensi psikologis: versi simplified (scene sedikit, tidak ada ruang
   // untuk open loop penuh) vs versi lengkap (open loop di scene 1, rehook di scene
@@ -128,7 +168,8 @@ Kamu WAJIB membuat prompt yang sesuai dengan jenis foto scene tersebut.
 ✗ SALAH: scene kamar tidur → prompt menyebut eksterior bangunan
 ✓ BENAR: scene kamar tidur → prompt fokus pada interior, pencahayaan hangat, detail furnitur
 JANGAN mendeskripsikan konten yang tidak mungkin ada di foto tersebut.
-${toneStyleBlock}
+
+${toneStyleBlock}${antiHalusinasiPosisiBlock}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [3] STRUKTUR PROMPT WAJIB PER SCENE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -143,14 +184,19 @@ Setiap field 'prompt' HARUS mengandung SEMUA elemen ini secara natural:
 ✓ BENAR prompt: 'Cinematic drone pull-back revealing the modern 4-story boarding house facade in Depok, Sleman. Property consultant Ayu in black SBP uniform stands at entrance, gestures warmly toward the building with a confident smile. Warm golden hour lighting, smooth aerial motion. Professional real estate videography, cinematic 4K.' (spesifik, > 50 kata)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[4] BAHASA DIALOG KARAKTER
+[4] BAHASA & TEMPO DIALOG KARAKTER — WAJIB
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Field 'dialog_karakter' WAJIB dalam ${bahasa}.
+Bagian dialog (setelah klausa delivery di bawah) WAJIB MAKSIMAL ${maxWords} kata — ini BATAS KETAT, bukan saran. Klip video pendek; dialog kepanjangan akan terlihat dipercepat/tidak sinkron dengan gerak bibir.
+Field 'dialog_karakter' WAJIB berupa SATU KESATUAN TEKS (klausa delivery + dialog digabung, BUKAN dialog polos saja) dengan pola persis:
+  "[Nama karakter] berbicara cepat, artikulasi jelas, tanpa jeda atau gagap, mengatakan: [dialog]"
+Klausa delivery ("[Nama karakter] berbicara cepat...") WAJIB selalu ada di depan — hanya bagian [dialog] setelah "mengatakan:" yang dihitung ke batas ${maxWords} kata.
+✗ SALAH: 'Selamat datang di hunian impian Anda, rumah nyaman dengan tiga kamar tidur yang luas dan taman yang asri di belakang.' (dialog polos tanpa klausa delivery, tidak ada instruksi tempo, melebihi ${maxWords} kata)
 ✗ SALAH (jika bahasa = Indonesia): 'Welcome to our property'
-✓ BENAR (jika bahasa = Indonesia): 'Selamat datang di hunian impian Anda'
-Dialog harus: natural diucapkan, menyebut 1 fitur properti nyata, 1-2 kalimat saja.
+✓ BENAR: 'Ayu berbicara cepat, artikulasi jelas, tanpa jeda atau gagap, mengatakan: Selamat datang di hunian impian Anda.'
+Dialog harus: natural diucapkan, menyebut 1 fitur properti nyata, maksimal ${maxWords} kata.
 JIKA bahasa = Indonesia: gunakan Bahasa Indonesia formal yang hangat.
-JIKA bahasa = English: gunakan English professional.
+JIKA bahasa = English: gunakan English professional (klausa delivery tetap wajib, diterjemahkan proporsional, mis. "[Name] speaks quickly, clear articulation, no pauses or stutters, saying:").
 JIKA bahasa = Jawa: gunakan Bahasa Jawa Krama yang sopan.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -197,10 +243,10 @@ Format yang diharapkan:
     "scene": 1,
     "kamera": "nama singkat gerakan kamera dalam 3-5 kata",
     "prompt": "teks prompt lengkap bahasa Inggris minimum 50 kata",
-    "dialog_karakter": "1-2 kalimat dialog karakter dalam ${bahasa}"
+    "dialog_karakter": "klausa delivery + dialog karakter dalam ${bahasa}, sesuai pola wajib di [4], maksimal ${maxWords} kata untuk bagian dialog"
   }
 ]
-Field WAJIB ada dan non-empty: scene (integer), kamera (string), prompt (string min 50 kata), dialog_karakter (string).`;
+Field WAJIB ada dan non-empty: scene (integer), kamera (string), prompt (string min 50 kata), dialog_karakter (string, format sesuai [4]).`;
 }
 
 function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles }) {
@@ -333,6 +379,7 @@ export async function onRequestPost(context) {
   const musikPrompt = typeof body.musik_prompt === 'string' ? body.musik_prompt : '';
   const karakterId = parseInt(body.karakter_id, 10);
   const fotoAssignments = body.foto_assignments;
+  const supportsRefImage = body.supports_ref_image === true;
 
   if (!Number.isInteger(propertyId) || propertyId <= 0) return jsonError('property_id wajib diisi', 422);
   if (!Number.isInteger(jumlahScene) || jumlahScene < 2 || jumlahScene > 12) return jsonError('jumlah_scene harus 2-12', 422);
@@ -374,10 +421,11 @@ export async function onRequestPost(context) {
   if (!karakter) return jsonError('Karakter tidak ditemukan', 404);
 
   const durasiDetik = PLATFORM_DURASI[platform] ?? 8;
+  const maxWords = getMaxWords(durasiDetik);
   const deskripsiKarakter = describeKarakter(karakter);
   const karakterDesc = describeKarakterUntukPrompt(karakter);
 
-  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType });
+  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage });
   const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles });
 
   let dsRes;
