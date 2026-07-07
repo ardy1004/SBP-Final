@@ -1,7 +1,7 @@
 // POST /api/admin/viralframe/ai-generate — Jalur C: generate N video prompt via DeepSeek
 // Body: { property_id, jumlah_scene, platform, ai_tool, bahasa, tone, visual_style, hook_type,
 //         cta_type, scene_roles, musik_value, musik_prompt, karakter_id, foto_assignments,
-//         supports_ref_image }
+//         supports_ref_image, expression }
 // foto_assignments: [{ scene: 1, foto_url: '...', foto_label: '...' }, ...] — dipilih manual oleh user, bukan auto-pick.
 // tone/visual_style/hook_type/cta_type: label sudah diresolve di frontend dari Step 1
 // (options.ts TONES/VISUAL_STYLES/HOOK_TYPES/CTA_TYPES) — "Auto" berarti tidak ada instruksi tambahan.
@@ -67,6 +67,23 @@ function getMaxWords(durasiDetik) {
   return d <= 3 ? LIPSYNC_MAXWORDS[0].maxWords : LIPSYNC_MAXWORDS[LIPSYNC_MAXWORDS.length - 1].maxWords;
 }
 
+// Deskripsi ekspresi singkat dalam English untuk injeksi ke prompt karakter —
+// SAMA PERSIS dengan EXPRESSION_EN di
+// src/app/components/admin/viralframe/options.ts (functions/ tidak bisa import
+// langsung dari src/app/, jadi diduplikasi seperti pola LIPSYNC_MAXWORDS).
+const EXPRESSION_EN = {
+  auto:           'expression adapted to scene tone',
+  excited_joyful: 'excited and joyful, big smile, high energy',
+  confident_auth: 'confident and authoritative, assured',
+  surprised_amazed: 'surprised and amazed, wide eyes',
+  warm_friendly:  'warm and friendly, approachable',
+  urgent_intense: 'urgent and intense, serious',
+  empathetic:     'empathetic and relatable',
+  playful_humor:  'playful and humorous, light-hearted',
+  mysterious:     'mysterious and dramatic',
+  curious_invest: 'curious and investigative',
+};
+
 function formatRupiah(n) {
   if (n === null || n === undefined) return 'Hubungi agen';
   return `Rp ${Number(n).toLocaleString('id-ID')}`;
@@ -76,7 +93,7 @@ function isAutoValue(label) {
   return !label || label.trim().toLowerCase().startsWith('auto');
 }
 
-function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage }) {
+function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel }) {
   // Bagian [8] MUSIK: rule abstrak di bawah butuh teks musik konkret disisipkan
   // agar bisa benar-benar dieksekusi DeepSeek — tanpa ini instruksi "tambahkan
   // tepat seperti yang diberikan" tidak merujuk ke apapun.
@@ -207,6 +224,7 @@ Karakter HARUS muncul di SETIAP scene dengan identitas yang KONSISTEN:
   • Pakaian yang sama di setiap scene (jika tidak disebutkan: 'baju profesional gelap')
   • Aksi berbeda per scene sesuai jenis foto (berdiri di fasad, duduk di ruang tamu, dll)
 Gunakan deskripsi fisik karakter yang diberikan di data. Jika NULL → 'professional property consultant, formal attire'.
+Ekspresi/emosi karakter WAJIB konsisten '${expressionLabel}' di SEMUA scene — pengaruhi juga pemilihan kata dan energi pada dialog_karakter (bukan cuma deskripsi visual di prompt), supaya nada bicara terasa sesuai ekspresi yang dipilih, bukan datar/formal.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [6] VARIASI ANTAR SCENE
@@ -299,7 +317,7 @@ function describeKarakter(k) {
 // Khusus untuk userPrompt DeepSeek — beda dari describeKarakter() di atas
 // (yang dipakai untuk field karakter.deskripsi di response API): sertakan
 // nama karakter langsung, dan fallback teks jika ciri_fisik NULL.
-function describeKarakterUntukPrompt(k) {
+function describeKarakterUntukPrompt(k, expression) {
   return [
     k.nama,
     k.gender ?? null,
@@ -307,6 +325,7 @@ function describeKarakterUntukPrompt(k) {
     k.etnik ?? null,
     k.style ?? null,
     k.ciri_fisik ?? 'penampilan profesional, pakaian formal gelap',
+    `ekspresi ${EXPRESSION_EN[expression] ?? EXPRESSION_EN.auto}`,
   ].filter(Boolean).join(', ');
 }
 
@@ -380,6 +399,7 @@ export async function onRequestPost(context) {
   const karakterId = parseInt(body.karakter_id, 10);
   const fotoAssignments = body.foto_assignments;
   const supportsRefImage = body.supports_ref_image === true;
+  const expression = typeof body.expression === 'string' ? body.expression : 'auto';
 
   if (!Number.isInteger(propertyId) || propertyId <= 0) return jsonError('property_id wajib diisi', 422);
   if (!Number.isInteger(jumlahScene) || jumlahScene < 2 || jumlahScene > 12) return jsonError('jumlah_scene harus 2-12', 422);
@@ -422,10 +442,11 @@ export async function onRequestPost(context) {
 
   const durasiDetik = PLATFORM_DURASI[platform] ?? 8;
   const maxWords = getMaxWords(durasiDetik);
+  const expressionLabel = EXPRESSION_EN[expression] ?? EXPRESSION_EN.auto;
   const deskripsiKarakter = describeKarakter(karakter);
-  const karakterDesc = describeKarakterUntukPrompt(karakter);
+  const karakterDesc = describeKarakterUntukPrompt(karakter, expression);
 
-  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage });
+  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel });
   const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles });
 
   let dsRes;

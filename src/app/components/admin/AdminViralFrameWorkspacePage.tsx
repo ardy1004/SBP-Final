@@ -629,7 +629,7 @@ function mapLanguageToBahasa(lang: string): string {
 }
 
 interface ScenePhoto { foto_url: string; label: string }
-interface AISelectedKarakter { id: number; nama: string; deskripsi: string; foto_url: string }
+interface AISelectedKarakter { id: number; nama: string; deskripsi: string; foto_url: string; expression: string }
 interface AIGenerateTabProps {
   propertyId: number;
   propertyTitle: string;
@@ -710,6 +710,7 @@ function AIGenerateTab({
           musik_value: musik,
           musik_prompt: musikOpt.prompt,
           karakter_id: selectedKarakter.id,
+          expression: selectedKarakter.expression,
           foto_assignments,
           supports_ref_image: supportsRefImage,
         }),
@@ -1053,6 +1054,7 @@ export default function AdminViralFrameWorkspacePage() {
         foto_url: s3.character.foto_url,
         deskripsi: [s3.character.gender, s3.character.usia ? `${s3.character.usia} tahun` : null, s3.character.etnik, s3.character.style ? `gaya ${s3.character.style}` : null, s3.character.ciri_fisik]
           .filter(Boolean).join(', ') || 'tidak ada deskripsi khusus',
+        expression: s3.expression,
       }
     : null;
   const sceneRolesForAI = useMemo(() => {
