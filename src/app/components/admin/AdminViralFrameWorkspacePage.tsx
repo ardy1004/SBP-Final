@@ -1093,18 +1093,18 @@ export default function AdminViralFrameWorkspacePage() {
     return () => { cancel = true; };
   }, [id]);
 
-  // Shortcut dari list page (?mode=video-vo) — langsung ke Step 4, tab Video VO
+  // Pilihan dari list page (?mode=video-vo) — tetap mulai dari Step 1, tapi
+  // begitu user sampai di Step 4 secara natural, tab Video VO sudah aktif duluan.
   useEffect(() => {
     if (isVideoVOMode) {
-      setStep(4);
       setStep4Tab('video_vo');
     }
   }, [isVideoVOMode]);
 
-  // Shortcut dari list page (?mode=ai-generate) — langsung ke Step 4, tab AI Generate
+  // Pilihan dari list page (?mode=ai-generate) — tetap mulai dari Step 1, tapi
+  // begitu user sampai di Step 4 secara natural, tab AI Generate sudah aktif duluan.
   useEffect(() => {
     if (isAIGenerateMode) {
-      setStep(4);
       setStep4Tab('ai_generate');
     }
   }, [isAIGenerateMode]);
