@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react';
 
 // Site key Turnstile — nilai PUBLIK (aman di-commit), bukan secret.
-// Default = test key Cloudflare yang SELALU LULUS, supaya widget bisa dites tanpa
-// konfigurasi. GANTI dengan site key produksi dari Dashboard → Turnstile.
-// Secret (TURNSTILE_SECRET) di-set di Worker via `wrangler secret put`.
-export const TURNSTILE_SITE_KEY = '1x00000000000000000000AA';
+// Site key produksi untuk salambumi.xyz (Dashboard → Turnstile).
+// Pasangan secret-nya (TURNSTILE_SECRET) di-set di Pages via
+// `wrangler pages secret put TURNSTILE_SECRET --project-name sbp-final`.
+export const TURNSTILE_SITE_KEY = '0x4AAAAAADzWf7sppZk7H4QA';
 
 const SCRIPT_SRC = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
 
