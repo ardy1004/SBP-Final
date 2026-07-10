@@ -26,6 +26,8 @@ interface Step1State {
 interface ApiResult {
   kode_listing: string;
   kode_perjanjian: string;
+  photos_uploaded?: number;
+  photos_total_sent?: number;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -459,12 +461,34 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
       if (file.size > 8 * 1024 * 1024) { photoErr = `${file.name}: ukuran melebihi 8MB`; continue; }
       toAdd.push(file);
     }
-    if (photoErr) setErrors(p => ({ ...p, photos: photoErr }));
+    if (!toAdd.length) {
+      if (photoErr) setErrors(p => ({ ...p, photos: photoErr }));
+      else clearErr('photos');
+      e.target.value = '';
+      return;
+    }
+    const settled = await Promise.allSettled(toAdd.map(convertToWebP));
+    const okFiles: File[] = [];
+    const okPreviews: string[] = [];
+    const failedNames: string[] = [];
+    settled.forEach((result, i) => {
+      if (result.status === 'fulfilled') {
+        okFiles.push(toAdd[i]);
+        okPreviews.push(result.value);
+      } else {
+        failedNames.push(toAdd[i].name);
+      }
+    });
+    if (okFiles.length) {
+      setPhotoFiles(p => [...p, ...okFiles]);
+      setPhotoPreviews(p => [...p, ...okPreviews]);
+    }
+    const convertErr = failedNames.length
+      ? `${failedNames.join(', ')}: format foto ini tidak didukung browser Anda — coba screenshot foto lalu upload ulang, atau export sebagai JPG dari galeri HP.`
+      : '';
+    const combinedErr = [photoErr, convertErr].filter(Boolean).join(' ');
+    if (combinedErr) setErrors(p => ({ ...p, photos: combinedErr }));
     else clearErr('photos');
-    if (!toAdd.length) { e.target.value = ''; return; }
-    const previews = await Promise.all(toAdd.map(convertToWebP));
-    setPhotoFiles(p => [...p, ...toAdd]);
-    setPhotoPreviews(p => [...p, ...previews]);
     e.target.value = '';
   };
 
@@ -569,7 +593,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         return;
       }
 
-      onSuccess(json.data!);
+      onSuccess({ ...json.data!, photos_total_sent: photoPreviews.length });
     } catch {
       setApiError('Koneksi ke server gagal. Periksa koneksi internet Anda dan coba lagi.');
     } finally {
@@ -927,6 +951,14 @@ function SuccessPage({ result }: { result: ApiResult }) {
       <div className="inline-block px-6 py-3 bg-[#E3F2FD] rounded-xl mb-4">
         <span className="font-mono font-bold text-[#1565C0] text-lg">{result.kode_listing}</span>
       </div>
+      {typeof result.photos_uploaded === 'number' && typeof result.photos_total_sent === 'number' && result.photos_uploaded < result.photos_total_sent && (
+        <div className="flex items-start gap-2 p-3 mb-4 bg-amber-50 border border-amber-200 rounded-xl text-left">
+          <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-amber-800">
+            {result.photos_uploaded} dari {result.photos_total_sent} foto berhasil tersimpan. Jika Anda butuh foto lengkap tersimpan, silakan hubungi admin kami via WhatsApp setelah menerima konfirmasi.
+          </p>
+        </div>
+      )}
       <p className="text-[#64748B] text-sm mb-6">
         Kami akan menghubungi Anda via WhatsApp dalam <strong>1×24 jam</strong> untuk proses selanjutnya.
       </p>
