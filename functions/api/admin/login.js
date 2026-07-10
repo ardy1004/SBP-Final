@@ -2,7 +2,8 @@ import bcrypt from 'bcryptjs';
 import { jsonOk, jsonError, handleOptions } from '../_shared/response.js';
 import { signJWT, makePayload, makeSessionCookie } from '../_shared/jwt.js';
 
-const RATE_LIMIT_MAX     = 5;   // max percobaan gagal
+const RATE_LIMIT_MAX     = 5;   // max percobaan gagal per email (memperlambat, bukan mengunci total)
+const RATE_LIMIT_IP_MAX  = 20;  // max percobaan gagal per IP dalam window (guard brute-force)
 const RATE_LIMIT_WINDOW  = 15;  // menit
 
 // Pesan error generik — tidak mengungkap apakah email ada atau tidak (spec 13.1)
@@ -13,12 +14,14 @@ function sanitize(val, maxLen = 200) {
   return val.trim().slice(0, maxLen);
 }
 
-async function countRecentAttempts(db, identifier) {
+// Hitung percobaan gagal berdasarkan kolom (identifier=email atau ip_address)
+async function countRecentAttempts(db, column, value) {
+  if (!value) return 0;
   const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW * 60 * 1000).toISOString();
   const row = await db
     .prepare(`SELECT COUNT(*) AS cnt FROM login_rate_limits
-              WHERE identifier = ? AND attempted_at > ?`)
-    .bind(identifier, windowStart)
+              WHERE ${column} = ? AND attempted_at > ?`)
+    .bind(value, windowStart)
     .first();
   return row?.cnt ?? 0;
 }
@@ -68,9 +71,14 @@ export async function onRequestPost(context) {
              request.headers.get('X-Forwarded-For')  ??
              null;
 
-  // ── Rate limit: cek percobaan gagal terakhir ─────────────────────────────────
-  const attempts = await countRecentAttempts(env.DB, email);
-  if (attempts >= RATE_LIMIT_MAX) {
+  // ── Rate limit: cek percobaan gagal per-email DAN per-IP ─────────────────────
+  // Per-IP mencegah brute-force lintas banyak email; per-email memperlambat serangan
+  // terhadap satu akun tanpa memungkinkan penyerang mengunci admin secara permanen.
+  const [attempts, ipAttempts] = await Promise.all([
+    countRecentAttempts(env.DB, 'identifier', email),
+    countRecentAttempts(env.DB, 'ip_address', ip),
+  ]);
+  if (attempts >= RATE_LIMIT_MAX || ipAttempts >= RATE_LIMIT_IP_MAX) {
     return jsonError(
       `Terlalu banyak percobaan login. Coba lagi dalam ${RATE_LIMIT_WINDOW} menit.`,
       429
@@ -101,24 +109,23 @@ export async function onRequestPost(context) {
 
   if (!passwordValid) {
     await recordFailedAttempt(env.DB, email, ip);
-    const remaining = RATE_LIMIT_MAX - attempts - 1;
-    return jsonError(
-      `${ERR_INVALID}. (${remaining} percobaan tersisa)`,
-      401
-    );
+    // Pesan generik & identik dengan kasus "email tidak ditemukan" —
+    // tidak membocorkan email admin mana yang valid (mencegah user enumeration).
+    return jsonError(ERR_INVALID, 401);
   }
 
   // ── Login berhasil ─────────────────────────────────────────────────────────────
-  // Bersihkan rate limit + update last_login (non-blocking)
+  // Sign token DULU — kalau gagal, rate limit tidak terlanjur direset.
+  const payload = makePayload(admin);
+  const token   = await signJWT(payload, env.JWT_SECRET);
+  const cookie  = makeSessionCookie(token);
+
+  // Bersihkan rate limit + update last_login (non-blocking, setelah token aman)
   context.waitUntil(Promise.all([
     clearAttempts(env.DB, email),
     env.DB.prepare(`UPDATE admins SET last_login = CURRENT_TIMESTAMP WHERE id = ?`)
       .bind(admin.id).run().catch(() => {}),
   ]));
-
-  const payload = makePayload(admin);
-  const token   = await signJWT(payload, env.JWT_SECRET);
-  const cookie  = makeSessionCookie(token);
 
   return new Response(
     JSON.stringify({ success: true, data: { nama: admin.nama, role: admin.role } }),
@@ -127,7 +134,7 @@ export async function onRequestPost(context) {
       headers: {
         'Content-Type': 'application/json',
         'Set-Cookie': cookie,
-        'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || '*',
+        'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || 'https://salambumi.xyz',
         'Access-Control-Allow-Credentials': 'true',
       },
     }

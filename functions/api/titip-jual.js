@@ -323,6 +323,11 @@ export async function onRequestPost(context) {
     }
   }
 
+  const photos_failed = photos_raw.length - photos_uploaded;
+  if (photos_failed > 0) {
+    console.error(`[titip-jual] ${photos_failed}/${photos_raw.length} foto gagal upload untuk property_id=${property_id}`);
+  }
+
   return jsonOk({
     kode_perjanjian,
     kode_listing,
@@ -330,6 +335,13 @@ export async function onRequestPost(context) {
     owner_id,
     agreement_id,
     photos_uploaded,
+    photos_failed,
+    // Beri tahu klien agar bisa menampilkan peringatan bila sebagian/seluruh foto gagal
+    photos_warning: photos_failed > 0
+      ? (photos_uploaded === 0
+          ? 'Seluruh foto gagal diproses — tim SBP akan menghubungi Anda untuk melengkapi foto.'
+          : `${photos_failed} dari ${photos_raw.length} foto gagal diproses.`)
+      : null,
     status: 'draft',
     pesan: 'Data berhasil diterima. Tim SBP akan menghubungi Anda via WhatsApp untuk proses selanjutnya.',
   }, 201);

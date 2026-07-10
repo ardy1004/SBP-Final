@@ -277,37 +277,31 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
     setGenError('');
     setVideoResults(voScenes.map((_, i) => ({ scene_index: i, request_id: null, status: 'idle', video_url: null, blob: null })));
     try {
-      const tokenRes = await fetch('/api/admin/viralframe/siliconflow-token', { credentials: 'include' });
-      if (!tokenRes.ok) throw new Error('Gagal ambil token SiliconFlow');
-      const { token: sfToken } = await tokenRes.json();
-
       for (let i = 0; i < voScenes.length; i++) {
         const scene = voScenes[i];
         if (!scene.foto_url || !scene.gaya_kamera) continue;
         const image_base64 = await photoToBase64WithRatio(scene.foto_url, rasio);
-        console.log('[VideoVO] base64 prefix:', image_base64.slice(0, 30), 'len:', image_base64.length);
-        const sfSubmitRes = await fetch('https://api.siliconflow.com/v1/video/submit', {
+        // Submit via proxy Worker — API key SiliconFlow tidak pernah keluar ke browser.
+        const sfSubmitRes = await fetch('/api/admin/viralframe/submit-video', {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${sfToken}`,
-            'Content-Type': 'application/json',
-          },
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'Wan-AI/Wan2.2-I2V-A14B',
-            image: image_base64,
+            image_base64,
             prompt: scene.prompt_en,
+            model: 'Wan-AI/Wan2.2-I2V-A14B',
             image_size: rasio,
-            seed: Math.floor(Math.random() * 999999),
+            scene_index: i,
           }),
         });
         if (!sfSubmitRes.ok) {
           const errText = await sfSubmitRes.text();
-          throw new Error(`Scene ${i + 1}: SiliconFlow HTTP ${sfSubmitRes.status} — ${errText.slice(0, 200)}`);
+          throw new Error(`Scene ${i + 1}: submit gagal HTTP ${sfSubmitRes.status} — ${errText.slice(0, 200)}`);
         }
         const sfJson = await sfSubmitRes.json();
-        const request_id = sfJson.requestId ?? sfJson.request_id ?? null;
+        const request_id = sfJson.request_id ?? sfJson.requestId ?? null;
         if (!request_id) {
-          throw new Error(`Scene ${i + 1}: SiliconFlow tidak return requestId: ${JSON.stringify(sfJson).slice(0, 200)}`);
+          throw new Error(`Scene ${i + 1}: server tidak return request_id: ${JSON.stringify(sfJson).slice(0, 200)}`);
         }
         setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, request_id, status: 'pending' } : r));
         // Poll until done (max 40 × 3s = 120s)

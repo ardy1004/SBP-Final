@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+# Area admin & endpoint API tidak untuk diindeks
+Disallow: /admin
+Disallow: /api/
+Disallow: /sign/
+
+Sitemap: https://salambumi.xyz/sitemap.xml

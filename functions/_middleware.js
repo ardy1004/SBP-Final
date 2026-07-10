@@ -1,6 +1,11 @@
+// Fallback hardcoded ke origin produksi — JANGAN '*'. Cloudflare Pages kadang
+// tidak membaca [vars] dari wrangler.toml (lihat CLAUDE.md gotcha), dan '*'
+// akan diam-diam membuka seluruh API untuk semua origin.
+const DEFAULT_ORIGIN = 'https://salambumi.xyz';
+
 export async function onRequest(context) {
   const { request, next, env } = context;
-  const origin = env.ALLOWED_ORIGIN || '*';
+  const origin = env.ALLOWED_ORIGIN || DEFAULT_ORIGIN;
 
   if (request.method === 'OPTIONS') {
     return new Response(null, {
