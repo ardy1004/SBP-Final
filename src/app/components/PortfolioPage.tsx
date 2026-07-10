@@ -1,5 +1,13 @@
 import { useState } from 'react';
+import { redirect } from 'react-router';
 import { PORTFOLIO_ITEMS, formatRupiah } from '../data/mockData';
+
+// Portofolio masih memakai data mock (belum ada transaksi nyata terkurasi) dan
+// sudah disembunyikan dari navigasi. Redirect akses langsung ke beranda sampai
+// konten nyata siap — hapus loader ini untuk mengaktifkan kembali halaman.
+export function loader() {
+  return redirect('/');
+}
 
 export default function PortfolioPage() {
   const [filter, setFilter] = useState('Semua');
