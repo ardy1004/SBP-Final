@@ -70,6 +70,7 @@ export async function onRequestPost(context) {
   const no_wa_raw       = sanitize(body.no_wa ?? '', 20);
   const no_wa_2_raw     = sanitize(body.no_wa_2 ?? '', 20);
   const gmaps_link      = sanitize(body.gmaps_link ?? '', 500) || null;
+  if (!gmaps_link) errors.gmaps_link = 'Link Google Maps wajib diisi';
 
   let data_ahli_waris = null;
   if (body.data_ahli_waris && typeof body.data_ahli_waris === 'object') {
@@ -104,9 +105,20 @@ export async function onRequestPost(context) {
   if (!TUJUAN_VALID.includes(tujuan)) errors.tujuan = 'tujuan harus: dijual, disewa, atau dijual_disewa';
 
   let harga = 0;
-  if (body.harga != null) {
+  if (tujuan === 'disewa') {
+    // Kolom `harga` = harga jual, tidak relevan untuk tujuan sewa murni — abaikan body.harga apa pun isinya
+    harga = 0;
+  } else if (body.harga != null) {
     harga = parseInt(String(body.harga), 10);
     if (!Number.isInteger(harga) || harga < 0) errors.harga = 'Harga harus angka positif';
+  }
+
+  let harga_sewa_tahun = null;
+  if (tujuan === 'disewa' || tujuan === 'dijual_disewa') {
+    harga_sewa_tahun = parseInt(String(body.harga_sewa_tahun), 10);
+    if (!Number.isInteger(harga_sewa_tahun) || harga_sewa_tahun <= 0) {
+      errors.harga_sewa_tahun = 'Harga sewa/tahun wajib diisi untuk tujuan Disewakan atau Dijual & Disewakan';
+    }
   }
 
   // ─── Foto validation ──────────────────────────────────────────────────────
@@ -207,7 +219,9 @@ export async function onRequestPost(context) {
   const titleFinal = title_raw || `${jenis_properti.charAt(0).toUpperCase() + jenis_properti.slice(1)} ${kecamatan_prop || kelurahan_owner}`;
 
   const meta = generateMetaSeo({
-    jenis_properti, tujuan, harga,
+    jenis_properti, tujuan,
+    // Kolom `harga` = 0 untuk tujuan disewa murni — pakai harga_sewa_tahun supaya meta title/description tidak jatuh ke "Harga Nego"
+    harga: tujuan === 'disewa' ? harga_sewa_tahun : harga,
     kecamatan: kecamatan_prop || kecamatan_owner,
     kabupaten, luas_tanah, luas_bangunan, nego,
   });
@@ -217,7 +231,7 @@ export async function onRequestPost(context) {
   try {
     const propResult = await env.DB.prepare(`
       INSERT INTO properties
-        (kode_listing, title, slug, jenis_properti, tujuan, harga,
+        (kode_listing, title, slug, jenis_properti, tujuan, harga, harga_sewa_tahun,
          nego, nett,
          provinsi, kabupaten, kecamatan, kelurahan, alamat,
          luas_tanah, luas_bangunan, lebar_depan, lantai,
@@ -230,7 +244,7 @@ export async function onRequestPost(context) {
          meta_title, meta_description,
          status_publish, created_at, updated_at)
       VALUES
-        (?,?,?,?,?,?,
+        (?,?,?,?,?,?,?,
          ?,?,
          ?,?,?,?,?,
          ?,?,?,?,
@@ -243,7 +257,7 @@ export async function onRequestPost(context) {
          ?,?,
          'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     `).bind(
-      kode_listing, titleFinal, slug, jenis_properti, tujuan, harga,
+      kode_listing, titleFinal, slug, jenis_properti, tujuan, harga, harga_sewa_tahun,
       nego, nett,
       provinsi, kabupaten, kecamatan_prop, kelurahan_prop, alamat_prop,
       luas_tanah, luas_bangunan, lebar_depan, lantai,

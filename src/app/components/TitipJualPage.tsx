@@ -359,9 +359,11 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
   const [locLoading, setLocLoading] = useState(true);
 
   // Property fields
+  const [judul, setJudul]   = useState('');
   const [jenis, setJenis]   = useState('');
   const [tujuan, setTujuan] = useState('dijual');
   const [harga, setHarga]   = useState('');
+  const [hargaSewa, setHargaSewa] = useState('');
   const [kondisi, setKondisi] = useState<'nego' | 'nett'>('nego');
   const [alamat, setAlamat] = useState('');
   const [lt, setLt]         = useState('');
@@ -510,6 +512,8 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     const e: Record<string, string> = {};
     if (!jenis) e.jenis = 'Jenis properti wajib dipilih';
     if (!harga || parseInt(harga) <= 0) e.harga = 'Harga wajib diisi';
+    if (tujuan === 'dijual_disewa' && (!hargaSewa || parseInt(hargaSewa) <= 0)) e.harga_sewa_tahun = 'Harga sewa/tahun wajib diisi untuk opsi Dijual & Disewakan';
+    if (!gmaps.trim()) e.gmaps_link = 'Link Google Maps wajib diisi';
     if (!legalitas) e.legalitas = 'Legalitas wajib dipilih';
     if (!photoPreviews.length) e.photos = 'Minimal 1 foto wajib diupload';
     if (!consent) e.consent = 'Persetujuan privasi wajib dicentang';
@@ -543,7 +547,11 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         // property (step 2)
         jenis_properti:    jenis,
         tujuan,
-        harga:             parseInt(harga) || 0,
+        title:             judul.trim() || undefined,
+        harga:             tujuan === 'disewa' ? undefined : (parseInt(harga) || 0),
+        harga_sewa_tahun:  tujuan === 'disewa'        ? (parseInt(harga) || undefined)
+                          : tujuan === 'dijual_disewa' ? (hargaSewa ? parseInt(hargaSewa) : undefined)
+                          : undefined,
         nego:              kondisi === 'nego',
         nett:              kondisi === 'nett',
         provinsi,
@@ -601,7 +609,8 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     }
   };
 
-  const isValid = jenis && harga && parseInt(harga) > 0 && legalitas && photoPreviews.length > 0 && consent;
+  const isValid = jenis && harga && parseInt(harga) > 0 && legalitas && photoPreviews.length > 0 && consent
+    && gmaps.trim() && (tujuan !== 'dijual_disewa' || (hargaSewa && parseInt(hargaSewa) > 0));
 
   return (
     <div>
@@ -615,6 +624,13 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
       </div>
 
       <div className="space-y-4">
+        {/* Judul Properti */}
+        <div>
+          <label className="block text-xs font-semibold text-[#64748B] mb-1">Judul Properti <span className="font-normal text-gray-400">(Opsional)</span></label>
+          <input value={judul} onChange={e => setJudul(e.target.value)}
+            placeholder="Kosongkan untuk judul otomatis" className={inputCls()} />
+        </div>
+
         {/* Tujuan */}
         <div>
           <label className="block text-xs font-semibold text-[#64748B] mb-2">Tujuan *</label>
@@ -634,6 +650,16 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
             type="number" placeholder="Contoh: 850000000" className={inputCls(errors.harga)} />
           <FieldErr msg={errors.harga} />
         </div>
+
+        {/* Harga Sewa/Tahun (kondisional — Dijual & Disewakan) */}
+        {tujuan === 'dijual_disewa' && (
+          <div>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">Harga Sewa/Tahun (Rp) *</label>
+            <input value={hargaSewa} onChange={e => { setHargaSewa(e.target.value); clearErr('harga_sewa_tahun'); }}
+              type="number" placeholder="Contoh: 25000000" className={inputCls(errors.harga_sewa_tahun)} />
+            <FieldErr msg={errors.harga_sewa_tahun} />
+          </div>
+        )}
 
         {/* Kondisi Harga */}
         <div>
@@ -799,10 +825,11 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
 
         {/* Google Maps Properti */}
         <div>
-          <label className="block text-xs font-semibold text-[#64748B] mb-1">Link Google Maps Properti <span className="font-normal text-gray-400">(Opsional)</span></label>
-          <input value={gmaps} onChange={e => setGmaps(e.target.value)}
-            placeholder="https://maps.google.com/..." className={inputCls()} />
+          <label className="block text-xs font-semibold text-[#64748B] mb-1">Link Google Maps Properti *</label>
+          <input value={gmaps} onChange={e => { setGmaps(e.target.value); clearErr('gmaps_link'); }}
+            placeholder="https://maps.google.com/..." className={inputCls(errors.gmaps_link)} />
           <p className="text-xs text-gray-400 mt-0.5">Buka Google Maps → cari properti → share link → paste di sini.</p>
+          <FieldErr msg={errors.gmaps_link} />
         </div>
 
         {/* Lebar Jalan */}
