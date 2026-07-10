@@ -2,6 +2,7 @@ import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { encryptNIK } from '../_lib/crypto.js';
 import { stripExif } from '../_lib/exif.js';
 import { generateMetaSeo } from '../_lib/metaSeo.js';
+import { verifyTurnstile } from '../_lib/turnstile.js';
 
 function sanitize(val, maxLen = 500) {
   if (typeof val !== 'string') return '';
@@ -54,6 +55,13 @@ export async function onRequestPost(context) {
   let body;
   try { body = await request.json(); }
   catch { return jsonError('Body JSON tidak valid', 400); }
+
+  // ─── Anti-bot: verifikasi Turnstile sebelum proses berat (3 INSERT + upload R2) ──
+  const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? null;
+  const captcha = await verifyTurnstile(body.cf_turnstile_token, env.TURNSTILE_SECRET, ip);
+  if (!captcha.ok) {
+    return jsonError('Verifikasi anti-bot gagal. Silakan muat ulang halaman dan coba lagi.', 403);
+  }
 
   const errors = {};
 

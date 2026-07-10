@@ -49,6 +49,10 @@ ADMIN_EMAIL = "salambumiproperty@gmail.com"
 # (Production + Preview) dengan nama ALLOWED_ORIGIN = https://salambumi.xyz.
 ALLOWED_ORIGIN = "https://salambumi.xyz"
 # NIK_ENC_KEY TIDAK DI SINI — set via .dev.vars (lokal) atau: wrangler secret put NIK_ENC_KEY (produksi)
+# TURNSTILE_SECRET — secret CAPTCHA anti-bot (titip-jual, leads, chat). Set via
+#   `wrangler secret put TURNSTILE_SECRET` (Production + Preview). Selama BELUM di-set,
+#   verifikasi Turnstile fail-open (form tetap jalan). Site key ada di src/app/components/Turnstile.tsx
+#   (nilai publik) — ganti dari default test key ke site key produksi dari Dashboard → Turnstile.
 
 # =============================================================================
 # PREVIEW / LOCAL DEVELOPMENT

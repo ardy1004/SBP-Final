@@ -200,6 +200,8 @@ export interface ApiLeadRequest {
   budget?: string;
   rencana_pembayaran?: 'hard_cash' | 'soft_cash' | 'kpr';
   pesan?: string;
+  /** Token Turnstile anti-bot (opsional; diverifikasi server bila TURNSTILE_SECRET di-set) */
+  cf_turnstile_token?: string;
 }
 
 export interface ApiLeadResponse {

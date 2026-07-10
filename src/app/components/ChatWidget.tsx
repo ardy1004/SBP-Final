@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useLocation } from 'react-router';
 import { MessageCircle, Sparkles, X, Send, CheckCircle } from 'lucide-react';
 import ChatPropertyCard, { type ChatPropItem } from './ChatPropertyCard';
+import Turnstile from './Turnstile';
 import { formatRupiah } from '../../lib/api';
 
 // suppress unused import warning — formatRupiah not used here but exported from api
@@ -32,6 +33,7 @@ export default function ChatWidget() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLInputElement>(null);
 
@@ -51,6 +53,7 @@ export default function ChatWidget() {
     const text = input.trim();
     if (!text || loading) return;
 
+    const isFirstMessage = messages.length === 0;
     const newMessages: ChatMsg[] = [...messages, { role: 'user', content: text }];
     setMessages(newMessages);
     setInput('');
@@ -62,6 +65,8 @@ export default function ChatWidget() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+          // Token anti-bot hanya dikirim pada pesan pertama (backend verifikasi di giliran pertama)
+          cf_turnstile_token: isFirstMessage ? (turnstileToken || undefined) : undefined,
         }),
       });
       const json = await res.json() as { success: boolean; data?: { reply: string; properties: ChatPropItem[]; leadSubmitted?: boolean; waUrl?: string | null }; error?: string };
@@ -123,6 +128,9 @@ export default function ChatWidget() {
                   Halo! Saya Asisten SBP 👋<br />
                   Tanya saya tentang properti yang kamu cari — misal <em>&quot;kost dekat UGM budget 1jt&quot;</em> atau <em>&quot;rumah Sleman 3 kamar&quot;</em>.
                 </p>
+                <div style={{ marginTop: 14 }}>
+                  <Turnstile onVerify={setTurnstileToken} onExpire={() => setTurnstileToken('')} />
+                </div>
               </div>
             ) : (
               messages.map((msg, i) => (

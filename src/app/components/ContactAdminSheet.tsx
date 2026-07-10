@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { MessageCircle, X, Star } from 'lucide-react';
 import { postLead, formatRupiah, type NormalizedPropertyDetail } from '../../lib/api';
 import { trackEvent } from '../../lib/tracking';
+import Turnstile from './Turnstile';
 
 const RENCANA_MAP: Record<string, 'hard_cash' | 'soft_cash' | 'kpr'> = {
   'Hard Cash': 'hard_cash',
@@ -29,6 +30,7 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
   const [sending, setSending] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [skipLoading, setSkipLoading] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState('');
 
   const isValid = Boolean(tipe && nama && no_wa.trim() && asal && (tipe !== 'pembeli' || (budget && rencana)));
 
@@ -46,6 +48,7 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
       budget: budget || undefined,
       rencana_pembayaran: RENCANA_MAP[rencana] ?? undefined,
       pesan: pesan || undefined,
+      cf_turnstile_token: turnstileToken || undefined,
     });
     setSending(false);
     if (res.success && res.data) {
@@ -246,6 +249,10 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
           {apiError && (
             <p className="text-xs text-[#EF4444] text-center mb-3 bg-red-50 rounded-xl px-3 py-2">⚠️ {apiError}</p>
           )}
+
+          <div className="flex justify-center mb-3">
+            <Turnstile onVerify={setTurnstileToken} onExpire={() => setTurnstileToken('')} />
+          </div>
 
           <button
             onClick={handleSubmit}

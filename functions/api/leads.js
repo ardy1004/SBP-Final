@@ -1,6 +1,7 @@
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { buildPropertyUrl } from '../_lib/propertyUrl.js';
 import { sendCapiEvent } from '../_lib/metaCapi.js';
+import { verifyTurnstile } from '../_lib/turnstile.js';
 
 // ─── Sanitasi ─────────────────────────────────────────────────────────────────
 function sanitize(val, maxLen = 500) {
@@ -65,6 +66,13 @@ export async function onRequestPost(context) {
     body = await request.json();
   } catch {
     return jsonError('Body JSON tidak valid', 400);
+  }
+
+  // ── Anti-bot: verifikasi Turnstile sebelum insert lead ──────────────────────
+  const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? null;
+  const captcha = await verifyTurnstile(body.cf_turnstile_token, env.TURNSTILE_SECRET, ip);
+  if (!captcha.ok) {
+    return jsonError('Verifikasi anti-bot gagal. Silakan muat ulang halaman dan coba lagi.', 403);
   }
 
   // ── Validasi wajib ──────────────────────────────────────────────────────────

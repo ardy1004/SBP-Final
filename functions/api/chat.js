@@ -1,6 +1,7 @@
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { searchProperties } from '../_lib/searchProperties.js';
 import { createLead } from '../_lib/createLead.js';
+import { verifyTurnstile } from '../_lib/turnstile.js';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODEL    = 'llama-3.3-70b-versatile';
@@ -149,6 +150,18 @@ export async function onRequestPost(context) {
 
   if (clientMessages.length === 0 || clientMessages.at(-1)?.role !== 'user') {
     return jsonError('Pesan terakhir harus dari role user', 400);
+  }
+
+  // ── Anti-bot: verifikasi Turnstile pada pesan PERTAMA saja ──────────────────
+  // Melindungi kuota Groq (2 panggilan LLM/pesan) dari bot, tanpa memaksa user
+  // menyelesaikan CAPTCHA di setiap giliran percakapan.
+  const userTurns = clientMessages.filter(m => m.role === 'user').length;
+  if (userTurns <= 1) {
+    const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? null;
+    const captcha = await verifyTurnstile(body.cf_turnstile_token, env.TURNSTILE_SECRET, ip);
+    if (!captcha.ok) {
+      return jsonError('Verifikasi anti-bot gagal. Silakan muat ulang halaman dan coba lagi.', 403);
+    }
   }
 
   const messages = [
