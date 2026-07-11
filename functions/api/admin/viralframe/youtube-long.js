@@ -2,7 +2,10 @@
 // User memilih foto + label per scene + gaya visual + gaya kamera; AI menyusun
 // skenario & mengeluarkan prompt JSON siap-tempel per blok:
 //   thumbnail, opening, scene 1..N (per foto), ending.
-// Body: { property_id, photos:[{label,url_webp}], visual_style, camera_style, provider? }
+// Body: { property_id, photos:[{label,url_webp}], visual_style, camera_style,
+//         language? ('id'|'en'), use_agent?, agent_id?, provider? }
+// Bila use_agent: agen (viralframe_characters) hadir sebagai host di semua blok,
+// dengan mandat konsistensi ke reference image agent.webp.
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
@@ -32,6 +35,8 @@ export async function onRequestPost(context) {
   if (photos.length < 2) return jsonError('Pilih minimal 2 foto beserta labelnya', 422);
   const visualStyle = typeof body.visual_style === 'string' ? body.visual_style.slice(0, 80) : '';
   const cameraStyle = typeof body.camera_style === 'string' ? body.camera_style.slice(0, 80) : '';
+  const language = body.language === 'en' ? 'en' : 'id';
+  const useAgent = body.use_agent === true;
 
   let p;
   try {
@@ -41,13 +46,34 @@ export async function onRequestPost(context) {
   } catch (err) { console.error('[yt-long] property', err.message); return jsonError('Gagal ambil properti', 500); }
   if (!p) return jsonError('Properti tidak ditemukan', 404);
 
-  const sceneList = photos.map((f, i) => `${i + 1}. ${f.label}`).join('\n');
+  // Agen (host) opsional — ambil profil dari viralframe_characters.
+  let agent = null;
+  if (useAgent) {
+    const agentId = parseInt(body.agent_id, 10);
+    if (!Number.isInteger(agentId) || agentId <= 0) return jsonError('Pilih agen terlebih dahulu', 422);
+    try {
+      agent = await env.DB.prepare(`SELECT id, nama, foto_url, gender, usia, etnik, style, ciri_fisik
+                                    FROM viralframe_characters WHERE id = ?`).bind(agentId).first();
+    } catch (err) { console.error('[yt-long] agent', err.message); return jsonError('Gagal ambil data agen', 500); }
+    if (!agent) return jsonError('Agen tidak ditemukan', 404);
+  }
 
-  const system = `Kamu sutradara & prompt engineer video properti YouTube profesional. Output HANYA satu objek JSON valid, mulai { akhiri }, tanpa markdown/komentar/proses berpikir.`;
+  const sceneList = photos.map((f, i) => `${i + 1}. ${f.label}`).join('\n');
+  const langName = language === 'en' ? 'English' : 'Bahasa Indonesia';
+  const agentDesc = agent
+    ? [agent.gender, agent.usia ? `${agent.usia} th` : null, agent.etnik, agent.style, agent.ciri_fisik]
+        .filter(Boolean).join(', ')
+    : '';
+
+  const system = `Kamu sutradara & prompt engineer video properti YouTube profesional. Output HANYA satu objek JSON valid, mulai { akhiri }, tanpa markdown/komentar/proses berpikir.
+SYARAT WAJIB — KONSISTENSI REFERENCE IMAGE: setiap prompt yang kamu tulis akan dieksekusi image-to-video/image dengan foto referensi terlampir. Setiap objek "prompt" WAJIB punya field "reference_image" (nama file referensinya) dan instruksi harus SETIA ke foto itu: jangan mengarang arsitektur, furnitur, warna, atau material yang tidak ada di foto. Gaya visual & kamera harus konsisten di semua blok agar terasa satu film.${agent ? `
+SYARAT WAJIB — KONSISTENSI AGEN: agen/host yang sama (dari reference image "agent.webp") hadir di thumbnail, opening, scene, dan ending. WAJIB tulis "exact same person as reference image agent.webp — identical face, hair, and outfit in every shot" di field subject/agent tiap prompt. Jangan pernah mengganti wajah, gaya rambut, atau pakaian antar blok.` : ''}`;
   const user = `Susun STORYBOARD video tur properti YouTube (16:9, long-form) berdasarkan foto & urutan scene yang DIPILIH user. JANGAN mengarang fitur yang tak disebutkan di data.
 
 GAYA VISUAL : ${visualStyle || 'cinematic real estate, clean & aspiratif'}
 GAYA KAMERA : ${cameraStyle || 'kombinasi drone aerial + gimbal interior yang mulus'}
+BAHASA DIALOG/NARASI : ${langName} (semua field narration_id ditulis dalam ${langName})
+${agent ? `AGEN/HOST : ${agent.nama}${agentDesc ? ` (${agentDesc})` : ''} — reference image: agent.webp. Agen tampil sebagai host tur: berjalan, menunjuk fitur, bicara ke kamera secara natural. narration_id = kalimat yang DIUCAPKAN agen on-camera.` : 'TANPA AGEN : murni sinematik properti (tanpa manusia); narration_id = voiceover.'}
 
 DATA PROPERTI:
 - Judul: ${p.title}
@@ -58,10 +84,15 @@ DATA PROPERTI:
 - Legalitas: ${p.legalitas ?? '-'} · Kode: ${p.kode_listing}
 ${p.deskripsi ? `- Deskripsi: ${String(p.deskripsi).slice(0, 300)}` : ''}
 
-URUTAN SCENE (buat TEPAT 1 scene per item, sesuai ruangan/area foto):
+URUTAN SCENE (buat TEPAT 1 scene per item, sesuai ruangan/area foto; reference_image scene ke-N = "scene_N.webp"):
 ${sceneList}
 
-Untuk SETIAP blok (thumbnail, opening, tiap scene, ending), field "prompt" WAJIB berupa OBJEK JSON siap-tempel ke AI video/image generator, English sinematik, dengan field: shot, subject, camera_movement (terapkan gaya kamera di atas), lighting, mood, style (terapkan gaya visual di atas), duration_sec, aspect_ratio ("16:9"). Prompt harus grounded ke ruangan/fitur nyata sesuai label — bukan generik.
+Untuk SETIAP blok (thumbnail, opening, tiap scene, ending), field "prompt" WAJIB berupa OBJEK JSON siap-tempel ke AI video/image generator, English sinematik, dengan field: reference_image, shot, subject, camera_movement (terapkan gaya kamera di atas), lighting, mood, style (terapkan gaya visual di atas), duration_sec, aspect_ratio ("16:9"). Prompt harus grounded ke ruangan/fitur nyata sesuai label — bukan generik. Opening & ending pakai reference_image "scene_1.webp" (establishing shot).
+
+THUMBNAIL — WAJIB WOW & CATCHY (gaya high-CTR YouTube real estate, ini penentu klik):
+- Basis foto terbaik (reference_image "scene_1.webp")${agent ? ' + agen dengan ekspresi wajah kuat (kagum/excited, mulut terbuka atau menunjuk ke rumah) di sepertiga kiri/kanan frame' : ''}.
+- Field wajib di prompt thumbnail: reference_image, shot, subject, text_overlay (2-4 kata ${langName} HURUF BESAR yang provokatif, mis. harga atau hook — bukan judul panjang), text_style (bold sans-serif ekstra besar, warna kontras + outline/glow, mudah dibaca di layar HP), color_grade (vivid, high-saturation, dramatic golden-hour/HDR, langit biru dramatis), focal_point, composition (rule of thirds, depth, sudut rendah heroik), badge (badge harga/label mencolok, mis. "${fmtRupiah(p.harga)}"), style, aspect_ratio "16:9".
+- Hindari: thumbnail datar, teks kecil, warna pucat, komposisi pas-foto.
 
 FORMAT JSON WAJIB (patuhi persis):
 {
@@ -70,18 +101,18 @@ FORMAT JSON WAJIB (patuhi persis):
   "chapters_timestamp": ["00:00 Opening", "00:08 <label scene 1>", "..."],
   "caption": "caption share singkat",
   "hashtag_sets": ["5 string, tiap string 5-8 hashtag campur lokasi+jenis+brand #salambumiproperty"],
-  "thumbnail": { "prompt": { "shot": "...", "text_overlay": "...", "style": "...", "aspect_ratio": "16:9" } },
-  "opening": { "prompt": { "shot": "...", "camera_movement": "...", "lighting": "...", "mood": "...", "duration_sec": 8, "aspect_ratio": "16:9" }, "narration_id": "narasi voiceover Indonesia" },
-  "scenes": [ { "scene": 1, "photo_label": "<label>", "prompt": { "shot": "...", "subject": "...", "camera_movement": "...", "lighting": "...", "mood": "...", "style": "...", "duration_sec": 10, "aspect_ratio": "16:9" }, "narration_id": "narasi voiceover Indonesia" } ],
-  "ending": { "prompt": { "shot": "...", "camera_movement": "...", "cta": "...", "duration_sec": 8, "aspect_ratio": "16:9" }, "narration_id": "narasi CTA Indonesia" }
+  "thumbnail": { "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "text_overlay": "...", "text_style": "...", "color_grade": "...", "focal_point": "...", "composition": "...", "badge": "...", "style": "...", "aspect_ratio": "16:9" } },
+  "opening": { "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "...", "lighting": "...", "mood": "...", "style": "...", "duration_sec": 8, "aspect_ratio": "16:9" }, "narration_id": "narasi ${langName}" },
+  "scenes": [ { "scene": 1, "photo_label": "<label>", "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "...", "lighting": "...", "mood": "...", "style": "...", "duration_sec": 10, "aspect_ratio": "16:9" }, "narration_id": "narasi ${langName}" } ],
+  "ending": { "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "...", "cta": "...", "duration_sec": 8, "aspect_ratio": "16:9" }, "narration_id": "narasi CTA ${langName}" }
 }
-"scenes" berisi TEPAT ${photos.length} item (urutan sama dengan daftar di atas). hashtag_sets TEPAT 5 string. Keluarkan HANYA objek JSON.`;
+"scenes" berisi TEPAT ${photos.length} item (urutan sama dengan daftar di atas). hashtag_sets TEPAT 5 string. titles/description/caption/hashtag tetap Bahasa Indonesia. Keluarkan HANYA objek JSON.`;
 
   const tryOrder = [chosenProvider, ...PROVIDER_ORDER.filter(x => x !== chosenProvider)];
   const deadline = Date.now() + 26000;
   // Output nyata 12 scene ≈ 2.200 token; skala per scene + headroom, jangan flat 8000
-  // (max_tokens Gemini juga menghitung token thinking).
-  const maxTokens = Math.min(8000, 1500 + photos.length * 300);
+  // (max_tokens Gemini juga menghitung token thinking). Mode agen menambah detail subject.
+  const maxTokens = Math.min(8000, 1500 + photos.length * 300 + (agent ? 500 : 0));
   let raw = null, used = null, lastErr = null;
   for (const prov of tryOrder) {
     const remaining = deadline - Date.now();
@@ -94,8 +125,10 @@ FORMAT JSON WAJIB (patuhi persis):
       // Gemini 3 Flash = model thinking: tanpa ini ±1.400 token reasoning tersembunyi
       // membuat 12 scene ~24s (nabrak wall-clock 30s). Dengan "none": ~8s, JSON tetap valid.
       reasoningEffort: prov === 'gemini' ? 'none' : undefined,
-      // Cap per provider agar provider berikutnya masih kebagian waktu bila yang ini hang.
-      timeoutMs: Math.min(remaining - 1500, 16000),
+      // Cap per provider — latensi Gemini terukur 7-17s (varian tinggi); 22s memberi
+      // ruang aman, dan provider berikutnya tetap kebagian bila yang ini gagal cepat
+      // (kuota habis / key invalid — kasus fallback yang paling umum).
+      timeoutMs: Math.min(remaining - 1500, 22000),
     });
     if (r.ok) { raw = r.content; used = prov; break; }
     lastErr = r.error;
@@ -122,10 +155,13 @@ FORMAT JSON WAJIB (patuhi persis):
   try {
     await env.DB.prepare(`INSERT INTO viralframe_generations (property_id, params_json, master_prompt, result_json)
                           VALUES (?,?,?,?)`)
-      .bind(propertyId, JSON.stringify({ mode: 'youtube_long', photos, visualStyle, cameraStyle }), null, JSON.stringify(parsed)).run();
+      .bind(propertyId, JSON.stringify({ mode: 'youtube_long', photos, visualStyle, cameraStyle, language, agent_id: agent?.id ?? null }), null, JSON.stringify(parsed)).run();
   } catch { /* non-fatal */ }
 
-  return jsonOk({ ...parsed, provider_used: used, kode_listing: p.kode_listing });
+  return jsonOk({
+    ...parsed, provider_used: used, kode_listing: p.kode_listing, language,
+    agent: agent ? { id: agent.id, nama: agent.nama, foto_url: agent.foto_url } : null,
+  });
 }
 
 export async function onRequestOptions() { return handleOptions(); }

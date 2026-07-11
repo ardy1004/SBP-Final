@@ -1436,14 +1436,21 @@ const YT_CAMERA = [
 ];
 interface YtBlock { prompt?: Record<string, unknown>; narration_id?: string }
 interface YtScene { scene: number; photo_label?: string; prompt?: Record<string, unknown>; narration_id?: string; url_webp?: string | null }
+interface YtAgent { id: number; nama: string; foto_url: string | null }
 interface YtResult {
   titles?: string[]; description?: string; chapters_timestamp?: string[]; caption?: string; hashtag_sets?: string[];
   thumbnail?: YtBlock; opening?: YtBlock; scenes?: YtScene[]; ending?: YtBlock; provider_used?: string;
+  kode_listing?: string; language?: string; agent?: YtAgent | null;
 }
 function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: number; propertyTitle: string; photos: { id: number; url_webp: string }[] }) {
   const [selected, setSelected] = useState<{ id: number; url_webp: string; label: string }[]>([]);
   const [visualStyle, setVisualStyle] = useState('cinematic_film');
   const [cameraStyle, setCameraStyle] = useState('drone_gimbal');
+  const [language, setLanguage] = useState<'id' | 'en'>('id');
+  const [useAgent, setUseAgent] = useState(false);
+  const [agents, setAgents] = useState<YtAgent[] | null>(null); // null = belum dimuat
+  const [agentId, setAgentId] = useState<number | null>(null);
+  const [zipBusy, setZipBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
@@ -1458,10 +1465,20 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
   });
   const setLabel = (id: number, label: string) => setSelected(prev => prev.map(s => (s.id === id ? { ...s, label } : s)));
   const orderOf = (id: number) => { const i = selected.findIndex(s => s.id === id); return i >= 0 ? i + 1 : null; };
-  const ready = selected.length >= 2 && selected.every(s => s.label);
+  const ready = selected.length >= 2 && selected.every(s => s.label) && (!useAgent || agentId != null);
+
+  // Muat daftar agen (viralframe_characters) sekali, saat opsi agen pertama kali dinyalakan.
+  useEffect(() => {
+    if (!useAgent || agents !== null) return;
+    fetch('/api/admin/viralframe/characters', { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => setAgents(j.data?.items ?? []))
+      .catch(() => setAgents([]));
+  }, [useAgent, agents]);
 
   const generate = async () => {
-    if (!ready) { setError('Pilih minimal 2 foto dan beri label tiap foto.'); return; }
+    if (selected.length < 2 || !selected.every(s => s.label)) { setError('Pilih minimal 2 foto dan beri label tiap foto.'); return; }
+    if (useAgent && agentId == null) { setError('Pilih agen yang tampil dalam video, atau matikan opsi agen.'); return; }
     setLoading(true); setError(''); setProgress(8);
     const timer = setInterval(() => setProgress(p => (p < 90 ? p + Math.max(1, (90 - p) * 0.06) : p)), 700);
     try {
@@ -1472,12 +1489,79 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
           photos: selected.map(s => ({ label: s.label, url_webp: s.url_webp })),
           visual_style: VISUAL_STYLES.find(v => v.value === visualStyle)?.label ?? '',
           camera_style: YT_CAMERA.find(c => c.value === cameraStyle)?.label ?? '',
+          language,
+          use_agent: useAgent,
+          agent_id: useAgent ? agentId : undefined,
         }),
       });
       const j = await r.json();
       if (!r.ok || !j.success) throw new Error(j.error ?? 'Gagal generate');
       setResult(j.data); setProgress(100);
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Gagal'); } finally { clearInterval(timer); setLoading(false); }
+  };
+
+  // ZIP lengkap: prompt JSON per blok + naskah + foto referensi (nama file = field
+  // reference_image di prompt) + foto agen — siap dilampirkan ke AI generator.
+  const fetchRefBlob = async (url: string) => {
+    const src = /^https?:/i.test(url) ? url : `/api/admin/media?key=${encodeURIComponent(url)}`;
+    const res = await fetch(src, { credentials: 'include' });
+    if (!res.ok) throw new Error('fetch referensi gagal');
+    return res.blob();
+  };
+  const downloadZip = async () => {
+    if (!result) return;
+    setZipBusy(true); setError('');
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      const kode = (result.kode_listing ?? 'SBP').replace(/[^a-zA-Z0-9-]/g, '-');
+      if (result.thumbnail?.prompt) zip.file('prompts/00_thumbnail.json', JSON.stringify(result.thumbnail.prompt, null, 2));
+      if (result.opening?.prompt) zip.file('prompts/01_opening.json', JSON.stringify(result.opening.prompt, null, 2));
+      (result.scenes ?? []).forEach((s, i) => { if (s.prompt) zip.file(`prompts/scene_${i + 1}.json`, JSON.stringify(s.prompt, null, 2)); });
+      if (result.ending?.prompt) zip.file('prompts/99_ending.json', JSON.stringify(result.ending.prompt, null, 2));
+      zip.file('narasi.txt', [
+        `OPENING: ${result.opening?.narration_id ?? ''}`,
+        ...(result.scenes ?? []).map(s => `SCENE ${s.scene} (${s.photo_label ?? ''}): ${s.narration_id ?? ''}`),
+        `ENDING: ${result.ending?.narration_id ?? ''}`,
+      ].join('\n\n'));
+      zip.file('judul_deskripsi.txt', [
+        'JUDUL (pilih 1):', ...(result.titles ?? []).map((t, i) => `${i + 1}. ${t}`), '',
+        'DESKRIPSI:', result.description ?? '', '',
+        'CHAPTERS:', ...(result.chapters_timestamp ?? []), '',
+        'CAPTION:', result.caption ?? '', '',
+        'HASHTAG:', ...(result.hashtag_sets ?? []),
+      ].join('\n'));
+      const scenes = result.scenes ?? [];
+      for (let i = 0; i < scenes.length; i++) {
+        const u = scenes[i].url_webp;
+        if (!u) continue;
+        try { zip.file(`referensi/scene_${i + 1}.webp`, await fetchRefBlob(u)); } catch { /* skip foto gagal */ }
+      }
+      if (result.agent?.foto_url) {
+        try { zip.file('referensi/agent.webp', await fetchRefBlob(result.agent.foto_url)); } catch { /* skip */ }
+      }
+      zip.file('README.txt', [
+        `YouTube Long Storyboard — ${propertyTitle} (${result.kode_listing ?? ''})`,
+        `Bahasa narasi: ${result.language === 'en' ? 'English' : 'Bahasa Indonesia'}`,
+        result.agent ? `Agen/host: ${result.agent.nama} — referensi/agent.webp (lampirkan di SEMUA blok agar wajah konsisten)` : 'Mode tanpa agen (murni sinematik properti).',
+        '',
+        'CARA PAKAI:',
+        '1. Buka AI video/image generator (Veo3/Kling/dsb).',
+        '2. Tiap blok: lampirkan file dari folder referensi/ sesuai field "reference_image" di prompt-nya.',
+        result.agent ? '3. Mode agen: lampirkan JUGA referensi/agent.webp di tiap blok.' : '',
+        `${result.agent ? '4' : '3'}. Tempel isi prompts/*.json sebagai prompt.`,
+        `${result.agent ? '5' : '4'}. Narasi/dialog per blok ada di narasi.txt; judul/deskripsi/hashtag di judul_deskripsi.txt.`,
+        '',
+        'Generator: ViralFrame AI · salambumi.xyz',
+      ].filter(Boolean).join('\n'));
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `youtube-long_${kode}_${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Gagal membuat ZIP'); }
+    finally { setZipBusy(false); }
   };
 
   const JsonBlock = ({ title, obj, narration, k }: { title: string; obj?: Record<string, unknown>; narration?: string; k: string }) => {
@@ -1569,6 +1653,48 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
             </div>
           </div>
 
+          {/* Bahasa narasi + opsi agen */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <div className="text-sm font-medium text-[#0F172A] mb-1.5">5. Bahasa Dialog / Narasi</div>
+              <select value={language} onChange={e => setLanguage(e.target.value === 'en' ? 'en' : 'id')} className={selectCls}>
+                <option value="id">Bahasa Indonesia (default)</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+            <div>
+              <div className="text-sm font-medium text-[#0F172A] mb-1.5">6. Agen dalam Video</div>
+              <select value={useAgent ? 'agent' : 'none'} onChange={e => { const on = e.target.value === 'agent'; setUseAgent(on); if (!on) setAgentId(null); }} className={selectCls}>
+                <option value="none">Tanpa agen — video rumah saja</option>
+                <option value="agent">Tampilkan agen (pakai foto referensi)</option>
+              </select>
+            </div>
+          </div>
+
+          {useAgent && (
+            <div>
+              <div className="text-sm font-medium text-[#0F172A] mb-1.5">Pilih agen — fotonya jadi reference image di semua blok</div>
+              {agents === null ? (
+                <p className="text-sm text-[#64748B]">Memuat daftar agen…</p>
+              ) : agents.length === 0 ? (
+                <p className="text-sm text-[#64748B]">Belum ada agen tersimpan. Tambahkan lewat workspace ViralFrame → Step 3 (Karakter).</p>
+              ) : (
+                <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                  {agents.map(a => (
+                    <button key={a.id} type="button" onClick={() => setAgentId(a.id)} title={a.nama}
+                      className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${agentId === a.id ? 'border-[#EF4444] ring-2 ring-red-200' : 'border-transparent hover:border-gray-300'}`}>
+                      {a.foto_url
+                        ? <img src={thumbSrc(a.foto_url, 160)} alt={a.nama} loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                        : <span className="w-full h-full flex items-center justify-center bg-gray-100 text-[#94A3B8]"><ImageOff size={18} /></span>}
+                      <span className="absolute bottom-0 inset-x-0 bg-black/55 text-white text-[10px] px-1 py-0.5 truncate">{a.nama}</span>
+                      {agentId === a.id && <span className="absolute top-1 left-1 w-5 h-5 rounded-full bg-[#EF4444] text-white flex items-center justify-center"><Check size={12} /></span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {error && <p className="text-sm text-red-600">{error}</p>}
           <button onClick={generate} disabled={loading || !ready}
             className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
@@ -1585,11 +1711,22 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
 
       {result && (
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-sm font-semibold text-emerald-600">✅ Storyboard siap untuk {propertyTitle}</span>
-            <button onClick={() => { setResult(null); setProgress(0); }} className="text-xs text-[#1565C0] underline">Buat ulang</button>
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <button onClick={downloadZip} disabled={zipBusy}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-[#1565C0] hover:bg-[#1565C0]/90 disabled:opacity-50">
+                {zipBusy ? <><Loader2 size={13} className="animate-spin" /> Membuat ZIP…</> : <><FileArchive size={13} /> Download ZIP</>}
+              </button>
+              <button onClick={() => { setResult(null); setProgress(0); }} className="text-xs text-[#1565C0] underline">Buat ulang</button>
+            </div>
           </div>
-          {result.provider_used && <p className="text-[11px] text-[#94A3B8]">Digenerate oleh {result.provider_used}</p>}
+          <p className="text-[11px] text-[#94A3B8]">
+            {result.provider_used && <>Digenerate oleh {result.provider_used} · </>}
+            Narasi: {result.language === 'en' ? 'English' : 'Bahasa Indonesia'}
+            {result.agent && <> · Agen: {result.agent.nama}</>}
+            {' '}· ZIP berisi prompt JSON per blok + narasi + foto referensi{result.agent ? ' + foto agen' : ''}
+          </p>
 
           {Array.isArray(result.titles) && result.titles.length > 0 && (
             <TextBlock title="Judul Video (pilih 1)" k="titles" text={result.titles.map((t, i) => `${i + 1}. ${t}`).join('\n')} />
