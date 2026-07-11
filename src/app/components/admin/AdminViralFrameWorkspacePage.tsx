@@ -1315,6 +1315,105 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
 }
 const VideoLibraryMemo = memo(VideoLibrary);
 
+// ── YouTube Long 1-klik (Tahap 4) ──
+interface YtScene { scene: number; chapter?: string; duration_sec?: number; ai_ready_prompt?: string; narration_id?: string; on_screen_text?: string }
+interface YtResult { titles?: string[]; description?: string; chapters_timestamp?: string[]; thumbnail_prompt?: string; scenes?: YtScene[]; caption?: string; hashtag_sets?: string[]; provider_used?: string }
+function YouTubeLongView({ propertyId, propertyTitle }: { propertyId: number; propertyTitle: string }) {
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<YtResult | null>(null);
+  const [copied, setCopied] = useState('');
+  const copy = (text: string, key: string) => { navigator.clipboard?.writeText(text).then(() => { setCopied(key); setTimeout(() => setCopied(c => (c === key ? '' : c)), 1500); }).catch(() => {}); };
+
+  const generate = async () => {
+    setLoading(true); setError(''); setProgress(8);
+    const timer = setInterval(() => setProgress(p => (p < 90 ? p + Math.max(1, (90 - p) * 0.06) : p)), 700);
+    try {
+      const r = await fetch('/api/admin/viralframe/youtube-long', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ property_id: propertyId }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.success) throw new Error(j.error ?? 'Gagal generate');
+      setResult(j.data); setProgress(100);
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Gagal'); } finally { clearInterval(timer); setLoading(false); }
+  };
+
+  const Block = ({ title, text, k }: { title: string; text: string; k: string }) => (
+    <div className="border border-gray-100 rounded-xl p-3 bg-[#F8FAFC]">
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wide">{title}</div>
+        <button onClick={() => copy(text, k)} className="text-[11px] font-semibold text-[#1565C0] flex items-center gap-1">
+          {copied === k ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
+        </button>
+      </div>
+      <pre className="text-xs text-[#0F172A] whitespace-pre-wrap break-words font-mono leading-relaxed">{text}</pre>
+    </div>
+  );
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+      <div>
+        <h2 className="font-display font-bold text-[#0F172A] flex items-center gap-2">📺 YouTube Long — Storyboard 1-Klik</h2>
+        <p className="text-sm text-[#64748B] mt-0.5">Sekali klik, AI menyusun storyboard tur properti 16:9 lengkap dari data listing. Tinggal copy-paste ke AI video generator.</p>
+      </div>
+
+      {!result && (
+        <button onClick={generate} disabled={loading}
+          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+          style={{ background: 'linear-gradient(135deg, #EF4444 0%, #F97316 100%)' }}>
+          {loading ? <><Loader2 size={16} className="animate-spin" /> Menyusun storyboard…</> : <>✨ Generate Storyboard YouTube</>}
+        </button>
+      )}
+      {loading && (
+        <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.round(progress)}%`, background: 'linear-gradient(90deg,#EF4444,#F97316)' }} />
+        </div>
+      )}
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {result && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-emerald-600">✅ Storyboard siap untuk {propertyTitle}</span>
+            <button onClick={() => { setResult(null); setProgress(0); }} className="text-xs text-[#1565C0] underline">Buat ulang</button>
+          </div>
+          {result.provider_used && <p className="text-[11px] text-[#94A3B8]">Digenerate oleh {result.provider_used}</p>}
+
+          {Array.isArray(result.titles) && result.titles.length > 0 && (
+            <Block title="Judul Video (pilih 1)" k="titles" text={result.titles.map((t, i) => `${i + 1}. ${t}`).join('\n')} />
+          )}
+          {result.description && <Block title="Deskripsi + Chapters" k="desc" text={`${result.description}\n\n${(result.chapters_timestamp ?? []).join('\n')}`} />}
+          {result.thumbnail_prompt && <Block title="Prompt Thumbnail" k="thumb" text={result.thumbnail_prompt} />}
+
+          <div className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wide pt-1">Scenes ({result.scenes?.length ?? 0}) · durasi per scene ~10s</div>
+          <div className="space-y-2">
+            {(result.scenes ?? []).map(s => (
+              <div key={s.scene} className="border border-gray-100 rounded-xl p-3 bg-white">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold text-[#0F172A]">Scene {s.scene} · {s.chapter ?? ''} · {s.duration_sec ?? 10}s</span>
+                  <button onClick={() => copy(JSON.stringify(s, null, 2), `s-${s.scene}`)} className="text-[11px] font-semibold text-[#1565C0] flex items-center gap-1">
+                    {copied === `s-${s.scene}` ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy JSON</>}
+                  </button>
+                </div>
+                {s.ai_ready_prompt && <pre className="text-xs text-[#0F172A] whitespace-pre-wrap break-words font-mono bg-[#F8FAFC] rounded-lg p-2 leading-relaxed">{s.ai_ready_prompt}</pre>}
+                {s.narration_id && <p className="text-xs text-[#1565C0] mt-1.5 italic">🎙️ {s.narration_id}</p>}
+              </div>
+            ))}
+          </div>
+
+          {result.caption && <Block title="Caption" k="cap" text={result.caption} />}
+          {Array.isArray(result.hashtag_sets) && result.hashtag_sets.length > 0 && (
+            <Block title="Hashtag (5 kombinasi)" k="tags" text={result.hashtag_sets.join('\n')} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+const YouTubeLongViewMemo = memo(YouTubeLongView);
+
 // #2: versi memo dari tab berat — hanya re-render bila prop berubah (prop-nya
 // distabilkan via useMemo/useCallback di parent), bukan tiap parent re-render.
 const VideoVOTabMemo = memo(VideoVOTab);
@@ -1326,6 +1425,7 @@ export default function AdminViralFrameWorkspacePage() {
   const [searchParams] = useSearchParams();
   const isVideoVOMode = searchParams.get('mode') === 'video-vo';
   const isAIGenerateMode = searchParams.get('mode') === 'ai-generate';
+  const isYoutubeLongMode = searchParams.get('mode') === 'youtube-long';
 
   const [prop, setProp] = useState<PropertyDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1823,6 +1923,12 @@ export default function AdminViralFrameWorkspacePage() {
         </div>
       </div>
 
+      {/* Tahap 4: YouTube Long 1-klik menggantikan wizard */}
+      {isYoutubeLongMode && prop && (
+        <YouTubeLongViewMemo propertyId={prop.id} propertyTitle={prop.title} />
+      )}
+
+      {!isYoutubeLongMode && (<>
       {/* Tahap 1: Banner draft tersimpan */}
       {draftFound && (
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 flex items-center justify-between gap-3 flex-wrap">
@@ -2392,6 +2498,7 @@ export default function AdminViralFrameWorkspacePage() {
           <span className="text-xs text-[#94A3B8]">Fase V4 — Coming Soon</span>
         )}
       </div>
+      </>)}
     </div>
   );
 }

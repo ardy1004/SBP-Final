@@ -40,7 +40,7 @@ interface SelectedProperty { id: number; judul: string }
 function ModeSelectionModal({ property, onClose, onPick }: {
   property: SelectedProperty;
   onClose: () => void;
-  onPick: (mode: 'ai-generate' | 'manual' | 'video-vo') => void;
+  onPick: (mode: 'ai-generate' | 'manual' | 'video-vo' | 'youtube-long') => void;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -93,6 +93,19 @@ function ModeSelectionModal({ property, onClose, onPick }: {
             <p className="text-xs text-[#64748B] mb-2">Video + voiceover AI langsung.</p>
             <span className="text-xs font-semibold text-[#1565C0]">Generate →</span>
           </button>
+
+          <button
+            onClick={() => onPick('youtube-long')}
+            className="w-full text-left p-4 rounded-xl border-2 border-red-200 bg-red-50/50 hover:border-red-400 transition-colors"
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-base">📺</span>
+              <span className="font-semibold text-sm text-[#0F172A]">YouTube Long (1-klik)</span>
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white bg-red-500">16:9</span>
+            </div>
+            <p className="text-xs text-[#64748B] mb-2">Sekali klik → storyboard lengkap, prompt video per-scene, thumbnail, judul SEO, caption. Tanpa setting.</p>
+            <span className="text-xs font-semibold text-red-500">Generate Storyboard →</span>
+          </button>
         </div>
       </div>
     </div>
@@ -114,7 +127,7 @@ export default function AdminViralFramePage() {
 
   const openModeModal = (id: number, judul: string) => setSelectedProperty({ id, judul });
   const closeModal = () => setSelectedProperty(null);
-  const handlePickMode = (mode: 'ai-generate' | 'manual' | 'video-vo') => {
+  const handlePickMode = (mode: 'ai-generate' | 'manual' | 'video-vo' | 'youtube-long') => {
     if (!selectedProperty) return;
     const id = selectedProperty.id;
     closeModal();
