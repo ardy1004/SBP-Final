@@ -135,8 +135,10 @@ export const PLATFORMS: Opt[] = [
 
 // Step 2 — Label Foto per Scene
 export const PHOTO_LABELS: string[] = [
-  'Fasad', 'Ruang Tamu', 'Kamar Tidur', 'Kamar Mandi', 'Dapur',
-  'Taman/Halaman', 'Carport/Garasi', 'Balkon/Teras', 'Kolam Renang',
+  'Fasad', 'Ruang Tamu', 'Ruang Keluarga', 'Ruang Makan',
+  'Kamar Tidur', 'Kamar Mandi', 'Dapur', 'Ruang Kerja/Study',
+  'Koridor/Tangga', 'Taman/Halaman', 'Carport/Garasi', 'Balkon/Teras',
+  'Rooftop', 'Kolam Renang', 'Musholla', 'Gudang',
   'Ruang Usaha', 'Tampak Lokasi/Lingkungan', 'Lainnya',
 ];
 
@@ -219,13 +221,20 @@ export const REAL_ESTATE_CONTEXT = {
 export const PHOTO_LABEL_HINT: Record<string, string> = {
   'Fasad': 'tampak depan bangunan, pintu masuk utama, halaman depan, eksterior',
   'Ruang Tamu': 'area duduk utama, sofa, meja, dekorasi ruang tamu',
+  'Ruang Keluarga': 'ruang berkumpul keluarga, sofa santai, TV, suasana hangat',
+  'Ruang Makan': 'meja makan, kursi, area bersantap, pencahayaan hangat',
   'Kamar Tidur': 'kasur, headboard, pencahayaan kamar, suasana istirahat',
   'Kamar Mandi': 'kloset, wastafel, shower, keramik, area mandi',
   'Dapur': 'kitchen set, kompor, kabinet, area memasak',
+  'Ruang Kerja/Study': 'meja kerja, rak buku, area belajar/WFH yang tenang',
+  'Koridor/Tangga': 'koridor penghubung, tangga, railing, transisi antar ruang',
   'Taman/Halaman': 'rumput, tanaman, ruang terbuka hijau, area outdoor',
   'Carport/Garasi': 'tempat parkir kendaraan, kanopi/garasi, akses mobil',
   'Balkon/Teras': 'area teras/balkon, tempat duduk santai, pemandangan',
+  'Rooftop': 'area atap, rooftop lounge, pemandangan kota/sekitar dari atas',
   'Kolam Renang': 'kolam renang, deck, area berenang, suasana resort',
+  'Musholla': 'ruang sholat/musholla, sajadah, suasana khusyuk dan bersih',
+  'Gudang': 'ruang penyimpanan, gudang, area utilitas',
   'Ruang Usaha': 'area komersial/usaha, ruang display, etalase, ruang kerja',
   'Tampak Lokasi/Lingkungan': 'jalan akses, lingkungan sekitar, landmark terdekat, suasana area',
   'Lainnya': 'detail tambahan properti yang relevan',
