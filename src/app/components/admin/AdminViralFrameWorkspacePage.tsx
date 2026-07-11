@@ -1524,6 +1524,30 @@ export default function AdminViralFrameWorkspacePage() {
   }, [id]);
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
+  // R11: Preset tim (parameter Step 1)
+  interface PresetItem { name: string; params: Partial<Step1State>; updated_at?: string }
+  const [presets, setPresets] = useState<PresetItem[]>([]);
+  const loadPresets = useCallback(async () => {
+    try { const r = await fetch('/api/admin/viralframe/presets', { credentials: 'include' }); const j = await r.json(); if (j.success) setPresets(j.data?.items ?? []); } catch { /* noop */ }
+  }, []);
+  useEffect(() => { loadPresets(); }, [loadPresets]);
+  const savePreset = async () => {
+    const name = window.prompt('Nama preset (mis. "Kost Mahasiswa TikTok"):');
+    if (!name?.trim()) return;
+    const params = {
+      archetype: s1.archetype, register: s1.register, tone: s1.tone, visualStyle: s1.visualStyle,
+      hookType: s1.hookType, ctaType: s1.ctaType, ctaKeyword: s1.ctaKeyword, platforms: s1.platforms,
+      aiTool: s1.aiTool, ratio: s1.ratio, language: s1.language, sceneCount: s1.sceneCount,
+      durationMode: s1.durationMode, uniformDuration: s1.uniformDuration,
+    };
+    try { await fetch('/api/admin/viralframe/presets', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), params }) }); } catch { /* noop */ }
+    loadPresets();
+  };
+  const applyPreset = (name: string) => {
+    const p = presets.find(x => x.name === name);
+    if (p) setS1(prev => ({ ...prev, ...p.params }));
+  };
+
   // ─── Jalur C: derivasi props AIGenerateTab dari state Step 1–3 (bukan form independen lagi) ──
   const platformForAI = s1.platforms[0] ?? 'tiktok';
   const scenePhotosForAI = useMemo(() => {
@@ -2000,7 +2024,20 @@ export default function AdminViralFrameWorkspacePage() {
       {/* ─── STEP 1 ─── */}
       {step === 1 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-5">
-          <h2 className="font-display font-bold text-[#0F172A]">Step 1 — Parameter Video</h2>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h2 className="font-display font-bold text-[#0F172A]">Step 1 — Parameter Video</h2>
+            {/* R11: Preset tim */}
+            <div className="flex items-center gap-2">
+              {presets.length > 0 && (
+                <select onChange={e => { if (e.target.value) { applyPreset(e.target.value); e.target.value = ''; } }} defaultValue=""
+                  className="text-xs px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-[#1565C0]">
+                  <option value="">📋 Muat preset…</option>
+                  {presets.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                </select>
+              )}
+              <button onClick={savePreset} className="text-xs font-semibold text-[#1565C0] border border-[#1565C0]/30 rounded-lg px-2 py-1.5 hover:bg-[#F0F7FF]">💾 Simpan preset</button>
+            </div>
+          </div>
 
           {/* (0) Arketipe / Gaya Video — prefill parameter granular secara koheren */}
           <Field label="Gaya Video (Arketipe)" hint="Pilih satu gaya → Gaya Visual, Tone, & koreografi kamera terisi otomatis (tetap bisa diubah). Pilih Kustom untuk atur manual.">

@@ -124,6 +124,24 @@ export default function AdminViralFramePage() {
   const [withScript, setWithScript] = useState<Set<number>>(new Set());
   const [withVideo, setWithVideo] = useState<Set<number>>(new Set());
   const [onlyEmpty, setOnlyEmpty] = useState(false);
+  // R9 batch
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchDone, setBatchDone] = useState(0);
+  const toggleSelect = (id: number) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const refreshStatus = () => fetch('/api/admin/viralframe/status', { credentials: 'include' }).then(r => r.json())
+    .then(j => { if (j.success) { setWithScript(new Set(j.data?.with_script ?? [])); setWithVideo(new Set(j.data?.with_video ?? [])); } }).catch(() => {});
+  const runBatch = async () => {
+    const ids = [...selected]; if (ids.length === 0 || batchRunning) return;
+    setBatchRunning(true); setBatchDone(0);
+    for (let i = 0; i < ids.length; i++) {
+      try {
+        await fetch('/api/admin/viralframe/youtube-long', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ property_id: ids[i] }) });
+      } catch { /* lanjut */ }
+      setBatchDone(i + 1);
+    }
+    setBatchRunning(false); setSelected(new Set()); refreshStatus();
+  };
 
   const openModeModal = (id: number, judul: string) => setSelectedProperty({ id, judul });
   const closeModal = () => setSelectedProperty(null);
@@ -234,6 +252,22 @@ export default function AdminViralFramePage() {
         </div>
       )}
 
+      {/* R9: Batch action bar */}
+      {selected.size > 0 && (
+        <div className="sticky top-2 z-20 bg-[#0F172A] text-white rounded-2xl p-3 flex items-center justify-between gap-3 shadow-lg">
+          <span className="text-sm font-medium">{selected.size} properti dipilih</span>
+          <div className="flex items-center gap-2">
+            {batchRunning
+              ? <span className="text-xs">Memproses {batchDone}/{selected.size}…</span>
+              : <button onClick={() => setSelected(new Set())} className="text-xs text-white/70 hover:text-white">Batal</button>}
+            <button onClick={runBatch} disabled={batchRunning}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-500 hover:bg-red-600 disabled:opacity-50">
+              📺 Generate Storyboard Massal
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Grid properti */}
       {!loading && !error && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -265,8 +299,13 @@ export default function AdminViralFramePage() {
                     const meta = st === 'video' ? { t: '🎬 Video', c: 'bg-emerald-500 text-white' }
                       : st === 'script' ? { t: '📝 Naskah', c: 'bg-amber-400 text-white' }
                       : { t: '⬜ Belum', c: 'bg-white/90 text-gray-500 border border-gray-200' };
-                    return <span className={`absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-semibold ${meta.c}`}>{meta.t}</span>;
+                    return <span className={`absolute top-2 left-10 px-2 py-0.5 rounded-full text-[10px] font-semibold ${meta.c}`}>{meta.t}</span>;
                   })()}
+                  {/* R9: checkbox pilih untuk batch */}
+                  <button onClick={() => toggleSelect(p.id)} title="Pilih untuk batch"
+                    className={`absolute top-2 left-2 w-6 h-6 rounded-md border-2 flex items-center justify-center transition-colors ${selected.has(p.id) ? 'bg-[#1565C0] border-[#1565C0]' : 'bg-white/90 border-gray-300 hover:border-[#1565C0]'}`}>
+                    {selected.has(p.id) && <span className="text-white text-xs font-bold">✓</span>}
+                  </button>
                 </div>
                 <div className="p-3 flex-1 flex flex-col gap-1">
                   <div className="flex items-center gap-1.5">
