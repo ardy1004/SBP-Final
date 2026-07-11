@@ -73,7 +73,7 @@ function isQuotaError(status, bodyText) {
  * Panggil chat completion OpenAI-compat.
  * @returns {Promise<{ ok:boolean, content?:string, status:number, error?:string, quotaExhausted?:boolean }>}
  */
-export async function callChatCompletion({ provider, apiKey, model, systemPrompt, userPrompt, maxTokens = 4000, temperature = 0.7, timeoutMs = 24000 }) {
+export async function callChatCompletion({ provider, apiKey, model, systemPrompt, userPrompt, maxTokens = 4000, temperature = 0.7, timeoutMs = 24000, reasoningEffort }) {
   const cfg = PROVIDERS[provider];
   if (!cfg) return { ok: false, status: 0, error: 'provider tidak dikenal' };
   if (!apiKey) return { ok: false, status: 0, error: `API key ${cfg.label} belum diatur`, quotaExhausted: false };
@@ -90,6 +90,8 @@ export async function callChatCompletion({ provider, apiKey, model, systemPrompt
         model: model || cfg.defaultModel,
         temperature,
         max_tokens: maxTokens,
+        // Kirim hanya bila caller minta — tidak semua provider kenal field ini.
+        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },

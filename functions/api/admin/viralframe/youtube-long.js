@@ -79,15 +79,23 @@ FORMAT JSON WAJIB (patuhi persis):
 
   const tryOrder = [chosenProvider, ...PROVIDER_ORDER.filter(x => x !== chosenProvider)];
   const deadline = Date.now() + 26000;
+  // Output nyata 12 scene ≈ 2.200 token; skala per scene + headroom, jangan flat 8000
+  // (max_tokens Gemini juga menghitung token thinking).
+  const maxTokens = Math.min(8000, 1500 + photos.length * 300);
   let raw = null, used = null, lastErr = null;
   for (const prov of tryOrder) {
-    if (Date.now() > deadline - 6000) break;
+    const remaining = deadline - Date.now();
+    if (remaining < 8000) break; // sisa waktu tak cukup untuk satu percobaan berarti
     const key = await getProviderKey(env, prov);
     if (!key) continue;
     const r = await callChatCompletion({
       provider: prov, apiKey: key, model: PROVIDERS[prov].defaultModel,
-      systemPrompt: system, userPrompt: user, maxTokens: 8000, temperature: 0.6,
-      timeoutMs: deadline - Date.now() - 1500,
+      systemPrompt: system, userPrompt: user, maxTokens, temperature: 0.6,
+      // Gemini 3 Flash = model thinking: tanpa ini ±1.400 token reasoning tersembunyi
+      // membuat 12 scene ~24s (nabrak wall-clock 30s). Dengan "none": ~8s, JSON tetap valid.
+      reasoningEffort: prov === 'gemini' ? 'none' : undefined,
+      // Cap per provider agar provider berikutnya masih kebagian waktu bila yang ini hang.
+      timeoutMs: Math.min(remaining - 1500, 16000),
     });
     if (r.ok) { raw = r.content; used = prov; break; }
     lastErr = r.error;
