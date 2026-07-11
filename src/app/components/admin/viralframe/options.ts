@@ -108,6 +108,23 @@ export const TONES: Opt[] = [
   { value: 'informative_educational', label: 'Informatif / Edukatif' },
 ];
 
+// Register / Gaya Bahasa — memengaruhi dialog_karakter & narasi (lintas semua arketipe).
+// "gaul" = kunci untuk konten UGC/selfie vlog yang relatable di TikTok/Reels.
+export const LANGUAGE_REGISTERS: Opt[] = [
+  { value: 'auto',        label: 'Auto (ikut tone)' },
+  { value: 'formal',      label: 'Formal / Baku' },
+  { value: 'santai',      label: 'Santai / Ramah' },
+  { value: 'gaul',        label: 'Gaul (anak muda)' },
+  { value: 'jawa_halus',  label: 'Jawa Halus (Krama)' },
+];
+export const REGISTER_INSTRUCTION: Record<string, string> = {
+  auto:       '',
+  formal:     'Gunakan Bahasa Indonesia formal & baku, sopan dan profesional.',
+  santai:     'Gunakan bahasa santai & ramah dengan sapaan akrab, seolah sedang mengobrol dengan teman.',
+  gaul:       'Gunakan bahasa gaul anak muda Indonesia yang natural dan relatable (mis. "guys", "nih", "banget", "worth it parah", "gaskeun") — energik dan akrab, TETAPI tetap sopan dan tidak alay berlebihan. Sangat cocok untuk TikTok/Reels.',
+  jawa_halus: 'Gunakan Bahasa Jawa Krama (halus) yang sopan dan santun.',
+};
+
 // (c) Platform Distribusi
 export const PLATFORMS: Opt[] = [
   { value: 'tiktok',    label: 'TikTok' },

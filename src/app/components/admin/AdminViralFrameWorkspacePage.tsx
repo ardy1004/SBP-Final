@@ -7,7 +7,7 @@ import {
 // JSZip di-dynamic-import di handler (bukan static) agar tidak masuk chunk awal workspace.
 import {
   AI_TOOLS, RATIOS, LANGUAGES, HOOK_TYPES, CTA_TYPES, VISUAL_STYLES,
-  TONES, PLATFORMS, PHOTO_LABELS, sceneRole,
+  TONES, PLATFORMS, PHOTO_LABELS, sceneRole, LANGUAGE_REGISTERS, REGISTER_INSTRUCTION,
   sceneFileName, characterFileName, AI_TOOL_FORMAT_SPEC,
 } from './viralframe/options';
 import CharacterStepBase, { type Step3State } from './viralframe/CharacterStep';
@@ -75,6 +75,7 @@ interface Step1State {
   tone: string;
   niche: string;                // fixed 'real_estate'
   archetype: string;            // id VideoArchetype ('custom' = manual)
+  register: string;             // gaya bahasa dialog (auto/formal/santai/gaul/jawa_halus)
 }
 
 interface SceneAssign { photoId: number | null; label: string }
@@ -104,6 +105,23 @@ function resize<T>(arr: T[], len: number, fill: () => T): T[] {
   const next = arr.slice(0, len);
   while (next.length < len) next.push(fill());
   return next;
+}
+
+// R8: bangun subtitle .SRT dari narasi per scene + durasi (timing kumulatif).
+function srtTime(sec: number): string {
+  const ms = Math.max(0, Math.round(sec * 1000));
+  const p = (n: number, l = 2) => String(n).padStart(l, '0');
+  return `${p(Math.floor(ms / 3600000))}:${p(Math.floor((ms % 3600000) / 60000))}:${p(Math.floor((ms % 60000) / 1000))},${p(ms % 1000, 3)}`;
+}
+function buildSrt(scenes: { script_narration?: string }[], durations: number[]): string {
+  let t = 0; const out: string[] = []; let idx = 1;
+  scenes.forEach((sc, i) => {
+    const dur = durations[i] ?? durations[0] ?? 6;
+    const text = (sc.script_narration ?? '').trim();
+    if (text) { out.push(String(idx++), `${srtTime(t)} --> ${srtTime(t + dur)}`, text, ''); }
+    t += dur;
+  });
+  return out.join('\n');
 }
 
 // ─── Komponen kecil ────────────────────────────────────────────────────────
@@ -696,6 +714,7 @@ interface AIGenerateTabProps {
   hookType: string;
   ctaType: string;
   archetype: string;
+  register: string;
   sceneRoles: Record<number, 'Hook' | 'Body' | 'CTA'>;
   // Data dari Step 2
   scenePhotos: Record<number, ScenePhoto>;
@@ -707,7 +726,7 @@ interface AIGenerateTabProps {
 
 function AIGenerateTab({
   propertyId, propertyTitle, kodeListingStr, jumlahScene, platform, platforms, aiTool, bahasa,
-  tone, visualStyle, hookType, ctaType, archetype, sceneRoles,
+  tone, visualStyle, hookType, ctaType, archetype, register, sceneRoles,
   scenePhotos, selectedKarakter, onEditStep,
 }: AIGenerateTabProps) {
   const [musik, setMusik] = useState('corporate');
@@ -715,6 +734,7 @@ function AIGenerateTab({
   const [generatedResult, setGeneratedResult] = useState<AIGeneratedResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [zipBusy, setZipBusy] = useState(false);
+  const [copiedScene, setCopiedScene] = useState<number | null>(null);
 
   // ── Provider AI + model + status + progress ──
   const [provider, setProvider] = useState<AiProviderId>('gemini');
@@ -821,6 +841,7 @@ function AIGenerateTab({
           archetype_note,
           camera_directives,
           presenter_mode: arc?.presenterMode ?? 'on_camera',
+          register_instruction: REGISTER_INSTRUCTION[register] ?? '',
           provider,
           model,
         }),
@@ -1136,7 +1157,12 @@ function AIGenerateTab({
               <div key={s.scene} className="p-3 border border-gray-100 rounded-xl bg-[#F8FAFC]">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="w-6 h-6 rounded-full bg-[#1565C0] text-white text-xs font-bold flex items-center justify-center">{s.scene}</span>
-                  <span className="text-xs font-semibold text-[#64748B]">{s.kamera}</span>
+                  <span className="text-xs font-semibold text-[#64748B] flex-1">{s.kamera}</span>
+                  <button
+                    onClick={() => { navigator.clipboard?.writeText(JSON.stringify(s, null, 2)).then(() => { setCopiedScene(s.scene); setTimeout(() => setCopiedScene(c => (c === s.scene ? null : c)), 1500); }).catch(() => {}); }}
+                    className="flex-shrink-0 text-[11px] font-semibold text-[#1565C0] flex items-center gap-1">
+                    {copiedScene === s.scene ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy JSON</>}
+                  </button>
                 </div>
                 <p className="text-xs text-[#0F172A] leading-relaxed">{s.prompt.slice(0, 200)}{s.prompt.length > 200 ? '…' : ''}</p>
                 <p className="text-xs text-[#1565C0] mt-1.5 italic">"{s.dialog_karakter}"</p>
@@ -1159,6 +1185,76 @@ function AIGenerateTab({
 }
 
 // ─── Halaman utama ──────────────────────────────────────────────────────────
+// ── Caption Studio (Tahap 2): N variasi caption × 5 kombinasi hashtag ──
+function CaptionStudio({ propertyId, platform, registerInstruction }: {
+  propertyId: number; platform: string; registerInstruction: string;
+}) {
+  const [variasi, setVariasi] = useState(3);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<{ caption: string; hashtag_sets: string[] }[]>([]);
+  const [copied, setCopied] = useState('');
+
+  const copy = async (text: string, key: string) => {
+    try { await navigator.clipboard.writeText(text); setCopied(key); setTimeout(() => setCopied(c => (c === key ? '' : c)), 1500); } catch { /* noop */ }
+  };
+  const generate = async () => {
+    setLoading(true); setError('');
+    try {
+      const r = await fetch('/api/admin/viralframe/captions', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ property_id: propertyId, variasi, platform, register_instruction: registerInstruction }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.success) throw new Error(j.error ?? 'Gagal generate caption');
+      setResult(j.data?.captions ?? []);
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Gagal'); } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h3 className="font-display font-bold text-[#0F172A] text-sm flex items-center gap-2">✍️ Caption Studio</h3>
+        <div className="flex items-center gap-2">
+          <select value={variasi} onChange={e => setVariasi(parseInt(e.target.value, 10))}
+            className="text-sm px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-[#1565C0]">
+            <option value={1}>1 variasi</option>
+            <option value={3}>3 variasi</option>
+            <option value={5}>5 variasi</option>
+          </select>
+          <button onClick={generate} disabled={loading}
+            className="px-3 py-1.5 rounded-lg text-sm font-semibold text-white bg-[#1565C0] hover:bg-[#1565C0]/90 disabled:opacity-50 flex items-center gap-1.5">
+            {loading ? <><Loader2 size={13} className="animate-spin" /> Membuat…</> : <>✨ Generate Caption</>}
+          </button>
+        </div>
+      </div>
+      <p className="text-[11px] text-[#94A3B8]">Setiap caption disertai 5 kombinasi hashtag (lokasi + jenis + brand). Bisa di-generate ulang.</p>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {result.map((c, i) => (
+        <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-[#F8FAFC]">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-sm text-[#0F172A] leading-relaxed whitespace-pre-wrap">{c.caption}</p>
+            <button onClick={() => copy(c.caption, `cap-${i}`)} className="flex-shrink-0 text-[11px] font-semibold text-[#1565C0] flex items-center gap-1">
+              {copied === `cap-${i}` ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
+            </button>
+          </div>
+          <div className="space-y-1">
+            {c.hashtag_sets.map((h, hi) => (
+              <div key={hi} className="flex items-center justify-between gap-2 bg-white rounded-lg px-2 py-1 border border-gray-100">
+                <span className="text-[11px] text-[#1565C0] font-medium truncate">{h}</span>
+                <button onClick={() => copy(h, `h-${i}-${hi}`)} className="flex-shrink-0 text-[10px] font-semibold text-[#64748B] flex items-center gap-1">
+                  {copied === `h-${i}-${hi}` ? <Check size={11} /> : <Copy size={11} />}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+const CaptionStudioMemo = memo(CaptionStudio);
+
 // #2: versi memo dari tab berat — hanya re-render bila prop berubah (prop-nya
 // distabilkan via useMemo/useCallback di parent), bukan tiap parent re-render.
 const VideoVOTabMemo = memo(VideoVOTab);
@@ -1194,6 +1290,7 @@ export default function AdminViralFrameWorkspacePage() {
     tone: 'auto',
     niche: 'real_estate',
     archetype: ARCHETYPE_CUSTOM_ID,
+    register: 'auto',
   });
   const [scenes, setScenes] = useState<SceneAssign[]>(
     Array.from({ length: 4 }, () => ({ photoId: null, label: '' }))
@@ -1367,7 +1464,7 @@ export default function AdminViralFrameWorkspacePage() {
   const applyArchetype = (id: string) => {
     const arc = findArchetype(id);
     if (!arc) { setS1(prev => ({ ...prev, archetype: ARCHETYPE_CUSTOM_ID })); return; }
-    setS1(prev => ({ ...prev, archetype: id, visualStyle: arc.defaults.visualStyle, tone: arc.defaults.tone }));
+    setS1(prev => ({ ...prev, archetype: id, visualStyle: arc.defaults.visualStyle, tone: arc.defaults.tone, register: arc.defaults.register ?? prev.register }));
     setS3(prev => ({ ...prev, useCharacter: arc.defaults.useCharacter, expression: arc.defaults.expression }));
   };
 
@@ -1590,6 +1687,10 @@ export default function AdminViralFrameWorkspacePage() {
         ? pn.hashtags.map(h => `#${String(h).replace(/^#/, '')}`).join(' ')
         : '';
       zip.file('caption_hashtag.txt', `CAPTION:\n${caption}\n\nHASHTAGS:\n${hashtags}`);
+
+      // (d2) subtitles.srt — timing dari narasi + durasi scene (R8)
+      const srt = buildSrt(validData.scenes ?? [], durations);
+      if (srt.trim()) zip.file('subtitles.srt', srt);
 
       // (e) generate + download
       const out = await zip.generateAsync({ type: 'blob' });
@@ -1876,6 +1977,10 @@ export default function AdminViralFrameWorkspacePage() {
             <Field label="Tone Narasi">
               <Select value={s1.tone} onChange={v => update1('tone', v)} opts={TONES} />
             </Field>
+            {/* Gaya Bahasa (register) — memengaruhi dialog/narasi */}
+            <Field label="Gaya Bahasa" hint="Mempengaruhi pemilihan kata dialog. 'Gaul' cocok TikTok/Reels.">
+              <Select value={s1.register} onChange={v => update1('register', v)} opts={LANGUAGE_REGISTERS} />
+            </Field>
           </div>
 
           {/* (h) CTA + keyword */}
@@ -2114,6 +2219,7 @@ export default function AdminViralFrameWorkspacePage() {
               hookType={s1.hookType}
               ctaType={s1.ctaType}
               archetype={s1.archetype}
+              register={s1.register}
               sceneRoles={sceneRolesForAI}
               scenePhotos={scenePhotosForAI}
               selectedKarakter={selectedKarakterForAI}
@@ -2188,6 +2294,17 @@ export default function AdminViralFrameWorkspacePage() {
                   <SceneCards data={validData} scenes={scenes} durations={durations} />
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Tahap 2: Caption Studio — tampil di semua tab Step 4 */}
+          {prop && (
+            <div className="mt-4">
+              <CaptionStudioMemo
+                propertyId={prop.id}
+                platform={s1.platforms[0] ?? 'tiktok'}
+                registerInstruction={REGISTER_INSTRUCTION[s1.register] ?? ''}
+              />
             </div>
           )}
         </div>

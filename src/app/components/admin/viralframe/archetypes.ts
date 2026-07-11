@@ -15,7 +15,8 @@
 export type CameraMove =
   | 'dolly_in' | 'pull_back' | 'orbit' | 'crane_up' | 'crane_down'
   | 'whip_pan' | 'gimbal_glide' | 'handheld_follow' | 'fpv_flythrough'
-  | 'static_locked' | 'tilt_up' | 'slow_push' | 'lateral_track';
+  | 'static_locked' | 'tilt_up' | 'slow_push' | 'lateral_track'
+  | 'selfie_hold' | 'selfie_walk';
 
 export type CameraSpeed = 'slow' | 'medium' | 'fast';
 export type CameraEase = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
@@ -42,6 +43,8 @@ const MOVE_PHRASE: Record<CameraMove, string> = {
   static_locked:   'locked static frame',
   tilt_up:         'tilt-up revealing full height',
   lateral_track:   'lateral tracking shot',
+  selfie_hold:     'handheld selfie-stick shot, arm-extended, subject facing the lens with natural micro-shake',
+  selfie_walk:     'handheld selfie walk-and-talk, arm-extended, subject leads the camera through the space',
 };
 
 const SPEED_PHRASE: Record<CameraSpeed, string> = {
@@ -55,6 +58,7 @@ const MOVE_TOKEN: Record<CameraMove, string> = {
   whip_pan: 'whip-pan', gimbal_glide: 'gimbal-forward', handheld_follow: 'handheld-follow',
   fpv_flythrough: 'fly-through', static_locked: 'static', tilt_up: 'tilt-up',
   lateral_track: 'track-lateral',
+  selfie_hold: 'selfie-arm', selfie_walk: 'selfie-walk',
 };
 
 // ─── Dialek kamera per AI video tool ──────────────────────────────────────────
@@ -177,6 +181,7 @@ export interface VideoArchetype {
     tone: string;                  // value TONES
     expression: string;            // value EXPRESSIONS
     useCharacter: boolean;         // apakah talent tampil di layar
+    register?: string;             // value LANGUAGE_REGISTERS (opsional prefill gaya bahasa)
   };
   cameraGrammar: CameraBeat[];     // vokabuler gerakan kamera signature
   pacing: 'punchy' | 'flowing' | 'relaxed';
@@ -191,7 +196,7 @@ export const ARCHETYPES: VideoArchetype[] = [
     ringkas: 'Agen tampil rapi menghadap kamera, berwibawa & meyakinkan.',
     presenterMode: 'on_camera',
     narrationPOV: 'agent_to_camera',
-    defaults: { visualStyle: 'modern_sleek', tone: 'professional_formal', expression: 'confident_auth', useCharacter: true },
+    defaults: { visualStyle: 'modern_sleek', tone: 'professional_formal', expression: 'confident_auth', useCharacter: true, register: 'formal' },
     cameraGrammar: [
       { move: 'dolly_in',      speed: 'slow',   ease: 'ease-out', motivation: 'establish authority at entrance' },
       { move: 'static_locked', speed: 'slow',   ease: 'linear',   motivation: 'agent addresses camera directly' },
@@ -208,7 +213,7 @@ export const ARCHETYPES: VideoArchetype[] = [
     ringkas: 'Energi tinggi, handheld natural, walk-and-talk seperti vlog.',
     presenterMode: 'on_camera',
     narrationPOV: 'vlogger_handheld',
-    defaults: { visualStyle: 'vlog_handheld', tone: 'friendly_casual', expression: 'excited_joyful', useCharacter: true },
+    defaults: { visualStyle: 'vlog_handheld', tone: 'friendly_casual', expression: 'excited_joyful', useCharacter: true, register: 'santai' },
     cameraGrammar: [
       { move: 'handheld_follow', speed: 'medium', ease: 'linear',  motivation: 'walk-and-talk energy through the space' },
       { move: 'whip_pan',        speed: 'fast',   ease: 'ease-in',  motivation: 'punchy reveal of the next room' },
@@ -217,6 +222,22 @@ export const ARCHETYPES: VideoArchetype[] = [
     ],
     pacing: 'punchy',
     shotGrammarNote: 'Gaya vlog: kamera handheld dengan micro-shake natural, energi tinggi, host antusias sering menyapa kamera (selfie-angle) sambil berjalan menjelajah properti. Transisi cepat & fun, kesan autentik/UGC, bukan korporat kaku.',
+  },
+  {
+    id: 'selfie_vlog',
+    label: 'Selfie Vlog (Tongsis)',
+    emoji: '🤳',
+    ringkas: 'Agen selfie pakai tongsis/gimbal, walk-and-talk, terasa nyata & akrab.',
+    presenterMode: 'on_camera',
+    narrationPOV: 'vlogger_handheld',
+    defaults: { visualStyle: 'ugc_authentic', tone: 'friendly_casual', expression: 'excited_joyful', useCharacter: true, register: 'gaul' },
+    cameraGrammar: [
+      { move: 'selfie_hold', speed: 'medium', ease: 'linear',  motivation: 'presenter greets viewer selfie-style' },
+      { move: 'selfie_walk', speed: 'medium', ease: 'linear',  motivation: 'walk-and-talk revealing the space behind' },
+      { move: 'whip_pan',    speed: 'fast',   ease: 'ease-in', motivation: 'flip the camera to reveal a highlight' },
+    ],
+    pacing: 'punchy',
+    shotGrammarNote: 'Gaya selfie vlog REALISTIS: kamera dipegang tangan sendiri via tongsis/gimbal (arm-extended selfie framing), presenter mengisi ~40% frame menghadap lensa LANGSUNG sambil berjalan menjelajah properti; ruangan/properti bergerak natural di belakangnya. Ada sedikit goyangan tangan yang wajar agar terasa autentik/UGC — BUKAN sinematik super-mulus. DILARANG menggambarkan tongsis/tangan pemegang di dalam frame — cukup perspektifnya saja. Energi tinggi, hangat, seperti teman yang sedang me-review rumah.',
   },
   {
     id: 'pov_walkthrough',

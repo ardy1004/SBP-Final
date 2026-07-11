@@ -60,7 +60,8 @@ function isAutoValue(label) {
   return !label || label.trim().toLowerCase().startsWith('auto');
 }
 
-function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode }) {
+function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction }) {
+  const registerLine = registerInstruction ? `\nGAYA BAHASA WAJIB: ${registerInstruction}\n` : '';
   // Mode voiceover/faceless: karakter = NARATOR yang terdengar tapi TIDAK tampil
   // di frame. Video prompt fokus pada visual properti POV/sinematik tanpa orang.
   const isVoiceover = presenterMode === 'voiceover_only' || presenterMode === 'faceless_broll';
@@ -191,7 +192,7 @@ Setiap field 'prompt' HARUS mengandung SEMUA elemen ini secara natural:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [4] BAHASA & TEMPO DIALOG KARAKTER — WAJIB
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Field 'dialog_karakter' WAJIB dalam ${bahasa}.
+Field 'dialog_karakter' WAJIB dalam ${bahasa}.${registerLine}
 Bagian dialog (setelah klausa delivery di bawah) WAJIB MAKSIMAL ${maxWords} kata — ini BATAS KETAT, bukan saran. Klip video pendek; dialog kepanjangan akan terlihat dipercepat/tidak sinkron dengan gerak bibir.
 Field 'dialog_karakter' WAJIB berupa SATU KESATUAN TEKS (klausa delivery + dialog digabung, BUKAN dialog polos saja) dengan pola persis:
   "[Nama karakter] berbicara cepat, artikulasi jelas, tanpa jeda atau gagap, mengatakan: [dialog]"
@@ -392,6 +393,7 @@ export async function onRequestPost(context) {
   const archetypeNote = typeof body.archetype_note === 'string' ? body.archetype_note.slice(0, 600) : '';
   const PRESENTER_VALID = ['on_camera', 'voiceover_only', 'faceless_broll'];
   const presenterMode = PRESENTER_VALID.includes(body.presenter_mode) ? body.presenter_mode : 'on_camera';
+  const registerInstruction = typeof body.register_instruction === 'string' ? body.register_instruction.slice(0, 400) : '';
   // Provider AI + model (default gemini). Fallback otomatis ke provider lain bila kuota habis.
   const PROVIDER_ORDER = ['gemini', 'groq', 'openrouter', 'deepseek'];
   const chosenProvider = PROVIDER_ORDER.includes(body.provider) ? body.provider : 'gemini';
@@ -444,7 +446,7 @@ export async function onRequestPost(context) {
   const deskripsiKarakter = describeKarakter(karakter);
   const karakterDesc = describeKarakterUntukPrompt(karakter, expression);
 
-  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode });
+  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction });
   const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote });
 
   // ── Panggil AI dengan fallback berantai ────────────────────────────────────

@@ -7,7 +7,7 @@ import {
   REAL_ESTATE_CONTEXT, PHOTO_LABEL_HINT, HOOK_TYPES, CTA_TYPES,
   VISUAL_STYLES, TONES, LANGUAGES, RATIOS, EXPRESSIONS,
   ETHNIC_EN, STYLE_EN, EXPRESSION_EN, getLipsync, sceneRole,
-  sceneFileName, characterFileName,
+  sceneFileName, characterFileName, REGISTER_INSTRUCTION,
 } from './options';
 import { findArchetype, compileCameraChoreography } from './archetypes';
 
@@ -30,6 +30,7 @@ export interface CompilerS1 {
   hookType: string; ctaType: string; ctaKeyword: string;
   visualStyle: string; tone: string; niche: string;
   archetype?: string; // id VideoArchetype (opsional; 'custom'/undefined = tanpa arketipe)
+  register?: string;  // gaya bahasa dialog (auto/formal/santai/gaul/jawa_halus)
 }
 export interface CompilerScene { photoId: number | null; label: string }
 export interface CompilerS3 {
@@ -249,6 +250,8 @@ export function compileMasterPrompt(
   L.push('');
   L.push(`GAYA VISUAL       : ${labelOf(VISUAL_STYLES, s1.visualStyle)} — terapkan sinematografi, color grading, dan komposisi yang konsisten dengan gaya ini di SEMUA scene.`);
   L.push(`TONE NARASI       : ${labelOf(TONES, s1.tone)}`);
+  const regInstr = REGISTER_INSTRUCTION[s1.register ?? 'auto'] ?? '';
+  if (regInstr) L.push(`GAYA BAHASA       : ${regInstr} Terapkan pada semua script_narration/dialog.`);
   L.push('');
 
   // ── BLOK 3b: FOTO REFERENSI PER SCENE ──
