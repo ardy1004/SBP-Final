@@ -2,6 +2,14 @@
 // Nilai disusun dari contoh yang disebut di PRD ringkas instruksi fase.
 // value = key disimpan ke state/params_json; label = teks UI.
 
+// Konstanta lipsync & ekspresi = sumber tunggal bersama dengan backend (Fase 4 dedup).
+// Ditempatkan di functions/_lib agar backend Functions bisa mengimpornya natif.
+import {
+  LIPSYNC_TABLE as SHARED_LIPSYNC_TABLE,
+  getLipsync as sharedGetLipsync,
+  EXPRESSION_EN as SHARED_EXPRESSION_EN,
+} from '../../../../../functions/_lib/viralframe-shared.js';
+
 export interface Opt { value: string; label: string }
 
 // (d) AI Video Tool — 11 pilihan + perkiraan batas karakter prompt
@@ -249,24 +257,11 @@ export const GENDER_OPTIONS: Opt[] = [
 ];
 
 // Tabel lipsync (PRD 3.8) — sinkronisasi durasi klip ↔ jumlah kata narasi.
+// Sumber tunggal ada di functions/_lib/viralframe-shared.js (dedup Fase 4);
+// di sini hanya di-re-export dengan tipe TS agar konsumen tetap type-safe.
 export interface LipsyncRow { minSec: number; maxSec: number; maxWords: number; pace: string; instruksi: string }
-export const LIPSYNC_TABLE: LipsyncRow[] = [
-  { minSec: 2,  maxSec: 3,  maxWords: 8,   pace: 'ultra_fast',    instruksi: 'Ucapan sangat cepat, 1 kalimat pendek punchy, tanpa jeda.' },
-  { minSec: 4,  maxSec: 5,  maxWords: 16,  pace: 'fast',          instruksi: 'Ucapan cepat, 1–2 kalimat ringkas, jeda minimal.' },
-  { minSec: 6,  maxSec: 8,  maxWords: 26,  pace: 'normal',        instruksi: 'Tempo natural, 2 kalimat, jeda wajar antar frasa.' },
-  { minSec: 9,  maxSec: 12, maxWords: 44,  pace: 'medium',        instruksi: 'Tempo sedang, 2–3 kalimat, ada penekanan kata kunci.' },
-  { minSec: 13, maxSec: 20, maxWords: 72,  pace: 'relaxed',       instruksi: 'Tempo santai, 3–4 kalimat, ruang untuk storytelling.' },
-  { minSec: 21, maxSec: 30, maxWords: 108, pace: 'slow_dramatic', instruksi: 'Tempo lambat dramatis, jeda sengaja untuk emosi.' },
-];
-
-export function getLipsync(durasiDetik: number): LipsyncRow {
-  const d = Math.max(2, Math.min(30, Math.round(durasiDetik || 0)));
-  for (const row of LIPSYNC_TABLE) {
-    if (d >= row.minSec && d <= row.maxSec) return row;
-  }
-  // d di antara range (mis. tidak mungkin karena kontigu) → fallback terdekat
-  return d <= 3 ? LIPSYNC_TABLE[0] : LIPSYNC_TABLE[LIPSYNC_TABLE.length - 1];
-}
+export const LIPSYNC_TABLE: LipsyncRow[] = SHARED_LIPSYNC_TABLE as LipsyncRow[];
+export const getLipsync: (durasiDetik: number) => LipsyncRow = sharedGetLipsync;
 
 // Mapping value Indonesia → label English untuk injeksi deskripsi karakter (PRD 3.13).
 export const ETHNIC_EN: Record<string, string> = {
@@ -289,19 +284,8 @@ export const STYLE_EN: Record<string, string> = {
   glamour:       'glamorous elegant outfit',
 };
 
-// Deskripsi ekspresi singkat dalam English untuk injeksi ke prompt karakter.
-export const EXPRESSION_EN: Record<string, string> = {
-  auto:           'expression adapted to scene tone',
-  excited_joyful: 'excited and joyful, big smile, high energy',
-  confident_auth: 'confident and authoritative, assured',
-  surprised_amazed: 'surprised and amazed, wide eyes',
-  warm_friendly:  'warm and friendly, approachable',
-  urgent_intense: 'urgent and intense, serious',
-  empathetic:     'empathetic and relatable',
-  playful_humor:  'playful and humorous, light-hearted',
-  mysterious:     'mysterious and dramatic',
-  curious_invest: 'curious and investigative',
-};
+// Deskripsi ekspresi singkat English — sumber tunggal di viralframe-shared.js.
+export const EXPRESSION_EN: Record<string, string> = SHARED_EXPRESSION_EN;
 
 // ─── Penamaan file aset (dipakai Master Prompt + ZIP export Fase V4b) ─────────
 // PENTING (requirement Fase V4b): ZIP generation WAJIB memakai sceneFileName() &

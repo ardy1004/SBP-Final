@@ -9,6 +9,8 @@
 // Auth: otomatis via functions/api/admin/_middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+// Konstanta lipsync & ekspresi = sumber tunggal bersama dengan frontend (Fase 4).
+import { getMaxWords, EXPRESSION_EN } from '../../../_lib/viralframe-shared.js';
 
 const PLATFORM_DURASI = {
   tiktok: 8,
@@ -47,42 +49,6 @@ const KAMERA_PER_LABEL = {
   lainnya: 'elegant cinematic reveal shot showing property space with smooth motion',
 };
 
-// Tabel lipsync — SAMA PERSIS dengan LIPSYNC_TABLE di
-// src/app/components/admin/viralframe/options.ts, supaya batas kata dialog
-// Jalur C konsisten dengan Jalur A (getLipsync).
-const LIPSYNC_MAXWORDS = [
-  { minSec: 2,  maxSec: 3,  maxWords: 8 },
-  { minSec: 4,  maxSec: 5,  maxWords: 16 },
-  { minSec: 6,  maxSec: 8,  maxWords: 26 },
-  { minSec: 9,  maxSec: 12, maxWords: 44 },
-  { minSec: 13, maxSec: 20, maxWords: 72 },
-  { minSec: 21, maxSec: 30, maxWords: 108 },
-];
-
-function getMaxWords(durasiDetik) {
-  const d = Math.max(2, Math.min(30, Math.round(durasiDetik || 0)));
-  for (const row of LIPSYNC_MAXWORDS) {
-    if (d >= row.minSec && d <= row.maxSec) return row.maxWords;
-  }
-  return d <= 3 ? LIPSYNC_MAXWORDS[0].maxWords : LIPSYNC_MAXWORDS[LIPSYNC_MAXWORDS.length - 1].maxWords;
-}
-
-// Deskripsi ekspresi singkat dalam English untuk injeksi ke prompt karakter —
-// SAMA PERSIS dengan EXPRESSION_EN di
-// src/app/components/admin/viralframe/options.ts (functions/ tidak bisa import
-// langsung dari src/app/, jadi diduplikasi seperti pola LIPSYNC_MAXWORDS).
-const EXPRESSION_EN = {
-  auto:           'expression adapted to scene tone',
-  excited_joyful: 'excited and joyful, big smile, high energy',
-  confident_auth: 'confident and authoritative, assured',
-  surprised_amazed: 'surprised and amazed, wide eyes',
-  warm_friendly:  'warm and friendly, approachable',
-  urgent_intense: 'urgent and intense, serious',
-  empathetic:     'empathetic and relatable',
-  playful_humor:  'playful and humorous, light-hearted',
-  mysterious:     'mysterious and dramatic',
-  curious_invest: 'curious and investigative',
-};
 
 function formatRupiah(n) {
   if (n === null || n === undefined) return 'Hubungi agen';
