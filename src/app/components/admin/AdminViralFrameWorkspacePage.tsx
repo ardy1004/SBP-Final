@@ -737,6 +737,7 @@ function AIGenerateTab({
           supports_ref_image: supportsRefImage,
           archetype_note,
           camera_directives,
+          presenter_mode: arc?.presenterMode ?? 'on_camera',
         }),
       });
       const json = await res.json();

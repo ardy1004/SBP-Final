@@ -93,7 +93,28 @@ function isAutoValue(label) {
   return !label || label.trim().toLowerCase().startsWith('auto');
 }
 
-function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel }) {
+function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode }) {
+  // Mode voiceover/faceless: karakter = NARATOR yang terdengar tapi TIDAK tampil
+  // di frame. Video prompt fokus pada visual properti POV/sinematik tanpa orang.
+  const isVoiceover = presenterMode === 'voiceover_only' || presenterMode === 'faceless_broll';
+  const karakterBlock = isVoiceover
+    ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[5] MODE VOICEOVER — NARATOR TIDAK TAMPIL DI LAYAR (WAJIB)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Karakter berperan sebagai NARATOR VOICEOVER: suaranya terdengar, tetapi WAJIB TIDAK PERNAH tampil di frame video.
+  • Field 'prompt' (video) DILARANG menampilkan orang/talent/manusia manapun — subjek visual adalah RUANG & elemen properti dari sudut POV/sinematik (gerakan kamera + ruangan + pencahayaan + mood), BUKAN karakter.
+  • Field 'dialog_karakter' = TEKS VOICEOVER narator (tetap ikut pola delivery [4] & batas ${maxWords} kata) — nada bicara konsisten dengan ekspresi '${expressionLabel}'.
+  • Konsistensi: satu persona suara narator di semua scene (bukan konsistensi visual karakter, karena tidak ada karakter di layar).
+Abaikan instruksi "SUBJEK: karakter" di [3] — untuk mode ini SUBJEK visual = properti/ruang, orang tidak boleh muncul.`
+    : `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[5] KONSISTENSI KARAKTER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Karakter HARUS muncul di SETIAP scene dengan identitas yang KONSISTEN:
+  • Nama yang sama di setiap scene
+  • Pakaian yang sama di setiap scene (jika tidak disebutkan: 'baju profesional gelap')
+  • Aksi berbeda per scene sesuai jenis foto (berdiri di fasad, duduk di ruang tamu, dll)
+Gunakan deskripsi fisik karakter yang diberikan di data. Jika NULL → 'professional property consultant, formal attire'.
+Ekspresi/emosi karakter WAJIB konsisten '${expressionLabel}' di SEMUA scene — pengaruhi juga pemilihan kata dan energi pada dialog_karakter (bukan cuma deskripsi visual di prompt), supaya nada bicara terasa sesuai ekspresi yang dipilih, bukan datar/formal.`;
   // Bagian [8] MUSIK: rule abstrak di bawah butuh teks musik konkret disisipkan
   // agar bisa benar-benar dieksekusi DeepSeek — tanpa ini instruksi "tambahkan
   // tepat seperti yang diberikan" tidak merujuk ke apapun.
@@ -216,15 +237,7 @@ JIKA bahasa = Indonesia: gunakan Bahasa Indonesia formal yang hangat.
 JIKA bahasa = English: gunakan English professional (klausa delivery tetap wajib, diterjemahkan proporsional, mis. "[Name] speaks quickly, clear articulation, no pauses or stutters, saying:").
 JIKA bahasa = Jawa: gunakan Bahasa Jawa Krama yang sopan.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[5] KONSISTENSI KARAKTER
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Karakter HARUS muncul di SETIAP scene dengan identitas yang KONSISTEN:
-  • Nama yang sama di setiap scene
-  • Pakaian yang sama di setiap scene (jika tidak disebutkan: 'baju profesional gelap')
-  • Aksi berbeda per scene sesuai jenis foto (berdiri di fasad, duduk di ruang tamu, dll)
-Gunakan deskripsi fisik karakter yang diberikan di data. Jika NULL → 'professional property consultant, formal attire'.
-Ekspresi/emosi karakter WAJIB konsisten '${expressionLabel}' di SEMUA scene — pengaruhi juga pemilihan kata dan energi pada dialog_karakter (bukan cuma deskripsi visual di prompt), supaya nada bicara terasa sesuai ekspresi yang dipilih, bukan datar/formal.
+${karakterBlock}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [6] VARIASI ANTAR SCENE
@@ -410,6 +423,8 @@ export async function onRequestPost(context) {
   const expression = typeof body.expression === 'string' ? body.expression : 'auto';
   // Arketipe (opsional) — string siap-pakai dari client (client compute, backend consume).
   const archetypeNote = typeof body.archetype_note === 'string' ? body.archetype_note.slice(0, 600) : '';
+  const PRESENTER_VALID = ['on_camera', 'voiceover_only', 'faceless_broll'];
+  const presenterMode = PRESENTER_VALID.includes(body.presenter_mode) ? body.presenter_mode : 'on_camera';
   const cameraDirectives = Array.isArray(body.camera_directives)
     ? body.camera_directives
         .filter(c => c && Number.isInteger(Number(c.scene)) && typeof c.camera === 'string')
@@ -461,7 +476,7 @@ export async function onRequestPost(context) {
   const deskripsiKarakter = describeKarakter(karakter);
   const karakterDesc = describeKarakterUntukPrompt(karakter, expression);
 
-  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel });
+  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode });
   const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote });
 
   let dsRes;
