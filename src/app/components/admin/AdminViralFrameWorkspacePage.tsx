@@ -1374,10 +1374,24 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
 }
 const VideoLibraryMemo = memo(VideoLibrary);
 
-// ── YouTube Long 1-klik (Tahap 4) ──
-interface YtScene { scene: number; chapter?: string; duration_sec?: number; ai_ready_prompt?: string; narration_id?: string; on_screen_text?: string }
-interface YtResult { titles?: string[]; description?: string; chapters_timestamp?: string[]; thumbnail_prompt?: string; scenes?: YtScene[]; caption?: string; hashtag_sets?: string[]; provider_used?: string; images?: { url_webp: string; alt: string }[] }
-function YouTubeLongView({ propertyId, propertyTitle }: { propertyId: number; propertyTitle: string }) {
+// ── YouTube Long — storyboard terpandu (pilih foto+label+style → blok JSON) ──
+const YT_CAMERA = [
+  { value: 'drone_gimbal', label: 'Kombinasi drone aerial + gimbal interior yang mulus' },
+  { value: 'drone',        label: 'Drone / aerial dominan (reveal megah)' },
+  { value: 'gimbal',       label: 'Gimbal cinematic super-mulus' },
+  { value: 'handheld',     label: 'Handheld natural (terasa nyata)' },
+  { value: 'static',       label: 'Static elegan (tripod, komposisi rapi)' },
+];
+interface YtBlock { prompt?: Record<string, unknown>; narration_id?: string }
+interface YtScene { scene: number; photo_label?: string; prompt?: Record<string, unknown>; narration_id?: string; url_webp?: string | null }
+interface YtResult {
+  titles?: string[]; description?: string; chapters_timestamp?: string[]; caption?: string; hashtag_sets?: string[];
+  thumbnail?: YtBlock; opening?: YtBlock; scenes?: YtScene[]; ending?: YtBlock; provider_used?: string;
+}
+function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: number; propertyTitle: string; photos: { id: number; url_webp: string }[] }) {
+  const [selected, setSelected] = useState<{ id: number; url_webp: string; label: string }[]>([]);
+  const [visualStyle, setVisualStyle] = useState('cinematic_film');
+  const [cameraStyle, setCameraStyle] = useState('drone_gimbal');
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
@@ -1385,13 +1399,28 @@ function YouTubeLongView({ propertyId, propertyTitle }: { propertyId: number; pr
   const [copied, setCopied] = useState('');
   const copy = (text: string, key: string) => { navigator.clipboard?.writeText(text).then(() => { setCopied(key); setTimeout(() => setCopied(c => (c === key ? '' : c)), 1500); }).catch(() => {}); };
 
+  const togglePhoto = (im: { id: number; url_webp: string }) => setSelected(prev => {
+    const i = prev.findIndex(s => s.id === im.id);
+    if (i >= 0) return prev.filter(s => s.id !== im.id);
+    return [...prev, { id: im.id, url_webp: im.url_webp, label: '' }];
+  });
+  const setLabel = (id: number, label: string) => setSelected(prev => prev.map(s => (s.id === id ? { ...s, label } : s)));
+  const orderOf = (id: number) => { const i = selected.findIndex(s => s.id === id); return i >= 0 ? i + 1 : null; };
+  const ready = selected.length >= 2 && selected.every(s => s.label);
+
   const generate = async () => {
+    if (!ready) { setError('Pilih minimal 2 foto dan beri label tiap foto.'); return; }
     setLoading(true); setError(''); setProgress(8);
     const timer = setInterval(() => setProgress(p => (p < 90 ? p + Math.max(1, (90 - p) * 0.06) : p)), 700);
     try {
       const r = await fetch('/api/admin/viralframe/youtube-long', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ property_id: propertyId }),
+        body: JSON.stringify({
+          property_id: propertyId,
+          photos: selected.map(s => ({ label: s.label, url_webp: s.url_webp })),
+          visual_style: VISUAL_STYLES.find(v => v.value === visualStyle)?.label ?? '',
+          camera_style: YT_CAMERA.find(c => c.value === cameraStyle)?.label ?? '',
+        }),
       });
       const j = await r.json();
       if (!r.ok || !j.success) throw new Error(j.error ?? 'Gagal generate');
@@ -1399,7 +1428,22 @@ function YouTubeLongView({ propertyId, propertyTitle }: { propertyId: number; pr
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Gagal'); } finally { clearInterval(timer); setLoading(false); }
   };
 
-  const Block = ({ title, text, k }: { title: string; text: string; k: string }) => (
+  const JsonBlock = ({ title, obj, narration, k }: { title: string; obj?: Record<string, unknown>; narration?: string; k: string }) => {
+    const text = obj ? JSON.stringify(obj, null, 2) : '';
+    return (
+      <div className="border border-gray-100 rounded-xl p-3 bg-white">
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-xs font-semibold text-[#0F172A]">{title}</div>
+          <button onClick={() => copy(text, k)} className="text-[11px] font-semibold text-[#1565C0] flex items-center gap-1">
+            {copied === k ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy JSON</>}
+          </button>
+        </div>
+        {obj && <pre className="text-xs text-[#0F172A] whitespace-pre-wrap break-words font-mono bg-[#F8FAFC] rounded-lg p-2 leading-relaxed">{text}</pre>}
+        {narration && <p className="text-xs text-[#1565C0] mt-1.5 italic">🎙️ {narration}</p>}
+      </div>
+    );
+  };
+  const TextBlock = ({ title, text, k }: { title: string; text: string; k: string }) => (
     <div className="border border-gray-100 rounded-xl p-3 bg-[#F8FAFC]">
       <div className="flex items-center justify-between mb-1">
         <div className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wide">{title}</div>
@@ -1414,23 +1458,81 @@ function YouTubeLongView({ propertyId, propertyTitle }: { propertyId: number; pr
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
       <div>
-        <h2 className="font-display font-bold text-[#0F172A] flex items-center gap-2">📺 YouTube Long — Storyboard 1-Klik</h2>
-        <p className="text-sm text-[#64748B] mt-0.5">Sekali klik, AI menyusun storyboard tur properti 16:9 lengkap dari data listing. Tinggal copy-paste ke AI video generator.</p>
+        <h2 className="font-display font-bold text-[#0F172A] flex items-center gap-2">📺 YouTube Long — Storyboard Terpandu (16:9)</h2>
+        <p className="text-sm text-[#64748B] mt-0.5">Pilih foto + beri label, tentukan gaya visual & kamera. AI menyusun skenario → prompt JSON per blok (thumbnail, opening, scene, ending) siap copy-paste.</p>
       </div>
 
       {!result && (
-        <button onClick={generate} disabled={loading}
-          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-          style={{ background: 'linear-gradient(135deg, #EF4444 0%, #F97316 100%)' }}>
-          {loading ? <><Loader2 size={16} className="animate-spin" /> Menyusun storyboard…</> : <>✨ Generate Storyboard YouTube</>}
-        </button>
-      )}
-      {loading && (
-        <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.round(progress)}%`, background: 'linear-gradient(90deg,#EF4444,#F97316)' }} />
+        <div className="space-y-4">
+          {/* Pilih foto + label (urutan = urutan scene) */}
+          <div>
+            <div className="text-sm font-medium text-[#0F172A] mb-1.5">1. Pilih foto (klik) — urutan klik = urutan scene</div>
+            {photos.length === 0 ? (
+              <p className="text-sm text-[#64748B]">Properti ini belum punya foto.</p>
+            ) : (
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                {photos.map(im => {
+                  const ord = orderOf(im.id);
+                  return (
+                    <button key={im.id} type="button" onClick={() => togglePhoto(im)}
+                      style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 80px' }}
+                      className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${ord ? 'border-[#EF4444] ring-2 ring-red-200' : 'border-transparent hover:border-gray-300'}`}>
+                      <img src={thumbSrc(im.url_webp, 160)} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                      {ord && <span className="absolute top-1 left-1 w-5 h-5 rounded-full bg-[#EF4444] text-white text-[11px] font-bold flex items-center justify-center">{ord}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Label per foto terpilih */}
+          {selected.length > 0 && (
+            <div>
+              <div className="text-sm font-medium text-[#0F172A] mb-1.5">2. Beri label tiap foto (ruangan/area)</div>
+              <div className="space-y-1.5">
+                {selected.map(s => (
+                  <div key={s.id} className="flex items-center gap-2">
+                    <img src={thumbSrc(s.url_webp, 80)} alt="" className="w-10 h-10 rounded object-cover flex-shrink-0" />
+                    <select value={s.label} onChange={e => setLabel(s.id, e.target.value)} className={`${selectCls} flex-1`}>
+                      <option value="">— Label —</option>
+                      {PHOTO_LABELS.map(l => <option key={l} value={l}>{l}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Gaya */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <div className="text-sm font-medium text-[#0F172A] mb-1.5">3. Gaya Visual</div>
+              <select value={visualStyle} onChange={e => setVisualStyle(e.target.value)} className={selectCls}>
+                {VISUAL_STYLES.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <div className="text-sm font-medium text-[#0F172A] mb-1.5">4. Gaya Kamera / Drone</div>
+              <select value={cameraStyle} onChange={e => setCameraStyle(e.target.value)} className={selectCls}>
+                {YT_CAMERA.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <button onClick={generate} disabled={loading || !ready}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            style={{ background: 'linear-gradient(135deg, #EF4444 0%, #F97316 100%)' }}>
+            {loading ? <><Loader2 size={16} className="animate-spin" /> Menyusun storyboard…</> : <>✨ Generate Storyboard ({selected.length} scene)</>}
+          </button>
+          {loading && (
+            <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+              <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.round(progress)}%`, background: 'linear-gradient(90deg,#EF4444,#F97316)' }} />
+            </div>
+          )}
         </div>
       )}
-      {error && <p className="text-sm text-red-600">{error}</p>}
 
       {result && (
         <div className="space-y-3">
@@ -1440,46 +1542,33 @@ function YouTubeLongView({ propertyId, propertyTitle }: { propertyId: number; pr
           </div>
           {result.provider_used && <p className="text-[11px] text-[#94A3B8]">Digenerate oleh {result.provider_used}</p>}
 
-          {/* Foto listing sebagai reference image */}
-          {Array.isArray(result.images) && result.images.length > 0 && (
-            <div className="border border-gray-100 rounded-xl p-3 bg-[#F8FAFC]">
-              <div className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wide mb-2">📸 Foto Listing — pakai sebagai reference image saat generate tiap scene</div>
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {result.images.map((im, i) => (
-                  <a key={i} href={`/api/media?key=${encodeURIComponent(im.url_webp)}`} download target="_blank" rel="noreferrer" className="flex-shrink-0">
-                    <img src={thumbSrc(im.url_webp, 160)} alt={im.alt} loading="lazy" decoding="async" className="w-24 h-16 object-cover rounded-lg border border-gray-200 hover:border-[#1565C0]" />
-                  </a>
-                ))}
-              </div>
-              <p className="text-[10px] text-[#94A3B8] mt-1">Klik foto untuk unduh. Unggah foto yang sesuai sebagai reference/first-frame di tool video (Veo/Kling) agar hasil setia ke properti asli.</p>
-            </div>
-          )}
-
           {Array.isArray(result.titles) && result.titles.length > 0 && (
-            <Block title="Judul Video (pilih 1)" k="titles" text={result.titles.map((t, i) => `${i + 1}. ${t}`).join('\n')} />
+            <TextBlock title="Judul Video (pilih 1)" k="titles" text={result.titles.map((t, i) => `${i + 1}. ${t}`).join('\n')} />
           )}
-          {result.description && <Block title="Deskripsi + Chapters" k="desc" text={`${result.description}\n\n${(result.chapters_timestamp ?? []).join('\n')}`} />}
-          {result.thumbnail_prompt && <Block title="Prompt Thumbnail" k="thumb" text={result.thumbnail_prompt} />}
+          {result.description && <TextBlock title="Deskripsi + Chapters" k="desc" text={`${result.description}\n\n${(result.chapters_timestamp ?? []).join('\n')}`} />}
 
-          <div className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wide pt-1">Scenes ({result.scenes?.length ?? 0}) · durasi per scene ~10s</div>
-          <div className="space-y-2">
-            {(result.scenes ?? []).map(s => (
-              <div key={s.scene} className="border border-gray-100 rounded-xl p-3 bg-white">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-semibold text-[#0F172A]">Scene {s.scene} · {s.chapter ?? ''} · {s.duration_sec ?? 10}s</span>
-                  <button onClick={() => copy(JSON.stringify(s, null, 2), `s-${s.scene}`)} className="text-[11px] font-semibold text-[#1565C0] flex items-center gap-1">
-                    {copied === `s-${s.scene}` ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy JSON</>}
-                  </button>
-                </div>
-                {s.ai_ready_prompt && <pre className="text-xs text-[#0F172A] whitespace-pre-wrap break-words font-mono bg-[#F8FAFC] rounded-lg p-2 leading-relaxed">{s.ai_ready_prompt}</pre>}
-                {s.narration_id && <p className="text-xs text-[#1565C0] mt-1.5 italic">🎙️ {s.narration_id}</p>}
+          {result.thumbnail?.prompt && <JsonBlock title="🖼️ Prompt JSON — Thumbnail" k="thumb" obj={result.thumbnail.prompt} />}
+          {result.opening?.prompt && <JsonBlock title="▶️ Prompt JSON — Opening Video" k="open" obj={result.opening.prompt} narration={result.opening.narration_id} />}
+
+          <div className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wide pt-1">Scenes ({result.scenes?.length ?? 0})</div>
+          {(result.scenes ?? []).map(s => (
+            <div key={s.scene} className="border border-gray-100 rounded-xl p-3 bg-white space-y-2">
+              <div className="flex items-center gap-2">
+                {s.url_webp && <img src={thumbSrc(s.url_webp, 120)} alt="" className="w-12 h-12 rounded object-cover flex-shrink-0" />}
+                <span className="text-xs font-semibold text-[#0F172A] flex-1">Scene {s.scene} · {s.photo_label ?? ''}</span>
+                <button onClick={() => copy(JSON.stringify(s.prompt ?? {}, null, 2), `s-${s.scene}`)} className="text-[11px] font-semibold text-[#1565C0] flex items-center gap-1">
+                  {copied === `s-${s.scene}` ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy JSON</>}
+                </button>
               </div>
-            ))}
-          </div>
+              {s.prompt && <pre className="text-xs text-[#0F172A] whitespace-pre-wrap break-words font-mono bg-[#F8FAFC] rounded-lg p-2 leading-relaxed">{JSON.stringify(s.prompt, null, 2)}</pre>}
+              {s.narration_id && <p className="text-xs text-[#1565C0] italic">🎙️ {s.narration_id}</p>}
+            </div>
+          ))}
 
-          {result.caption && <Block title="Caption" k="cap" text={result.caption} />}
+          {result.ending?.prompt && <JsonBlock title="⏹️ Prompt JSON — Ending Video" k="end" obj={result.ending.prompt} narration={result.ending.narration_id} />}
+          {result.caption && <TextBlock title="Caption" k="cap" text={result.caption} />}
           {Array.isArray(result.hashtag_sets) && result.hashtag_sets.length > 0 && (
-            <Block title="Hashtag (5 kombinasi)" k="tags" text={result.hashtag_sets.join('\n')} />
+            <TextBlock title="Hashtag (5 kombinasi)" k="tags" text={result.hashtag_sets.join('\n')} />
           )}
         </div>
       )}
@@ -2023,7 +2112,7 @@ export default function AdminViralFrameWorkspacePage() {
 
       {/* Tahap 4: YouTube Long 1-klik menggantikan wizard */}
       {isYoutubeLongMode && prop && (
-        <YouTubeLongViewMemo propertyId={prop.id} propertyTitle={prop.title} />
+        <YouTubeLongViewMemo propertyId={prop.id} propertyTitle={prop.title} photos={prop.images} />
       )}
 
       {!isYoutubeLongMode && (<>

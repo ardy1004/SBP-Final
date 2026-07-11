@@ -100,10 +100,10 @@ function ModeSelectionModal({ property, onClose, onPick }: {
           >
             <div className="flex items-center gap-2 mb-1">
               <span className="text-base">📺</span>
-              <span className="font-semibold text-sm text-[#0F172A]">YouTube Long (1-klik)</span>
+              <span className="font-semibold text-sm text-[#0F172A]">YouTube Long (16:9)</span>
               <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white bg-red-500">16:9</span>
             </div>
-            <p className="text-xs text-[#64748B] mb-2">Sekali klik → storyboard lengkap, prompt video per-scene, thumbnail, judul SEO, caption. Tanpa setting.</p>
+            <p className="text-xs text-[#64748B] mb-2">Pilih foto + label + gaya visual/kamera → AI susun storyboard: prompt JSON thumbnail, opening, scene per foto, ending. Siap copy-paste.</p>
             <span className="text-xs font-semibold text-red-500">Generate Storyboard →</span>
           </button>
         </div>

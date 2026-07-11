@@ -1,7 +1,8 @@
-// POST /api/admin/viralframe/youtube-long — generate storyboard YouTube 16:9 lengkap
-// 1-klik dari data properti (tanpa parameter kompleks). Struktur diturunkan otomatis
-// dari properti (kamar → chapter, kolam/investasi → scene khusus).
-// Body: { property_id, provider? }
+// POST /api/admin/viralframe/youtube-long — storyboard YouTube 16:9 terpandu.
+// User memilih foto + label per scene + gaya visual + gaya kamera; AI menyusun
+// skenario & mengeluarkan prompt JSON siap-tempel per blok:
+//   thumbnail, opening, scene 1..N (per foto), ending.
+// Body: { property_id, photos:[{label,url_webp}], visual_style, camera_style, provider? }
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
@@ -16,21 +17,6 @@ function fmtRupiah(n) {
   return `Rp ${Number(n).toLocaleString('id-ID')}`;
 }
 
-// Turunkan garis besar chapter dari data properti (tanpa parameter user).
-function deriveOutline(p, details) {
-  const ch = ['Intro / Hook (sapaan + teaser properti)', 'Eksterior & fasad'];
-  const kt = p.jumlah_kamar_tidur || 0;
-  if (kt >= 1) ch.push(`Ruang utama & ${kt} kamar tidur`);
-  else ch.push('Ruang utama');
-  if (p.jumlah_kamar_mandi) ch.push('Kamar mandi & area basah');
-  ch.push('Dapur & ruang keluarga');
-  if (details && /kolam|pool/i.test(JSON.stringify(details))) ch.push('Kolam renang / area outdoor');
-  ch.push('Halaman / lingkungan sekitar & akses');
-  if (p.income_per_bulan || p.harga) ch.push('Analisis nilai & potensi investasi');
-  ch.push('Penutup + CTA (WA/subscribe)');
-  return ch;
-}
-
 export async function onRequestPost(context) {
   const { request, env } = context;
   let body;
@@ -40,60 +26,56 @@ export async function onRequestPost(context) {
   if (!Number.isInteger(propertyId) || propertyId <= 0) return jsonError('property_id wajib', 422);
   const chosenProvider = PROVIDER_ORDER.includes(body.provider) ? body.provider : 'gemini';
 
+  const photos = Array.isArray(body.photos)
+    ? body.photos.filter(x => x && typeof x.label === 'string' && x.label.trim()).slice(0, 12)
+    : [];
+  if (photos.length < 2) return jsonError('Pilih minimal 2 foto beserta labelnya', 422);
+  const visualStyle = typeof body.visual_style === 'string' ? body.visual_style.slice(0, 80) : '';
+  const cameraStyle = typeof body.camera_style === 'string' ? body.camera_style.slice(0, 80) : '';
+
   let p;
   try {
     p = await env.DB.prepare(`SELECT title, jenis_properti, tujuan, harga, kecamatan, kabupaten, provinsi,
                                      jumlah_kamar_tidur, jumlah_kamar_mandi, luas_tanah, luas_bangunan,
-                                     legalitas, kode_listing, deskripsi, income_per_bulan, details
-                              FROM properties WHERE id = ?`).bind(propertyId).first();
+                                     legalitas, kode_listing, deskripsi FROM properties WHERE id = ?`).bind(propertyId).first();
   } catch (err) { console.error('[yt-long] property', err.message); return jsonError('Gagal ambil properti', 500); }
   if (!p) return jsonError('Properti tidak ditemukan', 404);
 
-  let details = null;
-  try { details = p.details ? JSON.parse(p.details) : null; } catch { /* ignore */ }
-  const outline = deriveOutline(p, details);
+  const sceneList = photos.map((f, i) => `${i + 1}. ${f.label}`).join('\n');
 
-  // Foto listing — dikembalikan agar user bisa memakainya sebagai reference image
-  // saat generate tiap scene di tool eksternal (Veo/Kling). Prompt tetap berbasis DATA.
-  let images = [];
-  try {
-    const imgRes = await env.DB.prepare(
-      `SELECT url_webp, alt_text FROM property_images WHERE property_id = ? ORDER BY is_cover DESC, urutan ASC LIMIT 20`
-    ).bind(propertyId).all();
-    images = (imgRes.results ?? []).map(r => ({ url_webp: r.url_webp, alt: r.alt_text }));
-  } catch { /* non-fatal */ }
+  const system = `Kamu sutradara & prompt engineer video properti YouTube profesional. Output HANYA satu objek JSON valid, mulai { akhiri }, tanpa markdown/komentar/proses berpikir.`;
+  const user = `Susun STORYBOARD video tur properti YouTube (16:9, long-form) berdasarkan foto & urutan scene yang DIPILIH user. JANGAN mengarang fitur yang tak disebutkan di data.
 
-  const system = `Kamu sutradara & copywriter konten properti YouTube profesional Indonesia. Output HANYA JSON valid, mulai { akhiri }, tanpa markdown/komentar.`;
-  const user = `Buat STORYBOARD lengkap video tur properti untuk YouTube (16:9, long-form, durasi total ~3-6 menit). Setiap scene berdurasi ~10 detik. Sasaran: penonton yang mempertimbangkan membeli/menyewa.
+GAYA VISUAL : ${visualStyle || 'cinematic real estate, clean & aspiratif'}
+GAYA KAMERA : ${cameraStyle || 'kombinasi drone aerial + gimbal interior yang mulus'}
 
-DATA PROPERTI (JANGAN mengarang fitur yang tak disebut):
+DATA PROPERTI:
 - Judul: ${p.title}
 - Jenis: ${p.jenis_properti} (${p.tujuan})
 - Harga: ${fmtRupiah(p.harga)}
 - Lokasi: ${p.kecamatan}, ${p.kabupaten}, ${p.provinsi}
 - Spesifikasi: ${p.jumlah_kamar_tidur ?? '-'} KT / ${p.jumlah_kamar_mandi ?? '-'} KM, LT ${p.luas_tanah ?? '-'}m², LB ${p.luas_bangunan ?? '-'}m²
-- Legalitas: ${p.legalitas ?? '-'}
-- Kode: ${p.kode_listing}
+- Legalitas: ${p.legalitas ?? '-'} · Kode: ${p.kode_listing}
 ${p.deskripsi ? `- Deskripsi: ${String(p.deskripsi).slice(0, 300)}` : ''}
 
-GARIS BESAR CHAPTER (ikuti urutan ini, boleh sesuaikan seperlunya):
-${outline.map((c, i) => `${i + 1}. ${c}`).join('\n')}
+URUTAN SCENE (buat TEPAT 1 scene per item, sesuai ruangan/area foto):
+${sceneList}
 
-Buat 8-12 scene total. Setiap scene punya prompt video SIAP-PAKAI (English, sinematik, gerakan kamera jelas, cocok untuk AI video generator seperti Veo/Kling) + narasi voiceover Bahasa Indonesia. RINGKAS tiap ai_ready_prompt (maks ~60 kata) agar output tidak terlalu panjang.
+Untuk SETIAP blok (thumbnail, opening, tiap scene, ending), field "prompt" WAJIB berupa OBJEK JSON siap-tempel ke AI video/image generator, English sinematik, dengan field: shot, subject, camera_movement (terapkan gaya kamera di atas), lighting, mood, style (terapkan gaya visual di atas), duration_sec, aspect_ratio ("16:9"). Prompt harus grounded ke ruangan/fitur nyata sesuai label — bukan generik.
 
-FORMAT JSON WAJIB:
+FORMAT JSON WAJIB (patuhi persis):
 {
-  "titles": ["3 judul video SEO menarik (Bahasa Indonesia)"],
-  "description": "deskripsi YouTube 3-5 kalimat + ajakan subscribe/WA",
-  "chapters_timestamp": ["00:00 Intro", "00:20 Eksterior", "..."],
-  "thumbnail_prompt": "prompt JSON/teks untuk generate thumbnail YouTube yang clickable (16:9, teks besar, ekspresi wow)",
-  "scenes": [
-    {"scene": 1, "chapter": "Intro", "duration_sec": 10, "ai_ready_prompt": "cinematic English prompt siap generate video", "narration_id": "narasi voiceover Bahasa Indonesia", "on_screen_text": "teks overlay singkat"}
-  ],
-  "caption": "caption untuk community post / share",
-  "hashtag_sets": ["5 string, tiap string 5-8 hashtag campur lokasi+jenis+brand #salambumiproperty"]
+  "titles": ["3 judul video SEO Bahasa Indonesia"],
+  "description": "deskripsi YouTube 3-5 kalimat + CTA subscribe/WA",
+  "chapters_timestamp": ["00:00 Opening", "00:08 <label scene 1>", "..."],
+  "caption": "caption share singkat",
+  "hashtag_sets": ["5 string, tiap string 5-8 hashtag campur lokasi+jenis+brand #salambumiproperty"],
+  "thumbnail": { "prompt": { "shot": "...", "text_overlay": "...", "style": "...", "aspect_ratio": "16:9" } },
+  "opening": { "prompt": { "shot": "...", "camera_movement": "...", "lighting": "...", "mood": "...", "duration_sec": 8, "aspect_ratio": "16:9" }, "narration_id": "narasi voiceover Indonesia" },
+  "scenes": [ { "scene": 1, "photo_label": "<label>", "prompt": { "shot": "...", "subject": "...", "camera_movement": "...", "lighting": "...", "mood": "...", "style": "...", "duration_sec": 10, "aspect_ratio": "16:9" }, "narration_id": "narasi voiceover Indonesia" } ],
+  "ending": { "prompt": { "shot": "...", "camera_movement": "...", "cta": "...", "duration_sec": 8, "aspect_ratio": "16:9" }, "narration_id": "narasi CTA Indonesia" }
 }
-hashtag_sets berisi TEPAT 5 string. scenes berisi 8-12 item. PENTING: keluarkan HANYA objek JSON, tanpa penjelasan atau proses berpikir apa pun sebelum/sesudahnya.`;
+"scenes" berisi TEPAT ${photos.length} item (urutan sama dengan daftar di atas). hashtag_sets TEPAT 5 string. Keluarkan HANYA objek JSON.`;
 
   const tryOrder = [chosenProvider, ...PROVIDER_ORDER.filter(x => x !== chosenProvider)];
   const deadline = Date.now() + 26000;
@@ -113,8 +95,7 @@ hashtag_sets berisi TEPAT 5 string. scenes berisi 8-12 item. PENTING: keluarkan 
   }
   if (!raw) return jsonError(`Gagal generate storyboard: ${(lastErr || 'semua provider gagal/kehabisan kuota').slice(0, 200)}. Pastikan API key AI diatur di Pengaturan.`, 502);
 
-  // Ekstraksi JSON tahan-banting: ambil dari '{' pertama sampai '}' terakhir
-  // (membuang preamble/penutup atau markdown yang kadang disisipkan model).
+  // Ekstraksi JSON tahan-banting: '{' pertama sampai '}' terakhir.
   let parsed;
   try {
     let txt = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
@@ -122,17 +103,21 @@ hashtag_sets berisi TEPAT 5 string. scenes berisi 8-12 item. PENTING: keluarkan 
     if (first > 0 || last < txt.length - 1) txt = txt.slice(first, last + 1);
     parsed = JSON.parse(txt);
   } catch {
-    return jsonError(`Respons AI tidak valid (kemungkinan terpotong). Coba lagi atau ganti provider di Pengaturan. Cuplikan: ${String(raw).slice(0, 150)}`, 502);
+    return jsonError(`Respons AI tidak valid (kemungkinan terpotong). Coba lagi / kurangi jumlah foto / ganti provider. Cuplikan: ${String(raw).slice(0, 150)}`, 502);
   }
 
-  // Simpan ke riwayat generations (params_json menandai mode youtube_long)
+  // Tautkan foto (url) ke tiap scene sesuai urutan, agar client bisa tampilkan referensinya.
+  if (Array.isArray(parsed.scenes)) {
+    parsed.scenes = parsed.scenes.map((s, i) => ({ ...s, url_webp: photos[i]?.url_webp ?? null }));
+  }
+
   try {
     await env.DB.prepare(`INSERT INTO viralframe_generations (property_id, params_json, master_prompt, result_json)
                           VALUES (?,?,?,?)`)
-      .bind(propertyId, JSON.stringify({ mode: 'youtube_long' }), null, JSON.stringify(parsed)).run();
+      .bind(propertyId, JSON.stringify({ mode: 'youtube_long', photos, visualStyle, cameraStyle }), null, JSON.stringify(parsed)).run();
   } catch { /* non-fatal */ }
 
-  return jsonOk({ ...parsed, outline, images, provider_used: used, kode_listing: p.kode_listing });
+  return jsonOk({ ...parsed, provider_used: used, kode_listing: p.kode_listing });
 }
 
 export async function onRequestOptions() { return handleOptions(); }
