@@ -1,16 +1,18 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
 import {
   ArrowLeft, ArrowRight, ImageOff, Check, Film, AlertCircle,
   Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles,
 } from 'lucide-react';
-import JSZip from 'jszip';
+// JSZip di-dynamic-import di handler (bukan static) agar tidak masuk chunk awal workspace.
 import {
   AI_TOOLS, RATIOS, LANGUAGES, HOOK_TYPES, CTA_TYPES, VISUAL_STYLES,
   TONES, PLATFORMS, PHOTO_LABELS, sceneRole,
   sceneFileName, characterFileName, AI_TOOL_FORMAT_SPEC,
 } from './viralframe/options';
-import CharacterStep, { type Step3State } from './viralframe/CharacterStep';
+import CharacterStepBase, { type Step3State } from './viralframe/CharacterStep';
+// #2: memoize komponen anak agar tak re-render saat parent re-render tanpa perubahan prop.
+const CharacterStep = memo(CharacterStepBase);
 import { ARCHETYPES, findArchetype, ARCHETYPE_CUSTOM_ID, compileCameraChoreography } from './viralframe/archetypes';
 import { getAiModels, getAiStatus, type AiProviderId, type AiStatusInfo } from '../../../lib/api';
 
@@ -30,7 +32,18 @@ import {
 } from '../../lib/viralframe-constants';
 import { compileMasterPrompt, estimateTokens } from './viralframe/masterPromptCompiler';
 import { validateSceneJson, type ParsedJSON, type ValidateResult } from './viralframe/jsonValidator';
-import SceneCards from './viralframe/SceneCards';
+import SceneCardsBase from './viralframe/SceneCards';
+const SceneCards = memo(SceneCardsBase);
+
+// Debounce nilai — dipakai menunda kompilasi Master Prompt saat mengetik (#1).
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
 
 // ─── Tipe data ────────────────────────────────────────────────────────────
 interface PropertyImage { id: number; url_webp: string; alt_text: string | null; urutan: number; is_cover: number }
@@ -805,6 +818,7 @@ function AIGenerateTab({
     setZipBusy(true);
     setError(null);
     try {
+      const { default: JSZip } = await import('jszip');
       const zip = new JSZip();
       const { scenes, foto_urls, karakter, metadata } = generatedResult;
       const platform = PLATFORM_OPTIONS.find(p => p.value === metadata.platform);
@@ -1116,6 +1130,11 @@ function AIGenerateTab({
 }
 
 // ─── Halaman utama ──────────────────────────────────────────────────────────
+// #2: versi memo dari tab berat — hanya re-render bila prop berubah (prop-nya
+// distabilkan via useMemo/useCallback di parent), bukan tiap parent re-render.
+const VideoVOTabMemo = memo(VideoVOTab);
+const AIGenerateTabMemo = memo(AIGenerateTab);
+
 export default function AdminViralFrameWorkspacePage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -1326,10 +1345,16 @@ export default function AdminViralFrameWorkspacePage() {
   };
   const goBack = () => { setShowErrors(false); setStep(s => Math.max(1, s - 1)); };
 
-  // ─── Step 4: compile Master Prompt (pure, re-compile saat state berubah) ──
+  // ─── Step 4: compile Master Prompt ──
+  // #1: hanya kompilasi saat benar-benar berada di Step 4, dan pakai input yang
+  // di-debounce 300ms — supaya mengetik/memilih di Step 1-3 tidak memicu build
+  // string besar tiap ketukan (penyebab utama lag).
+  const onStep4 = step === 4;
+  const compileSrc = useMemo(() => ({ s1, scenes, s3 }), [s1, scenes, s3]);
+  const debouncedSrc = useDebouncedValue(compileSrc, 300);
   const masterPrompt = useMemo(
-    () => (prop ? compileMasterPrompt(prop, s1, scenes, s3) : ''),
-    [prop, s1, scenes, s3],
+    () => (prop && onStep4 ? compileMasterPrompt(prop, debouncedSrc.s1, debouncedSrc.scenes, debouncedSrc.s3) : ''),
+    [prop, onStep4, debouncedSrc],
   );
 
   // Style Pair A/B — varian kedua dengan arketipe berbeda untuk uji split.
@@ -1338,13 +1363,14 @@ export default function AdminViralFrameWorkspacePage() {
   const [abVariant, setAbVariant] = useState('');
   const [copiedB, setCopiedB] = useState(false);
   const masterPromptB = useMemo(() => {
-    if (!prop || !abVariant) return '';
+    if (!prop || !abVariant || !onStep4) return '';
     const arcB = findArchetype(abVariant);
     if (!arcB) return '';
-    const s1B: Step1State = { ...s1, archetype: abVariant, visualStyle: arcB.defaults.visualStyle, tone: arcB.defaults.tone };
-    const s3B: Step3State = { ...s3, useCharacter: arcB.defaults.useCharacter, expression: arcB.defaults.expression };
-    return compileMasterPrompt(prop, s1B, scenes, s3B);
-  }, [prop, abVariant, s1, scenes, s3]);
+    const { s1: ds1, scenes: dscenes, s3: ds3 } = debouncedSrc;
+    const s1B: Step1State = { ...ds1, archetype: abVariant, visualStyle: arcB.defaults.visualStyle, tone: arcB.defaults.tone };
+    const s3B: Step3State = { ...ds3, useCharacter: arcB.defaults.useCharacter, expression: arcB.defaults.expression };
+    return compileMasterPrompt(prop, s1B, dscenes, s3B);
+  }, [prop, abVariant, onStep4, debouncedSrc]);
 
   // Simpan riwayat otomatis saat Step 4 tampil; record baru bila prompt berubah.
   useEffect(() => {
@@ -1439,6 +1465,7 @@ export default function AdminViralFrameWorkspacePage() {
     if (!validData || !prop) return;
     setZipBusy(true); setZipError('');
     try {
+      const { default: JSZip } = await import('jszip');
       const zip = new JSZip();
       const photosFolder = zip.folder('photos');
 
@@ -1921,7 +1948,7 @@ export default function AdminViralFrameWorkspacePage() {
 
           {/* ── TAB 3: VIDEO VO ── */}
           {step4Tab === 'video_vo' && prop && (
-            <VideoVOTab
+            <VideoVOTabMemo
               propertyId={prop.id}
               propertyTitle={prop.title}
               jenisProperti={prop.jenis_properti}
@@ -1932,7 +1959,7 @@ export default function AdminViralFrameWorkspacePage() {
 
           {/* ── TAB 4: AI GENERATE (Jalur C) ── */}
           {step4Tab === 'ai_generate' && prop && (
-            <AIGenerateTab
+            <AIGenerateTabMemo
               propertyId={prop.id}
               propertyTitle={prop.title}
               kodeListingStr={prop.kode_listing}
