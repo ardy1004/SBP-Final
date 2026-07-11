@@ -135,11 +135,11 @@ export const PLATFORMS: Opt[] = [
 
 // Step 2 — Label Foto per Scene
 export const PHOTO_LABELS: string[] = [
-  'Fasad', 'Ruang Tamu', 'Ruang Keluarga', 'Ruang Makan',
-  'Kamar Tidur', 'Kamar Mandi', 'Dapur', 'Ruang Kerja/Study',
-  'Koridor/Tangga', 'Taman/Halaman', 'Carport/Garasi', 'Balkon/Teras',
-  'Rooftop', 'Kolam Renang', 'Musholla', 'Gudang',
-  'Ruang Usaha', 'Tampak Lokasi/Lingkungan', 'Lainnya',
+  'Fasad', 'Foyer/Lobby', 'Ruang Tamu', 'Ruang Keluarga', 'Ruang Makan',
+  'Kamar Tidur', 'Walk-in Closet', 'Kamar Mandi', 'Dapur', 'Ruang Cuci/Jemur',
+  'Ruang Kerja/Study', 'Gym/Fitness', 'Koridor/Tangga', 'Void/Plafon Tinggi',
+  'Taman/Halaman', 'Carport/Garasi', 'Balkon/Teras', 'Rooftop', 'Kolam Renang',
+  'Musholla', 'Gudang', 'Ruang Usaha', 'Tampak Lokasi/Lingkungan', 'Lainnya',
 ];
 
 // Peran scene berdasarkan posisi (scene 1 = Hook, terakhir = CTA, sisanya = Body)
@@ -220,14 +220,19 @@ export const REAL_ESTATE_CONTEXT = {
 // (d) Hint visual per label foto (membantu AI menggambarkan scene).
 export const PHOTO_LABEL_HINT: Record<string, string> = {
   'Fasad': 'tampak depan bangunan, pintu masuk utama, halaman depan, eksterior',
+  'Foyer/Lobby': 'area masuk/foyer, lobby, kesan pertama saat masuk',
   'Ruang Tamu': 'area duduk utama, sofa, meja, dekorasi ruang tamu',
   'Ruang Keluarga': 'ruang berkumpul keluarga, sofa santai, TV, suasana hangat',
   'Ruang Makan': 'meja makan, kursi, area bersantap, pencahayaan hangat',
   'Kamar Tidur': 'kasur, headboard, pencahayaan kamar, suasana istirahat',
+  'Walk-in Closet': 'lemari pakaian besar, walk-in closet, area rias',
   'Kamar Mandi': 'kloset, wastafel, shower, keramik, area mandi',
   'Dapur': 'kitchen set, kompor, kabinet, area memasak',
+  'Ruang Cuci/Jemur': 'area cuci, mesin cuci, tempat jemur, service area',
   'Ruang Kerja/Study': 'meja kerja, rak buku, area belajar/WFH yang tenang',
+  'Gym/Fitness': 'area gym/fitness, alat olahraga, ruang latihan',
   'Koridor/Tangga': 'koridor penghubung, tangga, railing, transisi antar ruang',
+  'Void/Plafon Tinggi': 'void, plafon tinggi, kesan lega dan mewah vertikal',
   'Taman/Halaman': 'rumput, tanaman, ruang terbuka hijau, area outdoor',
   'Carport/Garasi': 'tempat parkir kendaraan, kanopi/garasi, akses mobil',
   'Balkon/Teras': 'area teras/balkon, tempat duduk santai, pemandangan',

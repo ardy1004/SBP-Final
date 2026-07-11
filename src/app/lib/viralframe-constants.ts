@@ -40,13 +40,18 @@ export const MUSIK_OPTIONS: MusikOption[] = [
 export interface FotoLabelOption { value: string; label: string; deskripsi: string }
 export const FOTO_LABEL_OPTIONS: FotoLabelOption[] = [
   { value: 'fasad', label: '🏠 Fasad / Eksterior', deskripsi: 'tampak depan/fasad bangunan' },
+  { value: 'foyer', label: '🚪 Foyer / Lobby', deskripsi: 'area masuk/foyer' },
   { value: 'kamar_tidur', label: '🛏️ Kamar Tidur', deskripsi: 'kamar tidur' },
+  { value: 'walk_in_closet', label: '👗 Walk-in Closet', deskripsi: 'lemari pakaian/walk-in closet' },
   { value: 'kamar_mandi', label: '🚿 Kamar Mandi', deskripsi: 'kamar mandi' },
   { value: 'dapur', label: '🍳 Dapur', deskripsi: 'dapur' },
+  { value: 'laundry', label: '🧺 Ruang Cuci/Jemur', deskripsi: 'area cuci/jemur' },
   { value: 'ruang_tamu', label: '🛋️ Ruang Tamu', deskripsi: 'ruang tamu' },
   { value: 'ruang_santai', label: '👨‍👩‍👧 Ruang Keluarga', deskripsi: 'ruang keluarga/santai' },
   { value: 'ruang_makan', label: '🍽️ Ruang Makan', deskripsi: 'ruang makan' },
   { value: 'ruang_kerja', label: '💻 Ruang Kerja/Study', deskripsi: 'ruang kerja/study' },
+  { value: 'gym', label: '🏋️ Gym / Fitness', deskripsi: 'area gym/fitness' },
+  { value: 'void', label: '🔼 Void / Plafon Tinggi', deskripsi: 'void/plafon tinggi' },
   { value: 'balkon', label: '🌿 Balkon / Teras', deskripsi: 'balkon' },
   { value: 'taman', label: '🌳 Taman / Halaman', deskripsi: 'taman/halaman' },
   { value: 'rooftop', label: '🏙️ Rooftop', deskripsi: 'area rooftop' },
