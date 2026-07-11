@@ -11,6 +11,7 @@ import {
   sceneFileName, characterFileName, AI_TOOL_FORMAT_SPEC,
 } from './viralframe/options';
 import CharacterStep, { type Step3State } from './viralframe/CharacterStep';
+import { ARCHETYPES, findArchetype, ARCHETYPE_CUSTOM_ID } from './viralframe/archetypes';
 import {
   PLATFORM_OPTIONS, AI_TOOL_OPTIONS, MUSIK_OPTIONS, FOTO_LABEL_OPTIONS,
 } from '../../lib/viralframe-constants';
@@ -46,6 +47,7 @@ interface Step1State {
   visualStyle: string;
   tone: string;
   niche: string;                // fixed 'real_estate'
+  archetype: string;            // id VideoArchetype ('custom' = manual)
 }
 
 interface SceneAssign { photoId: number | null; label: string }
@@ -1019,6 +1021,7 @@ export default function AdminViralFrameWorkspacePage() {
     visualStyle: 'auto',
     tone: 'auto',
     niche: 'real_estate',
+    archetype: ARCHETYPE_CUSTOM_ID,
   });
   const [scenes, setScenes] = useState<SceneAssign[]>(
     Array.from({ length: 4 }, () => ({ photoId: null, label: '' }))
@@ -1126,6 +1129,15 @@ export default function AdminViralFrameWorkspacePage() {
 
   const update1 = <K extends keyof Step1State>(key: K, val: Step1State[K]) =>
     setS1(prev => ({ ...prev, [key]: val }));
+
+  // Pilih arketipe → prefill visualStyle/tone (Step 1) + expression & useCharacter (Step 3).
+  // Nilai tetap bisa di-override manual setelahnya (memilih 'custom' tidak mereset).
+  const applyArchetype = (id: string) => {
+    const arc = findArchetype(id);
+    if (!arc) { setS1(prev => ({ ...prev, archetype: ARCHETYPE_CUSTOM_ID })); return; }
+    setS1(prev => ({ ...prev, archetype: id, visualStyle: arc.defaults.visualStyle, tone: arc.defaults.tone }));
+    setS3(prev => ({ ...prev, useCharacter: arc.defaults.useCharacter, expression: arc.defaults.expression }));
+  };
 
   const togglePlatform = (value: string) => {
     setS1(prev => {
@@ -1409,6 +1421,38 @@ export default function AdminViralFrameWorkspacePage() {
       {step === 1 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-5">
           <h2 className="font-display font-bold text-[#0F172A]">Step 1 — Parameter Video</h2>
+
+          {/* (0) Arketipe / Gaya Video — prefill parameter granular secara koheren */}
+          <Field label="Gaya Video (Arketipe)" hint="Pilih satu gaya → Gaya Visual, Tone, & koreografi kamera terisi otomatis (tetap bisa diubah). Pilih Kustom untuk atur manual.">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {ARCHETYPES.map(a => {
+                const active = s1.archetype === a.id;
+                return (
+                  <button key={a.id} type="button" onClick={() => applyArchetype(a.id)}
+                    className={`text-left p-3 rounded-xl border transition-colors ${
+                      active ? 'bg-[#EFF6FF] border-[#1565C0] ring-1 ring-[#1565C0]/30' : 'bg-white border-gray-200 hover:bg-gray-50'
+                    }`}>
+                    <div className="text-lg leading-none mb-1">{a.emoji}</div>
+                    <div className={`text-sm font-semibold ${active ? 'text-[#1565C0]' : 'text-[#0F172A]'}`}>{a.label}</div>
+                    <div className="text-[11px] text-[#64748B] leading-snug mt-0.5">{a.ringkas}</div>
+                  </button>
+                );
+              })}
+              {(() => {
+                const active = s1.archetype === ARCHETYPE_CUSTOM_ID;
+                return (
+                  <button type="button" onClick={() => applyArchetype(ARCHETYPE_CUSTOM_ID)}
+                    className={`text-left p-3 rounded-xl border transition-colors ${
+                      active ? 'bg-[#EFF6FF] border-[#1565C0] ring-1 ring-[#1565C0]/30' : 'bg-white border-gray-200 hover:bg-gray-50'
+                    }`}>
+                    <div className="text-lg leading-none mb-1">🎛️</div>
+                    <div className={`text-sm font-semibold ${active ? 'text-[#1565C0]' : 'text-[#0F172A]'}`}>Kustom</div>
+                    <div className="text-[11px] text-[#64748B] leading-snug mt-0.5">Atur semua parameter manual tanpa preset.</div>
+                  </button>
+                );
+              })()}
+            </div>
+          </Field>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* (a) Jumlah Scene */}

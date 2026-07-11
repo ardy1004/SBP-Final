@@ -9,6 +9,7 @@ import {
   ETHNIC_EN, STYLE_EN, EXPRESSION_EN, getLipsync, sceneRole,
   sceneFileName, characterFileName,
 } from './options';
+import { findArchetype, compileCameraChoreography } from './archetypes';
 
 // ─── Tipe input (struktural, decoupled dari komponen React) ──────────────────
 export interface CompilerProperty {
@@ -28,6 +29,7 @@ export interface CompilerS1 {
   platforms: string[]; aiTool: string; ratio: string; language: string;
   hookType: string; ctaType: string; ctaKeyword: string;
   visualStyle: string; tone: string; niche: string;
+  archetype?: string; // id VideoArchetype (opsional; 'custom'/undefined = tanpa arketipe)
 }
 export interface CompilerScene { photoId: number | null; label: string }
 export interface CompilerS3 {
@@ -103,6 +105,7 @@ export function compileMasterPrompt(
   const tool = AI_TOOLS.find(t => t.value === s1.aiTool);
   const toolSpec = AI_TOOL_FORMAT_SPEC[s1.aiTool];
   const platformBehavior = PLATFORM_BEHAVIOR[primer] ?? '';
+  const archetype = findArchetype(s1.archetype);
 
   // ── HEADER ──
   L.push('# MASTER PROMPT — VIRALFRAME (SBP / Salam Bumi Property)');
@@ -111,6 +114,34 @@ export function compileMasterPrompt(
   L.push('JANGAN tulis penjelasan, basa-basi, markdown, atau teks apa pun di luar JSON.');
   L.push('Mulai output dengan karakter { dan akhiri dengan }. Tidak ada yang lain.');
   L.push('');
+
+  // ── BLOK 0: ARAHAN FORMAT & GAYA (ARKETIPE) ──
+  // Hanya muncul bila user memilih arketipe. Ini "Style DNA" yang mengikat
+  // presenter mode, sudut narasi, dan tata bahasa kamera menjadi satu arahan.
+  if (archetype) {
+    const povLabel = {
+      agent_to_camera: 'Agen berbicara langsung ke kamera (presenter di layar).',
+      vlogger_handheld: 'Vlogger walk-and-talk, sering menyapa kamera, energi personal.',
+      first_person_pov: 'Sudut pandang orang pertama — penonton seolah hadir sendiri; TIDAK ada presenter di layar.',
+    }[archetype.narrationPOV];
+    const presenterLabel = {
+      on_camera: 'Talent/presenter TAMPIL di layar.',
+      voiceover_only: 'TANPA talent di layar — narasi hanya voiceover.',
+      faceless_broll: 'Faceless — rangkaian b-roll estetik tanpa orang, narasi voiceover.',
+    }[archetype.presenterMode];
+
+    L.push('═══════════════════════════════════════════════');
+    L.push('BLOK 0 — ARAHAN FORMAT & GAYA VIDEO (ARKETIPE)');
+    L.push('═══════════════════════════════════════════════');
+    L.push(`ARKETIPE          : ${archetype.label}`);
+    L.push(`MODE PRESENTER    : ${presenterLabel}`);
+    L.push(`SUDUT NARASI      : ${povLabel}`);
+    L.push(`TEMPO/PACING      : ${archetype.pacing}`);
+    L.push(`ARAHAN SUTRADARA  : ${archetype.shotGrammarNote}`);
+    L.push('CATATAN: Arahan arketipe ini MENGIKAT seluruh scene. Gaya visual, tone, dan');
+    L.push('koreografi kamera di bawah sudah diselaraskan dengan arketipe ini — jaga konsistensinya.');
+    L.push('');
+  }
 
   // ── BLOK 1: IDENTITAS & PERAN ──
   L.push('═══════════════════════════════════════════════');
@@ -176,6 +207,20 @@ export function compileMasterPrompt(
     L.push(`  Scene ${i + 1} = ${role}${extra}`);
   }
   L.push('');
+
+  // Koreografi kamera per scene (dari arketipe) — motion kompleks multi-beat
+  // yang menyesuaikan durasi & peran scene. Hanya bila arketipe dipilih.
+  if (archetype) {
+    L.push('KOREOGRAFI KAMERA PER SCENE (WAJIB dijadikan dasar field camera/motion di ai_ready_prompt):');
+    for (let i = 0; i < n; i++) {
+      const role = sceneRole(i, n);
+      const d = durationOf(s1, i);
+      const choreo = compileCameraChoreography(archetype.cameraGrammar, role, d, i);
+      L.push(`  Scene ${i + 1} (${role}, ${d}s): ${choreo}`);
+    }
+    L.push('  Terjemahkan koreografi ini ke dalam ai_ready_prompt masing-masing scene sebagai gerakan kamera utama — jaga agar setiap beat terasa mulus dan termotivasi, bukan gerakan acak.');
+    L.push('');
+  }
   L.push('TABEL LIPSYNC PER SCENE (durasi klip ↔ batas kata narasi — WAJIB dipatuhi):');
   for (let i = 0; i < n; i++) {
     const d = durationOf(s1, i);
