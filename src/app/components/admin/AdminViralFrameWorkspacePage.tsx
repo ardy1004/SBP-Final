@@ -14,6 +14,7 @@ import CharacterStepBase, { type Step3State } from './viralframe/CharacterStep';
 // #2: memoize komponen anak agar tak re-render saat parent re-render tanpa perubahan prop.
 const CharacterStep = memo(CharacterStepBase);
 import { ARCHETYPES, findArchetype, ARCHETYPE_CUSTOM_ID, compileCameraChoreography } from './viralframe/archetypes';
+import { cfImg } from '../../../lib/img';
 import { getAiModels, getAiStatus, type AiProviderId, type AiStatusInfo } from '../../../lib/api';
 
 const AI_PROVIDER_LIST: { id: AiProviderId; label: string }[] = [
@@ -86,6 +87,17 @@ function mediaSrc(url: string | null) {
     return `/api/admin/media?key=${encodeURIComponent(url)}`;
   }
   return url;
+}
+
+// Thumbnail teroptimasi untuk grid: foto publik (property/karakter) disajikan via
+// endpoint publik /api/media + Cloudflare resize (cfImg) → download & decode jauh
+// lebih ringan (fix scroll jank). Foto privat fallback ke mediaSrc.
+function thumbSrc(url: string | null, width: number): string {
+  if (!url) return '';
+  if (url.startsWith('property-photos/') || url.startsWith('viralframe-characters/')) {
+    return cfImg(`/api/media?key=${encodeURIComponent(url)}`, width);
+  }
+  return mediaSrc(url) ?? '';
 }
 
 function resize<T>(arr: T[], len: number, fill: () => T): T[] {
@@ -469,7 +481,7 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
                 <div className="flex items-center gap-2">
                   {selectedPhoto && (
                     <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200">
-                      <img src={mediaSrc(selectedPhoto.url_webp) ?? ''} alt="" className="w-full h-full object-cover" />
+                      <img src={thumbSrc(selectedPhoto.url_webp, 480)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
                     </div>
                   )}
                   <div className="flex-1">
@@ -991,7 +1003,7 @@ function AIGenerateTab({
                 <span className="text-xs text-[#64748B]">Karakter</span>
                 {selectedKarakter ? (
                   <span className="flex items-center gap-2 text-sm font-medium text-[#0F172A]">
-                    <img src={`/api/admin/media?key=${encodeURIComponent(selectedKarakter.foto_url)}`} alt="" className="w-6 h-6 rounded-full object-cover" loading="lazy" />
+                    <img src={thumbSrc(selectedKarakter.foto_url, 64)} alt="" className="w-6 h-6 rounded-full object-cover" loading="lazy" decoding="async" />
                     {selectedKarakter.nama}
                   </span>
                 ) : (
@@ -1556,7 +1568,7 @@ export default function AdminViralFrameWorkspacePage() {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex items-center gap-4">
         <div className="w-16 h-16 rounded-xl bg-gray-100 overflow-hidden flex-shrink-0">
           {coverUrl ? (
-            <img src={coverUrl} alt={prop.title} className="w-full h-full object-cover"
+            <img src={coverUrl} alt={prop.title} className="w-full h-full object-cover" loading="lazy" decoding="async"
               onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
           ) : (
             <div className="w-full h-full flex items-center justify-center"><ImageOff size={20} className="text-gray-300" /></div>
@@ -1781,7 +1793,7 @@ export default function AdminViralFrameWorkspacePage() {
                       Scene {i + 1} <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[#EFF6FF] text-[#1565C0]">{role}</span>
                       {selectedImg && (
                         <span className="flex items-center gap-1.5 text-xs text-emerald-600">
-                          <img src={mediaSrc(selectedImg.url_webp) ?? ''} alt="" className="w-6 h-6 rounded object-cover" loading="lazy" />
+                          <img src={thumbSrc(selectedImg.url_webp, 64)} alt="" className="w-6 h-6 rounded object-cover" loading="lazy" decoding="async" />
                           <Check size={13} /> Foto dipilih
                         </span>
                       )}
@@ -1795,14 +1807,15 @@ export default function AdminViralFrameWorkspacePage() {
                       <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
                         {prop.images.map(im => {
                           const selected = sc?.photoId === im.id;
-                          const src = mediaSrc(im.url_webp);
+                          const src = thumbSrc(im.url_webp, 160);
                           return (
                             <button key={im.id} type="button" onClick={() => setScene(i, { photoId: im.id })}
+                              style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 80px' }}
                               className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${
                                 selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-transparent hover:border-gray-300'
                               }`}>
                               {src ? (
-                                <img src={src} alt="" className="w-full h-full object-cover" loading="lazy" />
+                                <img src={src} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
                               ) : (
                                 <div className="w-full h-full bg-gray-100 flex items-center justify-center"><ImageOff size={14} className="text-gray-300" /></div>
                               )}

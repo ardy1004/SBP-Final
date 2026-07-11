@@ -3,6 +3,7 @@ import { Plus, Check, Trash2, ImageOff, Upload, X, Loader2 } from 'lucide-react'
 import {
   EXPRESSIONS, ETHNIC_OPTIONS, STYLE_OPTIONS, GENDER_OPTIONS,
 } from './options';
+import { cfImg } from '../../../../lib/img';
 
 export interface Character {
   id: number; nama: string; foto_url: string;
@@ -23,8 +24,10 @@ const selectCls =
 
 function charSrc(url: string | null) {
   if (!url) return null;
+  // Foto karakter/properti = publik → endpoint /api/media (bisa di-resize Cloudflare
+  // via cfImg, tanpa masalah auth). cfImg dipanggil di call-site dengan width thumbnail.
   if (url.startsWith('viralframe-characters/') || url.startsWith('property-photos/')) {
-    return `/api/admin/media?key=${encodeURIComponent(url)}`;
+    return `/api/media?key=${encodeURIComponent(url)}`;
   }
   return url;
 }
@@ -239,13 +242,14 @@ export default function CharacterStep({ value, onChange }: {
                 const selected = value.characterId === c.id;
                 const src = charSrc(c.foto_url);
                 return (
-                  <div key={c.id} className="relative">
+                  // content-visibility:auto → browser lewati paint sel di luar viewport saat scroll
+                  <div key={c.id} className="relative" style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 130px' }}>
                     <button type="button" onClick={() => onChange({ characterId: c.id, character: c })}
                       className={`w-full rounded-xl overflow-hidden border-2 transition-all ${
                         selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-transparent hover:border-gray-300'
                       }`}>
                       <div className="aspect-square bg-gray-100">
-                        {src ? <img src={src} alt={c.nama} className="w-full h-full object-cover" loading="lazy" />
+                        {src ? <img src={cfImg(src, 240)} alt={c.nama} className="w-full h-full object-cover" loading="lazy" decoding="async" />
                           : <div className="w-full h-full flex items-center justify-center"><ImageOff size={16} className="text-gray-300" /></div>}
                       </div>
                       <div className="px-1.5 py-1 text-[11px] font-medium text-[#0F172A] truncate text-center">{c.nama}</div>
