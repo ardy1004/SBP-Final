@@ -2,6 +2,7 @@ import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { encryptNIK } from '../_lib/crypto.js';
 import { stripExif } from '../_lib/exif.js';
 import { generateMetaSeo } from '../_lib/metaSeo.js';
+import { verifyTurnstile } from '../_lib/turnstile.js';
 
 function sanitize(val, maxLen = 500) {
   if (typeof val !== 'string') return '';
@@ -54,6 +55,13 @@ export async function onRequestPost(context) {
   let body;
   try { body = await request.json(); }
   catch { return jsonError('Body JSON tidak valid', 400); }
+
+  // ─── Anti-bot: verifikasi Turnstile sebelum proses berat (3 INSERT + upload R2) ──
+  const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? null;
+  const captcha = await verifyTurnstile(body.cf_turnstile_token, env.TURNSTILE_SECRET, ip);
+  if (!captcha.ok) {
+    return jsonError('Verifikasi anti-bot gagal. Silakan muat ulang halaman dan coba lagi.', 403);
+  }
 
   const errors = {};
 
@@ -323,6 +331,11 @@ export async function onRequestPost(context) {
     }
   }
 
+  const photos_failed = photos_raw.length - photos_uploaded;
+  if (photos_failed > 0) {
+    console.error(`[titip-jual] ${photos_failed}/${photos_raw.length} foto gagal upload untuk property_id=${property_id}`);
+  }
+
   return jsonOk({
     kode_perjanjian,
     kode_listing,
@@ -330,6 +343,13 @@ export async function onRequestPost(context) {
     owner_id,
     agreement_id,
     photos_uploaded,
+    photos_failed,
+    // Beri tahu klien agar bisa menampilkan peringatan bila sebagian/seluruh foto gagal
+    photos_warning: photos_failed > 0
+      ? (photos_uploaded === 0
+          ? 'Seluruh foto gagal diproses — tim SBP akan menghubungi Anda untuk melengkapi foto.'
+          : `${photos_failed} dari ${photos_raw.length} foto gagal diproses.`)
+      : null,
     status: 'draft',
     pesan: 'Data berhasil diterima. Tim SBP akan menghubungi Anda via WhatsApp untuk proses selanjutnya.',
   }, 201);

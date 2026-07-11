@@ -12,7 +12,7 @@ export async function onRequestPost(context) {
       return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
-    const { image_base64, prompt, scene_index } = body;
+    const { image_base64, prompt, scene_index, model, image_size } = body;
 
     if (!image_base64 || !image_base64.startsWith('data:image/')) {
       return Response.json({ error: 'image_base64 tidak valid' }, { status: 400 });
@@ -20,6 +20,12 @@ export async function onRequestPost(context) {
     if (!prompt || !String(prompt).trim()) {
       return Response.json({ error: 'prompt tidak boleh kosong' }, { status: 400 });
     }
+
+    // Whitelist model & image_size — jangan percaya nilai bebas dari client
+    const MODEL_VALID = ['Wan-AI/Wan2.2-I2V-A14B', 'Wan-AI/Wan2.1-I2V-14B-720P-Turbo'];
+    const SIZE_VALID  = ['1280x720', '720x1280', '960x960'];
+    const modelFinal  = MODEL_VALID.includes(model) ? model : 'Wan-AI/Wan2.2-I2V-A14B';
+    const sizeFinal   = SIZE_VALID.includes(image_size) ? image_size : '1280x720';
 
     const apiKey = env.SILICONFLOW_API_KEY;
     if (!apiKey) {
@@ -35,10 +41,10 @@ export async function onRequestPost(context) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'Wan-AI/Wan2.1-I2V-14B-720P-Turbo',
+          model: modelFinal,
           image: image_base64,
           prompt: String(prompt),
-          image_size: '1280x720',
+          image_size: sizeFinal,
           seed: Math.floor(Math.random() * 999999),
         }),
       });

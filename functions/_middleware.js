@@ -1,6 +1,24 @@
+// Fallback hardcoded ke origin produksi — JANGAN '*'. Cloudflare Pages kadang
+// tidak membaca [vars] dari wrangler.toml (lihat CLAUDE.md gotcha), dan '*'
+// akan diam-diam membuka seluruh API untuk semua origin.
+const DEFAULT_ORIGIN = 'https://salambumi.xyz';
+
+// Security headers untuk response SSR/Function. Cloudflare Pages TIDAK menerapkan
+// public/_headers pada response yang dihasilkan Functions (hanya untuk aset statis),
+// jadi header ini WAJIB di-set di sini agar halaman SSR — termasuk /sign yang
+// menampilkan NIK — tetap dapat X-Frame-Options dll. (aset statis ditangani _headers).
+const SECURITY_HEADERS = {
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), browsing-topics=()',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+};
+
 export async function onRequest(context) {
   const { request, next, env } = context;
-  const origin = env.ALLOWED_ORIGIN || '*';
+  const origin = env.ALLOWED_ORIGIN || DEFAULT_ORIGIN;
 
   if (request.method === 'OPTIONS') {
     return new Response(null, {
@@ -20,6 +38,7 @@ export async function onRequest(context) {
   headers.set('Access-Control-Allow-Origin', origin);
   headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
 
   return new Response(response.body, {
     status: response.status,

@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { Check, ChevronRight, Upload, X, AlertCircle } from 'lucide-react';
 import { getLocations, type ApiLocation } from '../../lib/api';
 import { PROPERTY_TYPES } from '../../lib/propertyTypes';
+import Turnstile from './Turnstile';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -396,6 +397,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
 
   // Consent + submission
   const [consent, setConsent] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState('');
   const [loading, setLoading] = useState(false);
   const [errors, setErrors]   = useState<Record<string, string>>({});
   const [apiError, setApiError] = useState<string | null>(null);
@@ -579,6 +581,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         harga_sewa_kamar_bulan: sewaKamarBulan     ? parseInt(sewaKamarBulan)      : undefined,
         details:           buildDetails(),
         photos:            photoPreviews,
+        cf_turnstile_token: turnstileToken || undefined,
       };
 
       // Remove undefined keys
@@ -938,6 +941,13 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
           </span>
         </label>
         <FieldErr msg={errors.consent} />
+
+        {/* Anti-bot Turnstile */}
+        <Turnstile
+          onVerify={setTurnstileToken}
+          onExpire={() => setTurnstileToken('')}
+          className="mt-1"
+        />
 
         {/* API Error */}
         {apiError && (
