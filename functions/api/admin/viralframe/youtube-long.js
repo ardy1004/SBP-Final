@@ -69,7 +69,7 @@ ${p.deskripsi ? `- Deskripsi: ${String(p.deskripsi).slice(0, 300)}` : ''}
 GARIS BESAR CHAPTER (ikuti urutan ini, boleh sesuaikan seperlunya):
 ${outline.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 
-Buat 10-14 scene total. Setiap scene punya prompt video SIAP-PAKAI (English, sinematik, gerakan kamera jelas, cocok untuk AI video generator seperti Veo/Kling) + narasi voiceover Bahasa Indonesia.
+Buat 8-12 scene total. Setiap scene punya prompt video SIAP-PAKAI (English, sinematik, gerakan kamera jelas, cocok untuk AI video generator seperti Veo/Kling) + narasi voiceover Bahasa Indonesia. RINGKAS tiap ai_ready_prompt (maks ~60 kata) agar output tidak terlalu panjang.
 
 FORMAT JSON WAJIB:
 {
@@ -83,30 +83,37 @@ FORMAT JSON WAJIB:
   "caption": "caption untuk community post / share",
   "hashtag_sets": ["5 string, tiap string 5-8 hashtag campur lokasi+jenis+brand #salambumiproperty"]
 }
-hashtag_sets berisi TEPAT 5 string. scenes berisi 10-14 item.`;
+hashtag_sets berisi TEPAT 5 string. scenes berisi 8-12 item. PENTING: keluarkan HANYA objek JSON, tanpa penjelasan atau proses berpikir apa pun sebelum/sesudahnya.`;
 
   const tryOrder = [chosenProvider, ...PROVIDER_ORDER.filter(x => x !== chosenProvider)];
   const deadline = Date.now() + 26000;
-  let raw = null, used = null;
+  let raw = null, used = null, lastErr = null;
   for (const prov of tryOrder) {
     if (Date.now() > deadline - 6000) break;
     const key = await getProviderKey(env, prov);
     if (!key) continue;
     const r = await callChatCompletion({
       provider: prov, apiKey: key, model: PROVIDERS[prov].defaultModel,
-      systemPrompt: system, userPrompt: user, maxTokens: 4000, temperature: 0.8,
+      systemPrompt: system, userPrompt: user, maxTokens: 8000, temperature: 0.6,
       timeoutMs: deadline - Date.now() - 1500,
     });
     if (r.ok) { raw = r.content; used = prov; break; }
-    console.error(`[yt-long] ${prov} gagal:`, r.error?.slice(0, 120));
+    lastErr = r.error;
+    console.error(`[yt-long] ${prov} gagal:`, r.error?.slice(0, 160));
   }
-  if (!raw) return jsonError('Gagal generate storyboard (semua provider). Pastikan API key AI diatur.', 502);
+  if (!raw) return jsonError(`Gagal generate storyboard: ${(lastErr || 'semua provider gagal/kehabisan kuota').slice(0, 200)}. Pastikan API key AI diatur di Pengaturan.`, 502);
 
+  // Ekstraksi JSON tahan-banting: ambil dari '{' pertama sampai '}' terakhir
+  // (membuang preamble/penutup atau markdown yang kadang disisipkan model).
   let parsed;
   try {
-    const txt = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    let txt = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    const first = txt.indexOf('{'), last = txt.lastIndexOf('}');
+    if (first > 0 || last < txt.length - 1) txt = txt.slice(first, last + 1);
     parsed = JSON.parse(txt);
-  } catch { return jsonError('Respons AI bukan JSON valid', 502); }
+  } catch {
+    return jsonError(`Respons AI tidak valid (kemungkinan terpotong). Coba lagi atau ganti provider di Pengaturan. Cuplikan: ${String(raw).slice(0, 150)}`, 502);
+  }
 
   // Simpan ke riwayat generations (params_json menandai mode youtube_long)
   try {
