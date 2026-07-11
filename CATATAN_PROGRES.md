@@ -5,7 +5,41 @@
 
 ---
 
-## STATUS SAAT INI: Domain `salambumi.xyz` LIVE di produksi (Fase H tuntas). Pengembangan aktif berlanjut pasca go-live — modul admin 13/13 area terisi (2 masih placeholder), G-MAP/G-CHAT/Meta CAPI/AI Description Generator sudah live, ViralFrame Jalur B (Video VO/SiliconFlow) dalam pengerjaan intensif. — Terakhir diupdate 3 Juli 2026
+## STATUS SAAT INI: Domain `salambumi.xyz` LIVE di produksi. Pasca go-live: security hardening + Turnstile anti-bot + sitemap dinamis LIVE; ViralFrame naik kelas (arketipe gaya video, koreografi kamera per-tool, Style Pair A/B, multi-provider AI Gemini/Groq/OpenRouter/DeepSeek dengan fallback), fix konsistensi image-to-video. `master` = produksi. — Terakhir diupdate 11 Juli 2026
+
+---
+
+## SESI 11 JULI 2026 — Security Hardening, Anti-Bot, ViralFrame Multi-Provider
+
+> Audit komprehensif + implementasi bertahap, semua di-deploy ke produksi & diverifikasi live. `master` disinkronkan = produksi.
+
+### Security & Anti-abuse (LIVE)
+- **Security headers**: HSTS, X-Frame-Options: DENY (anti-clickjacking `/sign` berisi NIK), nosniff, Referrer-Policy, Permissions-Policy, COOP. Di `public/_headers` (aset statis) **dan** `functions/_middleware.js` (response SSR — `_headers` tidak berlaku untuk Functions).
+- **Login**: fix user-enumeration (pesan gagal generik identik), rate-limit ditambah dimensi per-IP (anti lockout admin), sign token sebelum clear rate-limit.
+- **CORS**: fallback `'*'` → `https://salambumi.xyz`.
+- **Kebocoran API key SiliconFlow** ditutup: endpoint `siliconflow-token` dimatikan (410), submit video via proxy Worker `submit-video.js` (whitelist model/size).
+- **Turnstile** (Cloudflare CAPTCHA gratis) di `/api/titip-jual`, `/api/leads`, `/api/chat` (pesan pertama) + widget `Turnstile.tsx` di form Titip Jual, ContactAdminSheet, ChatWidget. Helper `functions/_lib/turnstile.js` (fail-open bila `TURNSTILE_SECRET` belum di-set). Site key produksi + secret sudah aktif.
+- `npm audit fix` (sisa vuln dev-only).
+
+### SEO (LIVE)
+- `functions/sitemap.xml.js` — sitemap dinamis dari D1 (properti + blog published). `public/robots.txt`.
+- Sanitizer blog di-harden (`functions/_lib/sanitize.js` + `src/lib/sanitize.ts`): tutup bypass `<img/onerror=>`, strip iteratif anti tag bersarang, netralkan `style` javascript:/expression().
+- `titip-jual`: surface kegagalan upload foto. Redirect `/portfolio` → `/` (masih mock). `.github/workflows/ci.yml` (build gate).
+
+### ViralFrame — upgrade besar (LIVE)
+- **Video Archetype** (`archetypes.ts`): 4 gaya (Agen Profesional, Vlogger, POV Walkthrough, Sinematik B-Roll) → prefill Gaya Visual/Tone/Expression/karakter + **koreografi kamera multi-beat** yang menyesuaikan durasi & peran scene, dengan **dialek per AI tool** (Kling/Veo3/Pika/Runway). Diinjeksi ke Master Prompt (BLOK 0) & Jalur C (via `camera_directives`/`archetype_note`).
+- **POV/faceless mode** di Jalur C: karakter jadi narator voiceover (tidak tampil di frame).
+- **Style Pair A/B**: generate 2 varian gaya sekaligus untuk uji split.
+- **Fix konsistensi image-to-video**: preset `GAYA_KAMERA` ditulis ulang jadi motion-only + scene-preserving; tambah `negative_prompt` di `submit-video.js` (cegah model mengubah/menambah elemen yang tak ada di foto).
+- **Dedup Fase 4**: `LIPSYNC`/`EXPRESSION_EN` → sumber tunggal `functions/_lib/viralframe-shared.js` (backend impor natif, frontend via Vite).
+
+### Multi-provider AI (LIVE)
+- **Settings → AI Providers**: input/simpan API key Gemini/Groq/OpenRouter/DeepSeek (disimpan D1 tabel `settings`, ditampilkan ter-mask 4 digit), indikator status kuota hijau/kuning/merah.
+- **Step 4 AI Generate**: pilih provider (default Gemini) + dropdown model live + progress bar + **fallback berantai otomatis** bila kuota habis. Default model Gemini `gemini-3-flash-preview` (free-tier kuota besar).
+- Abstraksi `functions/_lib/aiProviders.js` (OpenAI-compatible). Endpoint baru: `/api/admin/settings/ai-keys`, `/ai-status`, `/api/admin/viralframe/models`. Anggaran waktu 26s cegah 502 wall-clock.
+
+### Gotcha baru (dicatat di CLAUDE.md)
+`_headers` tak berlaku untuk Functions/SSR; wall-clock 30s untuk AI teks server-side; verifikasi bundle Functions via `wrangler pages functions build` sebelum deploy; `functions/` boleh import shared dari `functions/_lib`; `wrangler pages secret put` (bukan `wrangler secret put`) untuk Pages.
 
 ---
 

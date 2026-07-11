@@ -26,7 +26,9 @@
 - Setiap ubah route/file yang di-bundle SSR: clean build wajib (`Remove-Item -Recurse -Force dist, .react-router && npm run build`) — hash manifest server/client bisa tidak sinkron kalau tidak
 
 ## Secrets di Cloudflare Production
-`JWT_SECRET`, `NIK_ENC_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `SILICONFLOW_API_KEY` — di-set via `wrangler secret put` atau Dashboard (Production **dan** Preview, keduanya harus diisi manual, tidak otomatis sinkron).
+`JWT_SECRET`, `NIK_ENC_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `SILICONFLOW_API_KEY`, `TURNSTILE_SECRET` — di-set via `wrangler pages secret put <KEY> --project-name sbp-final` atau Dashboard (Production **dan** Preview, keduanya harus diisi manual, tidak otomatis sinkron). Untuk Pages gunakan `wrangler pages secret put` (BUKAN `wrangler secret put` yang untuk Worker).
+- **API key AI provider** (Gemini/Groq/OpenRouter/DeepSeek) untuk ViralFrame disimpan di tabel D1 `settings` (key `<provider>_api_key`), diinput via Admin → Pengaturan → AI Providers, ditampilkan ter-mask. `getProviderKey()` (`functions/_lib/aiProviders.js`) baca D1 dulu, fallback ke Cloudflare Secret lama (`GROQ_API_KEY`/`DEEPSEEK_API_KEY`).
+- **TURNSTILE_SECRET**: verifikasi anti-bot fail-open bila belum di-set (form tetap jalan), fail-closed bila sudah. Site key publik ada di `src/app/components/Turnstile.tsx`.
 
 ## Pattern Arsitektur
 - API client: `src/lib/api.ts` — tambah tipe dan fungsi fetch di sini
@@ -42,8 +44,14 @@
 ## AI APIs yang Dipakai
 - DeepSeek: `https://api.deepseek.com/chat/completions`, model `deepseek-chat` — AI Description Generator (`functions/api/admin/ai/generate-description.js`)
 - Groq: `llama-3.3-70b-versatile` — G-CHAT widget (`functions/api/chat.js`), function calling dengan tool `search_properties` + `submit_lead`
-- SiliconFlow: `Wan2.2-I2V-A14B` — video generation ViralFrame Jalur B (dalam pengerjaan aktif, submit dari client-side browser bukan Worker)
+- SiliconFlow: `Wan2.2-I2V-A14B` — video generation ViralFrame Video VO, submit via proxy Worker `functions/api/admin/viralframe/submit-video.js` (API key TIDAK keluar ke browser; ada `negative_prompt` + prompt kamera motion-only agar video setia ke foto referensi)
 - Pollinations TTS: `https://text.pollinations.ai/{text}?model=openai-audio&voice=alloy` (gratis, tanpa API key) — voiceover ViralFrame
+- **ViralFrame AI Generate (multi-provider)**: Gemini/Groq/OpenRouter/DeepSeek via endpoint OpenAI-compatible, abstraksi di `functions/_lib/aiProviders.js`. Default provider **Gemini**, default model `gemini-3-flash-preview` (free-tier kuota besar). `ai-generate.js` punya **fallback berantai** (provider pilihan → sisanya yang punya key) dengan anggaran waktu 26s (di bawah wall-clock 30s). Model dropdown diambil live dari `/api/admin/viralframe/models?provider=`; status kuota dari `/api/admin/settings/ai-status` (OpenRouter/DeepSeek dari saldo, Gemini/Groq dari health-check).
+
+## ViralFrame — Arketipe & Koreografi Kamera
+- **Video Archetype** (`src/app/components/admin/viralframe/archetypes.ts`): 4 gaya (Agen Profesional, Vlogger, POV Walkthrough, Sinematik B-Roll) yang mem-prefill Gaya Visual/Tone/Expression/mode karakter secara koheren + koreografi kamera multi-beat per scene. Diinjeksi ke Master Prompt (BLOK 0) dan ke Jalur C (DeepSeek/multi-provider) via `camera_directives`/`archetype_note` (client compute, backend consume). `compileCameraChoreography()` punya dialek per AI tool (Kling/Veo3/Pika/Runway).
+- **Style Pair A/B**: Step 4 bisa generate 2 varian gaya sekaligus untuk uji split.
+- Konstanta `LIPSYNC`/`EXPRESSION_EN` = sumber tunggal di `functions/_lib/viralframe-shared.js` (backend impor natif, frontend impor via Vite) — JANGAN duplikasi lagi.
 
 ## Gotcha Wajib Diingat
 - **Cloudflare Workers 30 detik wall-clock limit** — panggil API eksternal yang lambat (SiliconFlow, dsb) langsung dari browser (client-side), bukan dari dalam Worker
@@ -55,3 +63,8 @@
 - **Cloudflare Pages [vars] tidak selalu terbaca** dari `wrangler.toml` — env var seperti `ALLOWED_ORIGIN` WAJIB juga di-set manual di Dashboard > Pages > sbp-final > Settings > Environment Variables (Production + Preview)
 - **pdf-lib StandardFonts hanya WinAnsi/Latin-1** — karakter di luar itu (≥ ≤ — '' "" …) harus disanitasi sebelum `drawText()` atau akan throw
 - **Node zombie di Windows** menahan port wrangler walau sudah Ctrl+C — selalu `Get-Process node | Stop-Process -Force` sebelum sesi baru
+- **`public/_headers` TIDAK berlaku untuk response Pages Functions/SSR** — hanya untuk aset statis. Security headers (X-Frame-Options dll) untuk halaman SSR (termasuk `/sign` berisi NIK) WAJIB di-set di `functions/_middleware.js`, bukan cuma `_headers`.
+- **Wall-clock 30 detik juga berlaku untuk panggilan AI teks server-side** — fallback berantai multi-provider di `ai-generate.js` dijaga anggaran waktu 26s agar Worker tidak dibunuh (→ 502). Gejala salah model: generate provider pilihan gagal lalu fallback; pesan error 502 sekarang manusiawi (sebut provider + alasan).
+- **Verifikasi bundle Functions sebelum deploy** perubahan di `functions/`: `npx wrangler pages functions build --outdir=<tmp>` (exit 0 = aman). `npm run build` HANYA cek bundle React, bukan Functions.
+- **`functions/` BISA import file bersama dari `functions/_lib/*.js`** yang juga di-import frontend via Vite (mis. `viralframe-shared.js`) — bukan dari `src/app/`. Ini cara dedup konstanta lintas backend↔frontend tanpa duplikasi.
+- **Deploy dari branch**: `wrangler pages deploy dist/client --project-name sbp-final --branch=master` (flag `--branch=master` = produksi; tanpa itu masuk preview). Setelah menggabung beberapa branch fitur untuk deploy, jaga `master` = produksi (push master).
