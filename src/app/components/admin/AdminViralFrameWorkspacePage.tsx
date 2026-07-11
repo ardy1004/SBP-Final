@@ -12,6 +12,15 @@ import {
 } from './viralframe/options';
 import CharacterStep, { type Step3State } from './viralframe/CharacterStep';
 import { ARCHETYPES, findArchetype, ARCHETYPE_CUSTOM_ID, compileCameraChoreography } from './viralframe/archetypes';
+import { getAiModels, getAiStatus, type AiProviderId, type AiStatusInfo } from '../../../lib/api';
+
+const AI_PROVIDER_LIST: { id: AiProviderId; label: string }[] = [
+  { id: 'gemini', label: 'Gemini' },
+  { id: 'groq', label: 'Groq' },
+  { id: 'openrouter', label: 'OpenRouter' },
+  { id: 'deepseek', label: 'DeepSeek' },
+];
+const AI_STATUS_COLOR: Record<'green' | 'yellow' | 'red', string> = { green: '#10B981', yellow: '#F59E0B', red: '#EF4444' };
 
 // Durasi klip default per platform (selaras dgn PLATFORM_DURASI di ai-generate.js) —
 // hanya untuk menghitung jumlah beat koreografi kamera Jalur C.
@@ -604,6 +613,7 @@ interface AIKarakter { nama: string; deskripsi: string; foto_url: string }
 interface AIMetadata {
   platform: string; ai_tool: string; bahasa: string; musik_value: string;
   judul_properti: string; kode_listing: string; generated_at: string;
+  provider_used?: string; model_used?: string; provider_requested?: string; fell_back?: boolean;
 }
 interface AIGeneratedResult { scenes: AIScene[]; foto_urls: string[]; karakter: AIKarakter; metadata: AIMetadata }
 
@@ -672,6 +682,32 @@ function AIGenerateTab({
   const [error, setError] = useState<string | null>(null);
   const [zipBusy, setZipBusy] = useState(false);
 
+  // ── Provider AI + model + status + progress ──
+  const [provider, setProvider] = useState<AiProviderId>('gemini');
+  const [model, setModel] = useState('');
+  const [models, setModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [aiStatus, setAiStatus] = useState<Record<string, AiStatusInfo> | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [progressLabel, setProgressLabel] = useState('');
+
+  // Status kuota semua provider (sekali saat mount)
+  useEffect(() => { getAiStatus().then(r => { if (r.success && r.data) setAiStatus(r.data); }); }, []);
+
+  // Daftar model saat provider berganti
+  useEffect(() => {
+    let alive = true;
+    setLoadingModels(true);
+    setModels([]);
+    getAiModels(provider).then(r => {
+      if (!alive) return;
+      const list = r.success && r.data ? r.data.models : [];
+      setModels(list);
+      setModel(list[0] ?? '');
+    }).finally(() => { if (alive) setLoadingModels(false); });
+    return () => { alive = false; };
+  }, [provider]);
+
   const missingScenes = Array.from({ length: jumlahScene }, (_, i) => i + 1)
     .filter(n => !scenePhotos[n]?.foto_url);
   const allScenesHavePhoto = missingScenes.length === 0;
@@ -682,6 +718,10 @@ function AIGenerateTab({
     if (!canGenerate || !selectedKarakter) return;
     setIsGenerating(true);
     setError(null);
+    // Progress "indeterminate" yang merangkak naik selama request (bukan streaming).
+    setProgress(6);
+    setProgressLabel(`Menghubungi ${AI_PROVIDER_LIST.find(p => p.id === provider)?.label ?? provider}…`);
+    const progTimer = setInterval(() => setProgress(p => (p < 90 ? p + Math.max(1, (90 - p) * 0.08) : p)), 600);
     try {
       const musikOpt = MUSIK_OPTIONS.find(m => m.value === musik)!;
       const foto_assignments = Array.from({ length: jumlahScene }, (_, i) => ({
@@ -739,14 +779,23 @@ function AIGenerateTab({
           archetype_note,
           camera_directives,
           presenter_mode: arc?.presenterMode ?? 'on_camera',
+          provider,
+          model,
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Generate gagal');
+      setProgress(100);
+      setProgressLabel(json.data?.metadata?.fell_back
+        ? `Selesai (fallback ke ${json.data.metadata.provider_used})`
+        : 'Selesai');
       setGeneratedResult(json.data);
+      // Refresh status kuota setelah generate (mungkin berubah)
+      getAiStatus().then(r => { if (r.success && r.data) setAiStatus(r.data); });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Terjadi kesalahan');
     } finally {
+      clearInterval(progTimer);
       setIsGenerating(false);
     }
   };
@@ -964,6 +1013,36 @@ function AIGenerateTab({
             </select>
           </div>
 
+          {/* ── Sumber AI: provider + model + status kuota ── */}
+          <div>
+            <label className="block text-sm font-medium text-[#0F172A] mb-1.5">🤖 Sumber AI</label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+              {AI_PROVIDER_LIST.map(p => {
+                const st = aiStatus?.[p.id];
+                const active = provider === p.id;
+                return (
+                  <button key={p.id} type="button" onClick={() => setProvider(p.id)}
+                    title={st?.detail ?? 'memuat status…'}
+                    className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl text-sm font-medium border transition-colors ${
+                      active ? 'bg-[#EFF6FF] border-[#1565C0] text-[#1565C0]' : 'bg-white border-gray-200 text-[#64748B] hover:bg-gray-50'
+                    }`}>
+                    <span className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
+                      style={{ background: st ? AI_STATUS_COLOR[st.color] : '#CBD5E1' }} />
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
+            <select value={model} onChange={e => setModel(e.target.value)} disabled={loadingModels || models.length === 0} className={selectCls}>
+              {loadingModels && <option>Memuat model…</option>}
+              {!loadingModels && models.length === 0 && <option value="">— Key belum diatur di Pengaturan —</option>}
+              {models.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <p className="text-[10px] text-[#94A3B8] mt-1">
+              Kuota habis di tengah proses? Sistem otomatis beralih ke provider lain. Atur API key di menu <strong>Pengaturan → AI Providers</strong>.
+            </p>
+          </div>
+
           {!canGenerate && (
             <p className="text-xs text-amber-600 bg-amber-50 rounded-xl px-3 py-2">
               ⚠️ Lengkapi {!selectedKarakter && 'karakter (Step 3)'}{!selectedKarakter && !allScenesHavePhoto && ' dan '}{!allScenesHavePhoto && `foto (Step 2 — scene ${missingScenes.join(', ')})`} terlebih dahulu.
@@ -971,12 +1050,24 @@ function AIGenerateTab({
           )}
           {error && <p className="text-sm text-red-600">{error}</p>}
 
+          {isGenerating && (
+            <div className="space-y-1.5">
+              <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-full rounded-full transition-all duration-500"
+                  style={{ width: `${Math.round(progress)}%`, background: 'linear-gradient(90deg, #1565C0, #29B6F6)' }} />
+              </div>
+              <p className="text-xs text-[#64748B] flex items-center gap-1.5">
+                <Loader2 size={12} className="animate-spin" /> {progressLabel || 'Memproses…'} ({Math.round(progress)}%)
+              </p>
+            </div>
+          )}
+
           <button onClick={handleGenerate} disabled={!canGenerate || isGenerating}
             className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
             style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
             {isGenerating
-              ? <><Loader2 size={16} className="animate-spin" /> DeepSeek sedang menulis prompt...</>
-              : <>🚀 Generate dengan DeepSeek</>}
+              ? <><Loader2 size={16} className="animate-spin" /> Memproses…</>
+              : <>🚀 Generate dengan {AI_PROVIDER_LIST.find(p => p.id === provider)?.label ?? provider}</>}
           </button>
         </div>
       )}
@@ -987,6 +1078,15 @@ function AIGenerateTab({
             <p className="text-sm font-semibold text-emerald-600">✅ {generatedResult.scenes.length} prompt scene berhasil dibuat untuk {propertyTitle}!</p>
             <button onClick={() => { setGeneratedResult(null); setError(null); }} className="text-xs text-[#1565C0] underline">Buat ulang</button>
           </div>
+          {generatedResult.metadata.provider_used && (
+            <p className="text-xs text-[#64748B]">
+              Digenerate oleh <strong>{generatedResult.metadata.provider_used}</strong>
+              {generatedResult.metadata.model_used ? ` (${generatedResult.metadata.model_used})` : ''}
+              {generatedResult.metadata.fell_back && (
+                <span className="ml-1 text-amber-600">· fallback otomatis dari {generatedResult.metadata.provider_requested} karena kuota/error</span>
+              )}
+            </p>
+          )}
 
           <div className="space-y-3">
             {generatedResult.scenes.map(s => (

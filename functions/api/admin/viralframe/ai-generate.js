@@ -11,6 +11,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 // Konstanta lipsync & ekspresi = sumber tunggal bersama dengan frontend (Fase 4).
 import { getMaxWords, EXPRESSION_EN } from '../../../_lib/viralframe-shared.js';
+import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
 
 const PLATFORM_DURASI = {
   tiktok: 8,
@@ -391,6 +392,10 @@ export async function onRequestPost(context) {
   const archetypeNote = typeof body.archetype_note === 'string' ? body.archetype_note.slice(0, 600) : '';
   const PRESENTER_VALID = ['on_camera', 'voiceover_only', 'faceless_broll'];
   const presenterMode = PRESENTER_VALID.includes(body.presenter_mode) ? body.presenter_mode : 'on_camera';
+  // Provider AI + model (default gemini). Fallback otomatis ke provider lain bila kuota habis.
+  const PROVIDER_ORDER = ['gemini', 'groq', 'openrouter', 'deepseek'];
+  const chosenProvider = PROVIDER_ORDER.includes(body.provider) ? body.provider : 'gemini';
+  const chosenModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
   const cameraDirectives = Array.isArray(body.camera_directives)
     ? body.camera_directives
         .filter(c => c && Number.isInteger(Number(c.scene)) && typeof c.camera === 'string')
@@ -406,9 +411,6 @@ export async function onRequestPost(context) {
 
   const fotoCheck = validateFotoAssignments(fotoAssignments, jumlahScene);
   if (!fotoCheck.ok) return jsonError(fotoCheck.error, 422);
-
-  const apiKey = env.DEEPSEEK_API_KEY;
-  if (!apiKey) return jsonError('DEEPSEEK_API_KEY tidak dikonfigurasi', 500);
 
   let property;
   try {
@@ -445,36 +447,40 @@ export async function onRequestPost(context) {
   const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode });
   const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote });
 
-  let dsRes;
-  try {
-    dsRes = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        temperature: 0.7,
-        max_tokens: Math.min(4000, 500 + jumlahScene * 350),
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      }),
-    });
-  } catch (err) {
-    return jsonError(`Gagal menghubungi DeepSeek: ${err.message}`, 502);
+  // ── Panggil AI dengan fallback berantai ────────────────────────────────────
+  // Urutan: provider pilihan user dulu, lalu sisanya (yang punya key). Bila satu
+  // provider kehabisan kuota / gagal, lanjut otomatis ke berikutnya agar generate
+  // tetap jalan. Model kustom hanya dipakai untuk provider pilihan; fallback pakai
+  // default model provider tsb.
+  const maxTokens = Math.min(4000, 500 + jumlahScene * 350);
+  const tryOrder = [chosenProvider, ...PROVIDER_ORDER.filter(p => p !== chosenProvider)];
+
+  let raw = null;
+  let usedProvider = null;
+  let usedModel = null;
+  const attempts = [];
+
+  for (const provider of tryOrder) {
+    const key = await getProviderKey(env, provider);
+    if (!key) { attempts.push({ provider, skipped: 'no_key' }); continue; }
+    const model = provider === chosenProvider && chosenModel ? chosenModel : PROVIDERS[provider].defaultModel;
+
+    const result = await callChatCompletion({ provider, apiKey: key, model, systemPrompt, userPrompt, maxTokens });
+    if (result.ok) {
+      raw = result.content;
+      usedProvider = provider;
+      usedModel = model;
+      break;
+    }
+    attempts.push({ provider, error: result.error?.slice(0, 120), quota: result.quotaExhausted === true });
+    // Hanya lanjut fallback bila kuota habis / rate limit; error lain (mis. model
+    // salah pada provider pilihan) juga dilanjutkan agar tetap ada hasil.
+    console.error(`[ai-generate] ${provider} gagal:`, result.error?.slice(0, 160));
   }
 
-  if (!dsRes.ok) {
-    const errText = await dsRes.text().catch(() => '');
-    return jsonError(`DeepSeek error ${dsRes.status}: ${errText}`, 502);
+  if (!raw) {
+    return jsonError(`Semua provider AI gagal/kehabisan kuota. Detail: ${JSON.stringify(attempts).slice(0, 400)}`, 502);
   }
-
-  const dsJson = await dsRes.json();
-  const raw = (dsJson.choices?.[0]?.message?.content ?? '').trim();
-  if (!raw) return jsonError('DeepSeek mengembalikan respons kosong', 502);
 
   const parsed = parseSceneJson(raw, jumlahScene);
   if (!parsed.ok) return jsonError(parsed.error, 502);
@@ -504,6 +510,11 @@ export async function onRequestPost(context) {
       judul_properti: property.title,
       kode_listing: property.kode_listing,
       generated_at: new Date().toISOString(),
+      // Info provider yang benar-benar dipakai (untuk indikator fallback di UI)
+      provider_used: usedProvider,
+      model_used: usedModel,
+      provider_requested: chosenProvider,
+      fell_back: usedProvider !== chosenProvider,
     },
   });
 }

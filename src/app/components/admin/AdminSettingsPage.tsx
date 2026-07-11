@@ -1,6 +1,18 @@
 import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router';
-import { Lock, User, CheckCircle, XCircle, Eye, EyeOff, BarChart2, Plus, Trash2, Edit2, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Lock, User, CheckCircle, XCircle, Eye, EyeOff, BarChart2, Plus, Trash2, Edit2, ToggleLeft, ToggleRight, KeyRound } from 'lucide-react';
+import { getAiKeys, saveAiKeys, getAiStatus, type AiProviderId, type AiKeyInfo, type AiStatusInfo } from '../../../lib/api';
+
+const AI_PROVIDERS: { id: AiProviderId; label: string; hint: string }[] = [
+  { id: 'gemini',     label: 'Google Gemini', hint: 'aistudio.google.com/apikey' },
+  { id: 'groq',       label: 'Groq',          hint: 'console.groq.com/keys' },
+  { id: 'openrouter', label: 'OpenRouter',    hint: 'openrouter.ai/keys' },
+  { id: 'deepseek',   label: 'DeepSeek',      hint: 'platform.deepseek.com/api_keys' },
+];
+
+const STATUS_COLOR: Record<'green' | 'yellow' | 'red', string> = {
+  green: '#10B981', yellow: '#F59E0B', red: '#EF4444',
+};
 
 interface AdminUser { sub: number; email: string; nama: string; role: string; }
 interface PasswordForm { password_lama: string; password_baru: string; password_baru_konfirmasi: string; }
@@ -41,6 +53,34 @@ export default function AdminSettingsPage() {
   const [tracking, setTracking] = useState<TrackingSettings>({ ga4_measurement_id: '', gtm_container_id: '', search_console_verification: '' });
   const [savingTracking, setSavingTracking] = useState(false);
   const [trackingMsg, setTrackingMsg] = useState<Msg | null>(null);
+
+  // ── AI Providers (API keys + status) ──
+  const [aiKeys, setAiKeys] = useState<Record<AiProviderId, AiKeyInfo> | null>(null);
+  const [aiInput, setAiInput] = useState<Record<AiProviderId, string>>({ gemini: '', groq: '', openrouter: '', deepseek: '' });
+  const [aiStatus, setAiStatus] = useState<Record<AiProviderId, AiStatusInfo> | null>(null);
+  const [aiSaving, setAiSaving] = useState<AiProviderId | null>(null);
+  const [aiMsg, setAiMsg] = useState<Msg | null>(null);
+
+  const loadAi = () => {
+    getAiKeys().then(r => { if (r.success && r.data) setAiKeys(r.data); });
+    getAiStatus().then(r => { if (r.success && r.data) setAiStatus(r.data); });
+  };
+  useEffect(() => { loadAi(); }, []);
+
+  const handleSaveAiKey = async (id: AiProviderId) => {
+    const val = aiInput[id].trim();
+    if (!val) { setAiMsg({ type: 'error', text: 'Isi key dulu sebelum menyimpan.' }); return; }
+    setAiSaving(id); setAiMsg(null);
+    const r = await saveAiKeys({ [id]: val });
+    setAiSaving(null);
+    if (r.success) {
+      setAiMsg({ type: 'success', text: `Key ${id} tersimpan.` });
+      setAiInput(s => ({ ...s, [id]: '' }));
+      loadAi();
+    } else {
+      setAiMsg({ type: 'error', text: r.error ?? 'Gagal menyimpan key.' });
+    }
+  };
 
   // ── Load pixel configs + tracking settings ──
   useEffect(() => {
@@ -328,6 +368,61 @@ export default function AdminSettingsPage() {
           <button onClick={handleSaveTracking} disabled={savingTracking} className="w-full bg-[#F97316] hover:bg-[#EA6C00] disabled:opacity-50 text-white rounded-xl py-2.5 text-sm font-semibold transition-colors">
             {savingTracking ? 'Menyimpan...' : 'Simpan Tracking Settings'}
           </button>
+        </div>
+      </div>
+
+      {/* ── AI Providers (ViralFrame) ── */}
+      <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#ECFDF5]"><KeyRound size={17} color="#10B981" /></div>
+          <div>
+            <h2 className="font-display font-semibold text-[#0F172A]">AI Providers</h2>
+            <p className="text-xs text-[#64748B]">API key untuk generate naskah ViralFrame · ditampilkan ter-mask (4 digit akhir)</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {AI_PROVIDERS.map(p => {
+            const info = aiKeys?.[p.id];
+            const st = aiStatus?.[p.id];
+            return (
+              <div key={p.id}>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm font-semibold text-[#0F172A] flex items-center gap-2">
+                    {/* Indikator status kuota */}
+                    <span title={st?.detail ?? 'memuat...'} className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
+                      style={{ background: st ? STATUS_COLOR[st.color] : '#CBD5E1' }} />
+                    {p.label}
+                    {info?.configured && <span className="text-[10px] font-normal text-[#64748B]">({info.masked}{info.source === 'secret' ? ' · dari secret' : ''})</span>}
+                  </label>
+                  {st && <span className="text-[10px] text-[#94A3B8]">{st.detail}</span>}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={aiInput[p.id]}
+                    onChange={e => setAiInput(s => ({ ...s, [p.id]: e.target.value }))}
+                    placeholder={info?.configured ? 'Ketik key baru untuk mengganti…' : `Tempel API key (${p.hint})`}
+                    className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#10B981]"
+                  />
+                  <button
+                    onClick={() => handleSaveAiKey(p.id)}
+                    disabled={aiSaving === p.id || !aiInput[p.id].trim()}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-[#10B981] hover:bg-[#059669] disabled:opacity-40 transition-colors flex-shrink-0"
+                  >
+                    {aiSaving === p.id ? '...' : 'Simpan'}
+                  </button>
+                </div>
+                <p className="text-[10px] text-[#94A3B8] mt-0.5">Dapatkan key di {p.hint}</p>
+              </div>
+            );
+          })}
+          <MsgBox msg={aiMsg} />
+          <div className="flex items-center gap-3 text-[10px] text-[#94A3B8] pt-1">
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: STATUS_COLOR.green }} /> Kuota aman</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: STATUS_COLOR.yellow }} /> Hampir habis / rate-limit</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: STATUS_COLOR.red }} /> Habis / belum diisi</span>
+          </div>
         </div>
       </div>
     </div>

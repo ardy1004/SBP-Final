@@ -423,6 +423,36 @@ export async function getAdminMe() {
   return apiFetch<{ sub: number; email: string; nama: string; role: string }>('/admin/me');
 }
 
+// ─── AI Providers (ViralFrame multi-provider) ────────────────────────────────
+export type AiProviderId = 'gemini' | 'groq' | 'openrouter' | 'deepseek';
+export interface AiKeyInfo { configured: boolean; masked: string | null; source: 'db' | 'secret' | null }
+export interface AiStatusInfo { color: 'green' | 'yellow' | 'red'; detail: string; configured: boolean }
+
+/** GET /api/admin/settings/ai-keys — key ter-mask per provider */
+export async function getAiKeys() {
+  return apiFetch<Record<AiProviderId, AiKeyInfo>>('/admin/settings/ai-keys');
+}
+
+/** PATCH /api/admin/settings/ai-keys — simpan key (kirim hanya yang diubah) */
+export async function saveAiKeys(body: Partial<Record<AiProviderId, string>>) {
+  return apiFetch<{ updated: string[] }>('/admin/settings/ai-keys', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+/** GET /api/admin/settings/ai-status — status kuota (hijau/kuning/merah) per provider */
+export async function getAiStatus() {
+  return apiFetch<Record<AiProviderId, AiStatusInfo>>('/admin/settings/ai-status');
+}
+
+/** GET /api/admin/viralframe/models?provider= — daftar model tersedia */
+export async function getAiModels(provider: AiProviderId) {
+  return apiFetch<{ provider: string; default: string; models: string[] }>(
+    `/admin/viralframe/models?provider=${encodeURIComponent(provider)}`,
+  );
+}
+
 /** GET /api/testimonials */
 export async function getTestimonials() {
   return apiFetch<ApiTestimonialsData>('/testimonials');
