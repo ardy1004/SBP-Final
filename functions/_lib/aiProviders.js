@@ -10,7 +10,9 @@ export const PROVIDERS = {
     label: 'Gemini',
     settingKey: 'gemini_api_key',
     base: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    defaultModel: 'gemini-2.0-flash',
+    // Gemini 3 Flash (free-tier, kuota harian besar ~1.500 req/hari). Kalau Google
+    // meng-GA / mengganti nama model ini, cukup ubah string di sini.
+    defaultModel: 'gemini-3-flash-preview',
     quota: null, // tidak ada endpoint kuota — status dari cek models
   },
   groq: {
