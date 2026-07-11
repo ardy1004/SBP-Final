@@ -215,7 +215,7 @@ export function compileMasterPrompt(
     for (let i = 0; i < n; i++) {
       const role = sceneRole(i, n);
       const d = durationOf(s1, i);
-      const choreo = compileCameraChoreography(archetype.cameraGrammar, role, d, i);
+      const choreo = compileCameraChoreography(archetype.cameraGrammar, role, d, i, s1.aiTool);
       L.push(`  Scene ${i + 1} (${role}, ${d}s): ${choreo}`);
     }
     L.push('  Terjemahkan koreografi ini ke dalam ai_ready_prompt masing-masing scene sebagai gerakan kamera utama — jaga agar setiap beat terasa mulus dan termotivasi, bukan gerakan acak.');

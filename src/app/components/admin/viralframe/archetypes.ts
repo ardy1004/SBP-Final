@@ -48,6 +48,36 @@ const SPEED_PHRASE: Record<CameraSpeed, string> = {
   slow: 'slow', medium: 'steady', fast: 'fast',
 };
 
+// Token pendek per gerakan — dipakai dialek "structured" (Kling/Wan/Minimax).
+const MOVE_TOKEN: Record<CameraMove, string> = {
+  dolly_in: 'push-in', slow_push: 'slow push-in', pull_back: 'pull-back',
+  orbit: 'orbit', crane_up: 'crane-up', crane_down: 'crane-down',
+  whip_pan: 'whip-pan', gimbal_glide: 'gimbal-forward', handheld_follow: 'handheld-follow',
+  fpv_flythrough: 'fly-through', static_locked: 'static', tilt_up: 'tilt-up',
+  lateral_track: 'track-lateral',
+};
+
+// ─── Dialek kamera per AI video tool ──────────────────────────────────────────
+// Tool berbeda merespons frasa kamera berbeda:
+//  - cinematic      : natural language kaya (Veo3/Sora/Flow/CogVideoX)
+//  - structured     : token ringkas dipisah panah (Kling/Wan/Minimax/Jianying)
+//  - directive      : instruksi singkat dipisah ';' (Runway/Luma)
+//  - motion_strength: frasa + parameter -motion 1..4 (Pika)
+export type ToolDialect = 'cinematic' | 'structured' | 'directive' | 'motion_strength';
+
+const TOOL_DIALECT: Record<string, ToolDialect> = {
+  veo3: 'cinematic', sora: 'cinematic', google_flow: 'cinematic', cogvideox: 'cinematic',
+  kling: 'structured', wan21: 'structured', minimax: 'structured', jianying: 'structured',
+  runway: 'directive', luma: 'directive',
+  pika: 'motion_strength',
+};
+
+function speedToMotionStrength(speeds: CameraSpeed[]): number {
+  // Pika -motion 1..4; ambil beat tercepat sebagai penentu intensitas.
+  const max = speeds.reduce((m, s) => Math.max(m, rankSpeed(s)), 1);
+  return Math.min(4, max + 1); // slow(1)→2, medium(2)→3, fast(3)→4
+}
+
 // Jumlah beat berdasarkan durasi scene — makin panjang, makin kompleks koreografinya.
 function beatCountForDuration(durationSec: number): number {
   if (durationSec <= 4) return 1;
@@ -63,12 +93,16 @@ function beatCountForDuration(durationSec: number): number {
  * @param role     'Hook' | 'Body' | 'CTA'
  * @param durationSec durasi scene
  * @param sceneIndex untuk rotasi beat antar Body scene
+ * @param toolId    value AI tool (opsional) → memilih dialek frasa kamera
  */
 export function compileCameraChoreography(
   grammar: CameraBeat[], role: 'Hook' | 'Body' | 'CTA', durationSec: number, sceneIndex: number,
+  toolId?: string,
 ): string {
+  const dialect: ToolDialect = (toolId && TOOL_DIALECT[toolId]) || 'cinematic';
+
   if (!grammar || grammar.length === 0) {
-    return 'steady locked frame with subtle motion';
+    return dialect === 'structured' ? '[camera: static]' : 'steady locked frame with subtle motion';
   }
   const nBeats = beatCountForDuration(durationSec);
 
@@ -87,11 +121,35 @@ export function compileCameraChoreography(
     picked.push(ordered[(sceneIndex + i) % ordered.length]);
   }
 
-  const phrases = picked.map(b =>
-    `${SPEED_PHRASE[b.speed]} ${MOVE_PHRASE[b.move]} (${b.motivation})`
-  );
-  // Gabung beat: "A, then B, then C" — koreografi multi-beat yang mengalir.
-  return phrases.join(', then ');
+  return assembleDialect(dialect, picked);
+}
+
+// Rakit beat menjadi string sesuai dialek tool.
+function assembleDialect(dialect: ToolDialect, beats: CameraBeat[]): string {
+  switch (dialect) {
+    case 'structured': {
+      // Token ringkas dipisah panah — Kling/Wan/Minimax paham format ini.
+      const tokens = beats.map(b => `${MOVE_TOKEN[b.move]} (${b.speed})`);
+      return `[camera motion: ${tokens.join(' → ')}]`;
+    }
+    case 'directive': {
+      // Instruksi singkat imperatif — Runway/Luma.
+      const parts = beats.map(b => `${SPEED_PHRASE[b.speed]} ${MOVE_PHRASE[b.move]}`);
+      return parts.join('; ');
+    }
+    case 'motion_strength': {
+      // Frasa natural + parameter -motion (Pika).
+      const parts = beats.map(b => `${MOVE_PHRASE[b.move]}`);
+      const strength = speedToMotionStrength(beats.map(b => b.speed));
+      return `${parts.join(', then ')} -motion ${strength}`;
+    }
+    case 'cinematic':
+    default: {
+      // Natural language kaya dengan motivasi — Veo3/Sora/Flow/CogVideoX.
+      const phrases = beats.map(b => `${SPEED_PHRASE[b.speed]} ${MOVE_PHRASE[b.move]} (${b.motivation})`);
+      return phrases.join(', then ');
+    }
+  }
 }
 
 function rankSpeed(s: CameraSpeed): number {
