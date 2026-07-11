@@ -1263,17 +1263,27 @@ function CaptionStudio({ propertyId, platform, registerInstruction }: {
 const CaptionStudioMemo = memo(CaptionStudio);
 
 // ── Content Library (Tahap 3): video hasil generate tersimpan di R2 ──
-interface VideoItem { id: number; r2_key: string; label: string | null; gaya: string | null; rasio: string | null; duration_sec: number | null; size_bytes: number | null; created_at: string }
+interface VideoItem { id: number; r2_key: string; label: string | null; gaya: string | null; rasio: string | null; duration_sec: number | null; size_bytes: number | null; created_at: string; post_url: string | null; views: number | null; likes: number | null }
+interface AnalyticsRow { gaya: string; jumlah: number; avg_views: number; avg_likes: number }
 function VideoLibrary({ propertyId }: { propertyId: number }) {
   const [items, setItems] = useState<VideoItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [analytics, setAnalytics] = useState<AnalyticsRow[]>([]);
+  const [edits, setEdits] = useState<Record<number, { post_url: string; views: string; likes: string }>>({});
+  const [savingId, setSavingId] = useState<number | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const r = await fetch(`/api/admin/viralframe/videos?property_id=${propertyId}`, { credentials: 'include' });
       const j = await r.json();
-      if (j.success) setItems(j.data?.items ?? []);
+      if (j.success) {
+        const list: VideoItem[] = j.data?.items ?? [];
+        setItems(list);
+        setEdits(Object.fromEntries(list.map(v => [v.id, { post_url: v.post_url ?? '', views: v.views != null ? String(v.views) : '', likes: v.likes != null ? String(v.likes) : '' }])));
+      }
     } catch { /* noop */ } finally { setLoading(false); }
+    try { const a = await fetch('/api/admin/viralframe/analytics', { credentials: 'include' }); const aj = await a.json(); if (aj.success) setAnalytics(aj.data?.items ?? []); } catch { /* noop */ }
   }, [propertyId]);
   useEffect(() => { load(); }, [load]);
 
@@ -1282,6 +1292,18 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
     try { await fetch(`/api/admin/viralframe/videos/${id}`, { method: 'DELETE', credentials: 'include' }); } catch { /* noop */ }
     load();
   };
+  const saveMetrics = async (id: number) => {
+    const e = edits[id]; if (!e) return;
+    setSavingId(id);
+    try {
+      await fetch(`/api/admin/viralframe/videos/${id}`, {
+        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_url: e.post_url, views: parseInt(e.views, 10) || 0, likes: parseInt(e.likes, 10) || 0 }),
+      });
+    } catch { /* noop */ } finally { setSavingId(null); load(); }
+  };
+  const setEdit = (id: number, k: 'post_url' | 'views' | 'likes', val: string) =>
+    setEdits(prev => ({ ...prev, [id]: { ...(prev[id] ?? { post_url: '', views: '', likes: '' }), [k]: val } }));
   const mediaUrl = (key: string) => `/api/admin/media?key=${encodeURIComponent(key)}`;
 
   if (loading) return <div className="py-8 text-center text-sm text-[#94A3B8]"><Loader2 size={18} className="animate-spin mx-auto mb-1" /> Memuat library…</div>;
@@ -1292,24 +1314,61 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
     </div>
   );
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      {items.map(v => (
-        <div key={v.id} className="border border-gray-100 rounded-2xl overflow-hidden bg-white">
-          <video src={mediaUrl(v.r2_key)} controls preload="none" className="w-full bg-black aspect-video" />
-          <div className="p-3 flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-[#0F172A] truncate">{v.label ?? 'Video'}</div>
-              <div className="text-[11px] text-[#94A3B8]">
-                {v.gaya ?? '—'} · {v.rasio ?? '—'} · {v.size_bytes ? `${(v.size_bytes / 1024 / 1024).toFixed(1)}MB` : ''} · {new Date(v.created_at).toLocaleDateString('id-ID')}
+    <div className="space-y-4">
+      {/* Tahap 6: ringkasan analitik gaya "pemenang" */}
+      {analytics.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-100 p-4">
+          <div className="text-sm font-semibold text-[#0F172A] mb-2">📊 Performa per Gaya (dari metrik yang diisi)</div>
+          <div className="space-y-1">
+            {analytics.map((a, i) => (
+              <div key={a.gaya} className="flex items-center justify-between text-xs">
+                <span className={`font-medium ${i === 0 ? 'text-emerald-600' : 'text-[#64748B]'}`}>{i === 0 ? '🏆 ' : ''}{a.gaya}</span>
+                <span className="text-[#94A3B8]">rata-rata {a.avg_views.toLocaleString('id-ID')} views · {a.avg_likes.toLocaleString('id-ID')} likes · {a.jumlah} video</span>
               </div>
-            </div>
-            <div className="flex gap-1.5 flex-shrink-0">
-              <a href={mediaUrl(v.r2_key)} download className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download"><Download size={15} /></a>
-              <button onClick={() => del(v.id)} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50" title="Hapus"><X size={15} /></button>
-            </div>
+            ))}
           </div>
         </div>
-      ))}
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {items.map(v => {
+          const e = edits[v.id] ?? { post_url: '', views: '', likes: '' };
+          return (
+            <div key={v.id} className="border border-gray-100 rounded-2xl overflow-hidden bg-white">
+              <video src={mediaUrl(v.r2_key)} controls preload="none" className="w-full bg-black aspect-video" />
+              <div className="p-3 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-[#0F172A] truncate">{v.label ?? 'Video'}</div>
+                    <div className="text-[11px] text-[#94A3B8]">
+                      {v.gaya ?? '—'} · {v.rasio ?? '—'} · {v.size_bytes ? `${(v.size_bytes / 1024 / 1024).toFixed(1)}MB` : ''} · {new Date(v.created_at).toLocaleDateString('id-ID')}
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5 flex-shrink-0">
+                    <a href={mediaUrl(v.r2_key)} download className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download"><Download size={15} /></a>
+                    <button onClick={() => del(v.id)} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50" title="Hapus"><X size={15} /></button>
+                  </div>
+                </div>
+                {/* Tahap 6: input metrik A/B */}
+                <div className="pt-2 border-t border-gray-50 space-y-1.5">
+                  <input value={e.post_url} onChange={ev => setEdit(v.id, 'post_url', ev.target.value)} placeholder="URL postingan (TikTok/IG/YT)"
+                    className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-[#1565C0]" />
+                  <div className="flex items-center gap-2">
+                    <input value={e.views} onChange={ev => setEdit(v.id, 'views', ev.target.value)} placeholder="Views" inputMode="numeric"
+                      className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-[#1565C0]" />
+                    <input value={e.likes} onChange={ev => setEdit(v.id, 'likes', ev.target.value)} placeholder="Likes" inputMode="numeric"
+                      className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-[#1565C0]" />
+                    <button onClick={() => saveMetrics(v.id)} disabled={savingId === v.id}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-[#1565C0] hover:bg-[#1565C0]/90 disabled:opacity-50 flex-shrink-0">
+                      {savingId === v.id ? '…' : 'Simpan'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
