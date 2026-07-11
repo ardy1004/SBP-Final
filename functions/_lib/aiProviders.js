@@ -71,7 +71,7 @@ function isQuotaError(status, bodyText) {
  * Panggil chat completion OpenAI-compat.
  * @returns {Promise<{ ok:boolean, content?:string, status:number, error?:string, quotaExhausted?:boolean }>}
  */
-export async function callChatCompletion({ provider, apiKey, model, systemPrompt, userPrompt, maxTokens = 4000, temperature = 0.7, timeoutMs = 55000 }) {
+export async function callChatCompletion({ provider, apiKey, model, systemPrompt, userPrompt, maxTokens = 4000, temperature = 0.7, timeoutMs = 24000 }) {
   const cfg = PROVIDERS[provider];
   if (!cfg) return { ok: false, status: 0, error: 'provider tidak dikenal' };
   if (!apiKey) return { ok: false, status: 0, error: `API key ${cfg.label} belum diatur`, quotaExhausted: false };

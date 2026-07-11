@@ -455,31 +455,44 @@ export async function onRequestPost(context) {
   const maxTokens = Math.min(4000, 500 + jumlahScene * 350);
   const tryOrder = [chosenProvider, ...PROVIDER_ORDER.filter(p => p !== chosenProvider)];
 
+  // Anggaran waktu total: jaga di bawah batas wall-clock ~30 detik Cloudflare Workers.
+  // Setiap panggilan diberi sisa waktu; kalau tak cukup, hentikan fallback (bukan
+  // dibunuh runtime → 502). Lihat CLAUDE.md gotcha 30 detik.
+  const deadline = Date.now() + 26000;
+
   let raw = null;
   let usedProvider = null;
   let usedModel = null;
   const attempts = [];
 
   for (const provider of tryOrder) {
+    const remaining = deadline - Date.now();
+    if (remaining < 6000) { attempts.push({ provider, skipped: 'time_budget' }); break; }
+
     const key = await getProviderKey(env, provider);
     if (!key) { attempts.push({ provider, skipped: 'no_key' }); continue; }
     const model = provider === chosenProvider && chosenModel ? chosenModel : PROVIDERS[provider].defaultModel;
 
-    const result = await callChatCompletion({ provider, apiKey: key, model, systemPrompt, userPrompt, maxTokens });
+    const result = await callChatCompletion({ provider, apiKey: key, model, systemPrompt, userPrompt, maxTokens, timeoutMs: remaining - 1500 });
     if (result.ok) {
       raw = result.content;
       usedProvider = provider;
       usedModel = model;
       break;
     }
-    attempts.push({ provider, error: result.error?.slice(0, 120), quota: result.quotaExhausted === true });
-    // Hanya lanjut fallback bila kuota habis / rate limit; error lain (mis. model
-    // salah pada provider pilihan) juga dilanjutkan agar tetap ada hasil.
+    attempts.push({ provider, error: result.error?.slice(0, 140), quota: result.quotaExhausted === true });
     console.error(`[ai-generate] ${provider} gagal:`, result.error?.slice(0, 160));
   }
 
   if (!raw) {
-    return jsonError(`Semua provider AI gagal/kehabisan kuota. Detail: ${JSON.stringify(attempts).slice(0, 400)}`, 502);
+    const allNoKey = attempts.length > 0 && attempts.every(a => a.skipped === 'no_key');
+    if (allNoKey) {
+      return jsonError('Belum ada API key AI yang diatur. Buka menu Pengaturan → AI Providers dan simpan minimal satu API key.', 502);
+    }
+    const detail = attempts
+      .map(a => `${a.provider}: ${a.error || a.skipped || 'gagal'}`)
+      .join(' | ');
+    return jsonError(`Semua provider AI gagal. ${detail}`.slice(0, 480), 502);
   }
 
   const parsed = parseSceneJson(raw, jumlahScene);
