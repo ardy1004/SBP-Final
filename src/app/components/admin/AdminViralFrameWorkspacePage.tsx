@@ -237,7 +237,7 @@ interface VideoVOTabProps {
   photos: PropertyImage[];
 }
 
-function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTabProps) {
+function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }: VideoVOTabProps) {
   const [voScenes, setVoScenes] = useState<VOScene[]>([
     { foto_id: null, foto_url: null, gaya_kamera: '', prompt_en: '' },
   ]);
@@ -382,6 +382,13 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
             const videoBlob = await videoRes.blob();
             setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, blob: videoBlob } : r));
             done = true;
+            // Tahap 3: simpan ke Content Library (R2 + D1) — best-effort, tak blokir UI
+            try {
+              const qs = new URLSearchParams({ property_id: String(propertyId), label: `Scene ${i + 1}`, gaya: scene.gaya_kamera ?? '', rasio: String(rasio) });
+              fetch(`/api/admin/viralframe/videos?${qs.toString()}`, {
+                method: 'POST', credentials: 'include', headers: { 'Content-Type': 'video/mp4' }, body: videoBlob,
+              }).catch(() => {});
+            } catch { /* noop */ }
           } else if (status === 'failed') {
             done = true;
             throw new Error(`Scene ${i + 1}: SiliconFlow gagal — ${JSON.stringify(statusJson._raw ?? statusJson.reason ?? 'no detail').slice(0, 400)}`);
@@ -1255,6 +1262,59 @@ function CaptionStudio({ propertyId, platform, registerInstruction }: {
 }
 const CaptionStudioMemo = memo(CaptionStudio);
 
+// ── Content Library (Tahap 3): video hasil generate tersimpan di R2 ──
+interface VideoItem { id: number; r2_key: string; label: string | null; gaya: string | null; rasio: string | null; duration_sec: number | null; size_bytes: number | null; created_at: string }
+function VideoLibrary({ propertyId }: { propertyId: number }) {
+  const [items, setItems] = useState<VideoItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/admin/viralframe/videos?property_id=${propertyId}`, { credentials: 'include' });
+      const j = await r.json();
+      if (j.success) setItems(j.data?.items ?? []);
+    } catch { /* noop */ } finally { setLoading(false); }
+  }, [propertyId]);
+  useEffect(() => { load(); }, [load]);
+
+  const del = async (id: number) => {
+    if (!window.confirm('Hapus video ini dari Library?')) return;
+    try { await fetch(`/api/admin/viralframe/videos/${id}`, { method: 'DELETE', credentials: 'include' }); } catch { /* noop */ }
+    load();
+  };
+  const mediaUrl = (key: string) => `/api/admin/media?key=${encodeURIComponent(key)}`;
+
+  if (loading) return <div className="py-8 text-center text-sm text-[#94A3B8]"><Loader2 size={18} className="animate-spin mx-auto mb-1" /> Memuat library…</div>;
+  if (items.length === 0) return (
+    <div className="text-center py-10 border border-dashed border-gray-200 rounded-2xl">
+      <Film size={26} className="text-gray-300 mx-auto mb-2" />
+      <p className="text-sm text-[#64748B]">Belum ada video tersimpan. Generate video di tab Video VO — hasilnya otomatis tersimpan di sini.</p>
+    </div>
+  );
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {items.map(v => (
+        <div key={v.id} className="border border-gray-100 rounded-2xl overflow-hidden bg-white">
+          <video src={mediaUrl(v.r2_key)} controls preload="none" className="w-full bg-black aspect-video" />
+          <div className="p-3 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-[#0F172A] truncate">{v.label ?? 'Video'}</div>
+              <div className="text-[11px] text-[#94A3B8]">
+                {v.gaya ?? '—'} · {v.rasio ?? '—'} · {v.size_bytes ? `${(v.size_bytes / 1024 / 1024).toFixed(1)}MB` : ''} · {new Date(v.created_at).toLocaleDateString('id-ID')}
+              </div>
+            </div>
+            <div className="flex gap-1.5 flex-shrink-0">
+              <a href={mediaUrl(v.r2_key)} download className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download"><Download size={15} /></a>
+              <button onClick={() => del(v.id)} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50" title="Hapus"><X size={15} /></button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+const VideoLibraryMemo = memo(VideoLibrary);
+
 // #2: versi memo dari tab berat — hanya re-render bila prop berubah (prop-nya
 // distabilkan via useMemo/useCallback di parent), bukan tiap parent re-render.
 const VideoVOTabMemo = memo(VideoVOTab);
@@ -1402,7 +1462,7 @@ export default function AdminViralFrameWorkspacePage() {
   const savedPromptRef = useRef<string>('');
 
   // Step 4 — Tab Paste & Validate (Fase V4b)
-  const [step4Tab, setStep4Tab] = useState<'prompt' | 'validate' | 'video_vo' | 'ai_generate'>('prompt');
+  const [step4Tab, setStep4Tab] = useState<'prompt' | 'validate' | 'video_vo' | 'ai_generate' | 'library'>('prompt');
   const [pasteRaw, setPasteRaw] = useState('');
   const [valResult, setValResult] = useState<ValidateResult | null>(null);
   const [validData, setValidData] = useState<ParsedJSON | null>(null);
@@ -2100,6 +2160,7 @@ export default function AdminViralFrameWorkspacePage() {
               { v: 'validate', label: 'Paste & Validate', icon: <FileCheck2 size={14} /> },
               { v: 'video_vo', label: 'Video VO', icon: <Film size={14} /> },
               { v: 'ai_generate', label: 'AI Generate ✨', icon: <Sparkles size={14} /> },
+              { v: 'library', label: 'Library', icon: <Film size={14} /> },
             ] as const).map(t => (
               <button key={t.v} type="button" onClick={() => setStep4Tab(t.v)}
                 className={`flex items-center gap-1.5 px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
@@ -2225,6 +2286,11 @@ export default function AdminViralFrameWorkspacePage() {
               selectedKarakter={selectedKarakterForAI}
               onEditStep={setStep}
             />
+          )}
+
+          {/* ── TAB 5: CONTENT LIBRARY ── */}
+          {step4Tab === 'library' && prop && (
+            <VideoLibraryMemo propertyId={prop.id} />
           )}
 
           {/* ── TAB 2: PASTE & VALIDATE ── */}

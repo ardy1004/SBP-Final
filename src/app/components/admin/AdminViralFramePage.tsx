@@ -107,6 +107,10 @@ export default function AdminViralFramePage() {
   const [search, setSearch] = useState('');
   const [displayLimit, setDisplayLimit] = useState(24);
   const [selectedProperty, setSelectedProperty] = useState<SelectedProperty | null>(null);
+  // Status konten per properti (R6)
+  const [withScript, setWithScript] = useState<Set<number>>(new Set());
+  const [withVideo, setWithVideo] = useState<Set<number>>(new Set());
+  const [onlyEmpty, setOnlyEmpty] = useState(false);
 
   const openModeModal = (id: number, judul: string) => setSelectedProperty({ id, judul });
   const closeModal = () => setSelectedProperty(null);
@@ -134,9 +138,21 @@ export default function AdminViralFramePage() {
   }, []);
 
   useEffect(() => { fetchProperties(); }, [fetchProperties]);
-  useEffect(() => { setDisplayLimit(24); }, [search]);
+  useEffect(() => { setDisplayLimit(24); }, [search, onlyEmpty]);
+
+  // Status konten (R6)
+  useEffect(() => {
+    fetch('/api/admin/viralframe/status', { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => { if (j.success) { setWithScript(new Set(j.data?.with_script ?? [])); setWithVideo(new Set(j.data?.with_video ?? [])); } })
+      .catch(() => {});
+  }, []);
+
+  const contentStatus = (id: number): 'video' | 'script' | 'empty' =>
+    withVideo.has(id) ? 'video' : withScript.has(id) ? 'script' : 'empty';
 
   const filtered = properties.filter(p => {
+    if (onlyEmpty && contentStatus(p.id) !== 'empty') return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -144,6 +160,8 @@ export default function AdminViralFramePage() {
       (p.kode_listing ?? '').toLowerCase().includes(q)
     );
   });
+
+  const totalWithContent = properties.filter(p => contentStatus(p.id) !== 'empty').length;
 
   return (
     <div className="space-y-5">
@@ -158,8 +176,22 @@ export default function AdminViralFramePage() {
         </div>
       </div>
 
-      {/* Search bar */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+      {/* KPI produksi konten (R6) */}
+      {!loading && properties.length > 0 && (
+        <div className="bg-gradient-to-r from-[#1565C0] to-[#29B6F6] rounded-2xl p-4 text-white flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="text-sm font-semibold">Produksi Konten Video</div>
+            <div className="text-2xl font-bold">{totalWithContent}<span className="text-base font-normal">/{properties.length} listing</span></div>
+          </div>
+          <div className="text-right">
+            <div className="text-3xl font-bold">{properties.length ? Math.round((totalWithContent / properties.length) * 100) : 0}%</div>
+            <div className="text-xs text-white/80">sudah ada konten</div>
+          </div>
+        </div>
+      )}
+
+      {/* Search bar + filter */}
+      <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-3">
         <div className="relative">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#94A3B8]" />
           <input
@@ -169,6 +201,10 @@ export default function AdminViralFramePage() {
             className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] transition-colors"
           />
         </div>
+        <button onClick={() => setOnlyEmpty(v => !v)}
+          className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${onlyEmpty ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}>
+          ⬜ Belum ada konten {onlyEmpty ? '(aktif)' : ''}
+        </button>
       </div>
 
       {error && (
@@ -210,6 +246,14 @@ export default function AdminViralFramePage() {
                   <span className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-xs font-medium ${badge.cls}`}>
                     {badge.label}
                   </span>
+                  {/* Badge status konten ViralFrame (R6) */}
+                  {(() => {
+                    const st = contentStatus(p.id);
+                    const meta = st === 'video' ? { t: '🎬 Video', c: 'bg-emerald-500 text-white' }
+                      : st === 'script' ? { t: '📝 Naskah', c: 'bg-amber-400 text-white' }
+                      : { t: '⬜ Belum', c: 'bg-white/90 text-gray-500 border border-gray-200' };
+                    return <span className={`absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-semibold ${meta.c}`}>{meta.t}</span>;
+                  })()}
                 </div>
                 <div className="p-3 flex-1 flex flex-col gap-1">
                   <div className="flex items-center gap-1.5">

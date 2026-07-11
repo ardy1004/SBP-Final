@@ -4,7 +4,7 @@
 
 import { jsonError, handleOptions } from '../_shared/response.js';
 
-const ALLOWED_PREFIXES = ['property-photos/', 'signatures/', 'agreements/', 'viralframe-characters/'];
+const ALLOWED_PREFIXES = ['property-photos/', 'signatures/', 'agreements/', 'viralframe-characters/', 'viralframe-videos/'];
 
 export async function onRequestGet(context) {
   const { request, env } = context;
