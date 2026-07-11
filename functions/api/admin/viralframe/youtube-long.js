@@ -8,7 +8,7 @@
 // dengan mandat konsistensi ke reference image agent.webp.
 // Auth: _middleware.js
 
-import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+import { jsonError, handleOptions } from '../../_shared/response.js';
 import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
 
 const PROVIDER_ORDER = ['gemini', 'groq', 'openrouter', 'deepseek'];
@@ -109,58 +109,87 @@ FORMAT JSON WAJIB (patuhi persis):
 "scenes" berisi TEPAT ${photos.length} item (urutan sama dengan daftar di atas). hashtag_sets TEPAT 5 string. titles/description/caption/hashtag tetap Bahasa Indonesia. Keluarkan HANYA objek JSON.`;
 
   const tryOrder = [chosenProvider, ...PROVIDER_ORDER.filter(x => x !== chosenProvider)];
-  const deadline = Date.now() + 26000;
   // Output nyata 12 scene ≈ 2.200 token; skala per scene + headroom, jangan flat 8000
   // (max_tokens Gemini juga menghitung token thinking). Mode agen menambah detail subject.
   const maxTokens = Math.min(8000, 1500 + photos.length * 300 + (agent ? 500 : 0));
-  let raw = null, used = null, lastErr = null;
-  for (const prov of tryOrder) {
-    const remaining = deadline - Date.now();
-    if (remaining < 8000) break; // sisa waktu tak cukup untuk satu percobaan berarti
-    const key = await getProviderKey(env, prov);
-    if (!key) continue;
-    const r = await callChatCompletion({
-      provider: prov, apiKey: key, model: PROVIDERS[prov].defaultModel,
-      systemPrompt: system, userPrompt: user, maxTokens, temperature: 0.6,
-      // Gemini 3 Flash = model thinking: tanpa ini ±1.400 token reasoning tersembunyi
-      // membuat 12 scene ~24s (nabrak wall-clock 30s). Dengan "none": ~8s, JSON tetap valid.
-      reasoningEffort: prov === 'gemini' ? 'none' : undefined,
-      // Cap per provider — latensi Gemini terukur 7-17s (varian tinggi); 22s memberi
-      // ruang aman, dan provider berikutnya tetap kebagian bila yang ini gagal cepat
-      // (kuota habis / key invalid — kasus fallback yang paling umum).
-      timeoutMs: Math.min(remaining - 1500, 22000),
-    });
-    if (r.ok) { raw = r.content; used = prov; break; }
-    lastErr = r.error;
-    console.error(`[yt-long] ${prov} gagal:`, r.error?.slice(0, 160));
-  }
-  if (!raw) return jsonError(`Gagal generate storyboard: ${(lastErr || 'semua provider gagal/kehabisan kuota').slice(0, 200)}. Pastikan API key AI diatur di Pengaturan.`, 502);
 
-  // Ekstraksi JSON tahan-banting: '{' pertama sampai '}' terakhir.
-  let parsed;
-  try {
-    let txt = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-    const first = txt.indexOf('{'), last = txt.lastIndexOf('}');
-    if (first > 0 || last < txt.length - 1) txt = txt.slice(first, last + 1);
-    parsed = JSON.parse(txt);
-  } catch {
-    return jsonError(`Respons AI tidak valid (kemungkinan terpotong). Coba lagi / kurangi jumlah foto / ganti provider. Cuplikan: ${String(raw).slice(0, 150)}`, 502);
-  }
+  // Respons STREAMING NDJSON, bukan JSON tunggal. Alasannya: dari dalam Worker,
+  // latensi Gemini terukur >22s bahkan untuk 2 scene (jauh di atas 7-17s dari luar),
+  // sehingga pola "tunggu lalu balas" selalu menabrak wall-clock 30s → 502.
+  // Dengan mengirim heartbeat tiap 2s response sudah "mengalir" sejak awal, koneksi
+  // tetap hidup tanpa batas 30s, dan tiap provider bisa diberi waktu penuh (55s).
+  // Baris terakhir: { done:true, data:{...} } atau { done:true, error:"..." }.
+  const enc = new TextEncoder();
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const send = (obj) => writer.write(enc.encode(JSON.stringify(obj) + '\n')).catch(() => {});
 
-  // Tautkan foto (url) ke tiap scene sesuai urutan, agar client bisa tampilkan referensinya.
-  if (Array.isArray(parsed.scenes)) {
-    parsed.scenes = parsed.scenes.map((s, i) => ({ ...s, url_webp: photos[i]?.url_webp ?? null }));
-  }
+  const work = (async () => {
+    const heartbeat = setInterval(() => send({ status: 'progress' }), 2000);
+    try {
+      let raw = null, used = null, lastErr = null;
+      for (const prov of tryOrder) {
+        const key = await getProviderKey(env, prov);
+        if (!key) continue;
+        const r = await callChatCompletion({
+          provider: prov, apiKey: key, model: PROVIDERS[prov].defaultModel,
+          systemPrompt: system, userPrompt: user, maxTokens, temperature: 0.6,
+          // Gemini 3 Flash = model thinking: tanpa ini ±1.400 token reasoning tersembunyi
+          // memperlambat drastis. Dengan "none" JSON tetap valid.
+          reasoningEffort: prov === 'gemini' ? 'none' : undefined,
+          timeoutMs: 55000,
+        });
+        if (r.ok) { raw = r.content; used = prov; break; }
+        lastErr = r.error;
+        console.error(`[yt-long] ${prov} gagal:`, r.error?.slice(0, 160));
+      }
+      if (!raw) {
+        send({ done: true, error: `Gagal generate storyboard: ${(lastErr || 'semua provider gagal/kehabisan kuota').slice(0, 200)}. Pastikan API key AI diatur di Pengaturan.` });
+        return;
+      }
 
-  try {
-    await env.DB.prepare(`INSERT INTO viralframe_generations (property_id, params_json, master_prompt, result_json)
-                          VALUES (?,?,?,?)`)
-      .bind(propertyId, JSON.stringify({ mode: 'youtube_long', photos, visualStyle, cameraStyle, language, agent_id: agent?.id ?? null }), null, JSON.stringify(parsed)).run();
-  } catch { /* non-fatal */ }
+      // Ekstraksi JSON tahan-banting: '{' pertama sampai '}' terakhir.
+      let parsed;
+      try {
+        let txt = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+        const first = txt.indexOf('{'), last = txt.lastIndexOf('}');
+        if (first > 0 || last < txt.length - 1) txt = txt.slice(first, last + 1);
+        parsed = JSON.parse(txt);
+      } catch {
+        send({ done: true, error: `Respons AI tidak valid (kemungkinan terpotong). Coba lagi / kurangi jumlah foto / ganti provider. Cuplikan: ${String(raw).slice(0, 150)}` });
+        return;
+      }
 
-  return jsonOk({
-    ...parsed, provider_used: used, kode_listing: p.kode_listing, language,
-    agent: agent ? { id: agent.id, nama: agent.nama, foto_url: agent.foto_url } : null,
+      // Tautkan foto (url) ke tiap scene sesuai urutan, agar client bisa tampilkan referensinya.
+      if (Array.isArray(parsed.scenes)) {
+        parsed.scenes = parsed.scenes.map((s, i) => ({ ...s, url_webp: photos[i]?.url_webp ?? null }));
+      }
+
+      try {
+        await env.DB.prepare(`INSERT INTO viralframe_generations (property_id, params_json, master_prompt, result_json)
+                              VALUES (?,?,?,?)`)
+          .bind(propertyId, JSON.stringify({ mode: 'youtube_long', photos, visualStyle, cameraStyle, language, agent_id: agent?.id ?? null }), null, JSON.stringify(parsed)).run();
+      } catch { /* non-fatal */ }
+
+      send({
+        done: true,
+        data: {
+          ...parsed, provider_used: used, kode_listing: p.kode_listing, language,
+          agent: agent ? { id: agent.id, nama: agent.nama, foto_url: agent.foto_url } : null,
+        },
+      });
+    } catch (err) {
+      console.error('[yt-long] stream', err.message);
+      send({ done: true, error: 'Terjadi kesalahan internal saat generate. Coba lagi.' });
+    } finally {
+      clearInterval(heartbeat);
+      await writer.close().catch(() => {});
+    }
+  })();
+  context.waitUntil?.(work);
+
+  return new Response(readable, {
+    headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' },
   });
 }
 

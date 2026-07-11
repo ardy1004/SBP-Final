@@ -1494,9 +1494,36 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
           agent_id: useAgent ? agentId : undefined,
         }),
       });
-      const j = await r.json();
-      if (!r.ok || !j.success) throw new Error(j.error ?? 'Gagal generate');
-      setResult(j.data); setProgress(100);
+      // Error validasi (4xx/5xx) tetap JSON biasa; sukses = stream NDJSON
+      // (heartbeat tiap 2s + baris terakhir {done, data|error}) agar lolos
+      // wall-clock 30s Worker saat panggilan AI lambat.
+      const ct = r.headers.get('content-type') ?? '';
+      if (ct.includes('application/json')) {
+        const j = await r.json();
+        throw new Error(j.error ?? 'Gagal generate');
+      }
+      if (!r.ok || !r.body) throw new Error('Gagal generate (koneksi)');
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      let final: { done?: boolean; data?: YtResult; error?: string } | null = null;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (value) buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+          if (!line) continue;
+          try {
+            const o = JSON.parse(line);
+            if (o.done) final = o;
+          } catch { /* abaikan baris rusak */ }
+        }
+        if (done) break;
+      }
+      if (!final) throw new Error('Koneksi terputus saat generate. Coba lagi.');
+      if (final.error || !final.data) throw new Error(final.error ?? 'Gagal generate');
+      setResult(final.data); setProgress(100);
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Gagal'); } finally { clearInterval(timer); setLoading(false); }
   };
 
