@@ -53,6 +53,14 @@
 - **Style Pair A/B**: Step 4 bisa generate 2 varian gaya sekaligus untuk uji split.
 - Konstanta `LIPSYNC`/`EXPRESSION_EN` = sumber tunggal di `functions/_lib/viralframe-shared.js` (backend impor natif, frontend impor via Vite) — JANGAN duplikasi lagi.
 
+## ViralFrame 2.0 — Memori, Library, Konten (roadmap 6 tahap, semua LIVE)
+- **Riwayat**: setiap Master Prompt tersimpan ke `viralframe_generations` (params_json = `{s1,scenes,s3}`). Panel Riwayat di workspace bisa "Muat konfigurasi" (rehydrate) & "Lihat hasil". **Autosave** Step 1-3 ke `localStorage` (`vf_draft_<id>`).
+- **Content Library**: video SiliconFlow otomatis diupload ke R2 (`viralframe-videos/`) + tabel D1 `viralframe_videos` (punya kolom `post_url/views/likes` untuk analitik). Endpoint `videos` (POST bytes mentah, GET, `[id]` DELETE/PATCH). Tab "Library" (putar/download/hapus). Tabel dibuat via `wrangler d1 execute --remote` (BUKAN migrations apply, agar tak re-run migrasi lama).
+- **List page = dashboard**: badge status (🎬/📝/⬜) dari endpoint `/viralframe/status`, filter "belum ada konten", KPI banner, **batch** multi-select → Storyboard massal.
+- **Gaya baru**: arketipe 🤳 Selfie Vlog (tongsis) + parameter **Register Bahasa** (formal/santai/gaul/jawa) lintas arketipe.
+- **Caption Studio** (`/captions`): N variasi caption × 5 kombinasi hashtag. **YouTube Long 1-klik** (`/youtube-long`, `?mode=youtube-long`): storyboard 16:9 dari data properti tanpa parameter. **Preset tim** (`/presets`, settings JSON). **Analitik** (`/analytics`): gaya pemenang dari metrik. **SRT** di ZIP.
+- Semua endpoint AI baru pakai abstraksi `aiProviders.js` + fallback + anggaran waktu <30s.
+
 ## Gotcha Wajib Diingat
 - **Cloudflare Workers 30 detik wall-clock limit** — panggil API eksternal yang lambat (SiliconFlow, dsb) langsung dari browser (client-side), bukan dari dalam Worker
 - **react-leaflet WAJIB v4.2.1** — v5 butuh React 19, project masih React 18.3.1 (downgrade sudah dilakukan, jangan upgrade lagi tanpa upgrade React dulu)

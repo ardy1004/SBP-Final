@@ -5,6 +5,20 @@
 
 ---
 
+## SESI 11 JULI 2026 (lanjutan) — ViralFrame 2.0 (roadmap 6 tahap, semua LIVE)
+
+Dari "generator sekali-pakai yang amnesia" → sistem produksi konten (memori, library, status, feedback).
+- **Tahap 1**: Riwayat (baca generations + rehydrate params_json), Autosave draft (localStorage), guard beforeunload, modal jujur.
+- **Tahap 2**: Arketipe 🤳 Selfie Vlog (tongsis, arm-extended framing), Register Bahasa (formal/santai/gaul/jawa) lintas arketipe, Caption Studio (N×5 hashtag, endpoint `/captions`), copy JSON per scene, subtitle .SRT di ZIP.
+- **Tahap 3**: Content Library — tabel `viralframe_videos` (via d1 execute remote), video SiliconFlow auto-upload ke R2, tab Library (putar/download/hapus), endpoint `videos`. Status pipeline list page (badge 🎬/📝/⬜, filter, KPI banner) via `/status`.
+- **Tahap 4**: YouTube Long 1-klik (`?mode=youtube-long`, endpoint `/youtube-long`) — storyboard 16:9 diturunkan dari data properti (kamar→chapter), 10-14 scene + thumbnail prompt + judul SEO + timestamps + caption, tiap blok copy.
+- **Tahap 5**: Preset tim (`/presets`, settings JSON), Batch storyboard massal (multi-select list page). R7 (pecah monolit) DITUNDA — refactor murni, risiko regresi tinggi.
+- **Tahap 6**: Analitik A/B (`/analytics`) — input metrik views/likes per video di Library + ringkasan gaya pemenang.
+
+Semua tahap: build 0 error + Functions bundle OK + deploy + verifikasi health. Endpoint AI baru pakai `aiProviders.js` (fallback + budget <30s). Commit 3bf6cf4…ea074d4.
+
+---
+
 ## STATUS SAAT INI: Domain `salambumi.xyz` LIVE di produksi. Pasca go-live: security hardening + Turnstile anti-bot + sitemap dinamis LIVE; ViralFrame naik kelas (arketipe gaya video, koreografi kamera per-tool, Style Pair A/B, multi-provider AI Gemini/Groq/OpenRouter/DeepSeek dengan fallback), fix konsistensi image-to-video. `master` = produksi. — Terakhir diupdate 11 Juli 2026
 
 ---
