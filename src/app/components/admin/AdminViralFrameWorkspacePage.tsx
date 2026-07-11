@@ -11,7 +11,11 @@ import {
   sceneFileName, characterFileName, AI_TOOL_FORMAT_SPEC,
 } from './viralframe/options';
 import CharacterStep, { type Step3State } from './viralframe/CharacterStep';
-import { ARCHETYPES, findArchetype, ARCHETYPE_CUSTOM_ID } from './viralframe/archetypes';
+import { ARCHETYPES, findArchetype, ARCHETYPE_CUSTOM_ID, compileCameraChoreography } from './viralframe/archetypes';
+
+// Durasi klip default per platform (selaras dgn PLATFORM_DURASI di ai-generate.js) —
+// hanya untuk menghitung jumlah beat koreografi kamera Jalur C.
+const PLATFORM_DURASI_VF: Record<string, number> = { tiktok: 8, ig_reels: 8, yt_shorts: 10, fb_reels: 8 };
 import {
   PLATFORM_OPTIONS, AI_TOOL_OPTIONS, MUSIK_OPTIONS, FOTO_LABEL_OPTIONS,
 } from '../../lib/viralframe-constants';
@@ -646,6 +650,7 @@ interface AIGenerateTabProps {
   visualStyle: string;
   hookType: string;
   ctaType: string;
+  archetype: string;
   sceneRoles: Record<number, 'Hook' | 'Body' | 'CTA'>;
   // Data dari Step 2
   scenePhotos: Record<number, ScenePhoto>;
@@ -657,7 +662,7 @@ interface AIGenerateTabProps {
 
 function AIGenerateTab({
   propertyId, propertyTitle, kodeListingStr, jumlahScene, platform, platforms, aiTool, bahasa,
-  tone, visualStyle, hookType, ctaType, sceneRoles,
+  tone, visualStyle, hookType, ctaType, archetype, sceneRoles,
   scenePhotos, selectedKarakter, onEditStep,
 }: AIGenerateTabProps) {
   const [musik, setMusik] = useState('corporate');
@@ -694,6 +699,21 @@ function AIGenerateTab({
       const hookTypeLabel = HOOK_TYPES.find(h => h.value === hookType)?.label ?? hookType;
       const ctaTypeLabel = CTA_TYPES.find(c => c.value === ctaType)?.label ?? ctaType;
       const supportsRefImage = AI_TOOL_FORMAT_SPEC[aiTool]?.supportsRefImage ?? false;
+
+      // Arketipe (opsional) — client hitung koreografi kamera per scene + arahan sutradara,
+      // kirim sebagai string siap-pakai supaya backend tidak perlu menduplikasi data arketipe.
+      const arc = findArchetype(archetype);
+      const dur = PLATFORM_DURASI_VF[platform] ?? 8;
+      const archetype_note = arc
+        ? `${arc.label} — ${arc.shotGrammarNote} (mode presenter: ${arc.presenterMode}, pacing: ${arc.pacing})`
+        : '';
+      const camera_directives = arc
+        ? Array.from({ length: jumlahScene }, (_, i) => ({
+            scene: i + 1,
+            camera: compileCameraChoreography(arc.cameraGrammar, sceneRoles[i + 1] ?? 'Body', dur, i, aiTool),
+          }))
+        : [];
+
       const res = await fetch('/api/admin/viralframe/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -715,6 +735,8 @@ function AIGenerateTab({
           expression: selectedKarakter.expression,
           foto_assignments,
           supports_ref_image: supportsRefImage,
+          archetype_note,
+          camera_directives,
         }),
       });
       const json = await res.json();
@@ -1763,6 +1785,7 @@ export default function AdminViralFrameWorkspacePage() {
               visualStyle={s1.visualStyle}
               hookType={s1.hookType}
               ctaType={s1.ctaType}
+              archetype={s1.archetype}
               sceneRoles={sceneRolesForAI}
               scenePhotos={scenePhotosForAI}
               selectedKarakter={selectedKarakterForAI}

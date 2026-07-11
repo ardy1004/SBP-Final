@@ -267,25 +267,33 @@ Format yang diharapkan:
 Field WAJIB ada dan non-empty: scene (integer), kamera (string), prompt (string min 50 kata), dialog_karakter (string, format sesuai [4]).`;
 }
 
-function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles }) {
+function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote }) {
   const fasilitas = 'tidak disebutkan';
   const deskripsi = (property.deskripsi ?? '').slice(0, 200);
   const hargaLabel = `${formatRupiah(property.harga)}${property.nego ? ' (nego)' : property.nett ? ' (nett)' : ''}`;
 
   const roleByScene = new Map((sceneRoles ?? []).map(r => [Number(r.scene), r.role]));
+  // Koreografi kamera arketipe (dihitung di client) — string siap-pakai per scene.
+  const cameraByScene = new Map((cameraDirectives ?? []).map(c => [Number(c.scene), String(c.camera ?? '')]));
 
   const sceneLines = fotoAssignments
     .slice()
     .sort((a, b) => a.scene - b.scene)
     .map(a => {
       const fotoDeskripsi = LABEL_MAP[a.foto_label] ?? LABEL_MAP.lainnya;
-      const kameraHint = KAMERA_PER_LABEL[a.foto_label] ?? KAMERA_PER_LABEL.lainnya;
+      // Bila arketipe menyediakan koreografi kamera untuk scene ini, pakai itu
+      // (lebih koheren dgn gaya video). Kalau tidak, fallback ke hint per-label.
+      const kameraHint = cameraByScene.get(a.scene) || KAMERA_PER_LABEL[a.foto_label] || KAMERA_PER_LABEL.lainnya;
       const role = roleByScene.get(a.scene) ?? 'Body';
       return `Scene ${a.scene}:\n  Foto    : ${fotoDeskripsi} (${a.foto_label})\n  Kamera  : ${kameraHint}\n  Durasi  : ${durasiDetik} detik\n  Role    : ${role}`;
     })
     .join('\n\n');
 
-  return `Data properti:
+  const archetypeBlock = archetypeNote
+    ? `ARAHAN GAYA VIDEO (ARKETIPE) — WAJIB dipatuhi di semua scene:\n${archetypeNote}\n\n`
+    : '';
+
+  return `${archetypeBlock}Data properti:
 - Jenis: ${property.jenis_properti}
 - Judul: ${property.title}
 - Lokasi: ${property.kecamatan}, ${property.kabupaten}
@@ -400,6 +408,13 @@ export async function onRequestPost(context) {
   const fotoAssignments = body.foto_assignments;
   const supportsRefImage = body.supports_ref_image === true;
   const expression = typeof body.expression === 'string' ? body.expression : 'auto';
+  // Arketipe (opsional) — string siap-pakai dari client (client compute, backend consume).
+  const archetypeNote = typeof body.archetype_note === 'string' ? body.archetype_note.slice(0, 600) : '';
+  const cameraDirectives = Array.isArray(body.camera_directives)
+    ? body.camera_directives
+        .filter(c => c && Number.isInteger(Number(c.scene)) && typeof c.camera === 'string')
+        .map(c => ({ scene: Number(c.scene), camera: c.camera.slice(0, 400) }))
+    : [];
 
   if (!Number.isInteger(propertyId) || propertyId <= 0) return jsonError('property_id wajib diisi', 422);
   if (!Number.isInteger(jumlahScene) || jumlahScene < 2 || jumlahScene > 12) return jsonError('jumlah_scene harus 2-12', 422);
@@ -447,7 +462,7 @@ export async function onRequestPost(context) {
   const karakterDesc = describeKarakterUntukPrompt(karakter, expression);
 
   const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel });
-  const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles });
+  const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote });
 
   let dsRes;
   try {
