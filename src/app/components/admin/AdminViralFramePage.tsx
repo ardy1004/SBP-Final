@@ -63,10 +63,10 @@ function ModeSelectionModal({ property, onClose, onPick }: {
           >
             <div className="flex items-center gap-2 mb-1">
               <Sparkles size={16} className="text-[#1565C0]" />
-              <span className="font-semibold text-sm text-[#0F172A]">AI DeepSeek</span>
+              <span className="font-semibold text-sm text-[#0F172A]">⚡ AI Generate</span>
               <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white bg-[#1565C0]">REKOMENDASI</span>
             </div>
-            <p className="text-xs text-[#64748B] mb-2">Otomatis: pilih foto, tulis prompt, download ZIP siap pakai. ~30 detik.</p>
+            <p className="text-xs text-[#64748B] mb-2">Gemini / Groq / OpenRouter / DeepSeek dengan fallback otomatis. Lewat 3 langkah singkat (foto + karakter) untuk hasil akurat, lalu naskah per-scene siap pakai.</p>
             <span className="text-xs font-semibold text-[#1565C0]">Mulai →</span>
           </button>
 

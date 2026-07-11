@@ -13,10 +13,10 @@ export async function onRequestGet(context) {
 
   try {
     const stmt = Number.isInteger(pid) && pid > 0
-      ? env.DB.prepare(`SELECT id, property_id, master_prompt, result_json, created_at
+      ? env.DB.prepare(`SELECT id, property_id, params_json, master_prompt, result_json, created_at
                         FROM viralframe_generations WHERE property_id = ?
                         ORDER BY created_at DESC, id DESC`).bind(pid)
-      : env.DB.prepare(`SELECT id, property_id, master_prompt, result_json, created_at
+      : env.DB.prepare(`SELECT id, property_id, params_json, master_prompt, result_json, created_at
                         FROM viralframe_generations ORDER BY created_at DESC, id DESC LIMIT 100`);
     const res = await stmt.all();
     return jsonOk({ items: res.results ?? [], total: (res.results ?? []).length });

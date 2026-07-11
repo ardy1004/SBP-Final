@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
 import {
   ArrowLeft, ArrowRight, ImageOff, Check, Film, AlertCircle,
-  Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles,
+  Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles, History,
 } from 'lucide-react';
 // JSZip di-dynamic-import di handler (bukan static) agar tidak masuk chunk awal workspace.
 import {
@@ -438,6 +438,15 @@ function VideoVOTab({ propertyTitle, jenisProperti, lokasi, photos }: VideoVOTab
   const canGenerateVideos = voScenes.every(s => s.foto_id !== null && s.gaya_kamera !== '');
   const allVideosReady = videoResults.length === voScenes.length && videoResults.length > 0 && videoResults.every(r => r.blob !== null);
 
+  // R4: cegah tutup/refresh tab saat proses berjalan (video/merge/VO) — hindari kehilangan kerja.
+  const voBusy = isGeneratingVideos || isMerging || isGeneratingVO;
+  useEffect(() => {
+    if (!voBusy) return;
+    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [voBusy]);
+
   return (
     <div className="space-y-6 pt-2">
       {/* SECTION 1 — SCENE BUILDER */}
@@ -732,6 +741,14 @@ function AIGenerateTab({
     }).finally(() => { if (alive) setLoadingModels(false); });
     return () => { alive = false; };
   }, [provider]);
+
+  // R4: cegah tutup/refresh saat generate AI berlangsung.
+  useEffect(() => {
+    if (!isGenerating) return;
+    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [isGenerating]);
 
   const missingScenes = Array.from({ length: jumlahScene }, (_, i) => i + 1)
     .filter(n => !scenePhotos[n]?.foto_url);
@@ -1190,6 +1207,66 @@ export default function AdminViralFrameWorkspacePage() {
   const update3 = useCallback((patch: Partial<Step3State>) =>
     setS3(prev => ({ ...prev, ...patch })), []);
 
+  // ─── Tahap 1: Autosave draft (localStorage) + Riwayat (D1) ──────────────────
+  const draftKey = id ? `vf_draft_${id}` : '';
+  const [draftFound, setDraftFound] = useState<{ ts: number } | null>(null);
+  const [hydrated, setHydrated] = useState(false); // true = boleh autosave (draft sudah diputuskan / tak ada)
+
+  // Terapkan konfigurasi tersimpan ({s1,scenes,s3}) ke state — merge defensif.
+  const applyConfig = useCallback((cfg: { s1?: Partial<Step1State>; scenes?: SceneAssign[]; s3?: Partial<Step3State> } | null) => {
+    if (!cfg) return;
+    if (cfg.s1)  setS1(prev => ({ ...prev, ...cfg.s1 }));
+    if (Array.isArray(cfg.scenes)) setScenes(cfg.scenes);
+    if (cfg.s3)  setS3(prev => ({ ...prev, ...cfg.s3 }));
+  }, []);
+
+  // Cek draft tersimpan saat id siap (belum autosave sebelum user memutuskan).
+  useEffect(() => {
+    if (!draftKey) return;
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d?.s1) { setDraftFound({ ts: d.ts ?? 0 }); return; }
+      }
+    } catch { /* ignore */ }
+    setHydrated(true);
+  }, [draftKey]);
+
+  const restoreDraft = () => {
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (raw) applyConfig(JSON.parse(raw));
+    } catch { /* ignore */ }
+    setDraftFound(null); setHydrated(true);
+  };
+  const dismissDraft = () => {
+    try { localStorage.removeItem(draftKey); } catch { /* ignore */ }
+    setDraftFound(null); setHydrated(true);
+  };
+
+  // Autosave debounced (hanya setelah draft diputuskan agar tak menimpa draft lama).
+  const autosaveSrc = useMemo(() => ({ s1, scenes, s3 }), [s1, scenes, s3]);
+  const debouncedAutosave = useDebouncedValue(autosaveSrc, 800);
+  useEffect(() => {
+    if (!draftKey || !hydrated) return;
+    try { localStorage.setItem(draftKey, JSON.stringify({ ...debouncedAutosave, ts: Date.now() })); } catch { /* ignore */ }
+  }, [draftKey, hydrated, debouncedAutosave]);
+
+  // Riwayat generate (D1) per properti.
+  interface GenItem { id: number; params_json: string | null; master_prompt: string | null; result_json: string | null; created_at: string }
+  const [history, setHistory] = useState<GenItem[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const loadHistory = useCallback(async () => {
+    if (!id) return;
+    try {
+      const r = await fetch(`/api/admin/viralframe/generations?property_id=${id}`, { credentials: 'include' });
+      const j = await r.json();
+      if (j.success) setHistory(j.data?.items ?? []);
+    } catch { /* ignore */ }
+  }, [id]);
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
   // ─── Jalur C: derivasi props AIGenerateTab dari state Step 1–3 (bukan form independen lagi) ──
   const platformForAI = s1.platforms[0] ?? 'tiktok';
   const scenePhotosForAI = useMemo(() => {
@@ -1584,6 +1661,57 @@ export default function AdminViralFrameWorkspacePage() {
           <Film size={16} /> <span className="text-xs font-semibold">ViralFrame</span>
         </div>
       </div>
+
+      {/* Tahap 1: Banner draft tersimpan */}
+      {draftFound && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 flex items-center justify-between gap-3 flex-wrap">
+          <span className="text-sm text-amber-800">
+            📝 Draft tersimpan ditemukan{draftFound.ts ? ` (${new Date(draftFound.ts).toLocaleString('id-ID')})` : ''}. Lanjutkan?
+          </span>
+          <div className="flex gap-2">
+            <button onClick={restoreDraft} className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-[#1565C0] hover:bg-[#1565C0]/90">Pulihkan</button>
+            <button onClick={dismissDraft} className="px-3 py-1.5 rounded-lg text-xs font-semibold text-amber-700 border border-amber-300 hover:bg-amber-100">Mulai baru</button>
+          </div>
+        </div>
+      )}
+
+      {/* Tahap 1: Riwayat generate */}
+      {history.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <button onClick={() => setShowHistory(v => !v)}
+            className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
+            <span className="text-sm font-semibold text-[#0F172A] flex items-center gap-2">
+              <History size={15} className="text-[#1565C0]" /> Riwayat ({history.length})
+            </span>
+            <span className="text-[#94A3B8] text-xs">{showHistory ? '▲' : '▼'}</span>
+          </button>
+          {showHistory && (
+            <div className="border-t border-gray-100 divide-y divide-gray-50 max-h-72 overflow-y-auto">
+              {history.map(h => {
+                const hasResult = !!h.result_json;
+                return (
+                  <div key={h.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-[#0F172A]">#{h.id} · {new Date(h.created_at).toLocaleString('id-ID')}</div>
+                      <div className="text-[11px] text-[#94A3B8]">{hasResult ? '✅ ada hasil JSON' : '📝 konfigurasi'}</div>
+                    </div>
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      {h.params_json && (
+                        <button onClick={() => { try { applyConfig(JSON.parse(h.params_json!)); setStep(1); setShowHistory(false); } catch { /* ignore */ } }}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF]">Muat konfigurasi</button>
+                      )}
+                      {hasResult && (
+                        <button onClick={() => { try { setValidData(JSON.parse(h.result_json!)); setStep(4); setStep4Tab('validate'); setShowHistory(false); } catch { /* ignore */ } }}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-emerald-700 border border-emerald-200 hover:bg-emerald-50">Lihat hasil</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Step indicator */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
