@@ -53,6 +53,16 @@ export async function onRequestPost(context) {
   try { details = p.details ? JSON.parse(p.details) : null; } catch { /* ignore */ }
   const outline = deriveOutline(p, details);
 
+  // Foto listing — dikembalikan agar user bisa memakainya sebagai reference image
+  // saat generate tiap scene di tool eksternal (Veo/Kling). Prompt tetap berbasis DATA.
+  let images = [];
+  try {
+    const imgRes = await env.DB.prepare(
+      `SELECT url_webp, alt_text FROM property_images WHERE property_id = ? ORDER BY is_cover DESC, urutan ASC LIMIT 20`
+    ).bind(propertyId).all();
+    images = (imgRes.results ?? []).map(r => ({ url_webp: r.url_webp, alt: r.alt_text }));
+  } catch { /* non-fatal */ }
+
   const system = `Kamu sutradara & copywriter konten properti YouTube profesional Indonesia. Output HANYA JSON valid, mulai { akhiri }, tanpa markdown/komentar.`;
   const user = `Buat STORYBOARD lengkap video tur properti untuk YouTube (16:9, long-form, durasi total ~3-6 menit). Setiap scene berdurasi ~10 detik. Sasaran: penonton yang mempertimbangkan membeli/menyewa.
 
@@ -122,7 +132,7 @@ hashtag_sets berisi TEPAT 5 string. scenes berisi 8-12 item. PENTING: keluarkan 
       .bind(propertyId, JSON.stringify({ mode: 'youtube_long' }), null, JSON.stringify(parsed)).run();
   } catch { /* non-fatal */ }
 
-  return jsonOk({ ...parsed, outline, provider_used: used, kode_listing: p.kode_listing });
+  return jsonOk({ ...parsed, outline, images, provider_used: used, kode_listing: p.kode_listing });
 }
 
 export async function onRequestOptions() { return handleOptions(); }

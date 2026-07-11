@@ -1376,7 +1376,7 @@ const VideoLibraryMemo = memo(VideoLibrary);
 
 // ── YouTube Long 1-klik (Tahap 4) ──
 interface YtScene { scene: number; chapter?: string; duration_sec?: number; ai_ready_prompt?: string; narration_id?: string; on_screen_text?: string }
-interface YtResult { titles?: string[]; description?: string; chapters_timestamp?: string[]; thumbnail_prompt?: string; scenes?: YtScene[]; caption?: string; hashtag_sets?: string[]; provider_used?: string }
+interface YtResult { titles?: string[]; description?: string; chapters_timestamp?: string[]; thumbnail_prompt?: string; scenes?: YtScene[]; caption?: string; hashtag_sets?: string[]; provider_used?: string; images?: { url_webp: string; alt: string }[] }
 function YouTubeLongView({ propertyId, propertyTitle }: { propertyId: number; propertyTitle: string }) {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -1439,6 +1439,21 @@ function YouTubeLongView({ propertyId, propertyTitle }: { propertyId: number; pr
             <button onClick={() => { setResult(null); setProgress(0); }} className="text-xs text-[#1565C0] underline">Buat ulang</button>
           </div>
           {result.provider_used && <p className="text-[11px] text-[#94A3B8]">Digenerate oleh {result.provider_used}</p>}
+
+          {/* Foto listing sebagai reference image */}
+          {Array.isArray(result.images) && result.images.length > 0 && (
+            <div className="border border-gray-100 rounded-xl p-3 bg-[#F8FAFC]">
+              <div className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wide mb-2">📸 Foto Listing — pakai sebagai reference image saat generate tiap scene</div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {result.images.map((im, i) => (
+                  <a key={i} href={`/api/media?key=${encodeURIComponent(im.url_webp)}`} download target="_blank" rel="noreferrer" className="flex-shrink-0">
+                    <img src={thumbSrc(im.url_webp, 160)} alt={im.alt} loading="lazy" decoding="async" className="w-24 h-16 object-cover rounded-lg border border-gray-200 hover:border-[#1565C0]" />
+                  </a>
+                ))}
+              </div>
+              <p className="text-[10px] text-[#94A3B8] mt-1">Klik foto untuk unduh. Unggah foto yang sesuai sebagai reference/first-frame di tool video (Veo/Kling) agar hasil setia ke properti asli.</p>
+            </div>
+          )}
 
           {Array.isArray(result.titles) && result.titles.length > 0 && (
             <Block title="Judul Video (pilih 1)" k="titles" text={result.titles.map((t, i) => `${i + 1}. ${t}`).join('\n')} />
