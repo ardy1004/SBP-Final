@@ -27,6 +27,13 @@ export async function onRequestPost(context) {
     const modelFinal  = MODEL_VALID.includes(model) ? model : 'Wan-AI/Wan2.2-I2V-A14B';
     const sizeFinal   = SIZE_VALID.includes(image_size) ? image_size : '1280x720';
 
+    // Negative prompt untuk mengunci konsistensi image-to-video: cegah model
+    // mengubah adegan/arsitektur/menambah objek yang tidak ada di foto referensi.
+    // Client boleh menambah, tapi guard inti selalu disertakan.
+    const NEG_CORE = 'different scene, changed architecture, new rooms, extra objects, added furniture, morphing, warping, distorted geometry, style change, text, watermark, logo, people appearing, flickering, blurry, low quality';
+    const clientNeg = typeof body.negative_prompt === 'string' ? body.negative_prompt.slice(0, 400).trim() : '';
+    const negativePrompt = clientNeg ? `${NEG_CORE}, ${clientNeg}` : NEG_CORE;
+
     const apiKey = env.SILICONFLOW_API_KEY;
     if (!apiKey) {
       return Response.json({ error: 'SILICONFLOW_API_KEY tidak dikonfigurasi' }, { status: 500 });
@@ -44,6 +51,7 @@ export async function onRequestPost(context) {
           model: modelFinal,
           image: image_base64,
           prompt: String(prompt),
+          negative_prompt: negativePrompt,
           image_size: sizeFinal,
           seed: Math.floor(Math.random() * 999999),
         }),

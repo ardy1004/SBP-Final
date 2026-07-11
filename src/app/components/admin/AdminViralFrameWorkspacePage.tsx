@@ -138,14 +138,21 @@ function StepIndicator({ current }: { current: number }) {
 
 // ─── Jalur B: Video VO constants & component ────────────────────────────────
 
+// PENTING (image-to-video): prompt ini WAJIB "motion-only + scene-preserving".
+// Foto yang dikirim = frame pertama; deskripsi ADEGAN/pencahayaan/objek yang tidak
+// ada di foto akan membuat model (Wan2.2 I2V) melenceng dari foto. Jadi:
+//  - HANYA jelaskan gerakan kamera + perintah menjaga adegan tetap sama.
+//  - JANGAN sebut "facade/interior/sky/golden hour/neighborhood" (biarkan foto yang menentukan).
+//  - Utamakan gerakan yang TIDAK menuntut area di luar frame (push-in/dolly/pan/parallax);
+//    gerakan "reveal/pull-back/orbit" dibatasi ringan agar tidak memaksa mengarang.
 const GAYA_KAMERA = [
-  { label: '🚁 Drone Pull-back', value: 'drone_pullback', prompt: 'cinematic drone shot slowly pulling back and ascending revealing the full facade of the property, smooth aerial motion, golden hour warm lighting, professional real estate videography, 4K quality' },
-  { label: '🔄 Aerial Orbit', value: 'aerial_orbit', prompt: 'smooth aerial orbit shot slowly circling around the property from elevated position, wide angle revealing surrounding environment, cinematic drone photography, clear sky' },
-  { label: '▶️ Dolly Push-in', value: 'dolly_pushin', prompt: 'cinematic dolly push-in shot from street level slowly approaching the property main entrance, smooth forward tracking motion, wide angle lens, professional architectural videography' },
-  { label: '⬆️ Crane Rise', value: 'crane_rise', prompt: 'camera crane rising smoothly from ground level to aerial view revealing full height of building and surroundings, slow upward motion, architectural real estate style' },
-  { label: '🏠 Walk-through', value: 'walkthrough', prompt: 'smooth steadicam walk-through shot moving forward through the interior space, first-person cinematic perspective, warm natural lighting, professional property tour style' },
-  { label: '📐 Establishing Wide', value: 'establishing', prompt: 'wide angle establishing shot from elevated position showing full property and surrounding neighborhood, static camera, golden hour lighting, cinematic real estate photography' },
-  { label: '🎯 Close Detail', value: 'close_detail', prompt: 'slow cinematic lateral pan across architectural details and surfaces, close-up macro style, shallow depth of field, smooth horizontal motion revealing textures and materials' },
+  { label: '▶️ Push-in Lembut', value: 'dolly_pushin', prompt: 'slow steady push-in, camera moves gently forward into the existing scene, smooth cinematic motion, subtle natural parallax, keep the scene, architecture, objects and lighting exactly as shown, no new elements' },
+  { label: '🏠 Walk-through', value: 'walkthrough', prompt: 'slow steady forward gimbal glide through the existing space, smooth stabilized motion, first-person tour feel, preserve the scene, layout and lighting exactly as shown, gentle natural parallax, no new elements' },
+  { label: '🎯 Detail Pan', value: 'close_detail', prompt: 'slow gentle lateral pan across the existing scene, smooth micro-movement, shallow depth of field, keep all elements, textures and lighting consistent with the reference image, no new objects' },
+  { label: '↕️ Tilt Halus', value: 'gentle_tilt', prompt: 'slow smooth vertical tilt over the existing scene, subtle steady motion, keep the architecture, framing and lighting exactly as shown, natural parallax, no new elements' },
+  { label: '🤏 Slow Zoom-in', value: 'slow_zoom', prompt: 'very slow cinematic zoom-in on the existing scene, minimal steady motion, preserve every detail, geometry and lighting of the reference image, no distortion, no new objects' },
+  { label: '🚁 Pull-back Ringan', value: 'drone_pullback', prompt: 'slow gentle pull-back, camera eases steadily backward while keeping the existing scene consistent, smooth stable motion, natural parallax, do not invent areas outside the original framing, no new elements' },
+  { label: '🔄 Orbit Ringan', value: 'aerial_orbit', prompt: 'slow subtle orbital drift around the existing subject, small stable arc, keep the scene, architecture and lighting consistent with the reference image, minimal reveal, no new elements' },
 ];
 
 const RASIO_OPTIONS = [
