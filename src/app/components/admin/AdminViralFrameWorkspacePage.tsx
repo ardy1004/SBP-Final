@@ -138,6 +138,46 @@ function Field({ label, children, hint }: { label: string; children: React.React
 const selectCls =
   'w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] bg-white transition-colors';
 
+// Dropdown label dengan kotak pencarian (combobox) — untuk daftar label yang panjang.
+function LabelSelect({ value, onChange, options, placeholder = '— Pilih label —' }: {
+  value: string; onChange: (v: string) => void; options: string[]; placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  const filtered = options.filter(o => o.toLowerCase().includes(q.trim().toLowerCase()));
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => { setOpen(o => !o); setQ(''); }}
+        className={`${selectCls} text-left flex items-center justify-between gap-2`}>
+        <span className={value ? 'text-[#0F172A] truncate' : 'text-[#94A3B8]'}>{value || placeholder}</span>
+        <span className="text-[#94A3B8] text-xs flex-shrink-0">▼</span>
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+          <div className="p-2 border-b border-gray-100">
+            <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Cari label…"
+              className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-[#1565C0]" />
+          </div>
+          <div className="max-h-52 overflow-y-auto">
+            {filtered.length === 0 && <div className="px-3 py-2 text-xs text-[#94A3B8]">Tidak ada hasil</div>}
+            {filtered.map(o => (
+              <button key={o} type="button" onClick={() => { onChange(o); setOpen(false); }}
+                className={`w-full text-left px-3 py-2 text-sm hover:bg-[#F0F7FF] ${o === value ? 'text-[#1565C0] font-semibold bg-[#EFF6FF]' : 'text-[#0F172A]'}`}>{o}</button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Select({ value, onChange, opts }: {
   value: string; onChange: (v: string) => void; opts: { value: string; label: string }[];
 }) {
@@ -1506,10 +1546,7 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
                 {selected.map(s => (
                   <div key={s.id} className="flex items-center gap-2">
                     <img src={thumbSrc(s.url_webp, 80)} alt="" className="w-10 h-10 rounded object-cover flex-shrink-0" />
-                    <select value={s.label} onChange={e => setLabel(s.id, e.target.value)} className={`${selectCls} flex-1`}>
-                      <option value="">— Label —</option>
-                      {PHOTO_LABELS.map(l => <option key={l} value={l}>{l}</option>)}
-                    </select>
+                    <div className="flex-1"><LabelSelect value={s.label} onChange={v => setLabel(s.id, v)} options={PHOTO_LABELS} placeholder="— Label —" /></div>
                   </div>
                 ))}
               </div>
@@ -2443,10 +2480,7 @@ export default function AdminViralFrameWorkspacePage() {
                       {/* Label foto */}
                       <div className="sm:w-64">
                         <label className="block text-xs font-medium text-[#64748B] mb-1">Label Foto</label>
-                        <select value={sc?.label ?? ''} onChange={e => setScene(i, { label: e.target.value })} className={selectCls}>
-                          <option value="">— Pilih label —</option>
-                          {PHOTO_LABELS.map(l => <option key={l} value={l}>{l}</option>)}
-                        </select>
+                        <LabelSelect value={sc?.label ?? ''} onChange={v => setScene(i, { label: v })} options={PHOTO_LABELS} />
                       </div>
 
                       <button type="button"
