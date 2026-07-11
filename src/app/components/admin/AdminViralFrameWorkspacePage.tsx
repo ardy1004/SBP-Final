@@ -11,6 +11,11 @@ import {
   sceneFileName, characterFileName, AI_TOOL_FORMAT_SPEC,
 } from './viralframe/options';
 import CharacterStep, { type Step3State } from './viralframe/CharacterStep';
+import { ARCHETYPES, findArchetype, ARCHETYPE_CUSTOM_ID, compileCameraChoreography } from './viralframe/archetypes';
+
+// Durasi klip default per platform (selaras dgn PLATFORM_DURASI di ai-generate.js) —
+// hanya untuk menghitung jumlah beat koreografi kamera Jalur C.
+const PLATFORM_DURASI_VF: Record<string, number> = { tiktok: 8, ig_reels: 8, yt_shorts: 10, fb_reels: 8 };
 import {
   PLATFORM_OPTIONS, AI_TOOL_OPTIONS, MUSIK_OPTIONS, FOTO_LABEL_OPTIONS,
 } from '../../lib/viralframe-constants';
@@ -46,6 +51,7 @@ interface Step1State {
   visualStyle: string;
   tone: string;
   niche: string;                // fixed 'real_estate'
+  archetype: string;            // id VideoArchetype ('custom' = manual)
 }
 
 interface SceneAssign { photoId: number | null; label: string }
@@ -638,6 +644,7 @@ interface AIGenerateTabProps {
   visualStyle: string;
   hookType: string;
   ctaType: string;
+  archetype: string;
   sceneRoles: Record<number, 'Hook' | 'Body' | 'CTA'>;
   // Data dari Step 2
   scenePhotos: Record<number, ScenePhoto>;
@@ -649,7 +656,7 @@ interface AIGenerateTabProps {
 
 function AIGenerateTab({
   propertyId, propertyTitle, kodeListingStr, jumlahScene, platform, platforms, aiTool, bahasa,
-  tone, visualStyle, hookType, ctaType, sceneRoles,
+  tone, visualStyle, hookType, ctaType, archetype, sceneRoles,
   scenePhotos, selectedKarakter, onEditStep,
 }: AIGenerateTabProps) {
   const [musik, setMusik] = useState('corporate');
@@ -686,6 +693,21 @@ function AIGenerateTab({
       const hookTypeLabel = HOOK_TYPES.find(h => h.value === hookType)?.label ?? hookType;
       const ctaTypeLabel = CTA_TYPES.find(c => c.value === ctaType)?.label ?? ctaType;
       const supportsRefImage = AI_TOOL_FORMAT_SPEC[aiTool]?.supportsRefImage ?? false;
+
+      // Arketipe (opsional) — client hitung koreografi kamera per scene + arahan sutradara,
+      // kirim sebagai string siap-pakai supaya backend tidak perlu menduplikasi data arketipe.
+      const arc = findArchetype(archetype);
+      const dur = PLATFORM_DURASI_VF[platform] ?? 8;
+      const archetype_note = arc
+        ? `${arc.label} — ${arc.shotGrammarNote} (mode presenter: ${arc.presenterMode}, pacing: ${arc.pacing})`
+        : '';
+      const camera_directives = arc
+        ? Array.from({ length: jumlahScene }, (_, i) => ({
+            scene: i + 1,
+            camera: compileCameraChoreography(arc.cameraGrammar, sceneRoles[i + 1] ?? 'Body', dur, i, aiTool),
+          }))
+        : [];
+
       const res = await fetch('/api/admin/viralframe/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -707,6 +729,9 @@ function AIGenerateTab({
           expression: selectedKarakter.expression,
           foto_assignments,
           supports_ref_image: supportsRefImage,
+          archetype_note,
+          camera_directives,
+          presenter_mode: arc?.presenterMode ?? 'on_camera',
         }),
       });
       const json = await res.json();
@@ -1013,6 +1038,7 @@ export default function AdminViralFrameWorkspacePage() {
     visualStyle: 'auto',
     tone: 'auto',
     niche: 'real_estate',
+    archetype: ARCHETYPE_CUSTOM_ID,
   });
   const [scenes, setScenes] = useState<SceneAssign[]>(
     Array.from({ length: 4 }, () => ({ photoId: null, label: '' }))
@@ -1121,6 +1147,15 @@ export default function AdminViralFrameWorkspacePage() {
   const update1 = <K extends keyof Step1State>(key: K, val: Step1State[K]) =>
     setS1(prev => ({ ...prev, [key]: val }));
 
+  // Pilih arketipe → prefill visualStyle/tone (Step 1) + expression & useCharacter (Step 3).
+  // Nilai tetap bisa di-override manual setelahnya (memilih 'custom' tidak mereset).
+  const applyArchetype = (id: string) => {
+    const arc = findArchetype(id);
+    if (!arc) { setS1(prev => ({ ...prev, archetype: ARCHETYPE_CUSTOM_ID })); return; }
+    setS1(prev => ({ ...prev, archetype: id, visualStyle: arc.defaults.visualStyle, tone: arc.defaults.tone }));
+    setS3(prev => ({ ...prev, useCharacter: arc.defaults.useCharacter, expression: arc.defaults.expression }));
+  };
+
   const togglePlatform = (value: string) => {
     setS1(prev => {
       const has = prev.platforms.includes(value);
@@ -1190,6 +1225,20 @@ export default function AdminViralFrameWorkspacePage() {
     [prop, s1, scenes, s3],
   );
 
+  // Style Pair A/B — varian kedua dengan arketipe berbeda untuk uji split.
+  // '' = nonaktif. Varian B mewarisi semua parameter, hanya arketipe + gaya
+  // visual/tone/karakter di-override sesuai default arketipe B.
+  const [abVariant, setAbVariant] = useState('');
+  const [copiedB, setCopiedB] = useState(false);
+  const masterPromptB = useMemo(() => {
+    if (!prop || !abVariant) return '';
+    const arcB = findArchetype(abVariant);
+    if (!arcB) return '';
+    const s1B: Step1State = { ...s1, archetype: abVariant, visualStyle: arcB.defaults.visualStyle, tone: arcB.defaults.tone };
+    const s3B: Step3State = { ...s3, useCharacter: arcB.defaults.useCharacter, expression: arcB.defaults.expression };
+    return compileMasterPrompt(prop, s1B, scenes, s3B);
+  }, [prop, abVariant, s1, scenes, s3]);
+
   // Simpan riwayat otomatis saat Step 4 tampil; record baru bila prompt berubah.
   useEffect(() => {
     if (step !== 4 || !prop || !masterPrompt) return;
@@ -1220,6 +1269,14 @@ export default function AdminViralFrameWorkspacePage() {
       await navigator.clipboard.writeText(masterPrompt);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard tidak tersedia */ }
+  };
+
+  const handleCopyB = async () => {
+    try {
+      await navigator.clipboard.writeText(masterPromptB);
+      setCopiedB(true);
+      setTimeout(() => setCopiedB(false), 2000);
     } catch { /* clipboard tidak tersedia */ }
   };
 
@@ -1403,6 +1460,38 @@ export default function AdminViralFrameWorkspacePage() {
       {step === 1 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-5">
           <h2 className="font-display font-bold text-[#0F172A]">Step 1 — Parameter Video</h2>
+
+          {/* (0) Arketipe / Gaya Video — prefill parameter granular secara koheren */}
+          <Field label="Gaya Video (Arketipe)" hint="Pilih satu gaya → Gaya Visual, Tone, & koreografi kamera terisi otomatis (tetap bisa diubah). Pilih Kustom untuk atur manual.">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {ARCHETYPES.map(a => {
+                const active = s1.archetype === a.id;
+                return (
+                  <button key={a.id} type="button" onClick={() => applyArchetype(a.id)}
+                    className={`text-left p-3 rounded-xl border transition-colors ${
+                      active ? 'bg-[#EFF6FF] border-[#1565C0] ring-1 ring-[#1565C0]/30' : 'bg-white border-gray-200 hover:bg-gray-50'
+                    }`}>
+                    <div className="text-lg leading-none mb-1">{a.emoji}</div>
+                    <div className={`text-sm font-semibold ${active ? 'text-[#1565C0]' : 'text-[#0F172A]'}`}>{a.label}</div>
+                    <div className="text-[11px] text-[#64748B] leading-snug mt-0.5">{a.ringkas}</div>
+                  </button>
+                );
+              })}
+              {(() => {
+                const active = s1.archetype === ARCHETYPE_CUSTOM_ID;
+                return (
+                  <button type="button" onClick={() => applyArchetype(ARCHETYPE_CUSTOM_ID)}
+                    className={`text-left p-3 rounded-xl border transition-colors ${
+                      active ? 'bg-[#EFF6FF] border-[#1565C0] ring-1 ring-[#1565C0]/30' : 'bg-white border-gray-200 hover:bg-gray-50'
+                    }`}>
+                    <div className="text-lg leading-none mb-1">🎛️</div>
+                    <div className={`text-sm font-semibold ${active ? 'text-[#1565C0]' : 'text-[#0F172A]'}`}>Kustom</div>
+                    <div className="text-[11px] text-[#64748B] leading-snug mt-0.5">Atur semua parameter manual tanpa preset.</div>
+                  </button>
+                );
+              })()}
+            </div>
+          </Field>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* (a) Jumlah Scene */}
@@ -1663,9 +1752,45 @@ export default function AdminViralFrameWorkspacePage() {
                 Lalu buka tab <strong>Paste &amp; Validate</strong> untuk menempel hasilnya.
               </p>
 
+              {/* Style Pair A/B — bandingkan 2 gaya untuk uji split */}
+              <div className="flex items-center gap-2 flex-wrap p-3 rounded-xl bg-[#F8FAFC] border border-gray-100">
+                <span className="text-xs font-semibold text-[#0F172A]">🅰️🅱️ Style Pair A/B</span>
+                <span className="text-xs text-[#64748B]">Bandingkan gaya berbeda:</span>
+                <select value={abVariant} onChange={e => setAbVariant(e.target.value)}
+                  className="text-sm px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-[#1565C0]">
+                  <option value="">— Nonaktif —</option>
+                  {ARCHETYPES.filter(a => a.id !== s1.archetype).map(a => (
+                    <option key={a.id} value={a.id}>Varian B: {a.emoji} {a.label}</option>
+                  ))}
+                </select>
+                {abVariant && (
+                  <span className="text-[11px] text-[#64748B]">
+                    A = {findArchetype(s1.archetype)?.label ?? 'Kustom'} · B = {findArchetype(abVariant)?.label}
+                  </span>
+                )}
+              </div>
+
+              {abVariant && <div className="text-xs font-semibold text-[#1565C0]">Varian A — {findArchetype(s1.archetype)?.label ?? 'Kustom'}</div>}
               <textarea readOnly value={masterPrompt}
                 className="w-full h-96 max-h-[60vh] overflow-y-auto p-3 border border-gray-200 rounded-xl text-xs font-mono text-[#0F172A] bg-[#F8FAFC] outline-none resize-y leading-relaxed"
               />
+
+              {abVariant && masterPromptB && (
+                <div className="space-y-2 pt-2 border-t border-dashed border-gray-200">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="text-xs font-semibold text-[#7C3AED]">Varian B — {findArchetype(abVariant)?.label}</div>
+                    <button onClick={handleCopyB}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                      style={{ background: copiedB ? '#10B981' : 'linear-gradient(135deg, #7C3AED 0%, #A78BFA 100%)' }}>
+                      {copiedB ? <><Check size={15} /> Copied!</> : <><Copy size={15} /> Copy Varian B</>}
+                    </button>
+                  </div>
+                  <textarea readOnly value={masterPromptB}
+                    className="w-full h-96 max-h-[60vh] overflow-y-auto p-3 border border-[#7C3AED]/20 rounded-xl text-xs font-mono text-[#0F172A] bg-[#FAF8FF] outline-none resize-y leading-relaxed"
+                  />
+                  <p className="text-[11px] text-[#64748B]">Generate kedua varian, posting sebagai A/B test, lalu bandingkan retensi & engagement untuk menemukan gaya pemenang.</p>
+                </div>
+              )}
 
               <div className="flex items-center gap-4 flex-wrap text-xs text-[#64748B]">
                 <span>Estimasi ~{estimateTokens(masterPrompt).toLocaleString('id-ID')} token</span>
@@ -1713,6 +1838,7 @@ export default function AdminViralFrameWorkspacePage() {
               visualStyle={s1.visualStyle}
               hookType={s1.hookType}
               ctaType={s1.ctaType}
+              archetype={s1.archetype}
               sceneRoles={sceneRolesForAI}
               scenePhotos={scenePhotosForAI}
               selectedKarakter={selectedKarakterForAI}
