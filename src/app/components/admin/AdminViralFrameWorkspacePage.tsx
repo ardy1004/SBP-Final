@@ -1230,6 +1230,20 @@ export default function AdminViralFrameWorkspacePage() {
     [prop, s1, scenes, s3],
   );
 
+  // Style Pair A/B — varian kedua dengan arketipe berbeda untuk uji split.
+  // '' = nonaktif. Varian B mewarisi semua parameter, hanya arketipe + gaya
+  // visual/tone/karakter di-override sesuai default arketipe B.
+  const [abVariant, setAbVariant] = useState('');
+  const [copiedB, setCopiedB] = useState(false);
+  const masterPromptB = useMemo(() => {
+    if (!prop || !abVariant) return '';
+    const arcB = findArchetype(abVariant);
+    if (!arcB) return '';
+    const s1B: Step1State = { ...s1, archetype: abVariant, visualStyle: arcB.defaults.visualStyle, tone: arcB.defaults.tone };
+    const s3B: Step3State = { ...s3, useCharacter: arcB.defaults.useCharacter, expression: arcB.defaults.expression };
+    return compileMasterPrompt(prop, s1B, scenes, s3B);
+  }, [prop, abVariant, s1, scenes, s3]);
+
   // Simpan riwayat otomatis saat Step 4 tampil; record baru bila prompt berubah.
   useEffect(() => {
     if (step !== 4 || !prop || !masterPrompt) return;
@@ -1260,6 +1274,14 @@ export default function AdminViralFrameWorkspacePage() {
       await navigator.clipboard.writeText(masterPrompt);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard tidak tersedia */ }
+  };
+
+  const handleCopyB = async () => {
+    try {
+      await navigator.clipboard.writeText(masterPromptB);
+      setCopiedB(true);
+      setTimeout(() => setCopiedB(false), 2000);
     } catch { /* clipboard tidak tersedia */ }
   };
 
@@ -1735,9 +1757,45 @@ export default function AdminViralFrameWorkspacePage() {
                 Lalu buka tab <strong>Paste &amp; Validate</strong> untuk menempel hasilnya.
               </p>
 
+              {/* Style Pair A/B — bandingkan 2 gaya untuk uji split */}
+              <div className="flex items-center gap-2 flex-wrap p-3 rounded-xl bg-[#F8FAFC] border border-gray-100">
+                <span className="text-xs font-semibold text-[#0F172A]">🅰️🅱️ Style Pair A/B</span>
+                <span className="text-xs text-[#64748B]">Bandingkan gaya berbeda:</span>
+                <select value={abVariant} onChange={e => setAbVariant(e.target.value)}
+                  className="text-sm px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-[#1565C0]">
+                  <option value="">— Nonaktif —</option>
+                  {ARCHETYPES.filter(a => a.id !== s1.archetype).map(a => (
+                    <option key={a.id} value={a.id}>Varian B: {a.emoji} {a.label}</option>
+                  ))}
+                </select>
+                {abVariant && (
+                  <span className="text-[11px] text-[#64748B]">
+                    A = {findArchetype(s1.archetype)?.label ?? 'Kustom'} · B = {findArchetype(abVariant)?.label}
+                  </span>
+                )}
+              </div>
+
+              {abVariant && <div className="text-xs font-semibold text-[#1565C0]">Varian A — {findArchetype(s1.archetype)?.label ?? 'Kustom'}</div>}
               <textarea readOnly value={masterPrompt}
                 className="w-full h-96 max-h-[60vh] overflow-y-auto p-3 border border-gray-200 rounded-xl text-xs font-mono text-[#0F172A] bg-[#F8FAFC] outline-none resize-y leading-relaxed"
               />
+
+              {abVariant && masterPromptB && (
+                <div className="space-y-2 pt-2 border-t border-dashed border-gray-200">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="text-xs font-semibold text-[#7C3AED]">Varian B — {findArchetype(abVariant)?.label}</div>
+                    <button onClick={handleCopyB}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                      style={{ background: copiedB ? '#10B981' : 'linear-gradient(135deg, #7C3AED 0%, #A78BFA 100%)' }}>
+                      {copiedB ? <><Check size={15} /> Copied!</> : <><Copy size={15} /> Copy Varian B</>}
+                    </button>
+                  </div>
+                  <textarea readOnly value={masterPromptB}
+                    className="w-full h-96 max-h-[60vh] overflow-y-auto p-3 border border-[#7C3AED]/20 rounded-xl text-xs font-mono text-[#0F172A] bg-[#FAF8FF] outline-none resize-y leading-relaxed"
+                  />
+                  <p className="text-[11px] text-[#64748B]">Generate kedua varian, posting sebagai A/B test, lalu bandingkan retensi & engagement untuk menemukan gaya pemenang.</p>
+                </div>
+              )}
 
               <div className="flex items-center gap-4 flex-wrap text-xs text-[#64748B]">
                 <span>Estimasi ~{estimateTokens(masterPrompt).toLocaleString('id-ID')} token</span>
