@@ -182,19 +182,43 @@ export const meta: MetaFunction = () => [
           },
         },
         {
-          "@type": "LocalBusiness",
+          // RealEstateAgent = subtipe LocalBusiness yang lebih spesifik — entitas
+          // lebih kuat untuk Google & generative engine (GEO).
+          // TODO: tambahkan sameAs [Instagram, Facebook, YouTube] saat URL sosmed
+          // resmi tersedia (footer masih placeholder '#').
+          "@type": "RealEstateAgent",
           "@id": "https://salambumi.xyz/#organization",
           name: "CV Salam Bumi Property",
+          alternateName: "SBP",
+          description: "Agen properti berbasis kepercayaan & kecerdasan investasi untuk Yogyakarta. Semua listing dikurasi dan diverifikasi langsung oleh tim SBP, tanpa sistem agen pihak ketiga.",
           url: "https://salambumi.xyz",
           logo: "https://images.salambumi.xyz/materai/fav.webp",
+          image: "https://images.salambumi.xyz/salambumi.xyz.png",
           telephone: "+6281391278889",
           email: "salambumiproperty@gmail.com",
+          priceRange: "Rp",
+          knowsLanguage: "id",
           address: {
             "@type": "PostalAddress",
             addressRegion: "DI Yogyakarta",
             addressCountry: "ID",
           },
-          areaServed: "DI Yogyakarta",
+          areaServed: [
+            { "@type": "City", name: "Kota Yogyakarta" },
+            { "@type": "AdministrativeArea", name: "Kabupaten Sleman" },
+            { "@type": "AdministrativeArea", name: "Kabupaten Bantul" },
+            { "@type": "AdministrativeArea", name: "Kabupaten Kulon Progo" },
+            { "@type": "AdministrativeArea", name: "Kabupaten Gunungkidul" },
+          ],
+          makesOffer: {
+            "@type": "OfferCatalog",
+            name: "Layanan Salam Bumi Property",
+            itemListElement: [
+              { "@type": "Offer", itemOffered: { "@type": "Service", name: "Jual beli properti terverifikasi (rumah, kost, villa, tanah, komersial)" } },
+              { "@type": "Offer", itemOffered: { "@type": "Service", name: "Titip jual properti dengan perjanjian tertulis" } },
+              { "@type": "Offer", itemOffered: { "@type": "Service", name: "Pendampingan notaris/PPAT & legalitas" } },
+            ],
+          },
         },
       ],
     },

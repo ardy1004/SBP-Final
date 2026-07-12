@@ -1,4 +1,11 @@
 import { useContactEmail } from './useContactEmail';
+import { pageMeta } from '../../lib/pageMeta';
+
+export const meta = () => pageMeta({
+  title: 'Kebijakan Privasi | Salam Bumi Property',
+  description: 'Kebijakan privasi Salam Bumi Property — bagaimana data pribadi Anda dikumpulkan, digunakan, dan dilindungi.',
+  path: '/privacy',
+});
 
 export default function PrivacyPage() {
   const { display: emailDisplay } = useContactEmail();

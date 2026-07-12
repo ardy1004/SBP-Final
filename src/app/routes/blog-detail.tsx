@@ -94,6 +94,35 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     { property: "og:image", content: ogImage },
     { property: "og:type", content: "article" },
     { property: "og:url", content: canonical },
+    { tagName: "link", rel: "canonical", href: canonical },
+    { name: "twitter:card", content: "summary_large_image" },
+    { name: "twitter:title", content: title },
+    { name: "twitter:description", content: desc },
+    { name: "twitter:image", content: ogImage },
+    // Article structured data — sinyal E-E-A-T (author, tanggal) untuk SEO & GEO
+    {
+      "script:ld+json": {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        headline: p.judul,
+        description: desc,
+        image: ogImage,
+        url: canonical,
+        mainEntityOfPage: canonical,
+        ...(p.published_at ? { datePublished: p.published_at, dateModified: p.published_at } : {}),
+        inLanguage: "id",
+        author: {
+          "@type": p.author_nama ? "Person" : "Organization",
+          name: p.author_nama || "Tim Salam Bumi Property",
+        },
+        publisher: {
+          "@type": "Organization",
+          "@id": "https://salambumi.xyz/#organization",
+          name: "CV Salam Bumi Property",
+          url: "https://salambumi.xyz",
+        },
+      },
+    },
   ];
 };
 

@@ -1,5 +1,12 @@
 import { Link } from 'react-router';
 import { Shield, FileText, Scale, CheckCircle, MessageCircle } from 'lucide-react';
+import { pageMeta } from '../../lib/pageMeta';
+
+export const meta = () => pageMeta({
+  title: 'Jasa Notaris & PPAT Yogyakarta | Salam Bumi Property',
+  description: 'Pendampingan notaris/PPAT untuk transaksi properti di Yogyakarta: AJB, balik nama sertifikat, cek keabsahan dokumen, dan konsultasi legalitas.',
+  path: '/notaris',
+});
 
 export default function NotarisPage() {
   const faqs = [

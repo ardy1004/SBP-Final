@@ -2,6 +2,13 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router';
 import { Search } from 'lucide-react';
 import { getBlogPosts, type ApiBlogPost } from '../../lib/api';
+import { pageMeta } from '../../lib/pageMeta';
+
+export const meta = () => pageMeta({
+  title: 'Blog & Panduan Properti Yogyakarta | Salam Bumi Property',
+  description: 'Artikel, tips, dan panduan seputar jual-beli properti, investasi kost, KPR, dan legalitas di Yogyakarta — ditulis oleh tim Salam Bumi Property.',
+  path: '/blog',
+});
 
 function formatTanggal(s: string): string {
   if (!s) return '';

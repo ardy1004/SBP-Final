@@ -4,6 +4,13 @@ import { Check, ChevronRight, Upload, X, AlertCircle } from 'lucide-react';
 import { getLocations, type ApiLocation } from '../../lib/api';
 import { PROPERTY_TYPES } from '../../lib/propertyTypes';
 import Turnstile from './Turnstile';
+import { pageMeta } from '../../lib/pageMeta';
+
+export const meta = () => pageMeta({
+  title: 'Titip Jual Properti Yogyakarta | Salam Bumi Property',
+  description: 'Jual rumah, kost, tanah, atau villa Anda di Yogyakarta lewat Salam Bumi Property — pemasaran profesional, perjanjian tertulis, tanpa biaya di muka.',
+  path: '/titip-jual',
+});
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

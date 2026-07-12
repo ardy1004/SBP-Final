@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import { Phone, Mail, MapPin, Clock, MessageCircle, Send, AlertCircle } from 'lucide-react';
 import { useContactEmail } from './useContactEmail';
+import { pageMeta } from '../../lib/pageMeta';
+
+export const meta = () => pageMeta({
+  title: 'Hubungi Kami | Salam Bumi Property',
+  description: 'Kontak Salam Bumi Property Yogyakarta — WhatsApp +62 813-9127-8889, email, jam operasional, dan formulir konsultasi kebutuhan properti Anda.',
+  path: '/contact',
+});
 
 function normalizeWA(raw: string): string {
   const d = raw.replace(/\D/g, '');

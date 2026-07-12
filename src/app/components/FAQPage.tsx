@@ -1,6 +1,27 @@
 import { useState } from 'react';
 import { ChevronDown, MessageCircle } from 'lucide-react';
 import { FAQ_DATA } from '../data/mockData';
+import { pageMeta } from '../../lib/pageMeta';
+
+export const meta = () => [
+  ...pageMeta({
+    title: 'FAQ Jual Beli Properti Yogyakarta | Salam Bumi Property',
+    description: 'Jawaban pertanyaan umum seputar jual-beli properti di Yogyakarta: proses transaksi, legalitas, KPR, titip jual, dan layanan Salam Bumi Property.',
+    path: '/faq',
+  }),
+  // FAQPage structured data — semua Q&A dari FAQ_DATA (rich result + sinyal GEO)
+  {
+    'script:ld+json': {
+      '@context': 'https://schema.org',
+      '@type': 'FAQPage',
+      mainEntity: FAQ_DATA.flatMap(k => k.pertanyaan).map(({ q, a }) => ({
+        '@type': 'Question',
+        name: q,
+        acceptedAnswer: { '@type': 'Answer', text: a },
+      })),
+    },
+  },
+];
 
 function AccordionItem({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = useState(false);

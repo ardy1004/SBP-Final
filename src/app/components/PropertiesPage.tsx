@@ -79,7 +79,22 @@ function SkeletonListItems({ count = 5 }: { count?: number }) {
   );
 }
 
-export default function PropertiesPage() {
+/** Data SSR dari route module (routes/properties.tsx) — konten listing sudah
+ *  dirender server-side untuk SEO/GEO. filters harus identik dengan yang akan
+ *  dipakai fetch client agar hasil konsisten. */
+export interface SsrListingData {
+  properties: NormalizedProperty[];
+  total: number;
+  filters: { tujuan: string; jenis: string; provinsi: string; kabupaten: string; kecamatan: string };
+}
+
+interface PropertiesPageProps {
+  ssrData?: SsrListingData;
+  /** H1 kustom untuk halaman programmatic SEO (mis. "Rumah Dijual di Sleman") */
+  heading?: string | null;
+}
+
+export default function PropertiesPage({ ssrData, heading }: PropertiesPageProps = {}) {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -89,16 +104,19 @@ export default function PropertiesPage() {
   useEffect(() => { setIsMounted(true); }, []);
 
   // ── Filter state ──────────────────────────────────────────────────────────
-  const [tujuan, setTujuan] = useState(searchParams.get('tujuan') || 'semua');
-  const [selectedJenis, setSelectedJenis] = useState<string[]>(
-    searchParams.get('jenis') ? [searchParams.get('jenis')!] : []
-  );
+  // Untuk halaman programmatic SEO (/rumah-dijual-jogja), filter awal datang dari
+  // ssrData.filters (hasil parse slug oleh loader) — bukan dari query params.
+  const [tujuan, setTujuan] = useState(ssrData?.filters.tujuan || searchParams.get('tujuan') || 'semua');
+  const [selectedJenis, setSelectedJenis] = useState<string[]>(() => {
+    if (ssrData?.filters.jenis) return ssrData.filters.jenis.split(',');
+    return searchParams.get('jenis') ? [searchParams.get('jenis')!] : [];
+  });
   // Harga sebagai SATU sumber kebenaran (min/max). Dropdown range menulis ke sini juga.
   const [hargaMin, setHargaMin] = useState(0);
   const [hargaMax, setHargaMax] = useState(0);
-  const [kabupaten, setKabupaten] = useState(searchParams.get('kabupaten') || '');
+  const [kabupaten, setKabupaten] = useState(ssrData?.filters.kabupaten || searchParams.get('kabupaten') || '');
   const [kabupatenId, setKabupatenId] = useState<number | null>(null);
-  const [kecamatan, setKecamatan] = useState(searchParams.get('kecamatan') || '');
+  const [kecamatan, setKecamatan] = useState(ssrData?.filters.kecamatan || searchParams.get('kecamatan') || '');
   // Spek (dari smart search; minimum). 0 = tidak aktif.
   const [kt, setKt] = useState(0);
   const [km, setKm] = useState(0);
@@ -129,10 +147,13 @@ export default function PropertiesPage() {
   const [locLoading, setLocLoading] = useState(true);
 
   // ── Properties data state ─────────────────────────────────────────────────
-  const [properties, setProperties] = useState<NormalizedProperty[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [loading, setLoading] = useState(true);
+  // Dengan ssrData: state awal terisi dari server → konten ada di HTML awal
+  // (SEO/GEO) dan fetch pertama di-skip (data sudah identik, hindari flash skeleton).
+  const [properties, setProperties] = useState<NormalizedProperty[]>(ssrData?.properties ?? []);
+  const [totalCount, setTotalCount] = useState(ssrData?.total ?? 0);
+  const [loading, setLoading] = useState(!ssrData);
   const [error, setError] = useState<string | null>(null);
+  const skipFirstFetchRef = useRef(Boolean(ssrData));
 
   // ── Load provinces on mount ───────────────────────────────────────────────
   useEffect(() => {
@@ -233,7 +254,12 @@ export default function PropertiesPage() {
       .finally(() => setLoading(false));
   }, [tujuan, selectedJenis, hargaMin, hargaMax, kabupaten, kecamatan, kt, km, lantai, ltMin, lbMin, qKeyword, sort, limit]);
 
-  useEffect(() => { fetchProperties(); }, [fetchProperties]);
+  useEffect(() => {
+    // Fetch pertama di-skip bila data SSR tersedia (hasil query loader identik
+    // dengan fetch ini). Perubahan filter berikutnya tetap memicu fetch normal.
+    if (skipFirstFetchRef.current) { skipFirstFetchRef.current = false; return; }
+    fetchProperties();
+  }, [fetchProperties]);
 
   // Search tracking — fire saat filter/query berubah dan ada setidaknya 1 filter aktif
   useEffect(() => {
@@ -566,9 +592,11 @@ export default function PropertiesPage() {
       {/* Header */}
       <div className="bg-white border-b border-gray-100 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <h1 className="font-display text-2xl font-bold text-[#0F172A]">Cari Properti</h1>
+          <h1 className="font-display text-2xl font-bold text-[#0F172A]">{heading || 'Cari Properti'}</h1>
           <p className="text-[#64748B] text-sm mt-1">
-            Semua listing properti di DI Yogyakarta — dikurasi &amp; diverifikasi SBP
+            {heading
+              ? `${heading} — dikurasi & diverifikasi langsung oleh tim SBP`
+              : 'Semua listing properti di DI Yogyakarta — dikurasi & diverifikasi SBP'}
           </p>
         </div>
       </div>

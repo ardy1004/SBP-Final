@@ -1,6 +1,13 @@
 import { Link } from 'react-router';
 import { Shield, CheckCircle, Scale, Handshake, ArrowRight, Star } from 'lucide-react';
 import { useContactEmail } from './useContactEmail';
+import { pageMeta } from '../../lib/pageMeta';
+
+export const meta = () => pageMeta({
+  title: 'Tentang Kami | Salam Bumi Property',
+  description: 'Profil CV Salam Bumi Property — agen properti terpercaya di Yogyakarta. Listing terkurasi & terverifikasi, transaksi transparan dengan perjanjian tertulis, dan pendampingan legalitas.',
+  path: '/about',
+});
 
 export default function AboutPage() {
   const { display: emailDisplay } = useContactEmail();

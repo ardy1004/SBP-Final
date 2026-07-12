@@ -5,11 +5,11 @@ export default [
     // Homepage — pilot SSR dengan loader (Tugas 1 Fase E)
     index("./routes/home.tsx"),
 
-    // Halaman publik — belum ada loader, render loading-state server-side (aman, hydrate client)
-    route("properties", "./components/PropertiesPage.tsx", { id: "properties-page" }),
+    // Listing — SSR via loader D1 (routes/properties.tsx) untuk SEO/GEO
+    route("properties", "./routes/properties.tsx", { id: "properties-page" }),
     route("dijual/:jenis/:provinsi/:kabupaten/:kecamatan/:slug", "./routes/property-detail.tsx", { id: "dijual-detail" }),
     route("disewa/:jenis/:provinsi/:kabupaten/:kecamatan/:slug", "./routes/property-detail.tsx", { id: "disewa-detail" }),
-    route(":slug", "./components/PropertiesPage.tsx", { id: "programmatic-seo" }),   // /rumah-dijual-jogja
+    route(":slug", "./routes/properties.tsx", { id: "programmatic-seo" }),   // /rumah-dijual-jogja (slug tak valid → 404)
     route("about", "./components/AboutPage.tsx"),
     route("portfolio", "./components/PortfolioPage.tsx"),
     route("blog", "./components/BlogPage.tsx"),
