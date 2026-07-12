@@ -3,6 +3,7 @@ import { MessageCircle, X, Star } from 'lucide-react';
 import { postLead, formatRupiah, type NormalizedPropertyDetail } from '../../lib/api';
 import { trackEvent } from '../../lib/tracking';
 import Turnstile from './Turnstile';
+import { cfImg } from '../../lib/img';
 
 const RENCANA_MAP: Record<string, 'hard_cash' | 'soft_cash' | 'kpr'> = {
   'Hard Cash': 'hard_cash',
@@ -31,6 +32,11 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
   const [apiError, setApiError] = useState<string | null>(null);
   const [skipLoading, setSkipLoading] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState('');
+  // Lazy-mount: sheet (termasuk widget Turnstile + gambar agen) baru dirender
+  // setelah pertama kali dibuka — hindari load script challenges.cloudflare.com
+  // di initial page load (Lighthouse: unused JS + third-party cookies).
+  const [everOpened, setEverOpened] = useState(false);
+  if (isOpen && !everOpened) setEverOpened(true);
 
   const isValid = Boolean(tipe && nama && no_wa.trim() && asal && (tipe !== 'pembeli' || (budget && rencana)));
 
@@ -96,6 +102,8 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
 
   const inputClass = 'w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0] transition-all';
 
+  if (!everOpened) return null;
+
   return (
     <div className={`fixed inset-0 z-50 transition-all duration-300 ${isOpen ? 'visible' : 'invisible pointer-events-none'}`}>
       {/* Backdrop */}
@@ -155,8 +163,12 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
           {/* Agent */}
           <div className="flex items-center gap-3 mb-4 pb-4 border-b border-gray-100">
             <img
-              src="https://images.salambumi.xyz/monic%20sbp.webp"
+              src={cfImg('https://images.salambumi.xyz/monic%20sbp.webp', 96)}
               alt="Monica Vera S"
+              width={48}
+              height={48}
+              loading="lazy"
+              decoding="async"
               className="w-12 h-12 rounded-full object-cover border-2 border-[#1565C0]"
               onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&q=80'; }}
               suppressHydrationWarning

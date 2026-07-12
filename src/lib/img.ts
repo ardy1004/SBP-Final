@@ -12,7 +12,9 @@ const ENABLED = import.meta.env.PROD;
  */
 export function cfImg(src: string, width: number): string {
   if (!src || !ENABLED) return src;
-  const opts = `width=${width},format=auto,quality=80`;
+  // quality=65: sweet spot AVIF/WebP — visual tetap bagus, ukuran ±50% lebih kecil
+  // dari quality=80 (temuan Lighthouse "Improve image delivery").
+  const opts = `width=${width},format=auto,quality=65`;
   if (src.startsWith('/')) {
     if (src.startsWith('/cdn-cgi/')) return src; // sudah ditransform
     return `/cdn-cgi/image/${opts}${src}`;

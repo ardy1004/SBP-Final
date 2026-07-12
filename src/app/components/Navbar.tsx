@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router';
 import { Menu, X } from 'lucide-react';
+import { cfImg } from '../../lib/img';
 
 const NAV_LINKS = [
   { label: 'Home', href: '/' },
@@ -43,8 +44,10 @@ export default function Navbar() {
             {/* Logo */}
             <Link to="/" className="flex items-center gap-2 flex-shrink-0">
               <img
-                src="https://images.salambumi.xyz/materai/fav.webp"
+                src={cfImg('https://images.salambumi.xyz/materai/fav.webp', 80)}
                 alt="Salam Bumi Property"
+                width={36}
+                height={36}
                 className="h-9 w-9 rounded-lg object-cover"
                 onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                 suppressHydrationWarning

@@ -10,6 +10,7 @@ import {
 } from '../../lib/api';
 import { formatRibuan } from '../../lib/format';
 import { trackEvent } from '../../lib/tracking';
+import { cfImg } from '../../lib/img';
 // KPRCalculator dimuat hanya di klien — recharts akses window saat import, crash SSR.
 // Pola mounted-flag: server & render-klien-pertama tampilkan placeholder identik → no hydration mismatch.
 function KPRCalculatorClient({ defaultHarga }: { defaultHarga: number }) {
@@ -143,8 +144,12 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
       {/* Agent */}
       <div className="flex items-center gap-3 mb-5 pb-4 border-b border-gray-100">
         <img
-          src="https://images.salambumi.xyz/monic%20sbp.webp"
+          src={cfImg('https://images.salambumi.xyz/monic%20sbp.webp', 112)}
           alt="Monica Vera S"
+          width={56}
+          height={56}
+          loading="lazy"
+          decoding="async"
           className="w-14 h-14 rounded-full object-cover border-2 border-[#1565C0]"
           onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&q=80'; }}
           suppressHydrationWarning

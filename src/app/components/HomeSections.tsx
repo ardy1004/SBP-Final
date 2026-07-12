@@ -70,7 +70,7 @@ export function CoverageAreaSection({ areas }: { areas: CoverageArea[] }) {
               className="flex items-center gap-2 px-4 py-2 rounded-full border border-[#CBD5E1] bg-white text-[#334155] text-sm font-medium hover:border-[#1565C0] hover:text-[#1565C0] hover:bg-[#EFF6FF] transition-all"
             >
               📍 {a.kecamatan}
-              <span className="bg-[#E2E8F0] text-[#64748B] text-xs px-1.5 py-0.5 rounded-full">{a.cnt}</span>
+              <span className="bg-[#E2E8F0] text-[#475569] text-xs px-1.5 py-0.5 rounded-full">{a.cnt}</span>
             </Link>
           ))}
         </div>

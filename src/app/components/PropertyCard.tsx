@@ -101,8 +101,8 @@ export default function PropertyCard({ property, className = '' }: Props) {
             {imgs.map((img, i) => (
               <img
                 key={i}
-                src={cfImg(img!, 800)}
-                srcSet={cfSrcSet(img!, [400, 800])}
+                src={cfImg(img!, 640)}
+                srcSet={cfSrcSet(img!, [400, 640])}
                 sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 400px"
                 alt={i === 0 ? property.title : `${property.title} foto ${i + 1}`}
                 className="h-full object-cover flex-shrink-0"
@@ -230,7 +230,7 @@ export default function PropertyCard({ property, className = '' }: Props) {
         {/* Price */}
         <div className="mb-3">
           {property.harga_lama && (
-            <span className="text-gray-400 text-xs line-through mr-2">{formatHargaShort(property.harga_lama)}</span>
+            <span className="text-gray-500 text-xs line-through mr-2">{formatHargaShort(property.harga_lama)}</span>
           )}
           <span className="font-bold text-[#1565C0] text-lg font-display" style={{ fontVariantNumeric: 'tabular-nums' }}>
             {formatHargaShort(property.harga)}

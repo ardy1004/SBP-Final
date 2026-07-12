@@ -1,6 +1,7 @@
 import { Link } from 'react-router';
 import { Phone, Mail, MapPin, Instagram, Facebook, Youtube } from 'lucide-react';
 import { useContactEmail } from './useContactEmail';
+import { cfImg } from '../../lib/img';
 
 export default function Footer() {
   const { display: emailDisplay, href: emailHref } = useContactEmail();
@@ -12,8 +13,12 @@ export default function Footer() {
           <div>
             <div className="flex items-center gap-2 mb-4">
               <img
-                src="https://images.salambumi.xyz/materai/fav.webp"
+                src={cfImg('https://images.salambumi.xyz/materai/fav.webp', 80)}
                 alt="SBP"
+                width={40}
+                height={40}
+                loading="lazy"
+                decoding="async"
                 className="h-10 w-10 rounded-lg object-cover"
                 onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                 suppressHydrationWarning
