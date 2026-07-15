@@ -1,9 +1,13 @@
 // POST /api/admin/viralframe/captions — generate N variasi caption, tiap caption
 // punya 5 kombinasi hashtag. Ringan & terpisah dari generate utama (bisa diulang).
 // Body: { property_id, variasi (1|3|5), platform?, register_instruction?, provider? }
+// Respons SUKSES = streaming NDJSON (heartbeat 2s + baris {done,data|error}) —
+// dari dalam Worker latensi Gemini bisa >22s bahkan untuk output kecil sehingga
+// pola "tunggu lalu balas" menabrak wall-clock 30s → 502 (lihat youtube-long.js).
+// Error validasi awal tetap JSON biasa (client membedakan via content-type).
 // Auth: _middleware.js
 
-import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+import { jsonError, handleOptions } from '../../_shared/response.js';
 import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
 
 const PROVIDER_ORDER = ['gemini', 'groq', 'openrouter', 'deepseek'];
@@ -60,36 +64,68 @@ Format JSON WAJIB:
 Jumlah item captions = ${variasi}. Setiap hashtag_sets berisi tepat 5 string.`;
 
   const tryOrder = [chosenProvider, ...PROVIDER_ORDER.filter(x => x !== chosenProvider)];
-  const deadline = Date.now() + 22000;
-  let raw = null, used = null;
-  for (const prov of tryOrder) {
-    if (Date.now() > deadline - 5000) break;
-    const key = await getProviderKey(env, prov);
-    if (!key) continue;
-    const r = await callChatCompletion({
-      provider: prov, apiKey: key, model: PROVIDERS[prov].defaultModel,
-      systemPrompt: system, userPrompt: user, maxTokens: 1600, temperature: 0.9,
-      timeoutMs: deadline - Date.now() - 1500,
-    });
-    if (r.ok) { raw = r.content; used = prov; break; }
-    console.error(`[captions] ${prov} gagal:`, r.error?.slice(0, 120));
-  }
-  if (!raw) return jsonError('Gagal generate caption (semua provider). Pastikan API key AI diatur di Pengaturan.', 502);
 
-  let parsed;
-  try {
-    const txt = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-    parsed = JSON.parse(txt);
-  } catch {
-    return jsonError('Respons AI bukan JSON valid', 502);
-  }
-  const captions = Array.isArray(parsed.captions) ? parsed.captions.slice(0, variasi).map(c => ({
-    caption: String(c.caption ?? '').slice(0, 800),
-    hashtag_sets: Array.isArray(c.hashtag_sets) ? c.hashtag_sets.slice(0, 5).map(h => String(h).slice(0, 300)) : [],
-  })) : [];
-  if (captions.length === 0) return jsonError('AI tidak mengembalikan caption', 502);
+  const enc = new TextEncoder();
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const send = (obj) => writer.write(enc.encode(JSON.stringify(obj) + '\n')).catch(() => {});
 
-  return jsonOk({ captions, provider_used: used });
+  const work = (async () => {
+    const heartbeat = setInterval(() => send({ status: 'progress' }), 2000);
+    try {
+      let raw = null, used = null, lastErr = null;
+      for (const prov of tryOrder) {
+        const key = await getProviderKey(env, prov);
+        if (!key) continue;
+        const r = await callChatCompletion({
+          provider: prov, apiKey: key, model: PROVIDERS[prov].defaultModel,
+          systemPrompt: system, userPrompt: user, maxTokens: 1600, temperature: 0.9,
+          // Gemini = model thinking: tanpa 'none', token reasoning tersembunyi bikin lambat.
+          reasoningEffort: prov === 'gemini' ? 'none' : undefined,
+          timeoutMs: 55000,
+        });
+        if (r.ok) { raw = r.content; used = prov; break; }
+        lastErr = r.error;
+        console.error(`[captions] ${prov} gagal:`, r.error?.slice(0, 120));
+      }
+      if (!raw) {
+        send({ done: true, error: `Gagal generate caption: ${(lastErr || 'semua provider gagal/kehabisan kuota').slice(0, 180)}. Pastikan API key AI diatur di Pengaturan.` });
+        return;
+      }
+
+      let parsed;
+      try {
+        let txt = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+        const first = txt.indexOf('{'), last = txt.lastIndexOf('}');
+        if (first > 0 || last < txt.length - 1) txt = txt.slice(first, last + 1);
+        parsed = JSON.parse(txt);
+      } catch {
+        send({ done: true, error: 'Respons AI bukan JSON valid. Coba lagi.' });
+        return;
+      }
+      const captions = Array.isArray(parsed.captions) ? parsed.captions.slice(0, variasi).map(c => ({
+        caption: String(c.caption ?? '').slice(0, 800),
+        hashtag_sets: Array.isArray(c.hashtag_sets) ? c.hashtag_sets.slice(0, 5).map(h => String(h).slice(0, 300)) : [],
+      })) : [];
+      if (captions.length === 0) {
+        send({ done: true, error: 'AI tidak mengembalikan caption. Coba lagi.' });
+        return;
+      }
+
+      send({ done: true, data: { captions, provider_used: used } });
+    } catch (err) {
+      console.error('[captions] stream', err.message);
+      send({ done: true, error: 'Terjadi kesalahan internal saat generate caption. Coba lagi.' });
+    } finally {
+      clearInterval(heartbeat);
+      await writer.close().catch(() => {});
+    }
+  })();
+  context.waitUntil?.(work);
+
+  return new Response(readable, {
+    headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
 }
 
 export async function onRequestOptions() { return handleOptions(); }

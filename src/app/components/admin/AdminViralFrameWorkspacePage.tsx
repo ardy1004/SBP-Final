@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
 import {
   ArrowLeft, ArrowRight, ImageOff, Check, Film, AlertCircle,
-  Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles, History,
+  Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles, History, Trash2, RefreshCw,
 } from 'lucide-react';
 // JSZip di-dynamic-import di handler (bukan static) agar tidak masuk chunk awal workspace.
 import {
@@ -124,6 +125,39 @@ function buildSrt(scenes: { script_narration?: string }[], durations: number[]):
   return out.join('\n');
 }
 
+// Baca respons streaming NDJSON dari endpoint AI (heartbeat tiap 2s + baris
+// terakhir {done, data|error}) — pola anti wall-clock 30s Worker. Error validasi
+// awal (4xx) tetap JSON biasa, dibedakan via content-type.
+async function readNdjsonFinal<T>(r: Response): Promise<T> {
+  const ct = r.headers.get('content-type') ?? '';
+  if (ct.includes('application/json')) {
+    const j = await r.json();
+    throw new Error(j.error ?? 'Gagal generate');
+  }
+  if (!r.ok || !r.body) throw new Error('Gagal generate (koneksi)');
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let final: { done?: boolean; data?: T; error?: string } | null = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (value) buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+      if (!line) continue;
+      try {
+        const o = JSON.parse(line);
+        if (o.done) final = o;
+      } catch { /* abaikan baris rusak */ }
+    }
+    if (done) break;
+  }
+  if (!final) throw new Error('Koneksi terputus saat generate. Coba lagi.');
+  if (final.error || final.data == null) throw new Error(final.error ?? 'Gagal generate');
+  return final.data;
+}
+
 // ─── Komponen kecil ────────────────────────────────────────────────────────
 function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
@@ -144,23 +178,57 @@ function LabelSelect({ value, onChange, options, placeholder = '— Pilih label 
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
+  // Posisi menu (fixed, relatif viewport) — menu dirender via portal ke <body>
+  // agar tidak terpotong ancestor ber-overflow (kartu scene / scroll container AdminLayout).
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; up: boolean } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const MENU_H = 300; // perkiraan tinggi maksimum menu (search box + list max-h-52)
+
+  const place = useCallback(() => {
+    const btn = ref.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - r.bottom;
+    const up = spaceBelow < MENU_H && r.top > spaceBelow; // buka ke atas bila ruang bawah sempit
+    setPos({ top: up ? r.top : r.bottom, left: r.left, width: r.width, up });
+  }, []);
+
   useEffect(() => {
     if (!open) return;
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const h = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
     document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, [open]);
+    // Ikuti scroll/resize supaya menu tetap menempel pada tombol
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      document.removeEventListener('mousedown', h);
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [open, place]);
+
   const filtered = options.filter(o => o.toLowerCase().includes(q.trim().toLowerCase()));
   return (
     <div ref={ref} className="relative">
-      <button type="button" onClick={() => { setOpen(o => !o); setQ(''); }}
+      <button type="button" onClick={() => { setQ(''); if (!open) place(); setOpen(o => !o); }}
         className={`${selectCls} text-left flex items-center justify-between gap-2`}>
         <span className={value ? 'text-[#0F172A] truncate' : 'text-[#94A3B8]'}>{value || placeholder}</span>
         <span className="text-[#94A3B8] text-xs flex-shrink-0">▼</span>
       </button>
-      {open && (
-        <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+      {open && pos && typeof document !== 'undefined' && createPortal(
+        <div ref={menuRef}
+          className="fixed z-[9999] bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden"
+          style={{
+            left: pos.left,
+            width: pos.width,
+            ...(pos.up ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top + 4 }),
+          }}>
           <div className="p-2 border-b border-gray-100">
             <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Cari label…"
               className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-[#1565C0]" />
@@ -172,7 +240,8 @@ function LabelSelect({ value, onChange, options, placeholder = '— Pilih label 
                 className={`w-full text-left px-3 py-2 text-sm hover:bg-[#F0F7FF] ${o === value ? 'text-[#1565C0] font-semibold bg-[#EFF6FF]' : 'text-[#0F172A]'}`}>{o}</button>
             ))}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -835,83 +904,92 @@ function AIGenerateTab({
   const canGenerate = selectedKarakter != null && allScenesHavePhoto;
   const platformOpt = PLATFORM_OPTIONS.find(p => p.value === platform);
 
+  // Payload lengkap ai-generate dari state Step 1–3 — dipakai generate penuh
+  // maupun regenerate per scene (parameter identik agar hasilnya konsisten).
+  const buildGeneratePayload = () => {
+    if (!selectedKarakter) return null;
+    const musikOpt = MUSIK_OPTIONS.find(m => m.value === musik)!;
+    const foto_assignments = Array.from({ length: jumlahScene }, (_, i) => ({
+      scene: i + 1,
+      foto_url: scenePhotos[i + 1]?.foto_url ?? '',
+      foto_label: scenePhotos[i + 1]?.label ?? 'lainnya',
+    }));
+    const scene_roles = Array.from({ length: jumlahScene }, (_, i) => ({
+      scene: i + 1,
+      role: sceneRoles[i + 1] ?? 'Body',
+    }));
+    // Kirim label yang sudah diresolve (bukan raw value) — backend tinggal
+    // menyisipkan teksnya, tidak perlu daftar terjemahan tone/style/hook/cta sendiri.
+    const toneLabel = TONES.find(t => t.value === tone)?.label ?? tone;
+    const visualStyleLabel = VISUAL_STYLES.find(v => v.value === visualStyle)?.label ?? visualStyle;
+    const hookTypeLabel = HOOK_TYPES.find(h => h.value === hookType)?.label ?? hookType;
+    const ctaTypeLabel = CTA_TYPES.find(c => c.value === ctaType)?.label ?? ctaType;
+    const supportsRefImage = AI_TOOL_FORMAT_SPEC[aiTool]?.supportsRefImage ?? false;
+
+    // Arketipe (opsional) — client hitung koreografi kamera per scene + arahan sutradara,
+    // kirim sebagai string siap-pakai supaya backend tidak perlu menduplikasi data arketipe.
+    const arc = findArchetype(archetype);
+    const dur = PLATFORM_DURASI_VF[platform] ?? 8;
+    const archetype_note = arc
+      ? `${arc.label} — ${arc.shotGrammarNote} (mode presenter: ${arc.presenterMode}, pacing: ${arc.pacing})`
+      : '';
+    const camera_directives = arc
+      ? Array.from({ length: jumlahScene }, (_, i) => ({
+          scene: i + 1,
+          camera: compileCameraChoreography(arc.cameraGrammar, sceneRoles[i + 1] ?? 'Body', dur, i, aiTool),
+        }))
+      : [];
+
+    return {
+      property_id: propertyId,
+      jumlah_scene: jumlahScene,
+      platform,
+      ai_tool: aiTool,
+      bahasa,
+      tone: toneLabel,
+      visual_style: visualStyleLabel,
+      hook_type: hookTypeLabel,
+      cta_type: ctaTypeLabel,
+      scene_roles,
+      musik_value: musik,
+      musik_prompt: musikOpt.prompt,
+      karakter_id: selectedKarakter.id,
+      expression: selectedKarakter.expression,
+      foto_assignments,
+      supports_ref_image: supportsRefImage,
+      archetype_note,
+      camera_directives,
+      presenter_mode: arc?.presenterMode ?? 'on_camera',
+      register_instruction: REGISTER_INSTRUCTION[register] ?? '',
+      provider,
+      model,
+    };
+  };
+
   const handleGenerate = async () => {
     if (!canGenerate || !selectedKarakter) return;
     setIsGenerating(true);
     setError(null);
-    // Progress "indeterminate" yang merangkak naik selama request (bukan streaming).
+    // Progress "indeterminate" yang merangkak naik selama request.
     setProgress(6);
     setProgressLabel(`Menghubungi ${AI_PROVIDER_LIST.find(p => p.id === provider)?.label ?? provider}…`);
     const progTimer = setInterval(() => setProgress(p => (p < 90 ? p + Math.max(1, (90 - p) * 0.08) : p)), 600);
     try {
-      const musikOpt = MUSIK_OPTIONS.find(m => m.value === musik)!;
-      const foto_assignments = Array.from({ length: jumlahScene }, (_, i) => ({
-        scene: i + 1,
-        foto_url: scenePhotos[i + 1]?.foto_url ?? '',
-        foto_label: scenePhotos[i + 1]?.label ?? 'lainnya',
-      }));
-      const scene_roles = Array.from({ length: jumlahScene }, (_, i) => ({
-        scene: i + 1,
-        role: sceneRoles[i + 1] ?? 'Body',
-      }));
-      // Kirim label yang sudah diresolve (bukan raw value) — backend tinggal
-      // menyisipkan teksnya, tidak perlu daftar terjemahan tone/style/hook/cta sendiri.
-      const toneLabel = TONES.find(t => t.value === tone)?.label ?? tone;
-      const visualStyleLabel = VISUAL_STYLES.find(v => v.value === visualStyle)?.label ?? visualStyle;
-      const hookTypeLabel = HOOK_TYPES.find(h => h.value === hookType)?.label ?? hookType;
-      const ctaTypeLabel = CTA_TYPES.find(c => c.value === ctaType)?.label ?? ctaType;
-      const supportsRefImage = AI_TOOL_FORMAT_SPEC[aiTool]?.supportsRefImage ?? false;
-
-      // Arketipe (opsional) — client hitung koreografi kamera per scene + arahan sutradara,
-      // kirim sebagai string siap-pakai supaya backend tidak perlu menduplikasi data arketipe.
-      const arc = findArchetype(archetype);
-      const dur = PLATFORM_DURASI_VF[platform] ?? 8;
-      const archetype_note = arc
-        ? `${arc.label} — ${arc.shotGrammarNote} (mode presenter: ${arc.presenterMode}, pacing: ${arc.pacing})`
-        : '';
-      const camera_directives = arc
-        ? Array.from({ length: jumlahScene }, (_, i) => ({
-            scene: i + 1,
-            camera: compileCameraChoreography(arc.cameraGrammar, sceneRoles[i + 1] ?? 'Body', dur, i, aiTool),
-          }))
-        : [];
-
+      const payload = buildGeneratePayload();
+      if (!payload) throw new Error('Konfigurasi belum lengkap');
       const res = await fetch('/api/admin/viralframe/ai-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({
-          property_id: propertyId,
-          jumlah_scene: jumlahScene,
-          platform,
-          ai_tool: aiTool,
-          bahasa,
-          tone: toneLabel,
-          visual_style: visualStyleLabel,
-          hook_type: hookTypeLabel,
-          cta_type: ctaTypeLabel,
-          scene_roles,
-          musik_value: musik,
-          musik_prompt: musikOpt.prompt,
-          karakter_id: selectedKarakter.id,
-          expression: selectedKarakter.expression,
-          foto_assignments,
-          supports_ref_image: supportsRefImage,
-          archetype_note,
-          camera_directives,
-          presenter_mode: arc?.presenterMode ?? 'on_camera',
-          register_instruction: REGISTER_INSTRUCTION[register] ?? '',
-          provider,
-          model,
-        }),
+        body: JSON.stringify(payload),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? 'Generate gagal');
+      // Sukses = stream NDJSON (anti wall-clock 30s); error validasi = JSON biasa.
+      const data = await readNdjsonFinal<AIGeneratedResult>(res);
       setProgress(100);
-      setProgressLabel(json.data?.metadata?.fell_back
-        ? `Selesai (fallback ke ${json.data.metadata.provider_used})`
+      setProgressLabel(data.metadata?.fell_back
+        ? `Selesai (fallback ke ${data.metadata.provider_used})`
         : 'Selesai');
-      setGeneratedResult(json.data);
+      setGeneratedResult(data);
       // Refresh status kuota setelah generate (mungkin berubah)
       getAiStatus().then(r => { if (r.success && r.data) setAiStatus(r.data); });
     } catch (e: unknown) {
@@ -919,6 +997,42 @@ function AIGenerateTab({
     } finally {
       clearInterval(progTimer);
       setIsGenerating(false);
+    }
+  };
+
+  // Regenerate SATU scene: kirim konfigurasi yang sama + regenerate_scene + konteks
+  // scene lain (agar dialog baru tetap nyambung), lalu ganti scene itu di hasil.
+  const [regenScene, setRegenScene] = useState<number | null>(null);
+  const handleRegenerateScene = async (sceneNum: number) => {
+    if (!generatedResult || regenScene != null) return;
+    setRegenScene(sceneNum);
+    setError(null);
+    try {
+      const payload = buildGeneratePayload();
+      if (!payload) throw new Error('Konfigurasi belum lengkap');
+      const res = await fetch('/api/admin/viralframe/ai-generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          ...payload,
+          regenerate_scene: sceneNum,
+          existing_scenes: generatedResult.scenes.map(s => ({
+            scene: s.scene, kamera: s.kamera, dialog_karakter: s.dialog_karakter,
+          })),
+        }),
+      });
+      const data = await readNdjsonFinal<AIGeneratedResult>(res);
+      const newScene = data.scenes?.[0];
+      if (!newScene) throw new Error('AI tidak mengembalikan scene baru');
+      setGeneratedResult(prev => prev
+        ? { ...prev, scenes: prev.scenes.map(s => (s.scene === sceneNum ? newScene : s)) }
+        : prev);
+      getAiStatus().then(r => { if (r.success && r.data) setAiStatus(r.data); });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : `Gagal regenerate scene ${sceneNum}`);
+    } finally {
+      setRegenScene(null);
     }
   };
 
@@ -1213,10 +1327,19 @@ function AIGenerateTab({
 
           <div className="space-y-3">
             {generatedResult.scenes.map(s => (
-              <div key={s.scene} className="p-3 border border-gray-100 rounded-xl bg-[#F8FAFC]">
+              <div key={s.scene} className={`p-3 border rounded-xl bg-[#F8FAFC] transition-colors ${regenScene === s.scene ? 'border-[#1565C0]/40' : 'border-gray-100'}`}>
                 <div className="flex items-center gap-2 mb-1">
                   <span className="w-6 h-6 rounded-full bg-[#1565C0] text-white text-xs font-bold flex items-center justify-center">{s.scene}</span>
                   <span className="text-xs font-semibold text-[#64748B] flex-1">{s.kamera}</span>
+                  <button
+                    onClick={() => handleRegenerateScene(s.scene)}
+                    disabled={regenScene != null}
+                    title={`Generate ulang scene ${s.scene} dengan variasi baru (scene lain tidak berubah)`}
+                    className="flex-shrink-0 text-[11px] font-semibold text-amber-600 flex items-center gap-1 disabled:opacity-40">
+                    {regenScene === s.scene
+                      ? <><Loader2 size={12} className="animate-spin" /> Membuat ulang…</>
+                      : <><RefreshCw size={12} /> Regenerate</>}
+                  </button>
                   <button
                     onClick={() => { navigator.clipboard?.writeText(JSON.stringify(s, null, 2)).then(() => { setCopiedScene(s.scene); setTimeout(() => setCopiedScene(c => (c === s.scene ? null : c)), 1500); }).catch(() => {}); }}
                     className="flex-shrink-0 text-[11px] font-semibold text-[#1565C0] flex items-center gap-1">
@@ -1264,9 +1387,9 @@ function CaptionStudio({ propertyId, platform, registerInstruction }: {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ property_id: propertyId, variasi, platform, register_instruction: registerInstruction }),
       });
-      const j = await r.json();
-      if (!r.ok || !j.success) throw new Error(j.error ?? 'Gagal generate caption');
-      setResult(j.data?.captions ?? []);
+      // Sukses = stream NDJSON (anti wall-clock 30s); error validasi = JSON biasa.
+      const data = await readNdjsonFinal<{ captions: { caption: string; hashtag_sets: string[] }[] }>(r);
+      setResult(data.captions ?? []);
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Gagal'); } finally { setLoading(false); }
   };
 
@@ -1900,6 +2023,29 @@ export default function AdminViralFrameWorkspacePage() {
   }, [id]);
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
+  const [deletingHistoryId, setDeletingHistoryId] = useState<number | 'all' | null>(null);
+  const deleteHistoryItem = async (hid: number) => {
+    if (!window.confirm(`Hapus riwayat #${hid}? Tindakan ini tidak bisa dibatalkan.`)) return;
+    setDeletingHistoryId(hid);
+    try {
+      const r = await fetch(`/api/admin/viralframe/generations/${hid}`, { method: 'DELETE', credentials: 'include' });
+      const j = await r.json();
+      if (j.success) setHistory(prev => prev.filter(h => h.id !== hid));
+    } catch { /* ignore */ }
+    setDeletingHistoryId(null);
+  };
+  const clearHistory = async () => {
+    if (!id) return;
+    if (!window.confirm(`Hapus SEMUA ${history.length} riwayat properti ini? Tindakan ini tidak bisa dibatalkan.`)) return;
+    setDeletingHistoryId('all');
+    try {
+      const r = await fetch(`/api/admin/viralframe/generations?property_id=${id}`, { method: 'DELETE', credentials: 'include' });
+      const j = await r.json();
+      if (j.success) { setHistory([]); setShowHistory(false); }
+    } catch { /* ignore */ }
+    setDeletingHistoryId(null);
+  };
+
   // R11: Preset tim (parameter Step 1)
   interface PresetItem { name: string; params: Partial<Step1State>; updated_at?: string }
   const [presets, setPresets] = useState<PresetItem[]>([]);
@@ -2345,13 +2491,21 @@ export default function AdminViralFrameWorkspacePage() {
       {/* Tahap 1: Riwayat generate */}
       {history.length > 0 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <button onClick={() => setShowHistory(v => !v)}
-            className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
-            <span className="text-sm font-semibold text-[#0F172A] flex items-center gap-2">
-              <History size={15} className="text-[#1565C0]" /> Riwayat ({history.length})
-            </span>
-            <span className="text-[#94A3B8] text-xs">{showHistory ? '▲' : '▼'}</span>
-          </button>
+          <div className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
+            <button onClick={() => setShowHistory(v => !v)}
+              className="flex-1 flex items-center justify-between text-left">
+              <span className="text-sm font-semibold text-[#0F172A] flex items-center gap-2">
+                <History size={15} className="text-[#1565C0]" /> Riwayat ({history.length})
+              </span>
+              <span className="text-[#94A3B8] text-xs">{showHistory ? '▲' : '▼'}</span>
+            </button>
+            {showHistory && (
+              <button onClick={clearHistory} disabled={deletingHistoryId === 'all'}
+                className="ml-3 flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-50 flex-shrink-0">
+                {deletingHistoryId === 'all' ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} Hapus semua
+              </button>
+            )}
+          </div>
           {showHistory && (
             <div className="border-t border-gray-100 divide-y divide-gray-50 max-h-72 overflow-y-auto">
               {history.map(h => {
@@ -2371,6 +2525,11 @@ export default function AdminViralFrameWorkspacePage() {
                         <button onClick={() => { try { setValidData(JSON.parse(h.result_json!)); setStep(4); setStep4Tab('validate'); setShowHistory(false); } catch { /* ignore */ } }}
                           className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-emerald-700 border border-emerald-200 hover:bg-emerald-50">Lihat hasil</button>
                       )}
+                      <button onClick={() => deleteHistoryItem(h.id)} disabled={deletingHistoryId === h.id}
+                        title={`Hapus riwayat #${h.id}`}
+                        className="px-2 py-1 rounded-lg text-red-500 border border-red-200 hover:bg-red-50 disabled:opacity-50">
+                        {deletingHistoryId === h.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                      </button>
                     </div>
                   </div>
                 );
@@ -2597,10 +2756,10 @@ export default function AdminViralFrameWorkspacePage() {
               const isOpen = activeStep2Scene === i + 1;
               const selectedImg = sc?.photoId != null ? prop.images.find(im => im.id === sc.photoId) : null;
               return (
-                <div key={i} className="border border-gray-100 rounded-xl overflow-hidden">
+                <div key={i} className="border border-gray-100 rounded-xl">
                   <button type="button"
                     onClick={() => setActiveStep2Scene(isOpen ? 0 : i + 1)}
-                    className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors">
+                    className={`w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors ${isOpen ? 'rounded-t-xl' : 'rounded-xl'}`}>
                     <span className="font-semibold text-[#0F172A] text-sm flex items-center gap-2">
                       Scene {i + 1} <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[#EFF6FF] text-[#1565C0]">{role}</span>
                       {selectedImg && (

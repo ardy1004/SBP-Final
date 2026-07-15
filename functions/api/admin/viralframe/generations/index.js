@@ -1,6 +1,7 @@
 // POST /api/admin/viralframe/generations — simpan riwayat generate Master Prompt
 //   Body JSON: { property_id, params_json (string|object), master_prompt, result_json? }
 // GET  /api/admin/viralframe/generations?property_id= — list riwayat (opsional filter)
+// DELETE /api/admin/viralframe/generations?property_id= — hapus semua riwayat properti itu
 //
 // Auth: otomatis via functions/api/admin/_middleware.js
 
@@ -71,6 +72,25 @@ export async function onRequestPost(context) {
   } catch (err) {
     console.error('[viralframe generations POST]', err.message);
     return jsonError('Gagal menyimpan riwayat', 500, err.message);
+  }
+}
+
+export async function onRequestDelete(context) {
+  const { request, env } = context;
+  const url = new URL(request.url);
+  const pid = parseInt(url.searchParams.get('property_id') ?? '', 10);
+  // property_id wajib — mencegah hapus seluruh tabel tanpa sengaja
+  if (!Number.isInteger(pid) || pid <= 0) return jsonError('property_id wajib diisi', 422);
+
+  try {
+    const res = await env.DB
+      .prepare('DELETE FROM viralframe_generations WHERE property_id = ?')
+      .bind(pid)
+      .run();
+    return jsonOk({ deleted: res.meta?.changes ?? 0, pesan: 'Riwayat properti dihapus' });
+  } catch (err) {
+    console.error('[viralframe generations DELETE all]', err.message);
+    return jsonError('Gagal menghapus riwayat', 500, err.message);
   }
 }
 

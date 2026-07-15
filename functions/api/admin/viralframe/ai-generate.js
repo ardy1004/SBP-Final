@@ -6,9 +6,14 @@
 // tone/visual_style/hook_type/cta_type: label sudah diresolve di frontend dari Step 1
 // (options.ts TONES/VISUAL_STYLES/HOOK_TYPES/CTA_TYPES) — "Auto" berarti tidak ada instruksi tambahan.
 // scene_roles: [{ scene: 1, role: 'Hook'|'Body'|'CTA' }, ...] — dari sceneRole() (options.ts), sama dengan Jalur A.
+// Opsional REGENERATE SATU SCENE: { regenerate_scene: N, existing_scenes: [{scene,kamera,dialog_karakter}] }
+//   → AI hanya membuat ulang scene N (variasi baru) dengan konteks scene lain agar narasi nyambung.
+// Respons SUKSES = streaming NDJSON (heartbeat 2s + baris {done,data|error}) — latensi
+// Gemini dari dalam Worker bisa >22s bahkan untuk output kecil, pola "tunggu lalu balas"
+// menabrak wall-clock 30s → 502 (lihat youtube-long.js). Error validasi awal tetap JSON.
 // Auth: otomatis via functions/api/admin/_middleware.js
 
-import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+import { jsonError, handleOptions } from '../../_shared/response.js';
 // Konstanta lipsync & ekspresi = sumber tunggal bersama dengan frontend (Fase 4).
 import { getMaxWords, EXPRESSION_EN } from '../../../_lib/viralframe-shared.js';
 import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
@@ -272,7 +277,7 @@ Format yang diharapkan:
 Field WAJIB ada dan non-empty: scene (integer), kamera (string), prompt (string min 50 kata), dialog_karakter (string, format sesuai [4]).`;
 }
 
-function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote }) {
+function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes }) {
   const fasilitas = 'tidak disebutkan';
   const deskripsi = (property.deskripsi ?? '').slice(0, 200);
   const hargaLabel = `${formatRupiah(property.harga)}${property.nego ? ' (nego)' : property.nett ? ' (nett)' : ''}`;
@@ -298,6 +303,28 @@ function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments,
     ? `ARAHAN GAYA VIDEO (ARKETIPE) — WAJIB dipatuhi di semua scene:\n${archetypeNote}\n\n`
     : '';
 
+  // Mode regenerate satu scene: AI hanya membuat ulang scene N dengan variasi baru,
+  // sambil menjaga kesinambungan dengan dialog scene lain yang sudah final.
+  let closingInstruction = `Buat ${jumlahScene} video prompt sesuai aturan system prompt.`;
+  let regenBlock = '';
+  if (regenerateScene) {
+    const prev = (existingScenes ?? []).find(s => Number(s.scene) === regenerateScene);
+    const others = (existingScenes ?? [])
+      .filter(s => Number(s.scene) !== regenerateScene && s.dialog_karakter)
+      .map(s => `  Scene ${s.scene}: "${String(s.dialog_karakter).slice(0, 200)}"`)
+      .join('\n');
+    regenBlock = `
+PERINTAH KHUSUS — REGENERATE SATU SCENE:
+User meminta HANYA Scene ${regenerateScene} dibuat ulang dengan VARIASI BARU yang segar.
+${prev ? `Versi sebelumnya Scene ${regenerateScene} (JANGAN mengulangi pendekatan yang sama — buat gerakan kamera, angle, dan kalimat dialog yang BERBEDA):
+  kamera sebelumnya : ${String(prev.kamera ?? '').slice(0, 150)}
+  dialog sebelumnya : "${String(prev.dialog_karakter ?? '').slice(0, 250)}"
+` : ''}${others ? `Scene lain SUDAH FINAL dan TIDAK diubah — jaga kesinambungan narasi (jangan buat dialog yang bertabrakan/duplikat dengan ini):
+${others}
+` : ''}`;
+    closingInstruction = `Buat ulang HANYA Scene ${regenerateScene}. Output: JSON array berisi TEPAT 1 objek scene dengan field "scene" = ${regenerateScene}, mengikuti semua aturan system prompt (kamera & foto sesuai instruksi Scene ${regenerateScene} di atas, peran scene tetap sama).`;
+  }
+
   return `${archetypeBlock}Data properti:
 - Jenis: ${property.jenis_properti}
 - Judul: ${property.title}
@@ -313,8 +340,8 @@ Karakter: ${karakterDesc}
 
 Instruksi per scene (kamera & durasi sudah ditentukan, WAJIB diikuti):
 ${sceneLines}
-
-Buat ${jumlahScene} video prompt sesuai aturan system prompt.`;
+${regenBlock}
+${closingInstruction}`;
 }
 
 function describeKarakter(k) {
@@ -374,21 +401,24 @@ function isValidScene(s) {
     typeof s.dialog_karakter === 'string' && s.dialog_karakter.trim().length >= 10;
 }
 
-function parseSceneJson(raw, jumlahScene) {
+function parseSceneJson(raw, expectedCount) {
   let text = raw.trim();
   text = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+  // Ekstraksi tahan-banting: '[' pertama sampai ']' terakhir (model kadang menambah teks).
+  const first = text.indexOf('['), last = text.lastIndexOf(']');
+  if (first > 0 || (last >= 0 && last < text.length - 1)) text = text.slice(first, last + 1);
 
   let parsed;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { ok: false, error: 'Respons DeepSeek bukan JSON valid' };
+    return { ok: false, error: 'Respons AI bukan JSON valid' };
   }
 
-  if (!Array.isArray(parsed) || parsed.length !== jumlahScene || !parsed.every(isValidScene)) {
+  if (!Array.isArray(parsed) || parsed.length !== expectedCount || !parsed.every(isValidScene)) {
     return {
       ok: false,
-      error: `DeepSeek output tidak valid. Dapat ${Array.isArray(parsed) ? parsed.length : 'non-array'} scene, butuh ${jumlahScene}. Setiap scene wajib: scene (int), kamera (≥3 karakter), prompt (≥50 kata), dialog_karakter (≥10 karakter).`,
+      error: `Output AI tidak valid. Dapat ${Array.isArray(parsed) ? parsed.length : 'non-array'} scene, butuh ${expectedCount}. Setiap scene wajib: scene (int), kamera (≥3 karakter), prompt (≥50 kata), dialog_karakter (≥10 karakter).`,
     };
   }
   return { ok: true, data: parsed };
@@ -428,8 +458,24 @@ export async function onRequestPost(context) {
         .map(c => ({ scene: Number(c.scene), camera: c.camera.slice(0, 400) }))
     : [];
 
+  // Mode regenerate satu scene (opsional)
+  const regenerateScene = Number.isInteger(parseInt(body.regenerate_scene, 10)) && parseInt(body.regenerate_scene, 10) > 0
+    ? parseInt(body.regenerate_scene, 10)
+    : null;
+  const existingScenes = Array.isArray(body.existing_scenes)
+    ? body.existing_scenes
+        .filter(s => s && Number.isInteger(Number(s.scene)))
+        .map(s => ({
+          scene: Number(s.scene),
+          kamera: typeof s.kamera === 'string' ? s.kamera.slice(0, 200) : '',
+          dialog_karakter: typeof s.dialog_karakter === 'string' ? s.dialog_karakter.slice(0, 300) : '',
+        }))
+        .slice(0, 12)
+    : [];
+
   if (!Number.isInteger(propertyId) || propertyId <= 0) return jsonError('property_id wajib diisi', 422);
   if (!Number.isInteger(jumlahScene) || jumlahScene < 2 || jumlahScene > 12) return jsonError('jumlah_scene harus 2-12', 422);
+  if (regenerateScene != null && regenerateScene > jumlahScene) return jsonError('regenerate_scene di luar rentang jumlah scene', 422);
   if (!platform || typeof platform !== 'string') return jsonError('platform wajib diisi', 422);
   if (!aiTool || typeof aiTool !== 'string') return jsonError('ai_tool wajib diisi', 422);
   if (!bahasa || typeof bahasa !== 'string') return jsonError('bahasa wajib diisi', 422);
@@ -471,90 +517,117 @@ export async function onRequestPost(context) {
   const karakterDesc = describeKarakterUntukPrompt(karakter, expression);
 
   const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction });
-  const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote });
+  const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes });
 
-  // ── Panggil AI dengan fallback berantai ────────────────────────────────────
-  // Urutan: provider pilihan user dulu, lalu sisanya (yang punya key). Bila satu
-  // provider kehabisan kuota / gagal, lanjut otomatis ke berikutnya agar generate
-  // tetap jalan. Model kustom hanya dipakai untuk provider pilihan; fallback pakai
-  // default model provider tsb.
-  const maxTokens = Math.min(4000, 500 + jumlahScene * 350);
+  // ── Panggil AI dengan fallback berantai, respons streaming NDJSON ──────────
+  // Urutan: provider pilihan user dulu, lalu sisanya (yang punya key). Heartbeat
+  // tiap 2s membuat response "mengalir" sejak awal sehingga bebas wall-clock 30s;
+  // tiap provider dapat waktu penuh (55s) tanpa anggaran 26s lagi.
+  const expectedCount = regenerateScene != null ? 1 : jumlahScene;
+  const maxTokens = regenerateScene != null ? 900 : Math.min(4000, 500 + jumlahScene * 350);
   const tryOrder = [chosenProvider, ...PROVIDER_ORDER.filter(p => p !== chosenProvider)];
 
-  // Anggaran waktu total: jaga di bawah batas wall-clock ~30 detik Cloudflare Workers.
-  // Setiap panggilan diberi sisa waktu; kalau tak cukup, hentikan fallback (bukan
-  // dibunuh runtime → 502). Lihat CLAUDE.md gotcha 30 detik.
-  const deadline = Date.now() + 26000;
+  const enc = new TextEncoder();
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const send = (obj) => writer.write(enc.encode(JSON.stringify(obj) + '\n')).catch(() => {});
 
-  let raw = null;
-  let usedProvider = null;
-  let usedModel = null;
-  const attempts = [];
+  const work = (async () => {
+    const heartbeat = setInterval(() => send({ status: 'progress' }), 2000);
+    try {
+      let raw = null;
+      let usedProvider = null;
+      let usedModel = null;
+      const attempts = [];
 
-  for (const provider of tryOrder) {
-    const remaining = deadline - Date.now();
-    if (remaining < 6000) { attempts.push({ provider, skipped: 'time_budget' }); break; }
+      for (const provider of tryOrder) {
+        const key = await getProviderKey(env, provider);
+        if (!key) { attempts.push({ provider, skipped: 'no_key' }); continue; }
+        const model = provider === chosenProvider && chosenModel ? chosenModel : PROVIDERS[provider].defaultModel;
 
-    const key = await getProviderKey(env, provider);
-    if (!key) { attempts.push({ provider, skipped: 'no_key' }); continue; }
-    const model = provider === chosenProvider && chosenModel ? chosenModel : PROVIDERS[provider].defaultModel;
+        const result = await callChatCompletion({
+          provider, apiKey: key, model, systemPrompt, userPrompt, maxTokens,
+          // Gemini = model thinking: tanpa 'none', token reasoning tersembunyi bikin lambat.
+          reasoningEffort: provider === 'gemini' ? 'none' : undefined,
+          timeoutMs: 55000,
+        });
+        if (result.ok) {
+          raw = result.content;
+          usedProvider = provider;
+          usedModel = model;
+          break;
+        }
+        attempts.push({ provider, error: result.error?.slice(0, 140), quota: result.quotaExhausted === true });
+        console.error(`[ai-generate] ${provider} gagal:`, result.error?.slice(0, 160));
+      }
 
-    const result = await callChatCompletion({ provider, apiKey: key, model, systemPrompt, userPrompt, maxTokens, timeoutMs: remaining - 1500 });
-    if (result.ok) {
-      raw = result.content;
-      usedProvider = provider;
-      usedModel = model;
-      break;
+      if (!raw) {
+        const allNoKey = attempts.length > 0 && attempts.every(a => a.skipped === 'no_key');
+        if (allNoKey) {
+          send({ done: true, error: 'Belum ada API key AI yang diatur. Buka menu Pengaturan → AI Providers dan simpan minimal satu API key.' });
+          return;
+        }
+        const detail = attempts
+          .map(a => `${a.provider}: ${a.error || a.skipped || 'gagal'}`)
+          .join(' | ');
+        send({ done: true, error: `Semua provider AI gagal. ${detail}`.slice(0, 480) });
+        return;
+      }
+
+      const parsed = parseSceneJson(raw, expectedCount);
+      if (!parsed.ok) { send({ done: true, error: parsed.error }); return; }
+
+      // Mode regenerate: paksa nomor scene = yang diminta (model kadang salah nomor).
+      if (regenerateScene != null) parsed.data[0].scene = regenerateScene;
+
+      const fotoByScene = new Map(fotoAssignments.map(a => [Number(a.scene), a]));
+      const enrichedScenes = parsed.data.map(s => {
+        const assignment = fotoByScene.get(s.scene);
+        return {
+          ...s,
+          foto_label: assignment?.foto_label ?? null,
+          foto_deskripsi: assignment ? (LABEL_MAP[assignment.foto_label] ?? LABEL_MAP.lainnya) : null,
+        };
+      });
+
+      const fotoUrls = fotoAssignments
+        .slice()
+        .sort((a, b) => a.scene - b.scene)
+        .map(a => a.foto_url);
+
+      send({
+        done: true,
+        data: {
+          scenes: enrichedScenes,
+          foto_urls: fotoUrls,
+          karakter: { nama: karakter.nama, deskripsi: deskripsiKarakter, foto_url: karakter.foto_url },
+          metadata: {
+            platform, ai_tool: aiTool, bahasa,
+            musik_value: musikValue,
+            judul_properti: property.title,
+            kode_listing: property.kode_listing,
+            generated_at: new Date().toISOString(),
+            regenerated_scene: regenerateScene,
+            // Info provider yang benar-benar dipakai (untuk indikator fallback di UI)
+            provider_used: usedProvider,
+            model_used: usedModel,
+            provider_requested: chosenProvider,
+            fell_back: usedProvider !== chosenProvider,
+          },
+        },
+      });
+    } catch (err) {
+      console.error('[ai-generate] stream', err.message);
+      send({ done: true, error: 'Terjadi kesalahan internal saat generate. Coba lagi.' });
+    } finally {
+      clearInterval(heartbeat);
+      await writer.close().catch(() => {});
     }
-    attempts.push({ provider, error: result.error?.slice(0, 140), quota: result.quotaExhausted === true });
-    console.error(`[ai-generate] ${provider} gagal:`, result.error?.slice(0, 160));
-  }
+  })();
+  context.waitUntil?.(work);
 
-  if (!raw) {
-    const allNoKey = attempts.length > 0 && attempts.every(a => a.skipped === 'no_key');
-    if (allNoKey) {
-      return jsonError('Belum ada API key AI yang diatur. Buka menu Pengaturan → AI Providers dan simpan minimal satu API key.', 502);
-    }
-    const detail = attempts
-      .map(a => `${a.provider}: ${a.error || a.skipped || 'gagal'}`)
-      .join(' | ');
-    return jsonError(`Semua provider AI gagal. ${detail}`.slice(0, 480), 502);
-  }
-
-  const parsed = parseSceneJson(raw, jumlahScene);
-  if (!parsed.ok) return jsonError(parsed.error, 502);
-
-  const fotoByScene = new Map(fotoAssignments.map(a => [Number(a.scene), a]));
-  const enrichedScenes = parsed.data.map(s => {
-    const assignment = fotoByScene.get(s.scene);
-    return {
-      ...s,
-      foto_label: assignment?.foto_label ?? null,
-      foto_deskripsi: assignment ? (LABEL_MAP[assignment.foto_label] ?? LABEL_MAP.lainnya) : null,
-    };
-  });
-
-  const fotoUrls = fotoAssignments
-    .slice()
-    .sort((a, b) => a.scene - b.scene)
-    .map(a => a.foto_url);
-
-  return jsonOk({
-    scenes: enrichedScenes,
-    foto_urls: fotoUrls,
-    karakter: { nama: karakter.nama, deskripsi: deskripsiKarakter, foto_url: karakter.foto_url },
-    metadata: {
-      platform, ai_tool: aiTool, bahasa,
-      musik_value: musikValue,
-      judul_properti: property.title,
-      kode_listing: property.kode_listing,
-      generated_at: new Date().toISOString(),
-      // Info provider yang benar-benar dipakai (untuk indikator fallback di UI)
-      provider_used: usedProvider,
-      model_used: usedModel,
-      provider_requested: chosenProvider,
-      fell_back: usedProvider !== chosenProvider,
-    },
+  return new Response(readable, {
+    headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' },
   });
 }
 

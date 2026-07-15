@@ -1,5 +1,6 @@
-// PATCH /api/admin/viralframe/generations/:id — update result_json (JSON scene tervalidasi)
+// PATCH  /api/admin/viralframe/generations/:id — update result_json (JSON scene tervalidasi)
 //   Body JSON: { result_json (string|object) }
+// DELETE /api/admin/viralframe/generations/:id — hapus satu riwayat
 //
 // Auth: otomatis via functions/api/admin/_middleware.js
 
@@ -47,6 +48,26 @@ export async function onRequestPatch(context) {
   } catch (err) {
     console.error('[viralframe generations PATCH]', err.message);
     return jsonError('Gagal menyimpan hasil JSON', 500, err.message);
+  }
+}
+
+export async function onRequestDelete(context) {
+  const { env, params } = context;
+
+  const id = parseInt(params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return jsonError('ID tidak valid', 400);
+
+  try {
+    const res = await env.DB
+      .prepare('DELETE FROM viralframe_generations WHERE id = ?')
+      .bind(id)
+      .run();
+    if (!res.meta?.changes) return jsonError('Riwayat tidak ditemukan', 404);
+
+    return jsonOk({ id, pesan: 'Riwayat dihapus' });
+  } catch (err) {
+    console.error('[viralframe generations DELETE]', err.message);
+    return jsonError('Gagal menghapus riwayat', 500, err.message);
   }
 }
 
