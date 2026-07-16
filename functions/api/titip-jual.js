@@ -4,6 +4,7 @@ import { stripExif } from '../_lib/exif.js';
 import { generateMetaSeo } from '../_lib/metaSeo.js';
 import { verifyTurnstile } from '../_lib/turnstile.js';
 import { normalizeWA, isValidWA } from '../_lib/waUtils.js';
+import { parseGmapsCoords } from '../_lib/parseGmapsCoords.js';
 
 function sanitize(val, maxLen = 500) {
   if (typeof val !== 'string') return '';
@@ -187,6 +188,11 @@ export async function onRequestPost(context) {
   const no_wa_1 = normalizeWA(no_wa_raw);
   const no_wa_2 = no_wa_2_raw ? normalizeWA(no_wa_2_raw) : null;
 
+  // Auto-ekstrak koordinat dari link Maps (sama seperti PATCH admin) — sebelumnya
+  // titip-jual TIDAK pernah memanggil ini, jadi latitude/longitude tetap NULL
+  // sampai admin buka & simpan ulang properti secara manual.
+  const geo = await parseGmapsCoords(gmaps_link);
+
   // ─── Enkripsi NIK ────────────────────────────────────────────────────────
   let nik_encrypted;
   try { nik_encrypted = await encryptNIK(nik_raw, env.NIK_ENC_KEY); }
@@ -236,7 +242,7 @@ export async function onRequestPost(context) {
          jumlah_kamar_tidur, jumlah_kamar_mandi,
          legalitas, status_legalitas, bank_agunan, outstanding_bank,
          deskripsi, info_tambahan, alasan_dijual,
-         gmaps_link, lebar_jalan_m,
+         gmaps_link, latitude, longitude, lebar_jalan_m,
          income_per_bulan, pengeluaran_per_bulan, harga_sewa_kamar_bulan,
          details, furnished,
          meta_title, meta_description,
@@ -249,7 +255,7 @@ export async function onRequestPost(context) {
          ?,?,
          ?,?,?,?,
          ?,?,?,
-         ?,?,
+         ?,?,?,?,
          ?,?,?,
          ?,?,
          ?,?,
@@ -262,7 +268,7 @@ export async function onRequestPost(context) {
       kt, km,
       legalitas, status_legalitas, bank_agunan, outstanding_bank,
       deskripsi, info_tambahan, alasan_dijual,
-      gmaps_link, lebar_jalan_m,
+      gmaps_link, geo.latitude, geo.longitude, lebar_jalan_m,
       income_per_bulan, pengeluaran_per_bulan, harga_sewa_kamar_bulan,
       details, furnished,
       meta.meta_title, meta.meta_description

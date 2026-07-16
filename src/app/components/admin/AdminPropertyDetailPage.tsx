@@ -150,11 +150,35 @@ function waHref(phone: string): string {
   return `https://wa.me/${d}`;
 }
 
+// Titip Jual publik hanya minta owner pilih KATEGORI lingkungan (bukan jarak
+// meter presisi) — tersimpan di details.lingkungan. Form admin di sini
+// menampilkan jarak_X_m sebagai sumber utama (lebih presisi bila sudah diisi
+// admin), fallback ke kategori Titip Jual bila jarak_X_m masih kosong —
+// sebelumnya fallback ini tidak ada sehingga jawaban owner terlihat hilang.
+const LINGKUNGAN_DETAILS_MAP: Record<string, LingkunganType> = {
+  jauh_dari_semuanya: 'jauh',
+  dekat_sungai: 'sungai',
+  dekat_makam: 'makam',
+  dekat_sutet: 'sutet',
+};
+
 function detectLingkungan(d: PropertyDetail): LingkunganType {
   if (d.jarak_sungai_m) return 'sungai';
   if (d.jarak_makam_m)  return 'makam';
   if (d.jarak_sutet_m)  return 'sutet';
+  const fromTitipJual = (d.details as Record<string, unknown> | null)?.lingkungan;
+  if (typeof fromTitipJual === 'string' && fromTitipJual in LINGKUNGAN_DETAILS_MAP) {
+    return LINGKUNGAN_DETAILS_MAP[fromTitipJual];
+  }
   return 'jauh';
+}
+
+// true bila nilai lingkungan berasal murni dari kategori Titip Jual (belum ada
+// jarak meter presisi dari admin) — dipakai utk tampilkan hint di UI.
+function isLingkunganFromTitipJual(d: PropertyDetail): boolean {
+  if (d.jarak_sungai_m || d.jarak_makam_m || d.jarak_sutet_m) return false;
+  const v = (d.details as Record<string, unknown> | null)?.lingkungan;
+  return typeof v === 'string' && v in LINGKUNGAN_DETAILS_MAP;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -172,6 +196,7 @@ export default function AdminPropertyDetailPage() {
   const [form, setForm]               = useState<Partial<PropertyDetail>>({});
   const [detailsMap, setDetailsMap]   = useState<Record<string, unknown>>({});
   const [lingkungan, setLingkungan]   = useState<LingkunganType>('jauh');
+  const [lingkunganFromTitipJual, setLingkunganFromTitipJual] = useState(false);
 
   const [saving, setSaving]           = useState(false);
   const [saveMsg, setSaveMsg]         = useState('');
@@ -286,6 +311,7 @@ export default function AdminPropertyDetailPage() {
       setLoadedPhotos(d.images ?? []);
       setDetailsMap(d.details ?? {});
       setLingkungan(detectLingkungan(d));
+      setLingkunganFromTitipJual(isLingkunganFromTitipJual(d));
       setForm({
         title: d.title, jenis_properti: d.jenis_properti, tujuan: d.tujuan,
         harga: d.harga, harga_lama: d.harga_lama, harga_sewa_tahun: d.harga_sewa_tahun,
@@ -327,6 +353,7 @@ export default function AdminPropertyDetailPage() {
 
   const handleLingkungan = (type: LingkunganType) => {
     setLingkungan(type);
+    setLingkunganFromTitipJual(false); // admin sudah konfirmasi/ubah manual
     setF({
       jarak_sungai_m: type === 'sungai' ? (form.jarak_sungai_m ?? null) : null,
       jarak_makam_m:  type === 'makam'  ? (form.jarak_makam_m ?? null)  : null,
@@ -903,6 +930,11 @@ export default function AdminPropertyDetailPage() {
         {/* (F) Lingkungan */}
         <section className="pt-4 border-t border-gray-100 space-y-3">
           <h3 className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Lingkungan</h3>
+          {lingkunganFromTitipJual && (
+            <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-1.5 -mt-1">
+              ⚠️ Kategori ini dipilih owner saat Titip Jual (belum ada jarak meter presisi) — isi jarak di bawah bila diketahui.
+            </p>
+          )}
           <div className="flex flex-wrap gap-4">
             {([
               { value: 'jauh',   label: 'Jauh dari semuanya' },
