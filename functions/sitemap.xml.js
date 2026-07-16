@@ -54,33 +54,45 @@ export async function onRequestGet(context) {
     console.error('[sitemap] properties query error:', err.message);
   }
 
-  // Halaman programmatic SEO ({jenis}-{tujuan}[-{kabupaten}], mis. /rumah-dijual-sleman).
-  // Hanya kombinasi dengan ≥3 listing (anti thin-content, spec 3.8). Token kabupaten:
-  // "Kabupaten Sleman" → "sleman"; "Kota Yogyakarta" → "kota-yogyakarta" (JANGAN
-  // dipangkas jadi "yogyakarta" — itu alias seluruh DIY di parseProgrammaticSlug).
+  // Halaman programmatic SEO ({jenis}-{tujuan}[-{lokasi}], mis. /rumah-dijual-sleman,
+  // /kost-dijual-depok). Hanya kombinasi dengan ≥3 listing (anti thin-content, spec 3.8).
+  // Dua level lokasi: kabupaten (mis. "sleman") dan kecamatan (mis. "depok") — keduanya
+  // dicocokkan oleh parseProgrammaticSlug + loader (kabupaten LIKE dulu, lalu kecamatan
+  // LIKE), jadi slug flat "kost-dijual-depok" otomatis valid tanpa perlu prefix kabupaten.
   try {
-    const combos = await env.DB.prepare(`
-      SELECT jenis_properti AS jenis, kabupaten,
+    const kabCombos = await env.DB.prepare(`
+      SELECT jenis_properti AS jenis, kabupaten AS lokasi,
         SUM(CASE WHEN tujuan IN ('dijual','dijual_disewa') THEN 1 ELSE 0 END) AS c_dijual,
         SUM(CASE WHEN tujuan IN ('disewa','dijual_disewa') THEN 1 ELSE 0 END) AS c_disewa
       FROM properties
       WHERE status_publish = 'published'
       GROUP BY jenis_properti, kabupaten
     `).all();
-    const rows = combos.results ?? [];
+    const kecCombos = await env.DB.prepare(`
+      SELECT jenis_properti AS jenis, kecamatan AS lokasi,
+        SUM(CASE WHEN tujuan IN ('dijual','dijual_disewa') THEN 1 ELSE 0 END) AS c_dijual,
+        SUM(CASE WHEN tujuan IN ('disewa','dijual_disewa') THEN 1 ELSE 0 END) AS c_disewa
+      FROM properties
+      WHERE status_publish = 'published' AND kecamatan IS NOT NULL AND kecamatan != ''
+      GROUP BY jenis_properti, kecamatan
+    `).all();
+    const rows = [...(kabCombos.results ?? []), ...(kecCombos.results ?? [])];
     const slugSet = new Set();
-    const kabToken = (kab) => String(kab ?? '')
+    // "Kabupaten Sleman" → "sleman"; "Kota Yogyakarta" → "kota-yogyakarta" (JANGAN
+    // dipangkas jadi "yogyakarta" — itu alias seluruh DIY di parseProgrammaticSlug).
+    // Kecamatan (mis. "Depok") tidak punya prefix, cukup lowercase + slugify.
+    const lokasiToken = (l) => String(l ?? '')
       .toLowerCase().replace(/^kabupaten\s+/, '').trim().replace(/\s+/g, '-');
 
     for (const r of rows) {
-      const tok = kabToken(r.kabupaten);
+      const tok = lokasiToken(r.lokasi);
       if (!tok) continue;
       if (r.c_dijual >= 3) slugSet.add(`${r.jenis}-dijual-${tok}`);
       if (r.c_disewa >= 3) slugSet.add(`${r.jenis}-disewa-${tok}`);
     }
-    // Agregat seluruh DIY → alias 'jogja'
+    // Agregat seluruh DIY → alias 'jogja' (dari data kabupaten, tidak double-count kecamatan)
     const diy = new Map();
-    for (const r of rows) {
+    for (const r of (kabCombos.results ?? [])) {
       const cur = diy.get(r.jenis) ?? { dijual: 0, disewa: 0 };
       cur.dijual += r.c_dijual ?? 0;
       cur.disewa += r.c_disewa ?? 0;

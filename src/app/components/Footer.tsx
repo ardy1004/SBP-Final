@@ -71,10 +71,10 @@ export default function Footer() {
                 { label: 'Rumah Dijual Sleman', href: '/rumah-dijual-sleman' },
                 { label: 'Kost Dijual Jogja', href: '/kost-dijual-jogja' },
                 { label: 'Kost Dijual Sleman', href: '/kost-dijual-sleman' },
+                { label: 'Kost Dijual Depok (UGM/UNY)', href: '/kost-dijual-depok' },
                 { label: 'Tanah Dijual Jogja', href: '/tanah-dijual-jogja' },
                 { label: 'Tanah Dijual Sleman', href: '/tanah-dijual-sleman' },
                 { label: 'Hotel Dijual Jogja', href: '/hotel-dijual-jogja' },
-                { label: 'Kost Dekat UGM', href: '/properties?jenis=kost&kecamatan=Depok' },
               ].map((link) => (
                 <li key={link.href}>
                   <Link to={link.href} className="hover:text-[#29B6F6] transition-colors">
