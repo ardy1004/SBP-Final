@@ -4,6 +4,9 @@ import PropertiesPage, { type SsrListingData } from "../components/PropertiesPag
 import NotFoundPage from "../components/NotFoundPage";
 import { normalizeProperty, type NormalizedProperty } from "../../lib/api";
 import { parseProgrammaticSlug } from "../../lib/programmaticSeo";
+// functions/_lib import bersama backend↔frontend (lihat CLAUDE.md) — sama pola
+// dgn generateMetaSeo di AdminPropertyDetailPage.tsx.
+import { parseLandmarkSlug, resolveApproxCoord, haversineKm, LANDMARK_RADIUS_KM } from "../../../functions/_lib/geoLandmarks.js";
 
 // Route module SSR untuk /properties DAN programmatic SEO /:slug
 // (mis. /rumah-dijual-jogja, /kost-dijual-sleman).
@@ -26,9 +29,15 @@ interface SeoInfo {
   canonical: string;
   /** H1 halaman — untuk programmatic SEO ("Rumah Dijual di Sleman"), null = default */
   heading: string | null;
+  /** Subteks kustom di bawah H1 (disclaimer radius perkiraan utk halaman landmark), null = teks default */
+  subheading: string | null;
 }
 
 const EMPTY_FILTERS = { tujuan: '', jenis: '', provinsi: '', kabupaten: '', kecamatan: '' };
+
+function capitalize(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
 
 /** Payload 404 (slug programmatic tak dikenal) dengan status HTTP 404. */
 function notFoundResult() {
@@ -43,6 +52,7 @@ function notFoundResult() {
       description: 'Halaman yang Anda cari tidak tersedia.',
       canonical: 'https://salambumi.xyz/properties',
       heading: null,
+      subheading: null,
     } satisfies SeoInfo,
   }, { status: 404 });
 }
@@ -65,10 +75,22 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
 
   if (isProgrammatic) {
     const parsed = parseProgrammaticSlug(params.slug!);
-    // Slug tak dikenal → 404 (bukan menampilkan semua listing = duplicate content).
-    // Tidak throw Response (app belum punya ErrorBoundary) — return data + status 404,
-    // komponen merender NotFoundPage dan meta men-set noindex.
-    if (!parsed) return notFoundResult();
+    // Slug tak dikenal di grammar lokasi → coba grammar landmark
+    // ({jenis}-dekat-{landmark}, mis. "kost-dekat-ugm") sebelum menyerah 404.
+    if (!parsed) {
+      const landmarkParsed = parseLandmarkSlug(params.slug!, VALID_JENIS, capitalize);
+      // Grammar tak dikenal sama sekali (bukan lokasi, bukan landmark) → 404
+      // (bukan menampilkan semua listing = duplicate content). Tidak throw
+      // Response (app belum punya ErrorBoundary) — return data + status 404,
+      // komponen merender NotFoundPage + noindex.
+      if (!landmarkParsed) return notFoundResult();
+      // Slug valid tapi D1 tak tersedia (mis. `npm run dev` tanpa proxy — lihat
+      // CLAUDE.md) → render halaman kosong seperti path lokasi, JANGAN 404.
+      if (!env?.DB) {
+        return { ssr: false as const, notFound: false as const, properties: [] as NormalizedProperty[], total: 0, filters: EMPTY_FILTERS, seo: buildLandmarkSeo(landmarkParsed, 0, params.slug!) };
+      }
+      return await loadLandmarkPage(env, landmarkParsed, params.slug!);
+    }
     tujuan = parsed.tujuan;
     jenisList = [parsed.jenis];
     seoPath = `/${params.slug}`;
@@ -200,7 +222,7 @@ function buildSeo(
 ): SeoInfo {
   const countPart = total > 0 ? `${total} Listing Terverifikasi` : 'Listing Terverifikasi';
   if (isProgrammatic) {
-    const jenisLabel = jenisList[0] ? jenisList[0].charAt(0).toUpperCase() + jenisList[0].slice(1) : 'Properti';
+    const jenisLabel = jenisList[0] ? capitalize(jenisList[0]) : 'Properti';
     const tujuanLabel = tujuan === 'disewa' ? 'Disewa' : 'Dijual';
     const heading = `${jenisLabel} ${tujuanLabel} di ${lokasiLabel}`;
     return {
@@ -208,6 +230,7 @@ function buildSeo(
       description: `Cari ${jenisLabel.toLowerCase()} ${tujuanLabel.toLowerCase()} di ${lokasiLabel}. Semua listing dikurasi & diverifikasi langsung oleh tim Salam Bumi Property — legalitas dicek, harga transparan, nego langsung pemilik.`,
       canonical: `https://salambumi.xyz${seoPath}`,
       heading,
+      subheading: null,
     };
   }
   return {
@@ -215,7 +238,98 @@ function buildSeo(
     description: 'Jelajahi rumah, kost, villa, tanah & properti komersial dijual maupun disewa di Yogyakarta. Filter lokasi, harga, dan spesifikasi — semua listing terverifikasi tim SBP.',
     canonical: 'https://salambumi.xyz/properties',
     heading: null,
+    subheading: null,
   };
+}
+
+// ── Halaman landmark: {jenis}-dekat-{landmark}, mis. /kost-dekat-ugm ──────────
+// Terpisah dari alur lokasi (kabupaten/kecamatan) di atas karena jarak dihitung
+// via Haversine di JS (SQLite/D1 tak punya fungsi trig), bukan filter SQL biasa.
+interface LandmarkParsed {
+  jenis: string;
+  jenisLabel: string;
+  landmark: { slug: string; label: string; lat: number; lon: number };
+}
+
+function buildLandmarkSeo(parsed: LandmarkParsed, total: number, slug: string): SeoInfo {
+  const { jenisLabel, landmark } = parsed;
+  const countPart = total > 0 ? `${total} Listing Terverifikasi` : 'Listing Terverifikasi';
+  const heading = `${jenisLabel} Dekat ${landmark.label}`;
+  return {
+    title: `${heading} — ${countPart} | Salam Bumi Property`,
+    description: `Cari ${jenisLabel.toLowerCase()} dekat ${landmark.label} (radius ±${LANDMARK_RADIUS_KM} km) di Yogyakarta. Semua listing dikurasi & diverifikasi langsung oleh tim Salam Bumi Property.`,
+    canonical: `https://salambumi.xyz/${slug}`,
+    heading,
+    subheading: total > 0
+      ? `${countPart} dalam radius ±${LANDMARK_RADIUS_KM} km dari ${landmark.label} — jarak estimasi per area (kecamatan), bukan lokasi presisi GPS.`
+      : `Belum ada listing dalam radius ±${LANDMARK_RADIUS_KM} km dari ${landmark.label} saat ini.`,
+  };
+}
+
+async function loadLandmarkPage(env: { DB: D1Database }, parsed: LandmarkParsed, slug: string) {
+  try {
+    const dataRes = await env.DB.prepare(`
+      SELECT
+        p.id, p.kode_listing, p.title, p.slug,
+        p.jenis_properti, p.tujuan,
+        p.harga, p.harga_lama, p.harga_sewa_tahun,
+        p.nego, p.nett, p.harga_per_m2,
+        p.jumlah_kamar_tidur, p.jumlah_kamar_mandi,
+        p.luas_tanah, p.luas_bangunan, p.lebar_depan, p.lantai,
+        p.legalitas, p.status_legalitas, p.furnished,
+        p.kecamatan, p.kabupaten, p.provinsi,
+        p.latitude, p.longitude,
+        p.badge_premium, p.badge_featured, p.badge_hot,
+        p.status_sold, p.properti_pilihan, p.verified,
+        p.income_per_bulan, p.pengeluaran_per_bulan,
+        p.views_count, p.published_at, p.updated_at,
+        (SELECT url_webp FROM property_images
+           WHERE property_id = p.id ORDER BY is_cover DESC, urutan ASC LIMIT 1) AS cover_url,
+        (SELECT alt_text  FROM property_images
+           WHERE property_id = p.id ORDER BY is_cover DESC, urutan ASC LIMIT 1) AS cover_alt,
+        (SELECT GROUP_CONCAT(url_webp, '|||') FROM (
+           SELECT url_webp FROM property_images
+             WHERE property_id = p.id ORDER BY is_cover DESC, urutan ASC LIMIT 5
+         )) AS images_raw
+      FROM properties p
+      WHERE p.status_publish = 'published' AND p.jenis_properti = ?
+        AND p.kecamatan IS NOT NULL AND p.kecamatan != ''
+      ORDER BY p.properti_pilihan DESC, p.badge_premium DESC, p.badge_featured DESC, p.badge_hot DESC, p.published_at DESC
+    `).bind(parsed.jenis).all();
+
+    const rows = (dataRes.results ?? []) as Record<string, unknown>[];
+    const { lat: lmLat, lon: lmLon } = parsed.landmark;
+
+    // Filter jarak (Haversine) — resolveApproxCoord pakai koordinat properti asli
+    // bila ada, fallback centroid kecamatan (approx=true). Array.sort JS stabil →
+    // urutan SQL di atas (prioritas badge/tanggal) tetap terjaga untuk jarak sama.
+    const withinRadius = rows
+      .map(row => {
+        const coord = resolveApproxCoord(row);
+        if (!coord) return null;
+        const distanceKm = haversineKm(coord.lat, coord.lon, lmLat, lmLon);
+        return { row, distanceKm };
+      })
+      .filter((x): x is { row: Record<string, unknown>; distanceKm: number } => x !== null && x.distanceKm <= LANDMARK_RADIUS_KM)
+      .sort((a, b) => a.distanceKm - b.distanceKm);
+
+    const total = withinRadius.length;
+    const properties: NormalizedProperty[] = withinRadius
+      .slice(0, SSR_LIMIT)
+      .map(x => normalizeProperty(x.row as Parameters<typeof normalizeProperty>[0]));
+
+    return {
+      ssr: true as const,
+      notFound: false as const,
+      properties,
+      total,
+      filters: { ...EMPTY_FILTERS, jenis: parsed.jenis },
+      seo: buildLandmarkSeo(parsed, total, slug),
+    };
+  } catch (e) {
+    console.error('[properties loader] landmark', e);
+    return { ssr: false as const, notFound: false as const, properties: [] as NormalizedProperty[], total: 0, filters: EMPTY_FILTERS, seo: buildLandmarkSeo(parsed, 0, slug) };
+  }
 }
 
 const OG_IMAGE = 'https://images.salambumi.xyz/salambumi.xyz.png';
@@ -226,6 +340,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     description: 'Listing properti terverifikasi di Yogyakarta.',
     canonical: 'https://salambumi.xyz/properties',
     heading: null,
+    subheading: null,
   };
   if (data?.notFound) {
     return [
@@ -257,5 +372,5 @@ export default function PropertiesRoute() {
   const ssrData: SsrListingData | undefined = loaderData.ssr
     ? { properties: loaderData.properties, total: loaderData.total, filters: loaderData.filters }
     : undefined;
-  return <PropertiesPage ssrData={ssrData} heading={loaderData.seo.heading} />;
+  return <PropertiesPage ssrData={ssrData} heading={loaderData.seo.heading} subheading={loaderData.seo.subheading} />;
 }

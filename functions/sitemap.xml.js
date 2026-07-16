@@ -4,6 +4,7 @@
 // dijalankan lebih dulu (Pages Functions: exact route > catch-all).
 
 import { buildPropertyUrl } from './_lib/propertyUrl.js';
+import { LANDMARKS, LANDMARK_RADIUS_KM, resolveApproxCoord, haversineKm } from './_lib/geoLandmarks.js';
 
 const STATIC_PATHS = [
   { path: '/',          changefreq: 'daily',   priority: '1.0' },
@@ -39,15 +40,19 @@ export async function onRequestGet(context) {
     urls.push(urlEntry(base + s.path, null, s.changefreq, s.priority));
   }
 
+  // Hoisted (dipakai lagi di blok landmark di bawah agar tak query D1 dua kali).
+  let propsResults = [];
   try {
     const props = await env.DB.prepare(`
-      SELECT slug, jenis_properti, tujuan, provinsi, kabupaten, kecamatan, updated_at
+      SELECT slug, jenis_properti, tujuan, provinsi, kabupaten, kecamatan,
+             latitude, longitude, updated_at
       FROM properties
       WHERE status_publish = 'published'
       ORDER BY published_at DESC
       LIMIT 5000
     `).all();
-    for (const p of (props.results ?? [])) {
+    propsResults = props.results ?? [];
+    for (const p of propsResults) {
       urls.push(urlEntry(buildPropertyUrl(p, base), p.updated_at, 'weekly', '0.8'));
     }
   } catch (err) {
@@ -107,6 +112,29 @@ export async function onRequestGet(context) {
     }
   } catch (err) {
     console.error('[sitemap] programmatic query error:', err.message);
+  }
+
+  // Halaman landmark ({jenis}-dekat-{landmark}, mis. /kost-dekat-ugm) — jarak
+  // Haversine dari koordinat properti asli atau fallback centroid kecamatan
+  // (lihat functions/_lib/geoLandmarks.js). Dihitung dari propsResults yang
+  // sudah di-fetch di atas, TANPA query D1 tambahan. Ambang ≥3 listing sama
+  // seperti kombinasi lokasi (anti thin-content, spec 3.8).
+  try {
+    for (const lm of LANDMARKS) {
+      const byJenis = new Map();
+      for (const p of propsResults) {
+        const coord = resolveApproxCoord(p);
+        if (!coord) continue;
+        const d = haversineKm(coord.lat, coord.lon, lm.lat, lm.lon);
+        if (d > LANDMARK_RADIUS_KM) continue;
+        byJenis.set(p.jenis_properti, (byJenis.get(p.jenis_properti) ?? 0) + 1);
+      }
+      for (const [jenis, count] of byJenis) {
+        if (count >= 3) urls.push(urlEntry(`${base}/${jenis}-dekat-${lm.slug}`, null, 'weekly', '0.7'));
+      }
+    }
+  } catch (err) {
+    console.error('[sitemap] landmark query error:', err.message);
   }
 
   try {

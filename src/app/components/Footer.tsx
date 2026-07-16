@@ -65,15 +65,17 @@ export default function Footer() {
             <ul className="space-y-2 text-sm">
               {/* Link ke halaman programmatic SEO (SSR, canonical sendiri) — bukan
                   /properties?query, supaya halaman /rumah-dijual-sleman dkk. punya
-                  internal link & ditemukan crawler. Pilihan = kombinasi ≥3 listing. */}
+                  internal link & ditemukan crawler. Pilihan = kombinasi ≥3 listing.
+                  "Dekat {kampus}" = halaman landmark (radius Haversine, lihat
+                  functions/_lib/geoLandmarks.js) — lebih presisi drpd level kecamatan. */}
               {[
                 { label: 'Rumah Dijual Jogja', href: '/rumah-dijual-jogja' },
                 { label: 'Rumah Dijual Sleman', href: '/rumah-dijual-sleman' },
                 { label: 'Kost Dijual Jogja', href: '/kost-dijual-jogja' },
                 { label: 'Kost Dijual Sleman', href: '/kost-dijual-sleman' },
-                { label: 'Kost Dijual Depok (UGM/UNY)', href: '/kost-dijual-depok' },
+                { label: 'Kost Dekat UGM', href: '/kost-dekat-ugm' },
+                { label: 'Kost Dekat UNY', href: '/kost-dekat-uny' },
                 { label: 'Tanah Dijual Jogja', href: '/tanah-dijual-jogja' },
-                { label: 'Tanah Dijual Sleman', href: '/tanah-dijual-sleman' },
                 { label: 'Hotel Dijual Jogja', href: '/hotel-dijual-jogja' },
               ].map((link) => (
                 <li key={link.href}>

@@ -92,9 +92,11 @@ interface PropertiesPageProps {
   ssrData?: SsrListingData;
   /** H1 kustom untuk halaman programmatic SEO (mis. "Rumah Dijual di Sleman") */
   heading?: string | null;
+  /** Subteks kustom di bawah H1 (mis. disclaimer radius perkiraan halaman landmark). null/undefined = teks default otomatis dari heading. */
+  subheading?: string | null;
 }
 
-export default function PropertiesPage({ ssrData, heading }: PropertiesPageProps = {}) {
+export default function PropertiesPage({ ssrData, heading, subheading }: PropertiesPageProps = {}) {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -594,9 +596,11 @@ export default function PropertiesPage({ ssrData, heading }: PropertiesPageProps
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <h1 className="font-display text-2xl font-bold text-[#0F172A]">{heading || 'Cari Properti'}</h1>
           <p className="text-[#64748B] text-sm mt-1">
-            {heading
-              ? `${heading} — dikurasi & diverifikasi langsung oleh tim SBP`
-              : 'Semua listing properti di DI Yogyakarta — dikurasi & diverifikasi SBP'}
+            {subheading
+              ? subheading
+              : heading
+                ? `${heading} — dikurasi & diverifikasi langsung oleh tim SBP`
+                : 'Semua listing properti di DI Yogyakarta — dikurasi & diverifikasi SBP'}
           </p>
         </div>
       </div>
