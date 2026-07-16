@@ -4,6 +4,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { parseGmapsCoords } from '../../../../_lib/parseGmapsCoords.js';
+import { normalizeWA, isValidWA } from '../../../../_lib/waUtils.js';
 
 const VALID_JENIS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
 const VALID_TUJUAN = ['dijual','disewa','dijual_disewa'];
@@ -35,7 +36,11 @@ export async function onRequestGet(context) {
         jarak_sungai_m, jarak_makam_m, jarak_sutet_m, lebar_jalan_m,
         furnished,
         provinsi, kabupaten, kecamatan, kelurahan, alamat,
-        owner_phone, owner_phone_2,
+        -- Kontak owner = tabel owners (satu sumber kebenaran, dipakai juga oleh
+        -- alur Titip Jual + Perjanjian) — bukan kolom properties.owner_phone
+        -- lama yang sudah dihapus dari alur tulis (lihat PATCH di bawah).
+        (SELECT no_wa_1 FROM owners WHERE property_id = properties.id ORDER BY id ASC LIMIT 1) AS owner_phone,
+        (SELECT no_wa_2 FROM owners WHERE property_id = properties.id ORDER BY id ASC LIMIT 1) AS owner_phone_2,
         latitude, longitude, gmaps_link,
         deskripsi, info_tambahan, alasan_dijual, video_youtube,
         income_per_bulan, pengeluaran_per_bulan, harga_sewa_kamar_bulan,
@@ -95,6 +100,12 @@ export async function onRequestPatch(context) {
 
   const exists = await env.DB.prepare('SELECT id FROM properties WHERE id = ?').bind(id).first();
   if (!exists) return jsonError('Properti tidak ditemukan', 404);
+
+  // Dicek di awal (bukan di dalam try setelah UPDATE properties berjalan) supaya
+  // validasi kontak owner gagal-cepat sebelum tulisan apapun ke DB (lihat pemakaian di bawah).
+  const existingOwner = await env.DB
+    .prepare('SELECT id, no_wa_1, no_wa_2 FROM owners WHERE property_id = ? ORDER BY id ASC LIMIT 1')
+    .bind(id).first();
 
   const errors = {};
   const pairs = [];
@@ -170,12 +181,38 @@ export async function onRequestPatch(context) {
     else pairs.push({ col: 'furnished', val: v || null });
   }
 
+  // Kontak owner (no_wa_1/no_wa_2 di tabel owners, bukan properties — lihat blok
+  // upsert setelah UPDATE utama). Validasi format WA hanya bila diisi (kosong = hapus).
+  let ownerPhoneUpdate;
+  if (body.owner_phone !== undefined || body.owner_phone_2 !== undefined) {
+    const p1raw = body.owner_phone;
+    const p2raw = body.owner_phone_2;
+    if (p1raw && !isValidWA(p1raw)) errors.owner_phone = 'Nomor WA owner 1 tidak valid';
+    if (p2raw && !isValidWA(p2raw)) errors.owner_phone_2 = 'Nomor WA owner 2 tidak valid';
+
+    if (!errors.owner_phone && !errors.owner_phone_2) {
+      const phone1Set = body.owner_phone !== undefined;
+      const phone2Set = body.owner_phone_2 !== undefined;
+      const nextPhone1 = phone1Set ? (p1raw ? normalizeWA(p1raw) : null) : (existingOwner?.no_wa_1 ?? null);
+      const nextPhone2 = phone2Set ? (p2raw ? normalizeWA(p2raw) : null) : (existingOwner?.no_wa_2 ?? null);
+
+      // no_wa_1 NOT NULL di tabel owners — kalau belum ada row owners sama
+      // sekali, tidak bisa buat row baru hanya dengan Owner 2 tanpa Owner 1.
+      if (!existingOwner && !nextPhone1 && nextPhone2) {
+        errors.owner_phone = 'Isi No. Telp/WA Owner 1 terlebih dahulu sebelum Owner 2';
+      } else {
+        ownerPhoneUpdate = { phone1Set, phone1: nextPhone1, phone2Set, phone2: nextPhone2 };
+      }
+    }
+  }
+
   // NOT NULL TEXT cols (store '' not null when empty string sent)
   const notNullTextFields = ['provinsi','kabupaten','kecamatan','kelurahan'];
-  // Nullable TEXT cols (empty string → null)
+  // Nullable TEXT cols (empty string → null). owner_phone/owner_phone_2
+  // TIDAK di sini — itu ditulis ke tabel owners (lihat blok khusus di bawah),
+  // bukan kolom properties, supaya satu sumber kebenaran dengan Titip Jual.
   const nullableTextFields = [
     'bank_agunan','alamat',
-    'owner_phone','owner_phone_2',
     'gmaps_link','deskripsi','info_tambahan','alasan_dijual','video_youtube',
     'meta_title','meta_description',
   ];
@@ -208,7 +245,7 @@ export async function onRequestPatch(context) {
   }
 
   if (Object.keys(errors).length > 0) return jsonError('Validasi gagal', 422, errors);
-  if (pairs.length === 0) return jsonError('Tidak ada field yang dikirim', 400);
+  if (pairs.length === 0 && !ownerPhoneUpdate) return jsonError('Tidak ada field yang dikirim', 400);
 
   // Auto-extract lat/lng from gmaps_link jika field tersebut dikirim
   if (body.gmaps_link !== undefined) {
@@ -222,11 +259,30 @@ export async function onRequestPatch(context) {
   }
 
   try {
-    const setClauses = pairs.map(p => `${p.col} = ?`).join(', ');
-    const vals = pairs.map(p => p.val);
-    await env.DB.prepare(
-      `UPDATE properties SET ${setClauses}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-    ).bind(...vals, id).run();
+    if (pairs.length > 0) {
+      const setClauses = pairs.map(p => `${p.col} = ?`).join(', ');
+      const vals = pairs.map(p => p.val);
+      await env.DB.prepare(
+        `UPDATE properties SET ${setClauses}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+      ).bind(...vals, id).run();
+    }
+
+    if (ownerPhoneUpdate) {
+      // existingOwner + validasi no_wa_1-wajib sudah dihitung/dicek di awal
+      // (sebelum ada tulisan DB apapun) — di sini tinggal eksekusi.
+      if (existingOwner) {
+        await env.DB.prepare('UPDATE owners SET no_wa_1 = ?, no_wa_2 = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .bind(ownerPhoneUpdate.phone1, ownerPhoneUpdate.phone2, existingOwner.id).run();
+      } else if (ownerPhoneUpdate.phone1) {
+        // Belum ada row owners (properti dibuat manual, bukan via Titip Jual) —
+        // buat baris ringan (tanpa KYC lengkap, nama_pemilik nullable) supaya
+        // kontak owner tersimpan di tempat yang sama dipakai fitur Perjanjian.
+        await env.DB.prepare(`
+          INSERT INTO owners (no_wa_1, no_wa_2, property_id)
+          VALUES (?, ?, ?)
+        `).bind(ownerPhoneUpdate.phone1, ownerPhoneUpdate.phone2, id).run();
+      }
+    }
 
     const updated = await env.DB.prepare('SELECT id, title, status_publish, updated_at, latitude, longitude FROM properties WHERE id = ?').bind(id).first();
     return jsonOk({ pesan: 'Properti berhasil diperbarui', properti: updated });

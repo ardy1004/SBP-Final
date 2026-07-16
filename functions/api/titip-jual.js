@@ -3,21 +3,11 @@ import { encryptNIK } from '../_lib/crypto.js';
 import { stripExif } from '../_lib/exif.js';
 import { generateMetaSeo } from '../_lib/metaSeo.js';
 import { verifyTurnstile } from '../_lib/turnstile.js';
+import { normalizeWA, isValidWA } from '../_lib/waUtils.js';
 
 function sanitize(val, maxLen = 500) {
   if (typeof val !== 'string') return '';
   return val.replace(/<[^>]*>/g, '').replace(/[<>"'`]/g, '').trim().slice(0, maxLen);
-}
-
-function normalizeWA(raw) {
-  const d = String(raw).replace(/\D/g, '');
-  if (d.startsWith('62')) return d;
-  if (d.startsWith('0'))  return '62' + d.slice(1);
-  if (d.startsWith('8'))  return '62' + d;
-  return d;
-}
-function isValidWA(raw) {
-  return /^628[0-9]{8,12}$/.test(normalizeWA(raw));
 }
 
 function slugify(text) {
