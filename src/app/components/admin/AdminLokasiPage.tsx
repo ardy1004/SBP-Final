@@ -70,7 +70,10 @@ export default function AdminLokasiPage() {
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
-    return (json as { inserted?: number }).inserted ?? 0;
+    // jsonOk() backend membungkus payload di bawah `data` — {success,data:{inserted}}.
+    // Bug lama di sini membaca json.inserted langsung (selalu undefined -> 0),
+    // sehingga UI melaporkan "0 lokasi" walau data benar-benar tersimpan di D1.
+    return (json as { data?: { inserted?: number } }).data?.inserted ?? 0;
   };
 
   const handleImport = async () => {
