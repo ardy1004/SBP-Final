@@ -253,13 +253,15 @@ export default function AdminPropertyDetailPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      // Judul TIDAK ikut diganti — tombol ini generate deskripsi & SEO saja.
+      // json.judul sengaja diabaikan (backend tetap menghasilkannya sbg
+      // konteks internal utk kualitas deskripsi, tapi tak dipakai di form).
       setF({
-        title: json.judul,
         deskripsi: json.deskripsi,
         meta_title: json.meta_title,
         meta_description: json.meta_description,
       });
-      setAiNotif('Konten AI berhasil di-generate — silakan review sebelum menyimpan.');
+      setAiNotif('Deskripsi & SEO berhasil di-generate — silakan review sebelum menyimpan.');
       setTimeout(() => setAiNotif(''), 5000);
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Gagal generate konten AI');
