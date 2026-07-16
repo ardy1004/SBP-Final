@@ -171,7 +171,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   }
   const p = data.property;
   const tujuanPath = p.tujuan === 'disewa' ? 'disewa' : 'dijual';
-  const jenisSlug = p.jenis.toLowerCase();
+  const jenisSlug = (p.jenisRaw ?? p.jenis).toLowerCase();
   const provSlug = p.provinsi.toLowerCase().replace(/\s+/g, '-');
   const kabSlug = p.kabupaten.toLowerCase().replace(/\s+/g, '-');
   const kecSlug = (p.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-');

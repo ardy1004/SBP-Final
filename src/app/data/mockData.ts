@@ -4,6 +4,7 @@ export interface Property {
   slug: string;
   title: string;
   jenis: string;
+  jenisRaw?: string;
   jenisEmoji: string;
   tujuan: 'dijual' | 'disewa' | 'dijual_disewa';
   harga: number;

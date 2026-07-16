@@ -128,19 +128,40 @@ export default function AdminViralFramePage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchDone, setBatchDone] = useState(0);
+  const [batchResult, setBatchResult] = useState<{ ok: number; failed: { id: number; title: string; reason: string }[] } | null>(null);
   const toggleSelect = (id: number) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const refreshStatus = () => fetch('/api/admin/viralframe/status', { credentials: 'include' }).then(r => r.json())
     .then(j => { if (j.success) { setWithScript(new Set(j.data?.with_script ?? [])); setWithVideo(new Set(j.data?.with_video ?? [])); } }).catch(() => {});
   const runBatch = async () => {
     const ids = [...selected]; if (ids.length === 0 || batchRunning) return;
-    setBatchRunning(true); setBatchDone(0);
+    setBatchRunning(true); setBatchDone(0); setBatchResult(null);
+    const failed: { id: number; title: string; reason: string }[] = [];
+    let ok = 0;
     for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      const title = properties.find(p => p.id === id)?.title ?? `Properti #${id}`;
       try {
-        await fetch('/api/admin/viralframe/youtube-long', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ property_id: ids[i] }) });
-      } catch { /* lanjut */ }
+        const detailRes = await fetch(`/api/admin/properties/${id}`, { credentials: 'include' });
+        if (!detailRes.ok) throw new Error(`Gagal ambil detail properti (HTTP ${detailRes.status})`);
+        const detailJson = await detailRes.json();
+        const images: { url_webp: string }[] = detailJson.data?.images ?? [];
+        if (images.length < 2) throw new Error('Foto kurang dari 2 — lewati');
+        const photos = images.slice(0, 12).map((img, idx) => ({ label: `Foto ${idx + 1}`, url_webp: img.url_webp }));
+        const res = await fetch('/api/admin/viralframe/youtube-long', {
+          method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ property_id: id, photos, visual_style: '', camera_style: '' }),
+        });
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => null);
+          throw new Error(errJson?.error || `HTTP ${res.status}`);
+        }
+        ok++;
+      } catch (err) {
+        failed.push({ id, title, reason: err instanceof Error ? err.message : 'Gagal' });
+      }
       setBatchDone(i + 1);
     }
-    setBatchRunning(false); setSelected(new Set()); refreshStatus();
+    setBatchRunning(false); setSelected(new Set()); setBatchResult({ ok, failed }); refreshStatus();
   };
 
   const openModeModal = (id: number, judul: string) => setSelectedProperty({ id, judul });
@@ -249,6 +270,23 @@ export default function AdminViralFramePage() {
         <div className="py-12 text-center text-[#94A3B8] text-sm">
           <div className="w-6 h-6 border-2 border-[#1565C0]/20 border-t-[#1565C0] rounded-full animate-spin mx-auto mb-2" />
           Memuat data…
+        </div>
+      )}
+
+      {/* R9: Batch result summary */}
+      {batchResult && (
+        <div className={`rounded-2xl p-4 text-sm ${batchResult.failed.length === 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-amber-50 text-amber-800 border border-amber-100'}`}>
+          <div className="font-semibold mb-1">
+            Batch selesai: {batchResult.ok} berhasil{batchResult.failed.length > 0 ? `, ${batchResult.failed.length} gagal` : ''}.
+          </div>
+          {batchResult.failed.length > 0 && (
+            <ul className="list-disc pl-5 space-y-0.5">
+              {batchResult.failed.map(f => (
+                <li key={f.id}>{f.title}: {f.reason}</li>
+              ))}
+            </ul>
+          )}
+          <button onClick={() => setBatchResult(null)} className="mt-2 text-xs underline opacity-70 hover:opacity-100">Tutup</button>
         </div>
       )}
 

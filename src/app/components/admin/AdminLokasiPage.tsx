@@ -44,11 +44,12 @@ export default function AdminLokasiPage() {
       const res = await fetch('/api/admin/locations/stats', { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
+      const counts = json.data ?? json;
       setStats({
-        provinsi: json.provinsi ?? 0,
-        kabupaten: json.kabupaten ?? 0,
-        kecamatan: json.kecamatan ?? 0,
-        kelurahan: json.kelurahan ?? 0,
+        provinsi: counts.provinsi ?? 0,
+        kabupaten: counts.kabupaten ?? 0,
+        kecamatan: counts.kecamatan ?? 0,
+        kelurahan: counts.kelurahan ?? 0,
       });
     } catch { /* ignore */ }
     finally { setStatsLoading(false); }

@@ -185,7 +185,7 @@ function FeaturedBanner({ items }: { items: NormalizedProperty[] }) {
                     <div className="text-white/70 text-sm mb-3">📍 {prop.kecamatan}, {prop.kabupaten}</div>
                     <div className="text-2xl font-bold font-display text-[#29B6F6] mb-4">{formatRupiah(prop.harga)}</div>
                     <Link
-                      to={`/${prop.tujuan === 'disewa' ? 'disewa' : 'dijual'}/${prop.jenis.toLowerCase()}/${prop.provinsi.toLowerCase().replace(/\s+/g, '-')}/${prop.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${(prop.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-')}/${prop.slug}`}
+                      to={`/${prop.tujuan === 'disewa' ? 'disewa' : 'dijual'}/${(prop.jenisRaw ?? prop.jenis).toLowerCase()}/${prop.provinsi.toLowerCase().replace(/\s+/g, '-')}/${prop.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${(prop.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-')}/${prop.slug}`}
                       className="inline-block px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
                       style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
                     >

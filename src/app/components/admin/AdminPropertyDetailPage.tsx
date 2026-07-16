@@ -1076,7 +1076,7 @@ export default function AdminPropertyDetailPage() {
       </div>
 
       {/* (I) Foto */}
-      <PropertyPhotosCard propertyId={id!} isNew={isNew} initialPhotos={loadedPhotos} />
+      <PropertyPhotosCard key={id} propertyId={id!} isNew={isNew} initialPhotos={loadedPhotos} />
     </div>
   );
 }

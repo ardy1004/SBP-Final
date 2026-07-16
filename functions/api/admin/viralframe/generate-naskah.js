@@ -1,6 +1,8 @@
 // POST /api/admin/viralframe/generate-naskah
 // Auth via functions/api/admin/_middleware.js
 
+import { getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
+
 export async function onRequestPost(context) {
   const { request, env } = context;
 
@@ -13,9 +15,9 @@ export async function onRequestPost(context) {
 
   const { property_title, jenis_properti, lokasi, jumlah_scene, durasi_per_scene } = body;
 
-  const apiKey = env.DEEPSEEK_API_KEY;
+  const apiKey = await getProviderKey(env, 'deepseek');
   if (!apiKey) {
-    return Response.json({ error: 'DEEPSEEK_API_KEY tidak dikonfigurasi' }, { status: 500 });
+    return Response.json({ error: 'DeepSeek API key belum dikonfigurasi (isi via Pengaturan > AI Providers)' }, { status: 500 });
   }
 
   const target_kata = Math.floor((jumlah_scene || 1) * (durasi_per_scene || 8) * 1.9);
@@ -24,35 +26,21 @@ export async function onRequestPost(context) {
 
   const userPrompt = `Properti: ${property_title ?? 'Properti'}. Jenis: ${jenis_properti ?? 'Properti'}. Lokasi: ${lokasi ?? 'Yogyakarta'}. Target: ${target_kata} kata voiceover.`;
 
-  let dsRes;
-  try {
-    dsRes = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        max_tokens: 500,
-        temperature: 0.4,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      }),
-    });
-  } catch (err) {
-    return Response.json({ error: `Gagal menghubungi DeepSeek: ${err.message}` }, { status: 502 });
+  const result = await callChatCompletion({
+    provider: 'deepseek',
+    apiKey,
+    systemPrompt,
+    userPrompt,
+    maxTokens: 500,
+    temperature: 0.4,
+    timeoutMs: 25000,
+  });
+
+  if (!result.ok) {
+    return Response.json({ error: result.error }, { status: 502 });
   }
 
-  if (!dsRes.ok) {
-    const errText = await dsRes.text().catch(() => '');
-    return Response.json({ error: `DeepSeek error ${dsRes.status}: ${errText}` }, { status: 502 });
-  }
-
-  const dsJson = await dsRes.json();
-  const naskah = (dsJson.choices?.[0]?.message?.content ?? '').trim();
+  const naskah = result.content;
   const jumlah_kata = naskah.split(/\s+/).filter(Boolean).length;
 
   return Response.json({ naskah, jumlah_kata, target_kata });

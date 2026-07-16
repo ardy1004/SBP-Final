@@ -98,7 +98,7 @@ export async function onRequestPatch(context) {
   try { body = await request.json(); }
   catch { return jsonError('Body JSON tidak valid', 400); }
 
-  const exists = await env.DB.prepare('SELECT id FROM properties WHERE id = ?').bind(id).first();
+  const exists = await env.DB.prepare('SELECT id, harga, luas_tanah FROM properties WHERE id = ?').bind(id).first();
   if (!exists) return jsonError('Properti tidak ditemukan', 404);
 
   // Dicek di awal (bukan di dalam try setelah UPDATE properties berjalan) supaya
@@ -246,6 +246,18 @@ export async function onRequestPatch(context) {
 
   if (Object.keys(errors).length > 0) return jsonError('Validasi gagal', 422, errors);
   if (pairs.length === 0 && !ownerPhoneUpdate) return jsonError('Tidak ada field yang dikirim', 400);
+
+  // harga_per_m2 dihitung ulang app-layer setiap kali harga atau luas_tanah berubah
+  // (kolom ini dibaca langsung oleh fitur lain seperti sort/filter, jadi harus konsisten
+  // dengan nilai final, bukan cuma fallback hitung on-the-fly di halaman publik).
+  const hargaPair = pairs.find(p => p.col === 'harga');
+  const luasPair = pairs.find(p => p.col === 'luas_tanah');
+  if (hargaPair || luasPair) {
+    const finalHarga = hargaPair ? hargaPair.val : exists.harga;
+    const finalLuas = luasPair ? luasPair.val : exists.luas_tanah;
+    const hargaPerM2 = (finalHarga && finalLuas) ? Math.round(finalHarga / finalLuas) : null;
+    pairs.push({ col: 'harga_per_m2', val: hargaPerM2 });
+  }
 
   // Auto-extract lat/lng from gmaps_link jika field tersebut dikirim
   if (body.gmaps_link !== undefined) {

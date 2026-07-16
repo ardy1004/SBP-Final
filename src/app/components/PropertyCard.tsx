@@ -45,9 +45,10 @@ export default function PropertyCard({ property, className = '' }: Props) {
   const isSold = property.status_sold || property.status_publish === 'sold';
 
   const kec = (property.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-');
+  const jenisSlug = (property.jenisRaw ?? property.jenis).toLowerCase();
   const detailPath = property.tujuan === 'disewa'
-    ? `/disewa/${property.jenis.toLowerCase()}/${property.provinsi.toLowerCase().replace(/\s+/g, '-')}/${property.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${kec}/${property.slug}`
-    : `/dijual/${property.jenis.toLowerCase()}/${property.provinsi.toLowerCase().replace(/\s+/g, '-')}/${property.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${kec}/${property.slug}`;
+    ? `/disewa/${jenisSlug}/${property.provinsi.toLowerCase().replace(/\s+/g, '-')}/${property.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${kec}/${property.slug}`
+    : `/dijual/${jenisSlug}/${property.provinsi.toLowerCase().replace(/\s+/g, '-')}/${property.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${kec}/${property.slug}`;
 
   const hargaPerM2 = property.luas_tanah && property.harga
     ? Math.round(property.harga / property.luas_tanah)

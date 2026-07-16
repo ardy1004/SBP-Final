@@ -76,11 +76,20 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string }>
 };
 
 const BERTINDAK_LABELS: Record<string, string> = {
-  owner_sah:   'Pemilik Sah',
-  pasangan:    'Pasangan (suami/istri)',
-  ahli_waris:  'Ahli Waris',
-  lainnya:     'Lainnya',
+  pemilik_sertifikat: 'Pemilik Sah (sesuai sertifikat)',
+  suami_istri:        'Pasangan (suami/istri)',
+  ahli_waris:         'Ahli Waris',
+  lainnya:            'Lainnya',
 };
+
+function propertyUrl(p: { jenis_properti: string; provinsi: string; kabupaten: string; kecamatan: string | null; tujuan: string | null; slug: string }): string {
+  const jenis = p.jenis_properti.toLowerCase();
+  const prov  = p.provinsi.toLowerCase().replace(/\s+/g, '-');
+  const kab   = p.kabupaten.toLowerCase().replace(/\s+/g, '-');
+  const kec   = (p.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-');
+  const base  = p.tujuan === 'disewa' ? '/disewa' : '/dijual';
+  return `${base}/${jenis}/${prov}/${kab}/${kec}/${p.slug}`;
+}
 
 const TRANSAKSI_LABELS: Record<string, string> = {
   jual: 'Jual/Beli',
@@ -498,7 +507,7 @@ export default function AdminAgreementDetailPage() {
                 <select value={propForm.jenis_properti}
                   onChange={e => setPropForm(f => ({ ...f, jenis_properti: e.target.value }))}
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] bg-white">
-                  {['rumah','tanah','kost','hotel','homestay','villa','apartment','gudang','komersial'].map(j => (
+                  {['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'].map(j => (
                     <option key={j} value={j}>{j.charAt(0).toUpperCase() + j.slice(1)}</option>
                   ))}
                 </select>
@@ -810,7 +819,7 @@ export default function AdminAgreementDetailPage() {
               </a>
             )}
             <a
-              href={`/${data.properti.slug}`}
+              href={propertyUrl(data.properti)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-[#1565C0] bg-[#EFF6FF] hover:bg-[#DBEAFE] transition-colors">

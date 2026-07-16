@@ -195,7 +195,7 @@ export async function onRequestPatch(context) {
 
   // ─── Property fields ──────────────────────────────────────────────
   if (body.jenis_properti !== undefined) {
-    const VALID = ['rumah','tanah','kost','hotel','homestay','villa','apartment','gudang','komersial'];
+    const VALID = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
     const v = sanitize(body.jenis_properti, 30);
     if (!VALID.includes(v)) errors.jenis_properti = 'jenis_properti tidak valid';
     else propPairs.push({ col: 'jenis_properti', val: v });

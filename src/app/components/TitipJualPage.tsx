@@ -581,7 +581,6 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         outstanding_bank:  statusLeg === 'on_bank' ? parseInt(outstanding) || undefined : undefined,
         lingkungan:        lingkungan || undefined,
         deskripsi:         infoTambahan || undefined,
-        info_tambahan:     infoTambahan || undefined,
         alasan_dijual:     alasanJual   || undefined,
         income_per_bulan:       incomePerBulan     ? parseInt(incomePerBulan)      : undefined,
         pengeluaran_per_bulan:  pengeluaranPerBulan ? parseInt(pengeluaranPerBulan) : undefined,

@@ -455,7 +455,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
   const breadcrumbParts = [
     { label: 'Home', href: '/' },
     { label: 'Properties', href: '/properties' },
-    { label: property.jenis, href: `/properties?jenis=${property.jenis.toLowerCase()}` },
+    { label: property.jenis, href: `/properties?jenis=${(property.jenisRaw ?? property.jenis).toLowerCase()}` },
     { label: property.kabupaten, href: `/properties?kabupaten=${encodeURIComponent(property.kabupaten)}` },
     { label: property.kecamatan, href: `/properties?kecamatan=${encodeURIComponent(property.kecamatan)}` },
     { label: property.title, href: '' },
@@ -571,7 +571,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
               <p className="text-[#64748B] text-sm leading-relaxed whitespace-pre-line">{property.deskripsi}</p>
               <div className="mt-4 p-4 bg-[#F0F4F8] rounded-xl">
                 <p className="text-sm text-[#64748B] leading-relaxed">
-                  Properti {property.jenis.toLowerCase()} ini berlokasi di {property.kecamatan}, {property.kabupaten}, salah satu kawasan strategis di {property.provinsi}.
+                  Properti {property.jenis} ini berlokasi di {property.kecamatan}, {property.kabupaten}, salah satu kawasan strategis di {property.provinsi}.
                   {property.luas_tanah ? ` Dengan luas tanah ${property.luas_tanah} m²` : ''}
                   {property.kamar_tidur ? ` dan ${property.kamar_tidur} kamar tidur` : ''}, properti ini {property.tujuan === 'dijual' ? 'dijual' : property.tujuan === 'disewa' ? 'disewakan' : 'dijual dan disewakan'} dengan harga {formatRupiah(property.harga)}.
                   {property.income_per_bulan ? ` Sangat cocok untuk investasi dengan income potensial ${formatRupiah(property.income_per_bulan)} per bulan.` : ''}
