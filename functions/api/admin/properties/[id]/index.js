@@ -35,6 +35,7 @@ export async function onRequestGet(context) {
         jarak_sungai_m, jarak_makam_m, jarak_sutet_m, lebar_jalan_m,
         furnished,
         provinsi, kabupaten, kecamatan, kelurahan, alamat,
+        owner_phone, owner_phone_2,
         latitude, longitude, gmaps_link,
         deskripsi, info_tambahan, alasan_dijual, video_youtube,
         income_per_bulan, pengeluaran_per_bulan, harga_sewa_kamar_bulan,
@@ -174,6 +175,7 @@ export async function onRequestPatch(context) {
   // Nullable TEXT cols (empty string → null)
   const nullableTextFields = [
     'bank_agunan','alamat',
+    'owner_phone','owner_phone_2',
     'gmaps_link','deskripsi','info_tambahan','alasan_dijual','video_youtube',
     'meta_title','meta_description',
   ];

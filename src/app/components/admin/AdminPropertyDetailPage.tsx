@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
-import { ArrowLeft, Save, AlertTriangle, ChevronDown, Sparkles } from 'lucide-react';
+import { ArrowLeft, Save, AlertTriangle, ChevronDown, Sparkles, MessageCircle } from 'lucide-react';
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
 import PropertyPhotosCard from './PropertyPhotosCard';
 import { getLocations, type ApiLocation } from '../../../lib/api';
@@ -45,6 +45,8 @@ interface PropertyDetail {
   kecamatan: string | null;
   kelurahan: string | null;
   alamat: string | null;
+  owner_phone: string | null;
+  owner_phone_2: string | null;
   gmaps_link: string | null;
   latitude: number | null;
   longitude: number | null;
@@ -139,6 +141,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 const inputCls  = "w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] transition-colors";
 const selectCls = `${inputCls} bg-white cursor-pointer`;
+
+// Normalisasi nomor telepon Indonesia → link WhatsApp (08xx → 628xx).
+function waHref(phone: string): string {
+  let d = phone.replace(/\D/g, '');
+  if (d.startsWith('0')) d = `62${d.slice(1)}`;
+  else if (d.startsWith('8')) d = `62${d}`;
+  return `https://wa.me/${d}`;
+}
 
 function detectLingkungan(d: PropertyDetail): LingkunganType {
   if (d.jarak_sungai_m) return 'sungai';
@@ -286,6 +296,7 @@ export default function AdminPropertyDetailPage() {
         provinsi: d.provinsi, kabupaten: d.kabupaten,
         kecamatan: d.kecamatan, kelurahan: d.kelurahan,
         alamat: d.alamat, gmaps_link: d.gmaps_link,
+        owner_phone: d.owner_phone, owner_phone_2: d.owner_phone_2,
         lebar_jalan_m: d.lebar_jalan_m,
         jarak_sungai_m: d.jarak_sungai_m, jarak_makam_m: d.jarak_makam_m, jarak_sutet_m: d.jarak_sutet_m,
         deskripsi: d.deskripsi, info_tambahan: d.info_tambahan,
@@ -366,39 +377,17 @@ export default function AdminPropertyDetailPage() {
   const handleKecChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setForm(f => ({ ...f, kecamatan: e.target.value || null }));
   };
-  const handleSave = async () => {
-    setSaving(true);
-    setSaveMsg('');
-    setSaveError('');
-    try {
-      const detailsVal = Object.keys(detailsMap).length > 0 ? detailsMap : null;
-      if (isNew) {
-        const res = await fetch('/api/admin/properties', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            title: form.title ?? '',
-            jenis_properti: form.jenis_properti,
-            tujuan: form.tujuan,
-            harga: form.harga ?? 0,
-            kecamatan: form.kecamatan ?? '',
-            kabupaten: form.kabupaten ?? '',
-            provinsi: form.provinsi ?? 'DI Yogyakarta',
-            details: detailsVal,
-          }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-        navigate(`/admin/listing/${json.data.id}`);
-        return;
-      }
-      const body: Record<string, unknown> = {
-        title: form.title ?? '',
-        jenis_properti: form.jenis_properti,
-        tujuan: form.tujuan,
-        harga: form.harga,
-        harga_lama: form.harga_lama ?? null,
+  // Body PATCH lengkap dari state form — dipakai untuk edit DAN untuk create
+  // (setelah POST minimal, seluruh field lain dikirim via PATCH ke id baru —
+  // dulu field-field ini dibuang diam-diam sehingga tampak "kosong" setelah simpan).
+  const buildPatchBody = (): Record<string, unknown> => {
+    const detailsVal = Object.keys(detailsMap).length > 0 ? detailsMap : null;
+    return {
+      title: form.title ?? '',
+      jenis_properti: form.jenis_properti,
+      tujuan: form.tujuan,
+      harga: form.harga,
+      harga_lama: form.harga_lama ?? null,
         harga_sewa_tahun: form.harga_sewa_tahun ?? null,
         nego: form.nego ? 1 : 0,
         nett: form.nett ? 1 : 0,
@@ -418,6 +407,8 @@ export default function AdminPropertyDetailPage() {
         kecamatan: form.kecamatan ?? null,
         kelurahan: form.kelurahan ?? null,
         alamat: form.alamat ?? null,
+        owner_phone: form.owner_phone ?? null,
+        owner_phone_2: form.owner_phone_2 ?? null,
         gmaps_link: form.gmaps_link ?? null,
         lebar_jalan_m: form.lebar_jalan_m ?? null,
         jarak_sungai_m: lingkungan === 'sungai' ? (form.jarak_sungai_m ?? null) : null,
@@ -439,15 +430,52 @@ export default function AdminPropertyDetailPage() {
         verified: form.verified ? 1 : 0,
         status_sold: form.status_sold ? 1 : 0,
         details: detailsVal,
-      };
-      const res = await fetch(`/api/admin/properties/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(body),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+    };
+  };
+
+  const patchProperty = async (targetId: string | number) => {
+    const res = await fetch(`/api/admin/properties/${targetId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(buildPatchBody()),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+    return json;
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveMsg('');
+    setSaveError('');
+    try {
+      if (isNew) {
+        const detailsVal = Object.keys(detailsMap).length > 0 ? detailsMap : null;
+        const res = await fetch('/api/admin/properties', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            title: form.title ?? '',
+            jenis_properti: form.jenis_properti,
+            tujuan: form.tujuan,
+            harga: form.harga ?? 0,
+            kecamatan: form.kecamatan ?? '',
+            kabupaten: form.kabupaten ?? '',
+            provinsi: form.provinsi ?? 'DI Yogyakarta',
+            details: detailsVal,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+        // POST create hanya menyimpan field dasar — kirim SEMUA field form yang
+        // lain via PATCH ke id baru agar tidak ada isian yang hilang, baru pindah.
+        await patchProperty(json.data.id);
+        navigate(`/admin/listing/${json.data.id}`);
+        return;
+      }
+      const json = await patchProperty(id!);
       setSaveMsg('Tersimpan ✓');
       setTimeout(() => setSaveMsg(''), 3000);
       const saved = json.data?.properti;
@@ -768,6 +796,46 @@ export default function AdminPropertyDetailPage() {
                   ? <p className="text-xs mt-1 text-amber-600">⚠️ Koordinat tidak terdeteksi — simpan untuk mencoba lagi</p>
                   : null}
             </Field>
+          </div>
+        </section>
+
+        {/* (D2) Kontak Owner — internal, hanya admin */}
+        <section className="pt-4 border-t border-gray-100 space-y-4">
+          <h3 className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">
+            Kontak Owner <span className="normal-case font-normal text-[#94A3B8]">(internal — hanya tampil di admin)</span>
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {([
+              ['owner_phone',   'No. Telp/WhatsApp Owner 1'],
+              ['owner_phone_2', 'No. Telp/WhatsApp Owner 2'],
+            ] as const).map(([key, label]) => {
+              const val = (form[key] as string | null) ?? '';
+              return (
+                <Field key={key} label={label}>
+                  <div className="flex gap-2">
+                    <input
+                      type="tel"
+                      value={val}
+                      onChange={e => setF({ [key]: e.target.value || null })}
+                      className={inputCls}
+                      placeholder="cth: 081234567890"
+                    />
+                    <a
+                      href={val ? waHref(val) : undefined}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={e => { if (!val) e.preventDefault(); }}
+                      title={val ? `Buka WhatsApp ke ${val}` : 'Isi nomor dulu'}
+                      className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-opacity ${
+                        val ? 'bg-[#25D366] text-white hover:opacity-90' : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      }`}
+                    >
+                      <MessageCircle size={14} /> Kirim Pesan
+                    </a>
+                  </div>
+                </Field>
+              );
+            })}
           </div>
         </section>
 
