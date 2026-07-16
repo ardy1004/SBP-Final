@@ -159,6 +159,24 @@ ${supportsRefImage
 }
 `;
 
+  // Anchoring wajib ke reference image (hanya untuk tool yang mendukungnya).
+  // Tanpa ini model teks (yang TIDAK melihat foto) mengarang visual dari label
+  // ("massive facade" dll) yang kontradiktif dengan foto yang dilampirkan user
+  // ke AI video generator → hasil tidak konsisten / gagal render.
+  const refAnchorBlock = supportsRefImage
+    ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2d] ANCHORING KE REFERENCE IMAGE — WAJIB, PELANGGARAN = OUTPUT DITOLAK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Setiap scene akan dieksekusi dengan DUA gambar terlampir: foto ruangan/area scene + foto karakter. Kamu TIDAK melihat foto itu, maka:
+  • SETIAP field 'prompt' WAJIB memuat frasa anchoring lingkungan, mis. 'the exact ${'{'}room/area{'}'} shown in the attached scene reference image' — jangan menjabarkan arsitektur/furnitur spesifik yang tidak bisa kamu pastikan.
+  • SETIAP field 'prompt' WAJIB memuat frasa anchoring karakter: 'the exact same person as the attached character reference image — identical face, hair, and outfit' (boleh diparafrase tipis, kata 'reference' wajib ada).
+  • DILARANG mengarang kata sifat skala/arsitektur yang tidak terverifikasi dari foto: massive, huge, grand, towering, spacious, multi-story, modern facade, dsb. Cukup sebut jenis area sesuai label + rujuk ke reference image.
+  • Aksi/gerak karakter dan kamera = satu-satunya hal yang kamu tambahkan di atas foto referensi.
+✗ SALAH: 'Lisa stands in front of a massive 16-room boarding house facade'
+✓ BENAR: 'Lisa — the exact same person as the attached character reference image (identical face, hair, and outfit) — already standing in the exact front area shown in the attached scene reference image, greeting the viewer selfie-style'
+`
+    : '';
+
   // Struktur retensi psikologis: versi simplified (scene sedikit, tidak ada ruang
   // untuk open loop penuh) vs versi lengkap (open loop di scene 1, rehook di scene
   // tengah, payoff sebelum CTA di scene terakhir).
@@ -204,7 +222,7 @@ Kamu WAJIB membuat prompt yang sesuai dengan jenis foto scene tersebut.
 ✓ BENAR: scene kamar tidur → prompt fokus pada interior, pencahayaan hangat, detail furnitur
 JANGAN mendeskripsikan konten yang tidak mungkin ada di foto tersebut.
 
-${toneStyleBlock}${antiHalusinasiPosisiBlock}
+${toneStyleBlock}${antiHalusinasiPosisiBlock}${refAnchorBlock}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [3] STRUKTUR PROMPT WAJIB PER SCENE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -216,7 +234,9 @@ Setiap field 'prompt' HARUS mengandung SEMUA elemen ini secara natural:
   • MOOD: atmosfer emosional yang diinginkan (inviting / professional / homey / aspirational)
   • KUALITAS: 'cinematic 4K', 'smooth motion', 'professional real estate videography'
 ✗ SALAH prompt: 'A building exterior shot.' (terlalu generik, < 30 kata)
-✓ BENAR prompt: 'Cinematic drone pull-back revealing the modern 4-story boarding house facade in Depok, Sleman. Property consultant Ayu in black SBP uniform stands at entrance, gestures warmly toward the building with a confident smile. Warm golden hour lighting, smooth aerial motion. Professional real estate videography, cinematic 4K.' (spesifik, > 50 kata)
+${supportsRefImage
+    ? `✓ BENAR prompt: 'Steady handheld selfie-stick shot. Ayu — the exact same person as the attached character reference image, identical face, hair, and outfit — already standing in the exact front area shown in the attached scene reference image, gesturing warmly toward it with a confident smile. Warm natural daylight, smooth motion. Professional real estate videography, cinematic 4K.' (spesifik pada aksi & kamera, setia ke reference image, > 50 kata)`
+    : `✓ BENAR prompt: 'Cinematic drone pull-back revealing the modern 4-story boarding house facade in Depok, Sleman. Property consultant Ayu in black SBP uniform stands at entrance, gestures warmly toward the building with a confident smile. Warm golden hour lighting, smooth aerial motion. Professional real estate videography, cinematic 4K.' (spesifik, > 50 kata)`}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [4] BAHASA & TEMPO DIALOG KARAKTER — WAJIB
@@ -416,7 +436,7 @@ function looksIndonesian(text) {
   return false;
 }
 
-function parseSceneJson(raw, expectedCount) {
+function parseSceneJson(raw, expectedCount, requireRefAnchor = false) {
   let text = raw.trim();
   text = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
   // Ekstraksi tahan-banting: '[' pertama sampai ']' terakhir (model kadang menambah teks).
@@ -439,6 +459,12 @@ function parseSceneJson(raw, expectedCount) {
   const idScene = parsed.find(s => looksIndonesian(s.prompt));
   if (idScene) {
     return { ok: false, error: `Scene ${idScene.scene}: field prompt keluar dalam Bahasa Indonesia (wajib Inggris untuk AI video generator)` };
+  }
+  if (requireRefAnchor) {
+    const noAnchor = parsed.find(s => !/reference/i.test(s.prompt));
+    if (noAnchor) {
+      return { ok: false, error: `Scene ${noAnchor.scene}: prompt tidak meng-anchor ke reference image (wajib untuk tool ber-reference image)` };
+    }
   }
   return { ok: true, data: parsed };
 }
@@ -576,9 +602,9 @@ export async function onRequestPost(context) {
           continue;
         }
         // Output tidak valid (JSON rusak / jumlah scene salah / prompt berbahasa
-        // Indonesia) = kegagalan provider juga → coba provider berikutnya, jangan
-        // langsung menyerah dengan error ke user.
-        const parsed = parseSceneJson(result.content, expectedCount);
+        // Indonesia / tanpa anchoring reference) = kegagalan provider juga →
+        // coba provider berikutnya, jangan langsung menyerah dengan error ke user.
+        const parsed = parseSceneJson(result.content, expectedCount, supportsRefImage);
         if (!parsed.ok) {
           attempts.push({ provider, error: parsed.error.slice(0, 140) });
           console.error(`[ai-generate] ${provider} output tidak valid:`, parsed.error.slice(0, 160));
@@ -607,12 +633,17 @@ export async function onRequestPost(context) {
       if (regenerateScene != null) sceneData[0].scene = regenerateScene;
 
       const fotoByScene = new Map(fotoAssignments.map(a => [Number(a.scene), a]));
+      // Nama file referensi mengikuti isi ZIP (handleDownloadZip di frontend):
+      // foto scene = sceneN_foto.webp, foto karakter = <Nama_Karakter>.webp —
+      // supaya user/tool tahu persis gambar mana milik scene mana.
+      const karakterFile = `${String(karakter.nama).replace(/\s+/g, '_')}.webp`;
       const enrichedScenes = sceneData.map(s => {
         const assignment = fotoByScene.get(s.scene);
         return {
           ...s,
           foto_label: assignment?.foto_label ?? null,
           foto_deskripsi: assignment ? (LABEL_MAP[assignment.foto_label] ?? LABEL_MAP.lainnya) : null,
+          ...(supportsRefImage ? { reference_image: `scene${s.scene}_foto.webp`, character_reference: karakterFile } : {}),
         };
       });
 
