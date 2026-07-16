@@ -127,7 +127,10 @@ export default function PropertiesPage({ ssrData, heading, subheading }: Propert
   const [lbMin, setLbMin] = useState(0);
   // Keyword teks bebas (remainder) → param q.
   const [qKeyword, setQKeyword] = useState('');
-  const [sort, setSort] = useState('terbaru');
+  const [sort, setSort] = useState(() => {
+    const s = searchParams.get('sort');
+    return SORT_OPTIONS.some(o => o.value === s) ? s! : 'terbaru';
+  });
   const [limit, setLimit] = useState(20);
 
   // ── Smart search bar state ──────────────────────────────────────────────

@@ -94,11 +94,10 @@ export default function Footer() {
               {[
                 { label: 'Villa Disewa Kaliurang', href: '/properties?jenis=villa&tujuan=disewa&kecamatan=pakem' },
                 { label: 'Homestay Disewa Jogja', href: '/properties?jenis=homestay&tujuan=disewa' },
-                { label: 'Kost Investasi Terbaik', href: '/properties?jenis=kost&badge=premium' },
+                { label: 'Kost Investasi Terbaik', href: '/properties?jenis=kost&sort=yield' },
                 { label: 'Hotel Investasi Jogja', href: '/properties?jenis=hotel' },
                 { label: 'Ruko Disewa Sleman', href: '/properties?jenis=komersial&tujuan=disewa' },
                 { label: 'Properti Yield Tinggi', href: '/properties?sort=yield' },
-                { label: 'Investasi Properti Jogja', href: '/properties?badge=premium' },
               ].map((link) => (
                 <li key={link.href}>
                   <Link to={link.href} className="hover:text-[#29B6F6] transition-colors">

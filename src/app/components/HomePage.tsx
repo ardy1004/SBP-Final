@@ -9,6 +9,7 @@ import {
   type NormalizedProperty, type ApiLocation, formatRupiah,
   getTestimonials, type ApiTestimonial,
   getBlogPosts, type ApiBlogPost,
+  hitungSkorInvestasi, type InvestTeaserProp,
 } from '../../lib/api';
 import { PROPERTY_TYPES } from '../../lib/propertyTypes';
 import { cfImg, cfSrcSet } from '../../lib/img';
@@ -542,10 +543,11 @@ interface HomePageProps {
   ssrBlogPosts?: ApiBlogPost[];
   ssrStats?: HomeStats | null;
   ssrCoverageAreas?: CoverageArea[];
+  ssrInvestProp?: InvestTeaserProp | null;
 }
 
 /* ── MAIN HOMEPAGE ── */
-export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts, ssrStats, ssrCoverageAreas }: HomePageProps) {
+export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts, ssrStats, ssrCoverageAreas, ssrInvestProp }: HomePageProps) {
   const hasSSR = ssrProperties !== undefined;
 
   // Angka real dari DB; fallback ke angka brand hanya bila DB tak tersedia (mis. dev tanpa SSR)
@@ -596,7 +598,6 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
   // Turunan dari data yang sudah di-fetch
   const featuredItems = properties.filter(p => p.properti_pilihan);
   const cardItems = properties.slice(0, 6);
-  const investProp = properties.find(p => p.income_per_bulan && p.badge_premium);
 
   return (
     <>
@@ -741,34 +742,37 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
                 ))}
               </div>
               <Link
-                to="/properties?badge=premium"
+                to="/properties?sort=yield"
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-[#0B2447] bg-white hover:bg-[#E3F2FD] transition-colors"
               >
                 Jelajahi Properti Investasi <ArrowRight size={16} />
               </Link>
             </div>
 
-            {/* Investment Preview Card — tampilkan jika ada properti premium dengan income */}
-            {investProp && investProp.income_per_bulan && investProp.pengeluaran_per_bulan ? (() => {
-              const netIncome = investProp.income_per_bulan - investProp.pengeluaran_per_bulan;
-              const yieldPct = ((netIncome * 12) / investProp.harga * 100).toFixed(1);
-              const payback = (investProp.harga / (netIncome * 12)).toFixed(1);
-              const stars = parseFloat(yieldPct) > 8 ? 5 : parseFloat(yieldPct) > 6 ? 4 : 3;
+            {/* Investment Preview Card — properti YIELD TERTINGGI (dari loader SSR,
+                rumus & skor identik dgn backend/detail — lihat hitungSkorInvestasi). */}
+            {ssrInvestProp ? (() => {
+              const p = ssrInvestProp;
+              const netIncome = p.income_per_bulan - p.pengeluaran_per_bulan;
+              const yieldPct = p.yield_persen;
+              const payback = p.harga / (netIncome * 12);
+              const stars = hitungSkorInvestasi(yieldPct);
+              const depositoMarkerPct = Math.min(3 / 15 * 100, 100);
               return (
                 <div className="glass-dark rounded-2xl p-6">
                   <div className="flex items-center justify-between mb-4">
                     <span className="text-white font-semibold text-sm">💡 Analisis Investasi</span>
                     <div className="flex gap-0.5">
-                      {Array.from({ length: stars }).map((_, i) => (
-                        <Star key={i} size={14} fill="#F5A623" className="text-[#F5A623]" />
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <Star key={i} size={14} fill={i < stars ? '#F5A623' : 'transparent'} className={i < stars ? 'text-[#F5A623]' : 'text-white/30'} />
                       ))}
                     </div>
                   </div>
-                  <p className="text-white/70 text-xs mb-4 line-clamp-1">{investProp.title}</p>
+                  <p className="text-white/70 text-xs mb-4 line-clamp-1">{p.title}</p>
                   <div className="grid grid-cols-3 gap-3 mb-4">
                     {[
-                      { label: 'YIELD/TH', value: `${yieldPct}%`, color: '#F5A623' },
-                      { label: 'PAYBACK', value: `~${payback} thn`, color: '#29B6F6' },
+                      { label: 'YIELD/TH', value: `${yieldPct.toFixed(1)}%`, color: '#F5A623' },
+                      { label: 'PAYBACK', value: `~${payback.toFixed(1)} thn`, color: '#29B6F6' },
                       { label: 'NET/BLN', value: formatRupiah(netIncome), color: '#10B981' },
                     ].map(({ label, value, color }) => (
                       <div key={label} className="text-center">
@@ -777,15 +781,17 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
                       </div>
                     ))}
                   </div>
-                  <div className="text-xs text-white/50 mb-2">Yield vs Deposito (3%)</div>
+                  <div className="text-xs text-white/50 mb-2">Yield vs Deposito (~3%/th)</div>
                   <div className="flex items-center gap-2">
-                    <div className="flex-1 bg-white/10 rounded-full h-2">
-                      <div className="bg-[#F5A623] rounded-full h-2" style={{ width: `${Math.min(parseFloat(yieldPct) / 15 * 100, 100)}%` }} />
+                    <div className="relative flex-1 bg-white/10 rounded-full h-2.5 overflow-visible">
+                      <div className="h-full bg-[#F5A623] rounded-full overflow-hidden" style={{ width: `${Math.min(yieldPct / 15 * 100, 100)}%` }} />
+                      {/* Penanda posisi bunga deposito 3% — pembanding visual langsung */}
+                      <div className="absolute top-1/2 -translate-y-1/2 w-0.5 h-4 bg-white/60 rounded-full" style={{ left: `${depositoMarkerPct}%` }} title="Deposito ~3%/tahun" />
                     </div>
-                    <span className="text-[#F5A623] text-xs font-bold">{yieldPct}%</span>
+                    <span className="text-[#F5A623] text-xs font-bold">{yieldPct.toFixed(1)}%</span>
                   </div>
                   <Link
-                    to={`/${investProp.tujuan === 'disewa' ? 'disewa' : 'dijual'}/${investProp.jenis.toLowerCase()}/${investProp.provinsi.toLowerCase().replace(/\s+/g, '-')}/${investProp.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${(investProp.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-')}/${investProp.slug}`}
+                    to={`/${p.tujuan === 'disewa' ? 'disewa' : 'dijual'}/${p.jenis_properti.toLowerCase()}/${p.provinsi.toLowerCase().replace(/\s+/g, '-')}/${p.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${(p.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-')}/${p.slug}`}
                     className="mt-4 block w-full text-center py-2 rounded-xl text-sm font-semibold text-[#0B2447] bg-[#29B6F6] hover:bg-[#1E88E5] transition-colors"
                   >
                     Lihat Detail →

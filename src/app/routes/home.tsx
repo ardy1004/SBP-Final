@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData } from "react-router";
 import HomePage from "../components/HomePage";
-import type { NormalizedProperty, ApiTestimonial, ApiBlogPost } from "../../lib/api";
+import type { NormalizedProperty, ApiTestimonial, ApiBlogPost, InvestTeaserProp } from "../../lib/api";
 import { normalizeProperty } from "../../lib/api";
 
 // ── Cloudflare D1 bindings tersedia via context.cloudflare.env (dari cloudflareDevProxy / Pages Functions)
@@ -9,11 +9,11 @@ export async function loader({ context }: LoaderFunctionArgs) {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const env = (context as any)?.cloudflare?.env;
-    if (!env?.DB) return { properties: [], testimonials: [], blogPosts: [], stats: null };
+    if (!env?.DB) return { properties: [], testimonials: [], blogPosts: [], stats: null, coverageAreas: [], investProp: null };
 
     const db = env.DB as D1Database;
 
-    const [propsRes, testimRes, blogRes, statsRes, coverageRes] = await Promise.all([
+    const [propsRes, testimRes, blogRes, statsRes, coverageRes, investRes] = await Promise.all([
       // Query identik dengan GET /api/properties — kolom dan filter sama persis
       db.prepare(`
         SELECT
@@ -81,6 +81,23 @@ export async function loader({ context }: LoaderFunctionArgs) {
         ORDER BY cnt DESC
         LIMIT 8
       `).all(),
+
+      // Investment Intelligence teaser (6.7): properti YIELD TERTINGGI yang
+      // sedang tayang (spec — bukan sekadar "premium pertama"). Rumus persis
+      // sama dgn functions/api/properties/[slug].js: yield% = bersihTahun/harga.
+      // Guard bersihTahun>0 & harga>0 identik dgn backend (properti rugi/data
+      // tak masuk akal tak pernah tampil sbg "investasi terbaik").
+      db.prepare(`
+        SELECT id, title, slug, jenis_properti, tujuan, provinsi, kabupaten, kecamatan,
+               harga, income_per_bulan, pengeluaran_per_bulan,
+               ((income_per_bulan - COALESCE(pengeluaran_per_bulan,0)) * 12.0 / harga) * 100 AS yield_persen
+        FROM properties
+        WHERE status_publish = 'published'
+          AND income_per_bulan IS NOT NULL AND harga IS NOT NULL AND harga > 0
+          AND (income_per_bulan - COALESCE(pengeluaran_per_bulan,0)) > 0
+        ORDER BY yield_persen DESC
+        LIMIT 1
+      `).first(),
     ]);
 
     // Normalisasi properties (integer → boolean, dll.)
@@ -137,10 +154,26 @@ export async function loader({ context }: LoaderFunctionArgs) {
       };
     });
 
-    return { properties, testimonials, blogPosts, stats, coverageAreas };
+    const investRow = investRes as Record<string, unknown> | null;
+    const investProp: InvestTeaserProp | null = investRow ? {
+      id: investRow.id as number,
+      title: investRow.title as string,
+      slug: investRow.slug as string,
+      jenis_properti: investRow.jenis_properti as string,
+      tujuan: investRow.tujuan as string,
+      provinsi: investRow.provinsi as string,
+      kabupaten: investRow.kabupaten as string,
+      kecamatan: investRow.kecamatan as string | null,
+      harga: Number(investRow.harga),
+      income_per_bulan: Number(investRow.income_per_bulan),
+      pengeluaran_per_bulan: investRow.pengeluaran_per_bulan != null ? Number(investRow.pengeluaran_per_bulan) : 0,
+      yield_persen: Number(investRow.yield_persen),
+    } : null;
+
+    return { properties, testimonials, blogPosts, stats, coverageAreas, investProp };
   } catch (e) {
     console.error("[home loader]", e);
-    return { properties: [], testimonials: [], blogPosts: [], stats: null, coverageAreas: [] };
+    return { properties: [], testimonials: [], blogPosts: [], stats: null, coverageAreas: [], investProp: null };
   }
 }
 
@@ -227,7 +260,7 @@ export const meta: MetaFunction = () => [
 ];
 
 export default function HomeRoute() {
-  const { properties, testimonials, blogPosts, stats, coverageAreas } = useLoaderData<typeof loader>();
+  const { properties, testimonials, blogPosts, stats, coverageAreas, investProp } = useLoaderData<typeof loader>();
   return (
     <HomePage
       ssrProperties={properties}
@@ -235,6 +268,7 @@ export default function HomeRoute() {
       ssrBlogPosts={blogPosts}
       ssrStats={stats}
       ssrCoverageAreas={coverageAreas}
+      ssrInvestProp={investProp}
     />
   );
 }

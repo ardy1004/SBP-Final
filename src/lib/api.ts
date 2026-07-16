@@ -84,6 +84,34 @@ export interface InvestmentIntelligence {
   skor_investasi: number;
 }
 
+/** Skor Investasi 1–5 bintang dari yield% — SATU SUMBER KEBENARAN, harus identik
+ * dengan hitungSkorInvestasi() di functions/api/properties/[slug].js (spec 8.4).
+ * Dipakai homepage (teaser) DAN halaman detail (via investment_intelligence API)
+ * agar tidak ada dua rumus berbeda yang bisa saling bertentangan. */
+export function hitungSkorInvestasi(yieldPersen: number): number {
+  if (yieldPersen >= 8) return 5;
+  if (yieldPersen >= 6) return 4;
+  if (yieldPersen >= 4) return 3;
+  if (yieldPersen >= 2) return 2;
+  return 1;
+}
+
+/** Properti yield tertinggi untuk teaser Investment Intelligence homepage (spec 6.7). */
+export interface InvestTeaserProp {
+  id: number;
+  title: string;
+  slug: string;
+  jenis_properti: string;
+  tujuan: string;
+  provinsi: string;
+  kabupaten: string;
+  kecamatan: string | null;
+  harga: number;
+  income_per_bulan: number;
+  pengeluaran_per_bulan: number;
+  yield_persen: number;
+}
+
 /** Image dari GET /api/properties/:slug */
 export interface ApiImage {
   id: number;
