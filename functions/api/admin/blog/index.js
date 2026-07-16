@@ -5,7 +5,9 @@
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { sanitizeHtml } from '../../../_lib/sanitize.js';
 
-const VALID_STATUS = new Set(['draft', 'published', 'scheduled']);
+// 'scheduled' TIDAK didukung: tak ada kolom scheduled_at maupun cron auto-publish,
+// jadi status itu cuma jadi jebakan (post diam selamanya, tak pernah tayang otomatis).
+const VALID_STATUS = new Set(['draft', 'published']);
 
 function sanitize(val, maxLen = 1000) {
   if (typeof val !== 'string') return '';

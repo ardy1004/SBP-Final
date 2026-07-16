@@ -688,9 +688,9 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
               {similar.map(p => {
-                const reason = p.kecamatan === property.kecamatan ? '🏘️ Kecamatan Sama'
-                  : p.kabupaten === property.kabupaten ? '📍 Kabupaten Sama'
-                  : '🏠 Jenis Sama';
+                // API similar hanya filter by kabupaten, jadi p.kabupaten selalu sama —
+                // satu-satunya perbedaan berarti adalah apakah kecamatan-nya juga sama.
+                const reason = p.kecamatan === property.kecamatan ? '🏘️ Kecamatan Sama' : '📍 Kabupaten Sama';
                 return (
                   <div key={p.id} className="relative">
                     <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10">

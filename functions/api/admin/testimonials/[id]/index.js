@@ -35,7 +35,7 @@ export async function onRequestPatch(context) {
   let existing;
   try {
     existing = await env.DB
-      .prepare('SELECT id FROM testimonials WHERE id = ?')
+      .prepare('SELECT id, foto_url FROM testimonials WHERE id = ?')
       .bind(id)
       .first();
   } catch (err) {
@@ -101,6 +101,13 @@ export async function onRequestPatch(context) {
       .bind(id)
       .first();
 
+    // Bersihkan foto lama di R2 kalau foto_url diganti ke key/URL lain —
+    // mencegah file yatim menumpuk permanen di bucket.
+    if ('foto_url' in body && existing.foto_url && existing.foto_url !== updated.foto_url
+        && existing.foto_url.startsWith('testimonials/')) {
+      await env.MEDIA.delete(existing.foto_url).catch(() => {});
+    }
+
     return jsonOk({ pesan: 'Testimoni berhasil diperbarui', testimoni: updated });
   } catch (err) {
     console.error('[admin testimonials PATCH]', err.message);
@@ -116,7 +123,7 @@ export async function onRequestDelete(context) {
 
   try {
     const existing = await env.DB
-      .prepare('SELECT id FROM testimonials WHERE id = ?')
+      .prepare('SELECT id, foto_url FROM testimonials WHERE id = ?')
       .bind(id)
       .first();
     if (!existing) return jsonError('Testimoni tidak ditemukan', 404);
@@ -125,6 +132,10 @@ export async function onRequestDelete(context) {
       .prepare('DELETE FROM testimonials WHERE id = ?')
       .bind(id)
       .run();
+
+    if (existing.foto_url && existing.foto_url.startsWith('testimonials/')) {
+      await env.MEDIA.delete(existing.foto_url).catch(() => {});
+    }
 
     return jsonOk({ success: true, pesan: 'Testimoni berhasil dihapus' });
   } catch (err) {

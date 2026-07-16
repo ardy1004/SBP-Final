@@ -1,5 +1,18 @@
-import { Link } from 'react-router';
+import { Link, data } from 'react-router';
 import { Home, Search } from 'lucide-react';
+
+// URL tak dikenal WAJIB balas HTTP 404 asli (bukan status 200 "soft-404") —
+// data(null, {status:404}) tetap merender komponen normal tapi set status response.
+export function loader() {
+  return data(null, { status: 404 });
+}
+
+export function meta() {
+  return [
+    { title: "Halaman Tidak Ditemukan | Salam Bumi Property" },
+    { name: "robots", content: "noindex" },
+  ];
+}
 
 export default function NotFoundPage() {
   return (
