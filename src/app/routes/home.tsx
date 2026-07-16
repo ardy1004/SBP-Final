@@ -150,6 +150,7 @@ export const meta: MetaFunction = () => [
   { title: "Salam Bumi Property | Portal Properti Terpercaya Yogyakarta" },
   { name: "description", content: "Portal properti berbasis kepercayaan & kecerdasan investasi untuk Yogyakarta. Temukan rumah, kost, tanah terbaik — semua listing dikurasi dan diverifikasi langsung oleh tim SBP." },
   { name: "robots", content: "index, follow" },
+  { tagName: "link", rel: "canonical", href: "https://salambumi.xyz/" },
   { property: "og:site_name", content: "Salam Bumi Property" },
   { property: "og:title", content: "Salam Bumi Property | Agen Properti Terpercaya Yogyakarta" },
   { property: "og:description", content: "Temukan rumah, kost, tanah & investasi properti terbaik di Yogyakarta. Semua listing dikurasi & diverifikasi langsung oleh tim SBP." },

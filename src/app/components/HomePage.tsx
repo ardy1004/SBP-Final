@@ -635,9 +635,9 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
 
           {/* Headline */}
           <h1 className="font-display text-center text-4xl sm:text-5xl lg:text-6xl font-extrabold text-white leading-tight mb-4 max-w-4xl">
-            Finding The Best Properties,<br />
+            Temukan Properti Terbaik di Yogyakarta,<br />
             <span style={{ background: 'linear-gradient(90deg, #29B6F6, #FFFFFF)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
-              Will Be Easier And More Precise
+              Lebih Mudah & Lebih Tepat
             </span>
           </h1>
 

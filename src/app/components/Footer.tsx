@@ -63,15 +63,18 @@ export default function Footer() {
           <div>
             <h3 className="text-white font-semibold font-display mb-4 text-sm uppercase tracking-wide">Properti Dijual</h3>
             <ul className="space-y-2 text-sm">
+              {/* Link ke halaman programmatic SEO (SSR, canonical sendiri) — bukan
+                  /properties?query, supaya halaman /rumah-dijual-sleman dkk. punya
+                  internal link & ditemukan crawler. Pilihan = kombinasi ≥3 listing. */}
               {[
-                { label: 'Rumah Dijual Jogja', href: '/properties?jenis=rumah&tujuan=dijual' },
-                { label: 'Kost Dijual Jogja', href: '/properties?jenis=kost&tujuan=dijual' },
-                { label: 'Tanah Dijual Bantul', href: '/properties?jenis=tanah&kabupaten=bantul' },
-                { label: 'Villa Dijual Sleman', href: '/properties?jenis=villa&kabupaten=sleman' },
-                { label: 'Hotel Dijual Jogja', href: '/properties?jenis=hotel&tujuan=dijual' },
-                { label: 'Rumah Dijual Sleman', href: '/properties?jenis=rumah&kabupaten=sleman' },
-                { label: 'Kost Dekat UGM', href: '/properties?jenis=kost&kecamatan=depok' },
-                { label: 'Apartemen Dijual Jogja', href: '/properties?jenis=apartemen&tujuan=dijual' },
+                { label: 'Rumah Dijual Jogja', href: '/rumah-dijual-jogja' },
+                { label: 'Rumah Dijual Sleman', href: '/rumah-dijual-sleman' },
+                { label: 'Kost Dijual Jogja', href: '/kost-dijual-jogja' },
+                { label: 'Kost Dijual Sleman', href: '/kost-dijual-sleman' },
+                { label: 'Tanah Dijual Jogja', href: '/tanah-dijual-jogja' },
+                { label: 'Tanah Dijual Sleman', href: '/tanah-dijual-sleman' },
+                { label: 'Hotel Dijual Jogja', href: '/hotel-dijual-jogja' },
+                { label: 'Kost Dekat UGM', href: '/properties?jenis=kost&kecamatan=Depok' },
               ].map((link) => (
                 <li key={link.href}>
                   <Link to={link.href} className="hover:text-[#29B6F6] transition-colors">
