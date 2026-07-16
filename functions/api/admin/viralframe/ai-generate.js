@@ -274,7 +274,11 @@ Format yang diharapkan:
     "dialog_karakter": "klausa delivery + dialog karakter dalam ${bahasa}, sesuai pola wajib di [4], maksimal ${maxWords} kata untuk bagian dialog"
   }
 ]
-Field WAJIB ada dan non-empty: scene (integer), kamera (string), prompt (string min 50 kata), dialog_karakter (string, format sesuai [4]).`;
+Field WAJIB ada dan non-empty: scene (integer), kamera (string), prompt (string min 50 kata), dialog_karakter (string, format sesuai [4]).
+
+ATURAN TAMBAHAN FIELD 'prompt' — WAJIB, PELANGGARAN = OUTPUT DITOLAK:
+  • 'prompt' WAJIB 100% bahasa Inggris di SEMUA scene TERMASUK scene terakhir/CTA — jangan terbawa bahasa dialog_karakter (hanya 'dialog_karakter' yang memakai bahasa dialog).
+  • 'prompt' WAJIB mendeskripsikan SATU shot utuh yang bisa berdiri sendiri dari foto referensi. Jika koreografi kamera menyebut transisi (whip-pan, whip cut, dsb), tulis sebagai gabungan, mis. 'fast whip-pan settling into a steady selfie-stick shot of ...' — DILARANG menulis hanya nama transisinya tanpa shot stabil yang bisa ditahan sepanjang durasi.`;
 }
 
 function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes }) {
@@ -401,6 +405,17 @@ function isValidScene(s) {
     typeof s.dialog_karakter === 'string' && s.dialog_karakter.trim().length >= 10;
 }
 
+// Heuristik deteksi field 'prompt' yang keluar dalam Bahasa Indonesia (model kadang
+// terbawa bahasa dialog_karakter, terutama di scene CTA/terakhir) — prompt non-Inggris
+// membuat AI video generator eksternal sering gagal. ≥3 stopword khas ID = ditolak.
+const ID_STOPWORDS = ['yang', 'dengan', 'dan', 'untuk', 'dari', 'berbicara', 'terlihat', 'menghadap', 'berdiri', 'rumah', 'pemirsa', 'sebuah'];
+function looksIndonesian(text) {
+  const t = ` ${String(text).toLowerCase()} `;
+  let hits = 0;
+  for (const w of ID_STOPWORDS) { if (t.includes(` ${w} `)) hits++; if (hits >= 3) return true; }
+  return false;
+}
+
 function parseSceneJson(raw, expectedCount) {
   let text = raw.trim();
   text = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
@@ -420,6 +435,10 @@ function parseSceneJson(raw, expectedCount) {
       ok: false,
       error: `Output AI tidak valid. Dapat ${Array.isArray(parsed) ? parsed.length : 'non-array'} scene, butuh ${expectedCount}. Setiap scene wajib: scene (int), kamera (≥3 karakter), prompt (≥50 kata), dialog_karakter (≥10 karakter).`,
     };
+  }
+  const idScene = parsed.find(s => looksIndonesian(s.prompt));
+  if (idScene) {
+    return { ok: false, error: `Scene ${idScene.scene}: field prompt keluar dalam Bahasa Indonesia (wajib Inggris untuk AI video generator)` };
   }
   return { ok: true, data: parsed };
 }
@@ -535,7 +554,7 @@ export async function onRequestPost(context) {
   const work = (async () => {
     const heartbeat = setInterval(() => send({ status: 'progress' }), 2000);
     try {
-      let raw = null;
+      let sceneData = null;
       let usedProvider = null;
       let usedModel = null;
       const attempts = [];
@@ -551,17 +570,27 @@ export async function onRequestPost(context) {
           reasoningEffort: provider === 'gemini' ? 'none' : undefined,
           timeoutMs: 55000,
         });
-        if (result.ok) {
-          raw = result.content;
-          usedProvider = provider;
-          usedModel = model;
-          break;
+        if (!result.ok) {
+          attempts.push({ provider, error: result.error?.slice(0, 140), quota: result.quotaExhausted === true });
+          console.error(`[ai-generate] ${provider} gagal:`, result.error?.slice(0, 160));
+          continue;
         }
-        attempts.push({ provider, error: result.error?.slice(0, 140), quota: result.quotaExhausted === true });
-        console.error(`[ai-generate] ${provider} gagal:`, result.error?.slice(0, 160));
+        // Output tidak valid (JSON rusak / jumlah scene salah / prompt berbahasa
+        // Indonesia) = kegagalan provider juga → coba provider berikutnya, jangan
+        // langsung menyerah dengan error ke user.
+        const parsed = parseSceneJson(result.content, expectedCount);
+        if (!parsed.ok) {
+          attempts.push({ provider, error: parsed.error.slice(0, 140) });
+          console.error(`[ai-generate] ${provider} output tidak valid:`, parsed.error.slice(0, 160));
+          continue;
+        }
+        sceneData = parsed.data;
+        usedProvider = provider;
+        usedModel = model;
+        break;
       }
 
-      if (!raw) {
+      if (!sceneData) {
         const allNoKey = attempts.length > 0 && attempts.every(a => a.skipped === 'no_key');
         if (allNoKey) {
           send({ done: true, error: 'Belum ada API key AI yang diatur. Buka menu Pengaturan → AI Providers dan simpan minimal satu API key.' });
@@ -574,14 +603,11 @@ export async function onRequestPost(context) {
         return;
       }
 
-      const parsed = parseSceneJson(raw, expectedCount);
-      if (!parsed.ok) { send({ done: true, error: parsed.error }); return; }
-
       // Mode regenerate: paksa nomor scene = yang diminta (model kadang salah nomor).
-      if (regenerateScene != null) parsed.data[0].scene = regenerateScene;
+      if (regenerateScene != null) sceneData[0].scene = regenerateScene;
 
       const fotoByScene = new Map(fotoAssignments.map(a => [Number(a.scene), a]));
-      const enrichedScenes = parsed.data.map(s => {
+      const enrichedScenes = sceneData.map(s => {
         const assignment = fotoByScene.get(s.scene);
         return {
           ...s,
