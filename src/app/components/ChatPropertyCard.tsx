@@ -8,7 +8,8 @@ export interface ChatPropItem {
   title: string;
   jenis_properti: string;
   tujuan: string;
-  harga: number;
+  harga: number | null;
+  harga_sewa_tahun?: number | null;
   provinsi?: string;
   kecamatan: string;
   kabupaten: string;
@@ -16,6 +17,14 @@ export interface ChatPropItem {
 }
 
 export default function ChatPropertyCard({ prop }: { prop: ChatPropItem }) {
+  // Listing sewa: harga ada di harga_sewa_tahun (kolom harga biasanya kosong).
+  const isSewa = prop.tujuan === 'disewa';
+  const priceVal = isSewa
+    ? (prop.harga_sewa_tahun ?? prop.harga)
+    : (prop.harga ?? prop.harga_sewa_tahun);
+  const priceLabel = priceVal
+    ? `${formatRupiah(priceVal)}${isSewa || (prop.harga == null && prop.harga_sewa_tahun) ? '/tahun' : ''}`
+    : 'Hubungi kami';
   const prov = (prop.provinsi ?? 'di-yogyakarta').toLowerCase().replace(/\s+/g, '-');
   const kab  = prop.kabupaten.toLowerCase().replace(/\s+/g, '-');
   const kec  = (prop.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-');
@@ -58,7 +67,7 @@ export default function ChatPropertyCard({ prop }: { prop: ChatPropItem }) {
           {prop.kecamatan}{prop.kabupaten ? `, ${prop.kabupaten.replace(/^(Kabupaten|Kota)\s+/i, '')}` : ''}
         </p>
         <p className="text-[12px] font-bold" style={{ color: '#1565C0' }}>
-          {formatRupiah(prop.harga)}
+          {priceLabel}
         </p>
       </div>
     </Link>

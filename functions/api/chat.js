@@ -2,6 +2,7 @@ import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { searchProperties } from '../_lib/searchProperties.js';
 import { createLead } from '../_lib/createLead.js';
 import { verifyTurnstile } from '../_lib/turnstile.js';
+import { getProviderKey } from '../_lib/aiProviders.js';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODEL    = 'llama-3.3-70b-versatile';
@@ -14,6 +15,11 @@ PENTING - Konversi notasi harga Indonesia ke angka Rupiah penuh sebelum memanggi
 - 'rb' atau 'ribu' = dikali 1.000. Contoh: '500rb' = 500000
 - Kalau user sebut angka tanpa satuan dalam konteks properti (misal 'budget 800'), asumsikan dalam Milyar jika < 100, atau Juta jika antara 100-999, sesuai kewajaran harga properti.
 - SELALU kirim harga_min/harga_max sebagai angka Rupiah penuh (integer), BUKAN dalam notasi singkat.
+
+PENTING - Harga sewa di database adalah PER TAHUN:
+- Jika user mencari sewa/kost dan menyebut budget PER BULAN (umum untuk kost, misal 'budget 1jt per bulan' atau 'kost 800rb'), KALIKAN 12 dulu sebelum mengirim harga_max. Contoh: 'kost budget 1jt/bulan' → tujuan='disewa', harga_max=12000000.
+- Jika budget sewa disebut per tahun, kirim apa adanya.
+- Saat menyebutkan harga sewa ke user, sampaikan juga hitungan per bulannya agar mudah dipahami.
 
 Jika user menunjukkan minat tinggi pada sebuah properti (misal bertanya cara membeli, ingin survei lokasi, ingin nego, atau bilang 'saya minat'/'serius'), TANYAKAN nama dan nomor WhatsApp mereka secara sopan jika belum disebutkan. SETELAH user memberikan nama DAN nomor WhatsApp, panggil tool submit_lead dengan data tersebut. JANGAN panggil submit_lead sebelum kedua data (nama dan nomor WA) tersedia di percakapan. Setelah submit_lead berhasil, beri konfirmasi ramah bahwa tim akan segera menghubungi via WhatsApp.`;
 
@@ -126,7 +132,10 @@ async function callGroqWithRetry(apiKey, messages, useTools) {
 export async function onRequestPost(context) {
   const { request, env } = context;
 
-  if (!env.GROQ_API_KEY) {
+  // Key dari D1 settings (Admin → Pengaturan → AI Providers) dengan fallback
+  // ke Secret lama GROQ_API_KEY — konsisten dengan ViralFrame.
+  const groqKey = await getProviderKey(env, 'groq');
+  if (!groqKey) {
     return jsonError('Maaf, asisten sedang tidak tersedia', 503);
   }
 
@@ -164,14 +173,31 @@ export async function onRequestPost(context) {
     }
   }
 
+  // ── Konteks properti dari giliran sebelumnya ────────────────────────────────
+  // Model stateless antar giliran (history hanya role+content), jadi hasil
+  // pencarian terakhir (id + judul) dikirim balik oleh client agar submit_lead
+  // bisa mengisi property_id yang BENAR, bukan mengarang.
+  let propContext = '';
+  if (Array.isArray(body.context_properties) && body.context_properties.length > 0) {
+    const ctxProps = body.context_properties
+      .filter(p => p && Number.isInteger(Number(p.id)) && typeof p.title === 'string')
+      .slice(0, 10)
+      .map(p => ({ id: Number(p.id), title: String(p.title).slice(0, 120) }));
+    if (ctxProps.length > 0) {
+      propContext = `\n\nPROPERTI YANG SEDANG DIBAHAS (hasil pencarian giliran sebelumnya — id valid dari database):\n${
+        ctxProps.map(p => `- id ${p.id}: ${p.title}`).join('\n')
+      }\nJika user menunjukkan minat pada salah satu properti ini, gunakan id tersebut sebagai property_id saat memanggil submit_lead. JANGAN mengarang id lain.`;
+    }
+  }
+
   const messages = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: SYSTEM_PROMPT + propContext },
     ...clientMessages,
   ];
 
   try {
     // ── Putaran 1: kemungkinan ada tool_calls ────────────────────────────────
-    const round1 = await callGroqWithRetry(env.GROQ_API_KEY, messages, true);
+    const round1 = await callGroqWithRetry(groqKey, messages, true);
     const assistantMsg = round1.choices?.[0]?.message;
 
     if (!assistantMsg) {
@@ -194,7 +220,11 @@ export async function onRequestPost(context) {
       try { args = JSON.parse(tc.function?.arguments ?? '{}'); } catch { args = {}; }
 
       if (tc.function?.name === 'search_properties') {
-        lastSearchResults = await searchProperties(env, args);
+        // Akumulasi (bukan timpa) — model bisa memanggil search lebih dari sekali
+        // dalam satu giliran (mis. "rumah di Sleman dan tanah di Bantul").
+        const found = await searchProperties(env, args);
+        const seen = new Set(lastSearchResults.map(p => p.id));
+        lastSearchResults = [...lastSearchResults, ...found.filter(p => !seen.has(p.id))].slice(0, 10);
       } else if (tc.function?.name === 'submit_lead') {
         leadResult = await createLead(env, context, { ...args, source_page: 'chat' });
       }
@@ -222,11 +252,11 @@ export async function onRequestPost(context) {
     const resultContext = contextParts.length > 0 ? '\n\n' + contextParts.join('\n\n') : '';
 
     const messages2 = [
-      { role: 'system', content: SYSTEM_PROMPT + resultContext },
+      { role: 'system', content: SYSTEM_PROMPT + propContext + resultContext },
       ...clientMessages,
     ];
 
-    const round2 = await callGroqWithRetry(env.GROQ_API_KEY, messages2, false);
+    const round2 = await callGroqWithRetry(groqKey, messages2, false);
     const finalMsg = round2.choices?.[0]?.message;
 
     return jsonOk({

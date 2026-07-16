@@ -59,12 +59,19 @@ export default function ChatWidget() {
     setInput('');
     setLoading(true);
 
+    // Hasil pencarian terakhir dikirim balik (id + judul) supaya backend bisa
+    // memberi tahu model properti mana yang sedang dibahas — property_id lead
+    // jadi akurat, bukan karangan model.
+    const lastWithProps = [...messages].reverse().find(m => m.role === 'assistant' && (m.properties?.length ?? 0) > 0);
+    const contextProperties = lastWithProps?.properties?.map(p => ({ id: p.id, title: p.title })) ?? [];
+
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+          context_properties: contextProperties.length > 0 ? contextProperties : undefined,
           // Token anti-bot hanya dikirim pada pesan pertama (backend verifikasi di giliran pertama)
           cf_turnstile_token: isFirstMessage ? (turnstileToken || undefined) : undefined,
         }),
