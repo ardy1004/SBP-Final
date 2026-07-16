@@ -601,7 +601,7 @@ export default function AdminPropertyDetailPage() {
     : (STATUS_BADGE[property!.status_publish] ?? { label: property!.status_publish, cls: 'bg-gray-100 text-gray-500 border border-gray-200' });
 
   return (
-    <div className="space-y-5 max-w-4xl">
+    <div className="space-y-5">
       {/* Header */}
       <div className="flex items-start gap-3">
         <button onClick={() => navigate('/admin/listing')} className="mt-1 text-[#64748B] hover:text-[#0F172A] transition-colors">
