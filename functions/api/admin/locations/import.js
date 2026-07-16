@@ -10,7 +10,8 @@ function slugify(nama) {
 }
 
 // POST /api/admin/locations/import — terima {rows:[{kode,nama}]}
-// kode format Kemendagri: "11" (provinsi), "11.01" (kabupaten), "11.01.01" (kecamatan)
+// kode format Kemendagri: "11" (provinsi), "11.01" (kabupaten), "11.01.01"
+// (kecamatan), "11.01.01.2001" (kelurahan/desa)
 export async function onRequestPost(context) {
   const { request, env } = context;
 
@@ -32,7 +33,7 @@ export async function onRequestPost(context) {
     if (!Number.isInteger(id) || id <= 0) continue;
 
     const dotCount = (kode.match(/\./g) || []).length;
-    const tipe = dotCount === 0 ? 'provinsi' : dotCount === 1 ? 'kabupaten' : 'kecamatan';
+    const tipe = dotCount === 0 ? 'provinsi' : dotCount === 1 ? 'kabupaten' : dotCount === 2 ? 'kecamatan' : 'kelurahan';
     const parentKode = dotCount === 0 ? null : kode.split('.').slice(0, -1).join('.');
     const parent_id = parentKode ? parseInt(parentKode.replace(/\./g, ''), 10) : null;
     const slug = slugify(nama) || `lok-${id}`;

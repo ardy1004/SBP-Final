@@ -4,14 +4,30 @@ import { MapPin, RefreshCw, Download, CheckCircle, AlertCircle, Database } from 
 const WILAYAH_BASE = '/api/admin/locations/proxy?path=';
 const IMPORT_URL = '/api/admin/locations/import';
 const CHUNK_SIZE = 1500;
+// Fetch kelurahan/desa (~7.285 kecamatan × 1 request) dijalankan paralel terbatas
+// — sekuensial murni bisa >20 menit dan rawan gagal di tengah sesi browser.
+const VILLAGE_CONCURRENCY = 8;
 
-interface Stat { provinsi: number; kabupaten: number; kecamatan: number }
+interface Stat { provinsi: number; kabupaten: number; kecamatan: number; kelurahan: number }
 type Status = 'idle' | 'running' | 'done' | 'error';
 
 async function fetchJSON(url: string) {
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
+}
+
+/** Jalankan `fn` atas `items` dengan maksimal `limit` request paralel. */
+async function mapConcurrent<T>(items: T[], limit: number, fn: (item: T, index: number) => Promise<void>) {
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
 }
 
 export default function AdminLokasiPage() {
@@ -32,6 +48,7 @@ export default function AdminLokasiPage() {
         provinsi: json.provinsi ?? 0,
         kabupaten: json.kabupaten ?? 0,
         kecamatan: json.kecamatan ?? 0,
+        kelurahan: json.kelurahan ?? 0,
       });
     } catch { /* ignore */ }
     finally { setStatsLoading(false); }
@@ -58,7 +75,7 @@ export default function AdminLokasiPage() {
 
   const handleImport = async () => {
     if (!confirm(
-      'Ini akan menghapus data lokasi existing dan mengimport ulang dari wilayah.id (~7.800 lokasi).\nProses ~2-3 menit. Lanjutkan?'
+      'Ini akan menghapus data lokasi existing dan mengimport ulang dari wilayah.id (~91.700 lokasi, termasuk kelurahan/desa seluruh Indonesia).\nProses ~6-8 menit. Lanjutkan?'
     )) return;
 
     setStatus('running');
@@ -101,6 +118,7 @@ export default function AdminLokasiPage() {
       }
 
       // 4. Fetch districts per regency
+      const districts: { code: string; name: string; regency_code: string }[] = [];
       for (let i = 0; i < regencies.length; i++) {
         const reg = regencies[i];
         if (i % 10 === 0) setProgress(`Mengambil kecamatan [${i + 1}/${regencies.length}] — ${reg.name}`);
@@ -109,13 +127,34 @@ export default function AdminLokasiPage() {
           const items: { code: string; name: string }[] = d.data ?? [];
           items.forEach(dist => {
             allRows.push({ kode: dist.code, nama: dist.name, parent_kode: reg.code });
+            districts.push({ code: dist.code, name: dist.name, regency_code: reg.code });
           });
         } catch {
           setErrLog(prev => [...prev, `Gagal: kecamatan kabupaten ${reg.name}`]);
         }
       }
 
-      // 5. POST in chunks
+      // 5. Fetch kelurahan/desa per kecamatan — paralel terbatas (lihat
+      // VILLAGE_CONCURRENCY) karena ~7.285 kecamatan sekuensial bisa >20 menit.
+      let villageDone = 0;
+      await mapConcurrent(districts, VILLAGE_CONCURRENCY, async (dist) => {
+        try {
+          const d = await fetchJSON(`${WILAYAH_BASE}villages/${dist.code}.json`);
+          const items: { code: string; name: string }[] = d.data ?? [];
+          items.forEach(v => {
+            allRows.push({ kode: v.code, nama: v.name, parent_kode: dist.code });
+          });
+        } catch {
+          setErrLog(prev => [...prev, `Gagal: kelurahan kecamatan ${dist.name}`]);
+        } finally {
+          villageDone++;
+          if (villageDone % 25 === 0 || villageDone === districts.length) {
+            setProgress(`Mengambil kelurahan/desa [${villageDone}/${districts.length}] — ${dist.name}`);
+          }
+        }
+      });
+
+      // 6. POST in chunks
       const totalChunks = Math.ceil(allRows.length / CHUNK_SIZE);
       let totalInserted = 0;
       for (let i = 0; i < totalChunks; i++) {
@@ -163,11 +202,12 @@ export default function AdminLokasiPage() {
           </button>
         </div>
         {stats ? (
-          <div className="grid grid-cols-3 gap-4 text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
             {[
               { label: 'Provinsi', val: stats.provinsi },
               { label: 'Kab./Kota', val: stats.kabupaten },
               { label: 'Kecamatan', val: stats.kecamatan || '—' },
+              { label: 'Kelurahan/Desa', val: stats.kelurahan || '—' },
             ].map(s => (
               <div key={s.label} className="bg-[#F0F4F8] rounded-xl p-3">
                 <div className="font-bold text-2xl text-[#1565C0]">{s.val}</div>
@@ -187,7 +227,7 @@ export default function AdminLokasiPage() {
         </h2>
         <p className="text-sm text-[#64748B] mb-4">
           Mengambil data dari <code className="bg-gray-100 px-1 rounded text-xs">wilayah.id</code> (kode Kemendagri).
-          Import mencakup ~38 provinsi, ~514 kabupaten, ~7.266 kecamatan. Proses ~2–3 menit.
+          Import mencakup ~38 provinsi, ~514 kabupaten, ~7.266 kecamatan, ~83.900 kelurahan/desa. Proses ~6–8 menit.
           Data lokasi existing akan dihapus dan diganti.
         </p>
 

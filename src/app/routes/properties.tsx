@@ -69,6 +69,9 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
   let provinsi: string | null = null;
   let kabupaten: string | null = null;
   let kecamatan: string | null = null;
+  // Hanya diisi via resolusi slug programmatic (bukan query param publik — tak
+  // ada UI filter kelurahan) — dipakai murni utk WHERE SQL di bawah.
+  let kelurahan: string | null = null;
   let lokasiLabel = 'Yogyakarta';
   let seoPath = '/properties';
   let ssrEligible = true;
@@ -114,8 +117,18 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
             kecamatan = kecRow.v as string;
             lokasiLabel = kecamatan as string;
           } else {
-            // Lokasi tidak dikenal di inventori → 404
-            return notFoundResult();
+            // Fallback level ke-3: kelurahan/desa (mis. "kost-dijual-condongcatur")
+            // — slug flat sama seperti kabupaten/kecamatan, tanpa prefix.
+            const kelRow = await env.DB.prepare(
+              "SELECT kelurahan AS v FROM properties WHERE LOWER(kelurahan) LIKE ? AND status_publish = 'published' LIMIT 1"
+            ).bind(like).first();
+            if (kelRow?.v) {
+              kelurahan = kelRow.v as string;
+              lokasiLabel = kelurahan as string;
+            } else {
+              // Lokasi tidak dikenal di inventori → 404
+              return notFoundResult();
+            }
           }
         }
       }
@@ -159,6 +172,7 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
     if (provinsi)  { conditions.push('LOWER(p.provinsi) = LOWER(?)');  bindings.push(provinsi); }
     if (kabupaten) { conditions.push('LOWER(p.kabupaten) = LOWER(?)'); bindings.push(kabupaten); }
     if (kecamatan) { conditions.push('LOWER(p.kecamatan) = LOWER(?)'); bindings.push(kecamatan); }
+    if (kelurahan) { conditions.push('LOWER(p.kelurahan) = LOWER(?)'); bindings.push(kelurahan); }
 
     const where = conditions.join(' AND ');
     const sqlData = `

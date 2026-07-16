@@ -182,8 +182,10 @@ export default function AdminPropertyDetailPage() {
   const [provList, setProvList] = useState<ApiLocation[]>([]);
   const [kabList, setKabList] = useState<ApiLocation[]>([]);
   const [kecList, setKecList] = useState<ApiLocation[]>([]);
+  const [kelList, setKelList] = useState<ApiLocation[]>([]);
   const [provId, setProvId] = useState<number | null>(null);
   const [kabId, setKabId] = useState<number | null>(null);
+  const [kecId, setKecId] = useState<number | null>(null);
   const locationInitRef = useRef(false);
   const [statusPending, setStatusPending] = useState<StatusValue | ''>('');
   const [statusSaving, setStatusSaving]   = useState(false);
@@ -260,7 +262,8 @@ export default function AdminPropertyDetailPage() {
 
   const loadProperty = useCallback(async () => {
     locationInitRef.current = false;
-    setProvId(null); setKabId(null); setKabList([]); setKecList([]);
+    setProvId(null); setKabId(null); setKecId(null);
+    setKabList([]); setKecList([]); setKelList([]);
     if (isNew) {
       setForm({
         title: '', jenis_properti: 'rumah', tujuan: 'dijual', harga: 0,
@@ -358,24 +361,43 @@ export default function AdminPropertyDetailPage() {
   }, [provId]); // eslint-disable-line
 
   useEffect(() => {
-    if (!kabId) { setKecList([]); return; }
-    getLocations(kabId).then(res => { if (res.success && res.data) setKecList(res.data.items); });
-  }, [kabId]);
+    if (!kabId) { setKecList([]); setKecId(null); return; }
+    getLocations(kabId).then(res => {
+      if (!res.success || !res.data) return;
+      const list = res.data.items;
+      setKecList(list);
+      if (form?.kecamatan) {
+        const kec = list.find(k => k.nama === form.kecamatan);
+        if (kec) setKecId(kec.id);
+      }
+    });
+  }, [kabId]); // eslint-disable-line
+
+  useEffect(() => {
+    if (!kecId) { setKelList([]); return; }
+    getLocations(kecId).then(res => { if (res.success && res.data) setKelList(res.data.items); });
+  }, [kecId]);
 
   const handleProvChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const pid = parseInt(e.target.value, 10) || null;
     const nama = provList.find(p => p.id === pid)?.nama ?? null;
-    setProvId(pid); setKabId(null); setKabList([]); setKecList([]);
-    setForm(f => ({ ...f, provinsi: nama, kabupaten: null, kecamatan: null }));
+    setProvId(pid); setKabId(null); setKecId(null); setKabList([]); setKecList([]); setKelList([]);
+    setForm(f => ({ ...f, provinsi: nama, kabupaten: null, kecamatan: null, kelurahan: null }));
   };
   const handleKabChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const nama = e.target.value || null;
     const found = kabList.find(k => k.nama === nama);
-    setKabId(found?.id ?? null); setKecList([]);
-    setForm(f => ({ ...f, kabupaten: nama, kecamatan: null }));
+    setKabId(found?.id ?? null); setKecId(null); setKecList([]); setKelList([]);
+    setForm(f => ({ ...f, kabupaten: nama, kecamatan: null, kelurahan: null }));
   };
   const handleKecChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setForm(f => ({ ...f, kecamatan: e.target.value || null }));
+    const nama = e.target.value || null;
+    const found = kecList.find(k => k.nama === nama);
+    setKecId(found?.id ?? null); setKelList([]);
+    setForm(f => ({ ...f, kecamatan: nama, kelurahan: null }));
+  };
+  const handleKelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setForm(f => ({ ...f, kelurahan: e.target.value || null }));
   };
   // Body PATCH lengkap dari state form — dipakai untuk edit DAN untuk create
   // (setelah POST minimal, seluruh field lain dikirim via PATCH ke id baru —
@@ -782,8 +804,16 @@ export default function AdminPropertyDetailPage() {
                 {kecList.map(k => <option key={k.id} value={k.nama}>{k.nama}</option>)}
               </select>
             </Field>
-            <Field label="Kelurahan">
-              <input type="text" value={form.kelurahan ?? ''} onChange={e => setForm(f => ({ ...f, kelurahan: e.target.value || null }))} className={inputCls} />
+            <Field label="Kelurahan/Desa">
+              <select value={form.kelurahan ?? ''} onChange={handleKelChange} className={selectCls} disabled={!kecId}>
+                <option value="">-- Pilih Kelurahan/Desa --</option>
+                {kelList.map(k => <option key={k.id} value={k.nama}>{k.nama}</option>)}
+              </select>
+              {kecId && kelList.length === 0 && (
+                <p className="text-xs mt-1 text-amber-600">
+                  ⚠️ Belum ada data kelurahan/desa — jalankan Import di menu Lokasi.
+                </p>
+              )}
             </Field>
             <Field label="Alamat Lengkap">
               <input type="text" value={form.alamat ?? ''} onChange={e => setForm(f => ({ ...f, alamat: e.target.value || null }))} className={inputCls} placeholder="Hanya tampil ke admin" />

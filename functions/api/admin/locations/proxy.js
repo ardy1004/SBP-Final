@@ -1,7 +1,8 @@
 import { jsonError, handleOptions } from '../../_shared/response.js';
 
-// Whitelist pattern — cegah SSRF: hanya provinces.json, regencies/N.json, districts/N.N.json
-const SAFE_PATH = /^(provinces\.json|regencies\/[\d]+\.json|districts\/[\d.]+\.json)$/;
+// Whitelist pattern — cegah SSRF: hanya provinces.json, regencies/N.json,
+// districts/N.N.json, villages/N.N.N.json
+const SAFE_PATH = /^(provinces\.json|regencies\/[\d]+\.json|districts\/[\d.]+\.json|villages\/[\d.]+\.json)$/;
 
 export async function onRequestGet(context) {
   const { request } = context;

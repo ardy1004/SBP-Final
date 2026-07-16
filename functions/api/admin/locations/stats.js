@@ -7,7 +7,7 @@ export async function onRequestGet(context) {
       `SELECT tipe, COUNT(*) as cnt FROM locations GROUP BY tipe`
     ).all();
 
-    const counts = { provinsi: 0, kabupaten: 0, kecamatan: 0 };
+    const counts = { provinsi: 0, kabupaten: 0, kecamatan: 0, kelurahan: 0 };
     for (const row of (rows.results ?? [])) {
       if (row.tipe in counts) counts[row.tipe] = row.cnt;
     }

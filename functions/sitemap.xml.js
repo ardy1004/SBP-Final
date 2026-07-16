@@ -81,7 +81,19 @@ export async function onRequestGet(context) {
       WHERE status_publish = 'published' AND kecamatan IS NOT NULL AND kecamatan != ''
       GROUP BY jenis_properti, kecamatan
     `).all();
-    const rows = [...(kabCombos.results ?? []), ...(kecCombos.results ?? [])];
+    // Level ke-3 (kelurahan/desa, mis. "kost-dijual-condongcatur") — sama pola,
+    // slug flat tanpa prefix. Minim data saat ini (baru sedikit listing berisi
+    // kelurahan), tapi mekanisme siap: halaman terbit otomatis begitu ≥3 listing
+    // per kelurahan tercatat (via dropdown cascade admin, lihat Tahap 3).
+    const kelCombos = await env.DB.prepare(`
+      SELECT jenis_properti AS jenis, kelurahan AS lokasi,
+        SUM(CASE WHEN tujuan IN ('dijual','dijual_disewa') THEN 1 ELSE 0 END) AS c_dijual,
+        SUM(CASE WHEN tujuan IN ('disewa','dijual_disewa') THEN 1 ELSE 0 END) AS c_disewa
+      FROM properties
+      WHERE status_publish = 'published' AND kelurahan IS NOT NULL AND kelurahan != ''
+      GROUP BY jenis_properti, kelurahan
+    `).all();
+    const rows = [...(kabCombos.results ?? []), ...(kecCombos.results ?? []), ...(kelCombos.results ?? [])];
     const slugSet = new Set();
     // "Kabupaten Sleman" → "sleman"; "Kota Yogyakarta" → "kota-yogyakarta" (JANGAN
     // dipangkas jadi "yogyakarta" — itu alias seluruh DIY di parseProgrammaticSlug).
