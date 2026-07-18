@@ -1109,8 +1109,8 @@ function AIGenerateTab({
         'CARA PAKAI:',
         `1. Buka ${metadata.ai_tool} (${metadata.ai_tool === 'google_flow' ? 'labs.google/fx/tools/flow' : 'misal: labs.google.com/video untuk Veo3'})`,
         '2. Upload foto: scene1_foto.webp',
-        `3. Upload karakter: ${karakter.nama}.webp (sebagai reference/style)`,
-        '4. Copy-paste prompt dari scene1.txt (bagian 🎬 VIDEO PROMPT)',
+        `3. Upload karakter: ${karakter.nama.replace(/\s+/g, '_')}.webp (sebagai reference/style)`,
+        '4. Copy-paste isi field "prompt" dari scene1.txt (file JSON — dialog karakter ada di field "dialog_karakter")',
         '5. Generate video → download',
         '6. Ulangi untuk scene 2, 3, dst',
         '7. Gabungkan semua scene di CapCut / DaVinci Resolve',
@@ -2403,6 +2403,10 @@ export default function AdminViralFrameWorkspacePage() {
       // (d2) subtitles.srt — timing dari narasi + durasi scene (R8)
       const srt = buildSrt(validData.scenes ?? [], durations);
       if (srt.trim()) zip.file('subtitles.srt', srt);
+
+      // (d3) scenes.json — JSON hasil AI tervalidasi (ai_ready_prompt per scene ada
+      // di sini), agar bundle mandiri: user tidak perlu balik ke web untuk copy prompt.
+      zip.file('scenes.json', JSON.stringify(validData, null, 2));
 
       // (e) generate + download
       const out = await zip.generateAsync({ type: 'blob' });

@@ -579,7 +579,13 @@ export async function onRequestPost(context) {
   // tiap 2s membuat response "mengalir" sejak awal sehingga bebas wall-clock 30s;
   // tiap provider dapat waktu penuh (55s) tanpa anggaran 26s lagi.
   const expectedCount = regenerateScene != null ? 1 : jumlahScene;
-  const maxTokens = regenerateScene != null ? 900 : Math.min(4000, 500 + jumlahScene * 350);
+  // Mode multi-shot (agent_broll_hybrid): field 'prompt' mendeskripsikan 2 shot per
+  // scene (~2× lebih panjang) — beri budget token per scene lebih besar agar output
+  // 10-12 scene tidak terpotong di tengah JSON (parse gagal → semua provider "gagal").
+  const perSceneTokens = multiShotScene ? 520 : 350;
+  const maxTokens = regenerateScene != null
+    ? (multiShotScene ? 1300 : 900)
+    : Math.min(6000, 500 + jumlahScene * perSceneTokens);
   const tryOrder = [chosenProvider, ...PROVIDER_ORDER.filter(p => p !== chosenProvider)];
 
   const enc = new TextEncoder();
