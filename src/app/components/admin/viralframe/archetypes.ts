@@ -166,7 +166,7 @@ function isReveal(m: CameraMove): boolean {
 // ─── Video Archetype ──────────────────────────────────────────────────────────
 
 export type PresenterMode = 'on_camera' | 'voiceover_only' | 'faceless_broll';
-export type NarrationPOV = 'agent_to_camera' | 'vlogger_handheld' | 'first_person_pov';
+export type NarrationPOV = 'agent_to_camera' | 'vlogger_handheld' | 'first_person_pov' | 'text_driven' | 'client_testimonial';
 
 export interface VideoArchetype {
   id: string;
@@ -272,6 +272,68 @@ export const ARCHETYPES: VideoArchetype[] = [
     ],
     pacing: 'relaxed',
     shotGrammarNote: 'Sinematik mewah tanpa talent: rangkaian b-roll estetik dengan color grade premium, depth of field dangkal, komposisi terkurasi. Setiap shot terasa seperti iklan properti high-end. Narasi voiceover eksklusif, tempo tenang & aspiratif.',
+  },
+  {
+    id: 'agent_broll_hybrid',
+    label: 'Agen + Cutaway B-Roll (Hybrid)',
+    emoji: '✂️',
+    ringkas: 'Agen bicara ke kamera, disela cutaway full b-roll properti di SETIAP scene.',
+    presenterMode: 'on_camera',
+    narrationPOV: 'agent_to_camera',
+    defaults: { visualStyle: 'modern_sleek', tone: 'professional_formal', expression: 'confident_auth', useCharacter: true, register: 'formal' },
+    // Semua beat di sini HANYA merepresentasikan gerakan kamera untuk bagian
+    // B-ROLL CUTAWAY (bagian kedua tiap scene) — bagian A-ROLL/talking head
+    // (bagian pertama) selalu static/steady sehingga tidak perlu direpresentasikan
+    // di sini. Desain ini SENGAJA menghindari pola A/B bergantian dalam array
+    // (mis. [A,B,A,B]) karena rotasi compileCameraChoreography (ordered[(sceneIndex+i)%len])
+    // bisa mengubah beat pertama yang terpilih tergantung sceneIndex — kalau sebagian
+    // beat berlabel "A-ROLL" dan sebagian "B-ROLL", scene tertentu bisa kebagian
+    // urutan terbalik (B dulu baru A) dan bertentangan dengan shotGrammarNote yang
+    // menetapkan urutan TETAP (A-roll selalu duluan). Dengan seluruh beat berlabel
+    // sama (B-roll), urutan yang dihasilkan rotasi TIDAK PERNAH bertentangan dengan
+    // urutan tekstual yang mengikat.
+    cameraGrammar: [
+      { move: 'slow_push',     speed: 'slow',   ease: 'ease-in-out', motivation: 'B-ROLL CUTAWAY: aesthetic push-in on the scene area, no presenter' },
+      { move: 'orbit',         speed: 'slow',   ease: 'ease-in-out', motivation: 'B-ROLL CUTAWAY: aesthetic orbit around the scene area, no presenter' },
+      { move: 'pull_back',     speed: 'medium', ease: 'ease-out',    motivation: 'B-ROLL CUTAWAY: aesthetic pull-back reveal of the scene area, no presenter' },
+      { move: 'lateral_track', speed: 'slow',   ease: 'ease-in-out', motivation: 'B-ROLL CUTAWAY: aesthetic lateral track across the scene area, no presenter' },
+    ],
+    pacing: 'flowing',
+    shotGrammarNote: 'SETIAP scene WAJIB dibagi 2 bagian berurutan dengan durasi kurang-lebih sama: BAGIAN 1 = A-ROLL/TALKING HEAD — agen tampil menghadap kamera dengan framing static/steady, bicara langsung ke penonton, latar belakang sesuai area foto referensi scene ini (bagian ini SELALU tampil lebih dulu, tidak pernah dibalik). BAGIAN 2 = B-ROLL CUTAWAY — potongan (hard cut, BUKAN gerakan kamera menerus dari bagian 1) ke rekaman PENUH area yang sama TANPA agen tampil di frame sama sekali, dengan gerakan kamera sinematik/estetik sesuai KOREOGRAFI KAMERA PER SCENE di bawah (koreografi itu KHUSUS untuk Bagian 2 — Bagian 1 tidak perlu gerakan kamera, cukup frame diam). Pola talking-head→cutaway INI WAJIB berulang di SETIAP scene tanpa kecuali, bukan cuma sebagian. Tuliskan pembagian dua bagian ini secara eksplisit di dalam ai_ready_prompt tiap scene (mis. "first half: ...; hard cut to; second half: ...").',
+  },
+  {
+    id: 'kinetic_typography',
+    label: 'Kinetic Typography (Teks Dinamis)',
+    emoji: '🔤',
+    ringkas: 'Faceless, teks animasi bold kata-per-kata tersinkron VO — didesain buat ditonton TANPA suara.',
+    presenterMode: 'faceless_broll',
+    narrationPOV: 'text_driven',
+    defaults: { visualStyle: 'minimalist_clean', tone: 'informative_educational', expression: 'auto', useCharacter: false },
+    cameraGrammar: [
+      { move: 'slow_push',     speed: 'slow',   ease: 'ease-in-out', motivation: 'steady backdrop movement, leaves room for bold on-screen text' },
+      { move: 'static_locked', speed: 'slow',   ease: 'linear',      motivation: 'locked frame so kinetic text stays fully legible' },
+      { move: 'tilt_up',       speed: 'slow',   ease: 'ease-in-out', motivation: 'gentle reveal without competing with text overlay' },
+      { move: 'lateral_track', speed: 'slow',   ease: 'ease-in-out', motivation: 'subtle lateral motion, text remains the visual anchor' },
+    ],
+    pacing: 'punchy',
+    shotGrammarNote: 'Faceless total — footage properti HANYA jadi latar visual, bukan fokus utama. Fokus utama adalah TEKS ON-SCREEN bergaya kinetic typography: setiap on_screen_text WAJIB ditulis sebagai potongan kalimat pendek yang tampil kata-per-kata atau frasa-per-frasa dengan animasi bold (pop-in/scale/highlight warna), tersinkron KETAT dengan timing script_narration — bukan satu baris subtitle statis. Video ini didesain untuk ditonton TANPA suara (mayoritas viewer FYP/Reels scroll tanpa audio aktif): pesan inti HARUS tetap tersampaikan penuh hanya lewat teks, VO adalah pendukung bukan satu-satunya jalur informasi. Gerakan kamera dibuat MINIMAL dan stabil (lihat KOREOGRAFI KAMERA) supaya tidak mengganggu keterbacaan teks — jangan pernah gerakan kamera cepat/whip-pan di scene ini. Kontras warna tinggi antara teks dan footage (drop shadow/outline/background block) WAJIB disebutkan di ai_ready_prompt agar teks tetap terbaca di footage apa pun.',
+  },
+  {
+    id: 'client_testimonial',
+    label: 'Testimoni Klien (Bukan Agen)',
+    emoji: '🙋',
+    ringkas: 'Penghuni/pembeli asli cerita pengalaman — bukan agen jualan, trust lebih tinggi.',
+    presenterMode: 'on_camera',
+    narrationPOV: 'client_testimonial',
+    defaults: { visualStyle: 'ugc_authentic', tone: 'storytelling_emotional', expression: 'warm_friendly', useCharacter: true, register: 'santai' },
+    cameraGrammar: [
+      { move: 'static_locked', speed: 'slow',   ease: 'linear',      motivation: 'intimate interview-style framing, client speaks candidly' },
+      { move: 'slow_push',     speed: 'slow',   ease: 'ease-in-out', motivation: 'gentle push-in during an emotional/key statement' },
+      { move: 'lateral_track', speed: 'slow',   ease: 'ease-in-out', motivation: 'cutaway b-roll of the property while testimonial voice continues over it' },
+      { move: 'pull_back',     speed: 'medium', ease: 'ease-out',    motivation: 'closing reveal returning to the client in the space they just described' },
+    ],
+    pacing: 'relaxed',
+    shotGrammarNote: 'Presenter BUKAN agen properti — dia adalah penghuni/pembeli/penyewa ASLI yang menceritakan pengalaman nyatanya tinggal atau membeli properti ini, gaya bicara natural/tidak scripted seperti wawancara santai (BUKAN nada jualan/sales pitch). Framing interview-style (duduk santai atau berdiri natural di properti), kontak mata hangat ke kamera. Boleh ada cutaway singkat ke b-roll properti SAMBIL narasi testimoni tetap berlanjut sebagai voice-over yang menjembatani (bukan hard-cut senyap seperti gaya agen) — penonton tetap dengar cerita klien selama cutaway berlangsung. Hindari klaim USP yang terdengar seperti copywriting; gunakan bahasa personal ("saya", "keluarga saya", pengalaman konkret) agar terasa otentik dan credible, bukan seperti iklan.',
   },
 ];
 

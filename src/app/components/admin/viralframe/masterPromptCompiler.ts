@@ -124,6 +124,8 @@ export function compileMasterPrompt(
       agent_to_camera: 'Agen berbicara langsung ke kamera (presenter di layar).',
       vlogger_handheld: 'Vlogger walk-and-talk, sering menyapa kamera, energi personal.',
       first_person_pov: 'Sudut pandang orang pertama — penonton seolah hadir sendiri; TIDAK ada presenter di layar.',
+      text_driven: 'Teks on-screen sebagai jalur informasi utama — footage hanya latar, TIDAK ada presenter di layar.',
+      client_testimonial: 'Klien/penghuni asli bicara ke kamera gaya interview santai — BUKAN agen properti, narasi personal tidak scripted.',
     }[archetype.narrationPOV];
     const presenterLabel = {
       on_camera: 'Talent/presenter TAMPIL di layar.',
@@ -279,7 +281,7 @@ export function compileMasterPrompt(
   L.push('═══════════════════════════════════════════════');
   L.push('BLOK 4 — ATURAN VIRAL, KONSISTENSI & GUARDRAIL (WAJIB)');
   L.push('═══════════════════════════════════════════════');
-  L.push('8 ELEMEN VIRAL (terapkan MINIMAL 4 dari 8 di seluruh video):');
+  L.push('9 ELEMEN VIRAL (terapkan MINIMAL 4 dari 9 di seluruh video):');
   L.push('  1. Hook 3 detik pertama yang scroll-stopping.');
   L.push('  2. Pattern interrupt / kejutan visual.');
   L.push('  3. Emotional trigger (aspirasi, FOMO, rasa aman).');
@@ -288,6 +290,10 @@ export function compileMasterPrompt(
   L.push('  6. Social proof / kredibilitas.');
   L.push('  7. Open loop / curiosity gap yang baru terjawab di akhir.');
   L.push('  8. CTA yang jelas dan mendesak.');
+  L.push('  9. Loop-bait ending — lihat instruksi LOOP EDIT di bawah (WAJIB, bukan opsional, terlepas dari 4 elemen minimum di atas).');
+  L.push('');
+  L.push('LOOP EDIT (WAJIB — meningkatkan rewatch & autoplay loop di TikTok/Reels/Shorts):');
+  L.push(`  Frame PENUTUP scene terakhir (CTA) WAJIB disusun agar secara visual "menyambung" ke frame PEMBUKA scene pertama (Hook) — komposisi, sudut kamera, atau elemen visual yang mirip/echo, sehingga saat platform me-replay video secara otomatis (autoplay loop), transisi akhir→awal terasa MULUS seperti satu gerakan berkelanjutan, bukan potongan patah. Jangan tutup video dengan frame yang terasa "final"/statis (mis. black screen, freeze frame) — akhiri dengan komposisi yang secara visual bisa lanjut ke Hook tanpa jeda canggung. Sebutkan strategi loop ini secara eksplisit di transition_to_next scene terakhir dan di production_notes.editing_sequence.`);
   L.push('');
   L.push('KONSISTENSI WAJIB di seluruh scene:');
   L.push('  - Color temperature & color grade konsisten (tentukan 1 LUT/mood, pakai di semua scene).');
