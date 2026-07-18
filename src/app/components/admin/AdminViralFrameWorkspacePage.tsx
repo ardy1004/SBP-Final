@@ -77,6 +77,10 @@ interface Step1State {
   niche: string;                // fixed 'real_estate'
   archetype: string;            // id VideoArchetype ('custom' = manual)
   register: string;             // gaya bahasa dialog (auto/formal/santai/gaul/jawa_halus)
+  // Nomor scene (1-based) yang DIKECUALIKAN dari pola cutaway B-roll arketipe hybrid
+  // (agent_broll_hybrid/selfie_luxury_hybrid) — scene itu jadi talking-head/selfie
+  // penuh durasi tanpa cutaway. Hanya relevan bila archetype.allowMultiShotPerScene.
+  cutawayExcluded: number[];
 }
 
 interface SceneAssign { photoId: number | null; label: string }
@@ -843,6 +847,7 @@ interface AIGenerateTabProps {
   ctaType: string;
   archetype: string;
   register: string;
+  cutawayExcluded: number[];
   sceneRoles: Record<number, 'Hook' | 'Body' | 'CTA'>;
   // Data dari Step 2
   scenePhotos: Record<number, ScenePhoto>;
@@ -854,7 +859,7 @@ interface AIGenerateTabProps {
 
 function AIGenerateTab({
   propertyId, propertyTitle, kodeListingStr, jumlahScene, platform, platforms, aiTool, bahasa,
-  tone, visualStyle, hookType, ctaType, archetype, register, sceneRoles,
+  tone, visualStyle, hookType, ctaType, archetype, register, cutawayExcluded, sceneRoles,
   scenePhotos, selectedKarakter, onEditStep,
 }: AIGenerateTabProps) {
   const [musik, setMusik] = useState('corporate');
@@ -933,11 +938,24 @@ function AIGenerateTab({
     const archetype_note = arc
       ? `${arc.label} — ${arc.shotGrammarNote} (mode presenter: ${arc.presenterMode}, pacing: ${arc.pacing})`
       : '';
+    // Scene yang dikecualikan dari cutaway (arketipe hybrid) → kirim camera hint
+    // "steady, no cutaway" untuk scene itu, BUKAN koreografi cutaway biasa —
+    // supaya instruksi per-scene di user prompt tidak bertentangan dengan aturan
+    // "SATU shot talking-head saja" yang dikirim ke ai-generate.js.
+    const cutawayExcludedInRange = arc?.allowMultiShotPerScene
+      ? cutawayExcluded.filter(n => n >= 1 && n <= jumlahScene)
+      : [];
     const camera_directives = arc
-      ? Array.from({ length: jumlahScene }, (_, i) => ({
-          scene: i + 1,
-          camera: compileCameraChoreography(arc.cameraGrammar, sceneRoles[i + 1] ?? 'Body', dur, i, aiTool),
-        }))
+      ? Array.from({ length: jumlahScene }, (_, i) => {
+          const sceneNum = i + 1;
+          const isExcluded = cutawayExcludedInRange.includes(sceneNum);
+          return {
+            scene: sceneNum,
+            camera: isExcluded
+              ? 'steady handheld shot, presenter stays in frame throughout, no cutaway'
+              : compileCameraChoreography(arc.cameraGrammar, sceneRoles[sceneNum] ?? 'Body', dur, i, aiTool),
+          };
+        })
       : [];
 
     return {
@@ -961,6 +979,7 @@ function AIGenerateTab({
       camera_directives,
       presenter_mode: arc?.presenterMode ?? 'on_camera',
       multi_shot_scene: arc?.allowMultiShotPerScene === true,
+      cutaway_excluded_scenes: cutawayExcludedInRange,
       register_instruction: REGISTER_INSTRUCTION[register] ?? '',
       provider,
       model,
@@ -1956,6 +1975,7 @@ export default function AdminViralFrameWorkspacePage() {
     niche: 'real_estate',
     archetype: ARCHETYPE_CUSTOM_ID,
     register: 'auto',
+    cutawayExcluded: [],
   });
   const [scenes, setScenes] = useState<SceneAssign[]>(
     Array.from({ length: 4 }, () => ({ photoId: null, label: '' }))
@@ -2157,14 +2177,22 @@ export default function AdminViralFrameWorkspacePage() {
     }
   }, [isAIGenerateMode]);
 
-  // Ubah jumlah scene → resize manualDurations & scenes (pertahankan nilai lama)
+  // Ubah jumlah scene → resize manualDurations & scenes (pertahankan nilai lama).
+  // cutawayExcluded: bila sebelumnya persis default "hanya scene terakhir" (CTA),
+  // geser mengikuti scene terakhir yang baru; selain itu cukup buang nomor scene
+  // yang sudah tidak ada lagi (di atas n).
   const setSceneCount = useCallback((raw: number) => {
     const n = Math.max(2, Math.min(12, raw || 0));
-    setS1(prev => ({
-      ...prev,
-      sceneCount: n,
-      manualDurations: resize(prev.manualDurations, n, () => prev.uniformDuration || 6),
-    }));
+    setS1(prev => {
+      const wasDefaultCtaOnly = prev.cutawayExcluded.length === 1 && prev.cutawayExcluded[0] === prev.sceneCount;
+      const cutawayExcluded = wasDefaultCtaOnly ? [n] : prev.cutawayExcluded.filter(x => x <= n);
+      return {
+        ...prev,
+        sceneCount: n,
+        manualDurations: resize(prev.manualDurations, n, () => prev.uniformDuration || 6),
+        cutawayExcluded,
+      };
+    });
     setScenes(prev => resize(prev, n, () => ({ photoId: null, label: '' })));
   }, []);
 
@@ -2173,11 +2201,29 @@ export default function AdminViralFrameWorkspacePage() {
 
   // Pilih arketipe → prefill visualStyle/tone (Step 1) + expression & useCharacter (Step 3).
   // Nilai tetap bisa di-override manual setelahnya (memilih 'custom' tidak mereset).
+  // Arketipe hybrid (allowMultiShotPerScene): default scene terakhir (CTA) DIKECUALIKAN
+  // dari cutaway — jadi talking-head/selfie murni sebagai penutup. User bisa override
+  // per scene lewat toggle "Per-Scene: Cutaway B-Roll" di bawah picker arketipe.
   const applyArchetype = (id: string) => {
     const arc = findArchetype(id);
-    if (!arc) { setS1(prev => ({ ...prev, archetype: ARCHETYPE_CUSTOM_ID })); return; }
-    setS1(prev => ({ ...prev, archetype: id, visualStyle: arc.defaults.visualStyle, tone: arc.defaults.tone, register: arc.defaults.register ?? prev.register }));
+    if (!arc) { setS1(prev => ({ ...prev, archetype: ARCHETYPE_CUSTOM_ID, cutawayExcluded: [] })); return; }
+    setS1(prev => ({
+      ...prev,
+      archetype: id,
+      visualStyle: arc.defaults.visualStyle,
+      tone: arc.defaults.tone,
+      register: arc.defaults.register ?? prev.register,
+      cutawayExcluded: arc.allowMultiShotPerScene ? [prev.sceneCount] : [],
+    }));
     setS3(prev => ({ ...prev, useCharacter: arc.defaults.useCharacter, expression: arc.defaults.expression }));
+  };
+
+  // Toggle satu scene masuk/keluar dari daftar pengecualian cutaway.
+  const toggleCutawayExcluded = (sceneNum: number) => {
+    setS1(prev => {
+      const has = prev.cutawayExcluded.includes(sceneNum);
+      return { ...prev, cutawayExcluded: has ? prev.cutawayExcluded.filter(x => x !== sceneNum) : [...prev.cutawayExcluded, sceneNum].sort((a, b) => a - b) };
+    });
   };
 
   const togglePlatform = (value: string) => {
@@ -2616,6 +2662,36 @@ export default function AdminViralFrameWorkspacePage() {
             </div>
           </Field>
 
+          {/* Per-scene cutaway override — hanya muncul untuk arketipe hybrid
+              (agent_broll_hybrid/selfie_luxury_hybrid). Default: scene terakhir
+              (CTA) dikecualikan dari cutaway (talking-head/selfie murni sebagai
+              penutup); user bisa toggle scene mana pun secara manual. */}
+          {(() => {
+            const arc = findArchetype(s1.archetype);
+            if (!arc?.allowMultiShotPerScene) return null;
+            return (
+              <Field label="Per-Scene: Cutaway B-Roll" hint='Nonaktifkan cutaway di scene tertentu (mis. CTA/penutup) — scene itu jadi talking-head/selfie murni tanpa disela b-roll.'>
+                <div className="space-y-1.5">
+                  {Array.from({ length: s1.sceneCount }, (_, i) => i + 1).map(sceneNum => {
+                    const role = sceneRole(sceneNum - 1, s1.sceneCount);
+                    const excluded = s1.cutawayExcluded.includes(sceneNum);
+                    return (
+                      <div key={sceneNum} className="flex items-center justify-between px-3 py-2 border border-gray-100 rounded-xl">
+                        <span className="text-sm text-[#0F172A]">Scene {sceneNum} <span className="text-xs text-[#94A3B8]">({role})</span></span>
+                        <button type="button" onClick={() => toggleCutawayExcluded(sceneNum)}
+                          className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
+                            excluded ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-[#EFF6FF] border-[#1565C0]/30 text-[#1565C0]'
+                          }`}>
+                          {excluded ? 'Talking-Head Saja' : 'Cutaway Aktif'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Field>
+            );
+          })()}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* (a) Jumlah Scene */}
             <Field label="Jumlah Scene" hint="Antara 2–12 scene">
@@ -2966,6 +3042,7 @@ export default function AdminViralFrameWorkspacePage() {
               ctaType={s1.ctaType}
               archetype={s1.archetype}
               register={s1.register}
+              cutawayExcluded={s1.cutawayExcluded}
               sceneRoles={sceneRolesForAI}
               scenePhotos={scenePhotosForAI}
               selectedKarakter={selectedKarakterForAI}

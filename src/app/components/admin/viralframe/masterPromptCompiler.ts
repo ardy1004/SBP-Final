@@ -31,6 +31,9 @@ export interface CompilerS1 {
   visualStyle: string; tone: string; niche: string;
   archetype?: string; // id VideoArchetype (opsional; 'custom'/undefined = tanpa arketipe)
   register?: string;  // gaya bahasa dialog (auto/formal/santai/gaul/jawa_halus)
+  /** Nomor scene (1-based) dikecualikan dari cutaway arketipe hybrid — jadi
+   * talking-head/selfie murni. Hanya relevan bila archetype.allowMultiShotPerScene. */
+  cutawayExcluded?: number[];
 }
 export interface CompilerScene { photoId: number | null; label: string }
 export interface CompilerS3 {
@@ -143,6 +146,10 @@ export function compileMasterPrompt(
     L.push(`ARAHAN SUTRADARA  : ${archetype.shotGrammarNote}`);
     L.push('CATATAN: Arahan arketipe ini MENGIKAT seluruh scene. Gaya visual, tone, dan');
     L.push('koreografi kamera di bawah sudah diselaraskan dengan arketipe ini — jaga konsistensinya.');
+    const excluded = archetype.allowMultiShotPerScene ? (s1.cutawayExcluded ?? []).filter(n => n >= 1 && n <= s1.sceneCount) : [];
+    if (excluded.length > 0) {
+      L.push(`PENGECUALIAN CUTAWAY: Scene ${excluded.join(', ')} TIDAK memakai pola 2-bagian di atas — scene tersebut HANYA talking-head/selfie PENUH durasi TANPA cutaway b-roll (kamera stabil/steady, tanpa hard cut). Lihat detail per scene di KOREOGRAFI KAMERA PER SCENE di bawah.`);
+    }
     L.push('');
   }
 
@@ -214,12 +221,18 @@ export function compileMasterPrompt(
   // Koreografi kamera per scene (dari arketipe) — motion kompleks multi-beat
   // yang menyesuaikan durasi & peran scene. Hanya bila arketipe dipilih.
   if (archetype) {
+    const cutawayExcluded = archetype.allowMultiShotPerScene ? (s1.cutawayExcluded ?? []).filter(x => x >= 1 && x <= n) : [];
     L.push('KOREOGRAFI KAMERA PER SCENE (WAJIB dijadikan dasar field camera/motion di ai_ready_prompt):');
     for (let i = 0; i < n; i++) {
       const role = sceneRole(i, n);
       const d = durationOf(s1, i);
-      const choreo = compileCameraChoreography(archetype.cameraGrammar, role, d, i, s1.aiTool);
-      L.push(`  Scene ${i + 1} (${role}, ${d}s): ${choreo}`);
+      const sceneNum = i + 1;
+      if (cutawayExcluded.includes(sceneNum)) {
+        L.push(`  Scene ${sceneNum} (${role}, ${d}s): [PENGECUALIAN] Talking-head/selfie PENUH durasi TANPA cutaway b-roll — kamera stabil/steady mengikuti presenter sepanjang scene, JANGAN terapkan pola 2-bagian arketipe ini di scene ini.`);
+      } else {
+        const choreo = compileCameraChoreography(archetype.cameraGrammar, role, d, i, s1.aiTool);
+        L.push(`  Scene ${sceneNum} (${role}, ${d}s): ${choreo}`);
+      }
     }
     L.push('  Terjemahkan koreografi ini ke dalam ai_ready_prompt masing-masing scene sebagai gerakan kamera utama — jaga agar setiap beat terasa mulus dan termotivasi, bukan gerakan acak.');
     L.push('');

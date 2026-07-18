@@ -89,7 +89,7 @@ function isAutoValue(label) {
   return !label || label.trim().toLowerCase().startsWith('auto');
 }
 
-function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene }) {
+function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes }) {
   const registerLine = registerInstruction ? `\nGAYA BAHASA WAJIB: ${registerInstruction}\n` : '';
   // Mode voiceover/faceless: karakter = NARATOR yang terdengar tapi TIDAK tampil
   // di frame. Video prompt fokus pada visual properti POV/sinematik tanpa orang.
@@ -300,8 +300,11 @@ Field WAJIB ada dan non-empty: scene (integer), kamera (string), prompt (string 
 ATURAN TAMBAHAN FIELD 'prompt' — WAJIB, PELANGGARAN = OUTPUT DITOLAK:
   • 'prompt' WAJIB 100% bahasa Inggris di SEMUA scene TERMASUK scene terakhir/CTA — jangan terbawa bahasa dialog_karakter (hanya 'dialog_karakter' yang memakai bahasa dialog).
   ${multiShotScene
-    ? `• 'prompt' WAJIB mendeskripsikan TEPAT DUA shot berurutan dalam SATU scene ini (arketipe hybrid A-roll/B-roll — ikuti ARAHAN GAYA VIDEO di atas): Shot 1 = talking head presenter; HARD CUT (bukan gerakan kamera menerus, potongan visual tegas) ke Shot 2 = cutaway penuh area yang sama TANPA presenter, memakai koreografi kamera yang diberikan. Tulis KEDUA shot secara eksplisit dan berurutan di dalam SATU field 'prompt' (mis. 'Shot 1: [presenter talking head] ...; hard cut to; Shot 2: [full b-roll cutaway, no presenter] ...'). Pengecualian ini MENGGANTIKAN aturan "satu shot utuh" yang berlaku untuk arketipe lain.`
-    : `• 'prompt' WAJIB mendeskripsikan SATU shot utuh yang bisa berdiri sendiri dari foto referensi. Jika koreografi kamera menyebut transisi (whip-pan, whip cut, dsb), tulis sebagai gabungan, mis. 'fast whip-pan settling into a steady selfie-stick shot of ...' — DILARANG menulis hanya nama transisinya tanpa shot stabil yang bisa ditahan sepanjang durasi.`}`;
+    ? `• Untuk SEMUA scene${cutawayExcludedScenes?.length ? ` KECUALI Scene ${cutawayExcludedScenes.join(', ')} (lihat pengecualian di bawah)` : ''}: 'prompt' WAJIB mendeskripsikan TEPAT DUA shot berurutan dalam SATU scene ini (arketipe hybrid A-roll/B-roll — ikuti ARAHAN GAYA VIDEO di atas): Shot 1 = talking head presenter; HARD CUT (bukan gerakan kamera menerus, potongan visual tegas) ke Shot 2 = cutaway penuh area yang sama TANPA presenter, memakai koreografi kamera yang diberikan. Tulis KEDUA shot secara eksplisit dan berurutan di dalam SATU field 'prompt' (mis. 'Shot 1: [presenter talking head] ...; hard cut to; Shot 2: [full b-roll cutaway, no presenter] ...'). Pengecualian ini MENGGANTIKAN aturan "satu shot utuh" yang berlaku untuk arketipe lain.`
+    : `• 'prompt' WAJIB mendeskripsikan SATU shot utuh yang bisa berdiri sendiri dari foto referensi. Jika koreografi kamera menyebut transisi (whip-pan, whip cut, dsb), tulis sebagai gabungan, mis. 'fast whip-pan settling into a steady selfie-stick shot of ...' — DILARANG menulis hanya nama transisinya tanpa shot stabil yang bisa ditahan sepanjang durasi.`}
+  ${cutawayExcludedScenes?.length
+    ? `• PENGECUALIAN — KHUSUS Scene ${cutawayExcludedScenes.join(', ')}: 'prompt' WAJIB mendeskripsikan SATU shot talking-head/selfie utuh SAJA sepanjang durasi scene (kamera stabil/steady mengikuti presenter) — TIDAK ADA hard cut, TIDAK ADA cutaway b-roll di scene ini, meskipun arketipe hybrid berlaku di scene lain. Perlakukan scene ini seperti penutup/closing personal.`
+    : ''}`;
 }
 
 function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes }) {
@@ -502,6 +505,11 @@ export async function onRequestPost(context) {
   // Arketipe hybrid A-roll/B-roll (agent_broll_hybrid) butuh 2 shot dalam 1 scene —
   // merelaksasi aturan default "satu shot utuh" (lihat buildSystemPrompt).
   const multiShotScene = body.multi_shot_scene === true;
+  // Scene (1-based) dikecualikan dari cutaway hybrid — jadi talking-head/selfie
+  // murni (mis. scene CTA/penutup). Divalidasi terhadap rentang jumlahScene di bawah.
+  const cutawayExcludedScenes = Array.isArray(body.cutaway_excluded_scenes)
+    ? [...new Set(body.cutaway_excluded_scenes.map(n => parseInt(n, 10)).filter(n => Number.isInteger(n) && n >= 1 && n <= jumlahScene))].sort((a, b) => a - b).slice(0, 12)
+    : [];
   const registerInstruction = typeof body.register_instruction === 'string' ? body.register_instruction.slice(0, 400) : '';
   // Provider AI + model (default gemini). Fallback otomatis ke provider lain bila kuota habis.
   const PROVIDER_ORDER = ['gemini', 'groq', 'openrouter', 'deepseek'];
@@ -571,7 +579,7 @@ export async function onRequestPost(context) {
   const deskripsiKarakter = describeKarakter(karakter);
   const karakterDesc = describeKarakterUntukPrompt(karakter, expression);
 
-  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene });
+  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes });
   const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes });
 
   // ── Panggil AI dengan fallback berantai, respons streaming NDJSON ──────────
