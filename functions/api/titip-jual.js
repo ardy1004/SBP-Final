@@ -6,6 +6,7 @@ import { verifyTurnstile } from '../_lib/turnstile.js';
 import { normalizeWA, isValidWA } from '../_lib/waUtils.js';
 import { parseGmapsCoords } from '../_lib/parseGmapsCoords.js';
 import { nextKodeSeq, fmtSeq, isUniqueErr } from '../_lib/kodeSeq.js';
+import { logServerError } from '../_lib/logError.js';
 
 function sanitize(val, maxLen = 500) {
   if (typeof val !== 'string') return '';
@@ -205,6 +206,7 @@ export async function onRequestPost(context) {
   try { nik_encrypted = await encryptNIK(nik_raw, env.NIK_ENC_KEY); }
   catch (err) {
     console.error('[titip-jual] Enkripsi NIK gagal:', err.message);
+    context.waitUntil(logServerError(env, { message: `[titip-jual] Enkripsi NIK gagal: ${err.message}`, stack: err.stack, url: request.url }));
     return jsonError('Gagal memproses data. Silakan coba lagi.', 500);
   }
 
@@ -221,6 +223,7 @@ export async function onRequestPost(context) {
     slug = `${slugify(title)}-${suffix}`;
   } catch (err) {
     console.error('[titip-jual] Gagal generate kode:', err.message);
+    context.waitUntil(logServerError(env, { message: `[titip-jual] Gagal generate kode: ${err.message}`, stack: err.stack, url: request.url }));
     return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
   }
   let kode_listing   = `SBP-${date8}-${fmtSeq(propSeqN)}`;
@@ -329,6 +332,7 @@ export async function onRequestPost(context) {
     agreement_id = agrResult.meta?.last_row_id;
   } catch (err) {
     console.error('[titip-jual] INSERT error:', err.message);
+    context.waitUntil(logServerError(env, { message: `[titip-jual] INSERT error: ${err.message}`, stack: err.stack, url: request.url }));
     return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
   }
 

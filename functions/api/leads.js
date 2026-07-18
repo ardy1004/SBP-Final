@@ -3,6 +3,7 @@ import { buildPropertyUrl } from '../_lib/propertyUrl.js';
 import { sendCapiEvent } from '../_lib/metaCapi.js';
 import { verifyTurnstile } from '../_lib/turnstile.js';
 import { normalizeWA, isValidWA } from '../_lib/waUtils.js';
+import { logServerError } from '../_lib/logError.js';
 
 // ─── Sanitasi ─────────────────────────────────────────────────────────────────
 function sanitize(val, maxLen = 500) {
@@ -150,6 +151,7 @@ export async function onRequestPost(context) {
     leadId = result.meta?.last_row_id;
   } catch (err) {
     console.error('[leads] INSERT error:', err.message);
+    context.waitUntil(logServerError(env, { message: `[leads] INSERT error: ${err.message}`, stack: err.stack, url: request.url }));
     return jsonError('Gagal menyimpan lead. Silakan coba lagi.', 500);
   }
 

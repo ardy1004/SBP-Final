@@ -8,6 +8,7 @@
 import { jsonOk, jsonError, handleOptions } from '../_shared/response.js';
 import { decryptNIK } from '../../_lib/crypto.js';
 import { generateAgreementPDF } from '../../_lib/pdf.js';
+import { logServerError } from '../../_lib/logError.js';
 
 // ─── Ambil & validasi agreement dari token ────────────────────────────────────
 async function getAgreementByToken(db, token) {
@@ -295,6 +296,7 @@ export async function onRequestPost(context) {
     signature_image_url = r2Key;
   } catch (err) {
     console.error('[sign POST] Upload R2 gagal:', err.message);
+    context.waitUntil(logServerError(env, { message: `[sign POST] Upload R2 gagal: ${err.message}`, stack: err.stack, url: request.url, context: { kode_perjanjian: agr.kode_perjanjian } }));
     // Jika R2 gagal, JANGAN set token_used — tolak request
     return jsonError('Gagal menyimpan tanda tangan. Silakan coba lagi.', 500);
   }
@@ -343,6 +345,7 @@ export async function onRequestPost(context) {
     ).run();
   } catch (err) {
     console.error('[sign POST] UPDATE agreements gagal:', err.message);
+    context.waitUntil(logServerError(env, { message: `[sign POST] UPDATE agreements gagal: ${err.message}`, stack: err.stack, url: request.url, context: { kode_perjanjian: agr.kode_perjanjian } }));
     return jsonError('Gagal merekam tanda tangan. Silakan coba lagi.', 500);
   }
 

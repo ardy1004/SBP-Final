@@ -1,7 +1,28 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteLoaderData } from "react-router";
+import { useEffect } from "react";
+import {
+  Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteLoaderData,
+  useRouteError, isRouteErrorResponse,
+} from "react-router";
 import ChatWidget from "./components/ChatWidget";
 import type { LoaderFunctionArgs } from "react-router";
 import "../styles/index.css";
+
+// Best-effort — kegagalan kirim laporan error TIDAK BOLEH melempar error baru
+function reportClientError(message: string, stack?: string, context?: Record<string, unknown>) {
+  try {
+    fetch('/api/client-error', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: String(message).slice(0, 1000),
+        stack: stack ? String(stack).slice(0, 4000) : undefined,
+        url: typeof window !== 'undefined' ? window.location.href : undefined,
+        context,
+      }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch { /* ignore */ }
+}
 
 export interface TrackingConfig {
   pixels: Array<{ pixel_id: string; events_enabled: string[] }>;
@@ -143,5 +164,69 @@ export function meta() {
 }
 
 export default function Root() {
+  // Tangkap error yang TIDAK melewati render/loader (event handler, async di
+  // useEffect, promise lepas) — ErrorBoundary di bawah cuma menangkap error
+  // render/loader/action, bukan ini.
+  useEffect(() => {
+    const onError = (e: ErrorEvent) => {
+      reportClientError(e.message, e.error?.stack, { type: 'window.onerror', filename: e.filename, lineno: e.lineno });
+    };
+    const onRejection = (e: PromiseRejectionEvent) => {
+      const reason = e.reason;
+      const message = reason instanceof Error ? reason.message : String(reason);
+      const stack = reason instanceof Error ? reason.stack : undefined;
+      reportClientError(message, stack, { type: 'unhandledrejection' });
+    };
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
+    };
+  }, []);
+
   return <Outlet />;
+}
+
+// Menangkap error render/loader/action di seluruh route tree (React Router v7
+// framework mode) — pengganti layar putih kosong saat komponen crash.
+// Layout export di atas tetap membungkus ini (html/head/body tetap utuh).
+export function ErrorBoundary() {
+  const error = useRouteError();
+
+  const status = isRouteErrorResponse(error) ? error.status : 500;
+  const message = isRouteErrorResponse(error)
+    ? (error.data?.message ?? error.statusText ?? 'Terjadi kesalahan')
+    : error instanceof Error
+      ? error.message
+      : 'Terjadi kesalahan yang tidak diketahui';
+
+  useEffect(() => {
+    if (!isRouteErrorResponse(error)) {
+      const stack = error instanceof Error ? error.stack : undefined;
+      reportClientError(message, stack, { type: 'ErrorBoundary', status });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center px-4 text-center">
+      <h1 className="text-3xl font-bold text-[#0F172A] mb-2">
+        {status === 404 ? 'Halaman tidak ditemukan' : 'Terjadi kesalahan'}
+      </h1>
+      <p className="text-[#64748B] mb-6 max-w-md">
+        {status === 404
+          ? 'Halaman yang Anda cari tidak tersedia atau sudah dipindahkan.'
+          : 'Mohon maaf, terjadi kesalahan teknis. Tim kami telah menerima laporan otomatis.'}
+      </p>
+      <a href="/" className="px-5 py-2.5 rounded-xl bg-[#1565C0] text-white text-sm font-medium hover:bg-[#0F4C9C] transition-colors">
+        Kembali ke Beranda
+      </a>
+      {import.meta.env.DEV && (
+        <pre className="mt-6 p-4 bg-gray-100 text-xs text-left rounded-lg max-w-2xl overflow-x-auto text-red-600">
+          {message}
+        </pre>
+      )}
+    </div>
+  );
 }

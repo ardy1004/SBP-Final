@@ -40,6 +40,7 @@ export default [
     route("admin/media", "./components/admin/AdminPlaceholderPage.tsx", { id: "admin-media" }),
     route("admin/pengaturan", "./components/admin/AdminSettingsPage.tsx", { id: "admin-pengaturan" }),
     route("admin/lokasi", "./components/admin/AdminLokasiPage.tsx"),
+    route("admin/errors", "./components/admin/AdminErrorsPage.tsx", { id: "admin-errors" }),
   ]),
 
   route("*", "./components/NotFoundPage.tsx"),

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router';
 import {
   LayoutDashboard, List, Users, LogOut, Menu, X, Bell, Shield,
-  FileText, Star, BookOpen, Briefcase, Image, Settings, MapPin, Video,
+  FileText, Star, BookOpen, Briefcase, Image, Settings, MapPin, Video, AlertTriangle,
 } from 'lucide-react';
 
 interface AdminUser {
@@ -41,6 +41,7 @@ export default function AdminLayout() {
   const [admin, setAdmin] = useState<AdminUser | null>(null);
   const [checking, setChecking] = useState(true);
   const [leadsBadge, setLeadsBadge] = useState(0);
+  const [errorsBadge, setErrorsBadge] = useState(0);
   const [showNotif, setShowNotif] = useState(false);
   const [notifLeads, setNotifLeads] = useState<NotifLead[]>([]);
   const [notifLoading, setNotifLoading] = useState(false);
@@ -72,15 +73,23 @@ export default function AdminLayout() {
       });
   }, [navigate]);
 
+  const fetchErrorsBadge = useCallback(() => {
+    fetch('/api/admin/errors?resolved=0&limit=1', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { const total = d?.data?.total; if (total !== undefined) setErrorsBadge(total); })
+      .catch(() => {});
+  }, []);
+
   // Fetch badge saat mount + setiap 60 detik
   useEffect(() => {
     if (checking) return;
     fetchBadge();
-    const id = setInterval(fetchBadge, 60_000);
-    const onFocus = () => fetchBadge();
+    fetchErrorsBadge();
+    const id = setInterval(() => { fetchBadge(); fetchErrorsBadge(); }, 60_000);
+    const onFocus = () => { fetchBadge(); fetchErrorsBadge(); };
     window.addEventListener('focus', onFocus);
     return () => { clearInterval(id); window.removeEventListener('focus', onFocus); };
-  }, [checking, fetchBadge]);
+  }, [checking, fetchBadge, fetchErrorsBadge]);
 
   const logout = async () => {
     try {
@@ -126,6 +135,7 @@ export default function AdminLayout() {
     { to: '/admin/media', label: 'Media', icon: Image, end: false, badge: 0 },
     { to: '/admin/pengaturan', label: 'Pengaturan', icon: Settings, end: false, badge: 0 },
     { to: '/admin/lokasi', label: 'Lokasi', icon: MapPin, end: false, badge: 0 },
+    { to: '/admin/errors', label: 'Error Logs', icon: AlertTriangle, end: false, badge: errorsBadge },
   ];
 
   const initials = admin?.nama
