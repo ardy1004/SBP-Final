@@ -2,6 +2,7 @@
 // Auth: _middleware.js (otomatis)
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+import { collectPropertyR2Keys, deleteR2Keys } from '../../../_lib/r2Cleanup.js';
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -88,16 +89,10 @@ export async function onRequestPost(context) {
       return jsonOk({ success: true, affected: result.meta?.changes ?? numericIds.length });
     }
 
-    // action === 'delete'
-    const photos = await env.DB.prepare(
-      `SELECT url_webp FROM property_images WHERE property_id IN (${placeholders})`
-    ).bind(...numericIds).all();
-
-    for (const photo of (photos.results ?? [])) {
-      if (photo.url_webp) {
-        try { await env.MEDIA.delete(photo.url_webp); } catch { /* abaikan R2 error */ }
-      }
-    }
+    // action === 'delete' — bersihkan SEMUA objek R2 (foto, video ViralFrame,
+    // tanda tangan & PDF perjanjian) sebelum baris DB hilang via CASCADE.
+    const r2Keys = await collectPropertyR2Keys(env.DB, numericIds);
+    await deleteR2Keys(env.MEDIA, r2Keys);
 
     const result = await env.DB.prepare(
       `DELETE FROM properties WHERE id IN (${placeholders})`

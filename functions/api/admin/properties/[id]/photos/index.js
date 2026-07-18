@@ -34,13 +34,23 @@ export async function onRequestPost(context) {
     }
     let imgRes;
     try {
-      imgRes = await fetch(photoUrl);
+      imgRes = await fetch(photoUrl, { signal: AbortSignal.timeout(15000) });
       if (!imgRes.ok) throw new Error(`HTTP ${imgRes.status}`);
     } catch (err) {
       return jsonError(`Gagal fetch foto: ${err.message}`, 400);
     }
     contentType = imgRes.headers.get('content-type') ?? 'image/jpeg';
+    // Hanya terima gambar — tanpa cek ini, HTML/file arbitrer bisa tersimpan ke R2
+    if (!/^image\//i.test(contentType)) {
+      return jsonError(`URL bukan gambar (content-type: ${contentType})`, 400);
+    }
     uploadBuf = await imgRes.arrayBuffer();
+    if (uploadBuf.byteLength > 10 * 1024 * 1024) {
+      return jsonError('Foto dari URL melebihi 10MB', 413);
+    }
+    if (uploadBuf.byteLength === 0) {
+      return jsonError('Foto dari URL kosong', 400);
+    }
 
   // Mode 2: photo base64 (existing)
   } else {

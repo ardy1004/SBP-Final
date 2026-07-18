@@ -5,6 +5,7 @@ import { generateMetaSeo } from '../_lib/metaSeo.js';
 import { verifyTurnstile } from '../_lib/turnstile.js';
 import { normalizeWA, isValidWA } from '../_lib/waUtils.js';
 import { parseGmapsCoords } from '../_lib/parseGmapsCoords.js';
+import { nextKodeSeq, fmtSeq, isUniqueErr } from '../_lib/kodeSeq.js';
 
 function sanitize(val, maxLen = 500) {
   if (typeof val !== 'string') return '';
@@ -26,12 +27,6 @@ function today8() {
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
-async function nextSeq(db, table, kodeCol, prefix) {
-  const row = await db
-    .prepare(`SELECT COUNT(*) as cnt FROM ${table} WHERE ${kodeCol} LIKE ?`)
-    .bind(`${prefix}%`).first();
-  return String((row?.cnt ?? 0) + 1).padStart(3, '0');
-}
 
 function jenisTransaksi(tujuan) {
   return tujuan === 'disewa' ? 'sewa' : 'jual';
@@ -80,6 +75,7 @@ export async function onRequestPost(context) {
 
   if (!nik_raw) { errors.nik = 'NIK wajib diisi'; }
   else if (!/^\d{16}$/.test(nik_raw)) { errors.nik = 'NIK harus 16 digit angka'; }
+  if (!nama_pemilik) errors.nama_pemilik = 'Nama pemilik wajib diisi';
   if (!nama_ktp) errors.nama_ktp = 'Nama KTP wajib diisi';
   if (!alamat_ktp) errors.alamat_ktp = 'Alamat KTP wajib diisi';
   if (!kelurahan_owner) errors.kelurahan = 'Kelurahan wajib diisi';
@@ -121,12 +117,18 @@ export async function onRequestPost(context) {
   }
 
   // ─── Foto validation ──────────────────────────────────────────────────────
+  // Total dibatasi 40MB (decoded) — client sudah downscale ke 1920px WebP, jadi
+  // normalnya jauh di bawah ini. Tanpa batas total, 20 × 8MB = ~213MB base64
+  // melebihi limit body request Cloudflare dan request ditolak di edge tanpa
+  // pesan yang ramah.
+  const MAX_TOTAL_PHOTO_BYTES = 40 * 1024 * 1024;
   const photos_raw = Array.isArray(body.photos) ? body.photos : [];
   if (photos_raw.length === 0) {
     errors.photos = 'Minimal 1 foto properti wajib diupload';
   } else if (photos_raw.length > 20) {
     errors.photos = `Terlalu banyak foto (maks 20)`;
   } else {
+    let totalEst = 0;
     for (let i = 0; i < photos_raw.length; i++) {
       const p = photos_raw[i];
       if (typeof p !== 'string') { errors.photos = `Foto #${i + 1}: format tidak valid`; break; }
@@ -135,6 +137,11 @@ export async function onRequestPost(context) {
       }
       const sizeEst = Math.ceil(p.slice(p.indexOf(',') + 1).length * 3 / 4);
       if (sizeEst > 8 * 1024 * 1024) { errors.photos = `Foto #${i + 1}: ukuran melebihi 8MB`; break; }
+      totalEst += sizeEst;
+      if (totalEst > MAX_TOTAL_PHOTO_BYTES) {
+        errors.photos = 'Total ukuran seluruh foto melebihi 40MB — kecilkan resolusi atau kurangi jumlah foto';
+        break;
+      }
     }
   }
 
@@ -203,22 +210,21 @@ export async function onRequestPost(context) {
 
   // ─── Generate kode ────────────────────────────────────────────────────────
   const date8 = today8();
-  let kode_listing, slug, kode_perjanjian;
+  let propSeqN, agrSeqN, slug;
   try {
-    const propSeq = await nextSeq(env.DB, 'properties', 'kode_listing', `SBP-${date8}-`);
-    kode_listing = `SBP-${date8}-${propSeq}`;
+    propSeqN = await nextKodeSeq(env.DB, 'properties', 'kode_listing', `SBP-${date8}-`);
+    agrSeqN  = await nextKodeSeq(env.DB, 'agreements', 'kode_perjanjian', `SBP-AGR-${date8}-`);
 
     const title = title_raw || `${jenis_properti.charAt(0).toUpperCase() + jenis_properti.slice(1)} ${kecamatan_prop || kelurahan_owner}`;
     const suffix = Array.from(crypto.getRandomValues(new Uint8Array(3)))
       .map(b => b.toString(16).padStart(2, '0')).join('');
     slug = `${slugify(title)}-${suffix}`;
-
-    const agrSeq = await nextSeq(env.DB, 'agreements', 'kode_perjanjian', `SBP-AGR-${date8}-`);
-    kode_perjanjian = `SBP-AGR-${date8}-${agrSeq}`;
   } catch (err) {
     console.error('[titip-jual] Gagal generate kode:', err.message);
     return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
   }
+  let kode_listing   = `SBP-${date8}-${fmtSeq(propSeqN)}`;
+  let kode_perjanjian = `SBP-AGR-${date8}-${fmtSeq(agrSeqN)}`;
 
   const titleFinal = title_raw || `${jenis_properti.charAt(0).toUpperCase() + jenis_properti.slice(1)} ${kecamatan_prop || kelurahan_owner}`;
 
@@ -233,7 +239,8 @@ export async function onRequestPost(context) {
   // ─── K6: INSERT ke DB ─────────────────────────────────────────────────────
   let property_id, owner_id, agreement_id;
   try {
-    const propResult = await env.DB.prepare(`
+    // Retry saat tabrakan UNIQUE kode_listing (dua submit paralel dapat sequence sama)
+    const insertProperty = () => env.DB.prepare(`
       INSERT INTO properties
         (kode_listing, title, slug, jenis_properti, tujuan, harga, harga_sewa_tahun,
          nego, nett,
@@ -273,6 +280,17 @@ export async function onRequestPost(context) {
       details, furnished,
       meta.meta_title, meta.meta_description
     ).run();
+
+    let propResult;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        propResult = await insertProperty();
+        break;
+      } catch (err) {
+        if (!isUniqueErr(err) || attempt >= 3) throw err;
+        kode_listing = `SBP-${date8}-${fmtSeq(propSeqN + attempt + 1)}`;
+      }
+    }
     property_id = propResult.meta?.last_row_id;
 
     const ownerResult = await env.DB.prepare(`
@@ -290,13 +308,24 @@ export async function onRequestPost(context) {
     ).run();
     owner_id = ownerResult.meta?.last_row_id;
 
-    const agrResult = await env.DB.prepare(`
+    const insertAgreement = () => env.DB.prepare(`
       INSERT INTO agreements
         (kode_perjanjian, property_id, owner_id,
          jenis_transaksi, jenis_listing, fee_persen,
          status, created_at, updated_at)
       VALUES (?,?,?,  ?,'open',3.0,  'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     `).bind(kode_perjanjian, property_id, owner_id, jenisTransaksi(tujuan)).run();
+
+    let agrResult;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        agrResult = await insertAgreement();
+        break;
+      } catch (err) {
+        if (!isUniqueErr(err) || attempt >= 3) throw err;
+        kode_perjanjian = `SBP-AGR-${date8}-${fmtSeq(agrSeqN + attempt + 1)}`;
+      }
+    }
     agreement_id = agrResult.meta?.last_row_id;
   } catch (err) {
     console.error('[titip-jual] INSERT error:', err.message);
@@ -304,27 +333,32 @@ export async function onRequestPost(context) {
   }
 
   // ─── Upload foto ke R2 + insert property_images ───────────────────────────
+  // Paralel per batch 5 — upload sekuensial 20 foto berisiko mendekati
+  // wall-clock 30 detik Workers.
   let photos_uploaded = 0;
-  for (let i = 0; i < photos_raw.length; i++) {
-    try {
-      const p = photos_raw[i];
-      const match = p.match(/^data:image\/(jpeg|jpg|png|webp);base64,/i);
-      const ext = match[1].toLowerCase() === 'jpg' ? 'jpeg' : match[1].toLowerCase();
-      const base64Data = p.slice(p.indexOf(',') + 1);
-      const binaryStr = atob(base64Data);
-      const rawBytes = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
-      const bytes = stripExif(rawBytes);
-      // WebP conversion dilakukan client-side di admin upload (G3b); titip-jual publik tetap JPEG-only
-      const r2Key = `property-photos/${crypto.randomUUID()}.${ext}`;
-      await env.MEDIA.put(r2Key, bytes.buffer, { httpMetadata: { contentType: `image/${ext}` } });
-      await env.DB.prepare(`
-        INSERT INTO property_images (property_id, url_webp, alt_text, urutan, is_cover)
-        VALUES (?,?,?,?,?)
-      `).bind(property_id, r2Key, titleFinal, i, i === 0 ? 1 : 0).run();
-      photos_uploaded++;
-    } catch (err) {
-      console.error(`[titip-jual] Upload foto #${i + 1} gagal:`, err.message);
-    }
+  const uploadOne = async (p, i) => {
+    const match = p.match(/^data:image\/(jpeg|jpg|png|webp);base64,/i);
+    const ext = match[1].toLowerCase() === 'jpg' ? 'jpeg' : match[1].toLowerCase();
+    const base64Data = p.slice(p.indexOf(',') + 1);
+    const binaryStr = atob(base64Data);
+    const rawBytes = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
+    const bytes = stripExif(rawBytes);
+    // WebP conversion dilakukan client-side (downscale 1920px); JPEG/PNG tetap diterima
+    const r2Key = `property-photos/${crypto.randomUUID()}.${ext}`;
+    await env.MEDIA.put(r2Key, bytes.buffer, { httpMetadata: { contentType: `image/${ext}` } });
+    await env.DB.prepare(`
+      INSERT INTO property_images (property_id, url_webp, alt_text, urutan, is_cover)
+      VALUES (?,?,?,?,?)
+    `).bind(property_id, r2Key, titleFinal, i, i === 0 ? 1 : 0).run();
+  };
+  for (let start = 0; start < photos_raw.length; start += 5) {
+    const batch = photos_raw.slice(start, start + 5)
+      .map((p, j) => uploadOne(p, start + j));
+    const results = await Promise.allSettled(batch);
+    results.forEach((r, j) => {
+      if (r.status === 'fulfilled') photos_uploaded++;
+      else console.error(`[titip-jual] Upload foto #${start + j + 1} gagal:`, r.reason?.message);
+    });
   }
 
   const photos_failed = photos_raw.length - photos_uploaded;

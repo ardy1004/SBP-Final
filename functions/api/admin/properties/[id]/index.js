@@ -5,6 +5,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { parseGmapsCoords } from '../../../../_lib/parseGmapsCoords.js';
 import { normalizeWA, isValidWA } from '../../../../_lib/waUtils.js';
+import { collectPropertyR2Keys, deleteR2Keys } from '../../../../_lib/r2Cleanup.js';
 
 const VALID_JENIS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
 const VALID_TUJUAN = ['dijual','disewa','dijual_disewa'];
@@ -316,15 +317,10 @@ export async function onRequestDelete(context) {
     const exists = await env.DB.prepare('SELECT id FROM properties WHERE id = ?').bind(id).first();
     if (!exists) return jsonError('Properti tidak ditemukan', 404);
 
-    const photos = await env.DB.prepare(
-      'SELECT url_webp FROM property_images WHERE property_id = ?'
-    ).bind(id).all();
-
-    for (const photo of (photos.results ?? [])) {
-      if (photo.url_webp) {
-        try { await env.MEDIA.delete(photo.url_webp); } catch { /* abaikan R2 error */ }
-      }
-    }
+    // Kumpulkan SEMUA objek R2 milik properti (foto, video ViralFrame, tanda
+    // tangan & PDF perjanjian) SEBELUM baris DB hilang via CASCADE.
+    const r2Keys = await collectPropertyR2Keys(env.DB, [id]);
+    await deleteR2Keys(env.MEDIA, r2Keys);
 
     await env.DB.prepare('DELETE FROM properties WHERE id = ?').bind(id).run();
     return jsonOk({ success: true });

@@ -54,12 +54,17 @@ function convertToWebP(file: File): Promise<string> {
     const url = URL.createObjectURL(file);
     img.onload = () => {
       URL.revokeObjectURL(url);
+      // Downscale ke maks 1920px sisi terpanjang — foto kamera modern (20MP+)
+      // tanpa downscale membuat total payload base64 bisa melebihi limit body
+      // request Cloudflare dan memperlambat upload di Worker.
+      const MAX_DIM = 1920;
+      const scale = Math.min(1, MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
       const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
       const ctx = canvas.getContext('2d');
       if (!ctx) { reject(new Error('Canvas tidak tersedia')); return; }
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       canvas.toBlob(blob => {
         if (!blob) { reject(new Error('Konversi WebP gagal')); return; }
         const reader = new FileReader();

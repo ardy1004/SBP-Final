@@ -5,6 +5,7 @@
 import { jsonOk, jsonCreated, jsonError, handleOptions } from '../../_shared/response.js';
 import { generateMetaSeo } from '../../../_lib/metaSeo.js';
 import { parseGmapsCoords } from '../../../_lib/parseGmapsCoords.js';
+import { nextKodeSeq, fmtSeq, isUniqueErr } from '../../../_lib/kodeSeq.js';
 
 const VALID_STATUSES = new Set(['draft', 'published', 'sold', 'archived']);
 const VALID_JENIS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
@@ -29,10 +30,6 @@ function today8() {
   return `${d.getUTCFullYear()}${String(d.getUTCMonth()+1).padStart(2,'0')}${String(d.getUTCDate()).padStart(2,'0')}`;
 }
 
-async function nextPropSeq(db, prefix) {
-  const row = await db.prepare('SELECT COUNT(*) as cnt FROM properties WHERE kode_listing LIKE ?').bind(`${prefix}%`).first();
-  return String((row?.cnt ?? 0) + 1).padStart(3, '0');
-}
 
 export async function onRequestGet(context) {
   const { request, env } = context;
@@ -125,10 +122,10 @@ export async function onRequestPost(context) {
   const date8  = today8();
   const prefix = `SBP-${date8}-`;
 
-  let kode_listing, slug;
+  let seqN, kode_listing, slug;
   try {
-    const seq    = await nextPropSeq(env.DB, prefix);
-    kode_listing = `${prefix}${seq}`;
+    seqN         = await nextKodeSeq(env.DB, 'properties', 'kode_listing', prefix);
+    kode_listing = `${prefix}${fmtSeq(seqN)}`;
     const rand   = Array.from(crypto.getRandomValues(new Uint8Array(3)))
       .map(b => b.toString(16).padStart(2, '0')).join('');
     const base   = slugify(title);
@@ -155,7 +152,7 @@ export async function onRequestPost(context) {
     : { meta_title: sanitize(body.meta_title, 60), meta_description: sanitize(body.meta_description ?? '', 155) };
 
   try {
-    const result = await env.DB.prepare(`
+    const insertProperty = () => env.DB.prepare(`
       INSERT INTO properties
         (kode_listing, title, slug, jenis_properti, tujuan, harga,
          provinsi, kabupaten, kecamatan, kelurahan, alamat,
@@ -166,6 +163,18 @@ export async function onRequestPost(context) {
     `).bind(kode_listing, title, slug, jenis, tujuan, harga,
             provinsi, kabupaten, kecamatan, '', '', gmaps_link, geo_lat, geo_lng,
             detailsVal, meta.meta_title, meta.meta_description).run();
+
+    // Retry saat tabrakan UNIQUE kode_listing (request paralel dapat sequence sama)
+    let result;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        result = await insertProperty();
+        break;
+      } catch (err) {
+        if (!isUniqueErr(err) || attempt >= 3) throw err;
+        kode_listing = `${prefix}${fmtSeq(seqN + attempt + 1)}`;
+      }
+    }
 
     const newId = result.meta?.last_row_id;
     return jsonCreated({ id: newId, kode_listing, slug });

@@ -85,6 +85,15 @@ export async function onRequestPost(context) {
     );
   }
 
+  // Housekeeping: buang attempt yang sudah jauh di luar window (>24 jam) —
+  // tanpa ini tabel tumbuh tanpa batas karena hanya clearAttempts(email) saat
+  // login sukses yang pernah menghapus baris.
+  context.waitUntil(
+    env.DB.prepare(`DELETE FROM login_rate_limits WHERE attempted_at < ?`)
+      .bind(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .run().catch(() => {})
+  );
+
   // ── Cari admin by email ───────────────────────────────────────────────────────
   const admin = await env.DB
     .prepare(`SELECT id, email, password_hash, nama, role FROM admins WHERE email = ? LIMIT 1`)

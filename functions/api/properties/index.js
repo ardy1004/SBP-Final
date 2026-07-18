@@ -85,8 +85,9 @@ export async function onRequestGet(context) {
   // Pencarian teks bebas (Level 1) — judul / deskripsi / alamat / kode listing.
   const textQ = (q.get('q') ?? '').trim().slice(0, 100);
   if (textQ) {
-    conditions.push('(LOWER(p.title) LIKE ? OR LOWER(p.deskripsi) LIKE ? OR LOWER(p.alamat) LIKE ? OR LOWER(p.kode_listing) LIKE ?)');
-    const like = `%${textQ.toLowerCase()}%`;
+    conditions.push("(LOWER(p.title) LIKE ? ESCAPE '\\' OR LOWER(p.deskripsi) LIKE ? ESCAPE '\\' OR LOWER(p.alamat) LIKE ? ESCAPE '\\' OR LOWER(p.kode_listing) LIKE ? ESCAPE '\\')");
+    // Escape wildcard LIKE (% _ \) agar input user diperlakukan literal
+    const like = `%${textQ.toLowerCase().replace(/[\\%_]/g, m => '\\' + m)}%`;
     bindings.push(like, like, like, like);
   }
 

@@ -2,6 +2,7 @@ import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { buildPropertyUrl } from '../_lib/propertyUrl.js';
 import { sendCapiEvent } from '../_lib/metaCapi.js';
 import { verifyTurnstile } from '../_lib/turnstile.js';
+import { normalizeWA, isValidWA } from '../_lib/waUtils.js';
 
 // ─── Sanitasi ─────────────────────────────────────────────────────────────────
 function sanitize(val, maxLen = 500) {
@@ -11,19 +12,6 @@ function sanitize(val, maxLen = 500) {
     .replace(/[<>"'`]/g, '')
     .trim()
     .slice(0, maxLen);
-}
-
-// ─── Validasi & normalisasi nomor WA Indonesia ───────────────────────────────
-function normalizeWA(raw) {
-  const d = String(raw).replace(/\D/g, '');
-  if (d.startsWith('62')) return d;
-  if (d.startsWith('0'))  return '62' + d.slice(1);
-  if (d.startsWith('8'))  return '62' + d;
-  return d;
-}
-
-function isValidWA(raw) {
-  return /^628[0-9]{8,12}$/.test(normalizeWA(raw));
 }
 
 // ─── Builder pesan WA ────────────────────────────────────────────────────────

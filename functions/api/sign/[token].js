@@ -278,6 +278,13 @@ export async function onRequestPost(context) {
     return jsonError('Ukuran tanda tangan terlalu besar (maks 2MB)', 413);
   }
 
+  // Validasi magic bytes PNG (\x89PNG\r\n\x1a\n) — jangan simpan payload
+  // sembarang yang cuma berlabel data:image/png
+  const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (sigBytes.length < 8 || !PNG_MAGIC.every((b, i) => sigBytes[i] === b)) {
+    return jsonError('Data tanda tangan bukan file PNG yang valid', 422);
+  }
+
   // ─── [1] Upload signature ke R2 ───────────────────────────────────────────
   const r2Key = `signatures/${agr.kode_perjanjian}-${crypto.randomUUID()}.png`;
   let signature_image_url;
@@ -313,8 +320,9 @@ export async function onRequestPost(context) {
   const audit_user_agent = (request.headers.get('User-Agent') ?? '').slice(0, 500);
 
   // ─── [5] Atomic update: set token_used=1, status=signed, audit ───────────
+  let updateResult;
   try {
-    await env.DB.prepare(`
+    updateResult = await env.DB.prepare(`
       UPDATE agreements
       SET token_used          = 1,
           status              = 'signed',
@@ -336,6 +344,15 @@ export async function onRequestPost(context) {
   } catch (err) {
     console.error('[sign POST] UPDATE agreements gagal:', err.message);
     return jsonError('Gagal merekam tanda tangan. Silakan coba lagi.', 500);
+  }
+
+  // Guard double-submit: dua request paralel sama-sama lolos validasi token di atas,
+  // tapi hanya satu yang mengubah baris (WHERE token_used = 0). Yang kalah TIDAK
+  // boleh lanjut ke auto-publish/PDF — itu akan menimpa pdf_url tanda tangan sah
+  // dan mengembalikan respons "signed" palsu.
+  if ((updateResult?.meta?.changes ?? 0) === 0) {
+    await env.MEDIA.delete(signature_image_url).catch(() => {});
+    return jsonError('Link tanda tangan sudah digunakan sebelumnya', 409);
   }
 
   // ─── [6] Auto-publish properti ────────────────────────────────────────────

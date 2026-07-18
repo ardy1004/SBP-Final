@@ -2,6 +2,7 @@
 // Auth: _middleware.js (otomatis)
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+import { nextKodeSeq, fmtSeq, isUniqueErr } from '../../../_lib/kodeSeq.js';
 
 const VALID_JENIS  = new Set(['apartment','rumah','tanah','kost','hotel','homestay','villa','ruko','gudang','komersial']);
 const VALID_TUJUAN = new Set(['dijual','disewa','dijual_disewa']);
@@ -23,11 +24,6 @@ function slugify(text) {
 function today8() {
   const d = new Date();
   return `${d.getUTCFullYear()}${String(d.getUTCMonth()+1).padStart(2,'0')}${String(d.getUTCDate()).padStart(2,'0')}`;
-}
-
-async function nextPropSeq(db, prefix) {
-  const row = await db.prepare('SELECT COUNT(*) as cnt FROM properties WHERE kode_listing LIKE ?').bind(`${prefix}%`).first();
-  return String((row?.cnt ?? 0) + 1).padStart(3, '0');
 }
 
 function randHex3() {
@@ -62,6 +58,16 @@ export async function onRequestPost(context) {
   let inserted = 0;
   const errors = [];
   const inserted_rows = [];
+
+  // Sequence dihitung SEKALI lalu di-increment lokal per baris sukses —
+  // query COUNT per baris rawan duplikat (COUNT turun saat ada baris terhapus).
+  let seqN;
+  try {
+    seqN = await nextKodeSeq(db, 'properties', 'kode_listing', prefix);
+  } catch (err) {
+    console.error('[batch] gagal ambil sequence:', err.message);
+    return jsonError('Gagal generate kode listing', 500);
+  }
 
   for (let i = 0; i < rows.length; i++) {
     const rowNum = i + 1;
@@ -110,21 +116,14 @@ export async function onRequestPost(context) {
     const status_sold    = r.status_sold    == 1 || r.status_sold    === '1' ? 1 : 0;
 
     // Generate kode_listing + slug (pola identik index.js)
-    let kode_listing, slug;
-    try {
-      const seq = await nextPropSeq(db, prefix);
-      kode_listing = `${prefix}${seq}`;
-      const base = slugify(title);
-      slug = base ? `${base}-${randHex3()}` : `properti-${randHex3()}`;
-    } catch (err) {
-      errors.push({ row: rowNum, field: 'internal', message: 'Gagal generate kode listing: ' + err.message });
-      continue;
-    }
+    let kode_listing = `${prefix}${fmtSeq(seqN)}`;
+    const base = slugify(title);
+    const slug = base ? `${base}-${randHex3()}` : `properti-${randHex3()}`;
 
     // INSERT — partial insert intentional, tidak pakai transaction
     let property_id = null;
     try {
-      const result = await db.prepare(`
+      const insertRow = () => db.prepare(`
         INSERT INTO properties
           (kode_listing, title, slug, jenis_properti, tujuan, harga,
            provinsi, kabupaten, kecamatan, kelurahan, alamat,
@@ -140,6 +139,21 @@ export async function onRequestPost(context) {
         legalitas || null, deskripsi || null, nego, nett,
         badge_premium, badge_featured, badge_hot, status_sold,
       ).run();
+
+      // Retry saat tabrakan UNIQUE kode_listing (import paralel / race antar sesi)
+      let result;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          result = await insertRow();
+          break;
+        } catch (err) {
+          if (!isUniqueErr(err) || !/kode_listing/i.test(err.message ?? '') || attempt >= 3) throw err;
+          seqN++;
+          kode_listing = `${prefix}${fmtSeq(seqN)}`;
+        }
+      }
+      seqN++; // baris berikutnya pakai sequence selanjutnya
+
       property_id = result.meta?.last_row_id ?? null;
       inserted++;
       inserted_rows.push({
