@@ -308,6 +308,31 @@ export const ARCHETYPES: VideoArchetype[] = [
     shotGrammarNote: 'SETIAP scene WAJIB dibagi 2 bagian VISUAL berurutan dengan durasi kurang-lebih sama: BAGIAN 1 = A-ROLL/TALKING HEAD — agen tampil menghadap kamera dengan framing static/steady, latar belakang sesuai area foto referensi scene ini (bagian ini SELALU tampil lebih dulu, tidak pernah dibalik). BAGIAN 2 = B-ROLL CUTAWAY — potongan VISUAL (hard cut, BUKAN gerakan kamera menerus dari bagian 1) ke rekaman PENUH area yang sama TANPA agen tampil DI FRAME, dengan gerakan kamera sinematik/estetik sesuai KOREOGRAFI KAMERA PER SCENE di bawah (koreografi itu KHUSUS untuk Bagian 2 — Bagian 1 tidak perlu gerakan kamera, cukup frame diam). PENTING — AUDIO TIDAK IKUT TERPOTONG: narasi/suara agen (script_narration/dialog_karakter) mengalir TERUS-MENERUS tanpa jeda melintasi kedua bagian visual tersebut (agen tetap TERDENGAR bicara selama cutaway berlangsung, seperti VO yang menjembatani potongan gambar) — HANYA gambarnya yang cut ke b-roll, suaranya TIDAK berhenti. Word count narasi TETAP mengikuti budget durasi PENUH scene ini (jangan dipotong setengah). Pola talking-head→cutaway-VISUAL INI WAJIB berulang di SETIAP scene tanpa kecuali, bukan cuma sebagian. Tuliskan pembagian dua bagian VISUAL ini secara eksplisit di dalam teks prompt video tiap scene (mis. "first half: ...; hard cut to (visual only, audio continues); second half: ..."), sementara narasi/dialog tetap satu kesatuan utuh untuk keseluruhan durasi scene.',
   },
   {
+    id: 'selfie_luxury_hybrid',
+    label: 'Vlog Tongsis Mewah (Selfie + Cutaway Elegan)',
+    emoji: '💎',
+    ringkas: 'Agen selfie tongsis/gimbal, disela cutaway b-roll properti dengan gerakan kamera elegan/mewah.',
+    presenterMode: 'on_camera',
+    narrationPOV: 'vlogger_handheld',
+    defaults: { visualStyle: 'luxury_premium', tone: 'luxurious_exclusive', expression: 'confident_auth', useCharacter: true, register: 'santai' },
+    // Sama seperti agent_broll_hybrid: seluruh beat di sini HANYA untuk bagian
+    // B-ROLL CUTAWAY (bagian kedua tiap scene) — bagian selfie/tongsis (bagian
+    // pertama) tidak direpresentasikan di sini agar rotasi compileCameraChoreography
+    // tidak pernah membalik urutan tekstual yang mengikat (lihat catatan panjang
+    // di agent_broll_hybrid). Beda dari agent_broll_hybrid: gerakan di sini SENGAJA
+    // lambat & megah (crane/orbit/slow push), bukan whip-pan energik ala vlog biasa —
+    // mencerminkan kesan mewah/mahal yang diminta, bukan energi UGC/vlog kasual.
+    cameraGrammar: [
+      { move: 'crane_up',      speed: 'slow',   ease: 'ease-out',    motivation: 'B-ROLL CUTAWAY: grand elegant reveal of the scene area, no presenter' },
+      { move: 'slow_push',     speed: 'slow',   ease: 'ease-in-out', motivation: 'B-ROLL CUTAWAY: luxurious lingering push-in on the scene area, no presenter' },
+      { move: 'orbit',         speed: 'slow',   ease: 'ease-in-out', motivation: 'B-ROLL CUTAWAY: hero-shot orbit around the scene area, no presenter' },
+      { move: 'pull_back',     speed: 'slow',   ease: 'ease-out',    motivation: 'B-ROLL CUTAWAY: majestic pull-back reveal of the scene area, no presenter' },
+    ],
+    pacing: 'relaxed',
+    allowMultiShotPerScene: true,
+    shotGrammarNote: 'SETIAP scene WAJIB dibagi 2 bagian VISUAL berurutan dengan durasi kurang-lebih sama: BAGIAN 1 = SELFIE/TONGSIS — agen memegang tongsis/gimbal (arm-extended selfie framing), menghadap lensa langsung sambil bicara dengan energi vlog yang hangat dan personal, latar belakang sesuai area foto referensi scene ini (bagian ini SELALU tampil lebih dulu, tidak pernah dibalik). BAGIAN 2 = B-ROLL CUTAWAY MEWAH — potongan VISUAL (hard cut, BUKAN gerakan kamera menerus dari bagian 1) ke rekaman PENUH area yang sama TANPA agen tampil DI FRAME, dengan gerakan kamera LAMBAT, ELEGAN, dan MEGAH (crane/orbit/slow push — BUKAN whip-pan atau gerakan cepat ala vlog) sesuai KOREOGRAFI KAMERA PER SCENE di bawah — kesan yang diinginkan adalah properti terlihat mewah/eksklusif/mahal, seperti cuplikan iklan properti high-end, kontras dengan energi santai di Bagian 1. PENTING — AUDIO TIDAK IKUT TERPOTONG: narasi/suara agen (script_narration/dialog_karakter) mengalir TERUS-MENERUS tanpa jeda melintasi kedua bagian visual tersebut (agen tetap TERDENGAR bicara selama cutaway berlangsung) — HANYA gambarnya yang cut ke b-roll, suaranya TIDAK berhenti. Word count narasi TETAP mengikuti budget durasi PENUH scene ini. Pola selfie→cutaway-mewah INI WAJIB berulang di SETIAP scene tanpa kecuali. Tuliskan pembagian dua bagian VISUAL ini secara eksplisit di dalam teks prompt video tiap scene (mis. "first half: selfie-stick handheld shot ...; hard cut to; second half: slow elegant crane/orbit b-roll ..."), sementara narasi/dialog tetap satu kesatuan utuh untuk keseluruhan durasi scene.',
+  },
+  {
     id: 'kinetic_typography',
     label: 'Kinetic Typography (Teks Dinamis)',
     emoji: '🔤',
