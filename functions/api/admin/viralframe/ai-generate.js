@@ -502,8 +502,8 @@ export async function onRequestPost(context) {
   const archetypeNote = typeof body.archetype_note === 'string' ? body.archetype_note.slice(0, 2000) : '';
   const PRESENTER_VALID = ['on_camera', 'voiceover_only', 'faceless_broll'];
   const presenterMode = PRESENTER_VALID.includes(body.presenter_mode) ? body.presenter_mode : 'on_camera';
-  // Arketipe hybrid A-roll/B-roll (agent_broll_hybrid) butuh 2 shot dalam 1 scene —
-  // merelaksasi aturan default "satu shot utuh" (lihat buildSystemPrompt).
+  // Arketipe hybrid A-roll/B-roll (agent_broll_hybrid, selfie_luxury_hybrid) butuh
+  // 2 shot dalam 1 scene — merelaksasi aturan default "satu shot utuh" (buildSystemPrompt).
   const multiShotScene = body.multi_shot_scene === true;
   // Scene (1-based) dikecualikan dari cutaway hybrid — jadi talking-head/selfie
   // murni (mis. scene CTA/penutup). Divalidasi terhadap rentang jumlahScene di bawah.

@@ -2087,6 +2087,7 @@ export default function AdminViralFrameWorkspacePage() {
       hookType: s1.hookType, ctaType: s1.ctaType, ctaKeyword: s1.ctaKeyword, platforms: s1.platforms,
       aiTool: s1.aiTool, ratio: s1.ratio, language: s1.language, sceneCount: s1.sceneCount,
       durationMode: s1.durationMode, uniformDuration: s1.uniformDuration,
+      cutawayExcluded: s1.cutawayExcluded,
     };
     try { await fetch('/api/admin/viralframe/presets', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), params }) }); } catch { /* noop */ }
     loadPresets();
@@ -2311,7 +2312,11 @@ export default function AdminViralFrameWorkspacePage() {
     const arcB = findArchetype(abVariant);
     if (!arcB) return '';
     const { s1: ds1, scenes: dscenes, s3: ds3 } = debouncedSrc;
-    const s1B: Step1State = { ...ds1, archetype: abVariant, visualStyle: arcB.defaults.visualStyle, tone: arcB.defaults.tone };
+    // cutawayExcluded ikut aturan applyArchetype: B hybrid mewarisi pilihan A bila
+    // A juga hybrid; kalau tidak, pakai default hybrid (scene terakhir dikecualikan).
+    const aIsHybrid = findArchetype(ds1.archetype)?.allowMultiShotPerScene === true;
+    const cutawayB = arcB.allowMultiShotPerScene ? (aIsHybrid ? ds1.cutawayExcluded : [ds1.sceneCount]) : [];
+    const s1B: Step1State = { ...ds1, archetype: abVariant, visualStyle: arcB.defaults.visualStyle, tone: arcB.defaults.tone, cutawayExcluded: cutawayB };
     const s3B: Step3State = { ...ds3, useCharacter: arcB.defaults.useCharacter, expression: arcB.defaults.expression };
     return compileMasterPrompt(prop, s1B, dscenes, s3B);
   }, [prop, abVariant, onStep4, debouncedSrc]);
