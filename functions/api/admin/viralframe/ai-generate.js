@@ -89,7 +89,7 @@ function isAutoValue(label) {
   return !label || label.trim().toLowerCase().startsWith('auto');
 }
 
-function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction }) {
+function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene }) {
   const registerLine = registerInstruction ? `\nGAYA BAHASA WAJIB: ${registerInstruction}\n` : '';
   // Mode voiceover/faceless: karakter = NARATOR yang terdengar tapi TIDAK tampil
   // di frame. Video prompt fokus pada visual properti POV/sinematik tanpa orang.
@@ -291,14 +291,17 @@ Format yang diharapkan:
     "scene": 1,
     "kamera": "nama singkat gerakan kamera dalam 3-5 kata",
     "prompt": "teks prompt lengkap bahasa Inggris minimum 50 kata",
-    "dialog_karakter": "klausa delivery + dialog karakter dalam ${bahasa}, sesuai pola wajib di [4], maksimal ${maxWords} kata untuk bagian dialog"
+    "dialog_karakter": "klausa delivery + dialog karakter dalam ${bahasa}, sesuai pola wajib di [4], maksimal ${maxWords} kata untuk bagian dialog",
+    "on_screen_text": "teks overlay singkat untuk scene ini — kosongkan string \\"\\" jika arketipe/gaya tidak menekankan teks on-screen"
   }
 ]
-Field WAJIB ada dan non-empty: scene (integer), kamera (string), prompt (string min 50 kata), dialog_karakter (string, format sesuai [4]).
+Field WAJIB ada dan non-empty: scene (integer), kamera (string), prompt (string min 50 kata), dialog_karakter (string, format sesuai [4]). on_screen_text WAJIB ada di setiap object tapi BOLEH string kosong "" jika tidak relevan untuk gaya video ini.
 
 ATURAN TAMBAHAN FIELD 'prompt' — WAJIB, PELANGGARAN = OUTPUT DITOLAK:
   • 'prompt' WAJIB 100% bahasa Inggris di SEMUA scene TERMASUK scene terakhir/CTA — jangan terbawa bahasa dialog_karakter (hanya 'dialog_karakter' yang memakai bahasa dialog).
-  • 'prompt' WAJIB mendeskripsikan SATU shot utuh yang bisa berdiri sendiri dari foto referensi. Jika koreografi kamera menyebut transisi (whip-pan, whip cut, dsb), tulis sebagai gabungan, mis. 'fast whip-pan settling into a steady selfie-stick shot of ...' — DILARANG menulis hanya nama transisinya tanpa shot stabil yang bisa ditahan sepanjang durasi.`;
+  ${multiShotScene
+    ? `• 'prompt' WAJIB mendeskripsikan TEPAT DUA shot berurutan dalam SATU scene ini (arketipe hybrid A-roll/B-roll — ikuti ARAHAN GAYA VIDEO di atas): Shot 1 = talking head presenter; HARD CUT (bukan gerakan kamera menerus, potongan visual tegas) ke Shot 2 = cutaway penuh area yang sama TANPA presenter, memakai koreografi kamera yang diberikan. Tulis KEDUA shot secara eksplisit dan berurutan di dalam SATU field 'prompt' (mis. 'Shot 1: [presenter talking head] ...; hard cut to; Shot 2: [full b-roll cutaway, no presenter] ...'). Pengecualian ini MENGGANTIKAN aturan "satu shot utuh" yang berlaku untuk arketipe lain.`
+    : `• 'prompt' WAJIB mendeskripsikan SATU shot utuh yang bisa berdiri sendiri dari foto referensi. Jika koreografi kamera menyebut transisi (whip-pan, whip cut, dsb), tulis sebagai gabungan, mis. 'fast whip-pan settling into a steady selfie-stick shot of ...' — DILARANG menulis hanya nama transisinya tanpa shot stabil yang bisa ditahan sepanjang durasi.`}`;
 }
 
 function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes }) {
@@ -489,9 +492,16 @@ export async function onRequestPost(context) {
   const supportsRefImage = body.supports_ref_image === true;
   const expression = typeof body.expression === 'string' ? body.expression : 'auto';
   // Arketipe (opsional) — string siap-pakai dari client (client compute, backend consume).
-  const archetypeNote = typeof body.archetype_note === 'string' ? body.archetype_note.slice(0, 600) : '';
+  // Cap dinaikkan dari 600→2000: arketipe baru (agent_broll_hybrid, kinetic_typography,
+  // client_testimonial) punya shotGrammarNote lebih detail (hingga ~1480 char) — 600 char
+  // memotong instruksi krusial di tengah kalimat (mis. klarifikasi audio-tidak-terpotong
+  // pada agent_broll_hybrid jatuh SETELAH byte ke-600, jadi tidak pernah sampai ke LLM).
+  const archetypeNote = typeof body.archetype_note === 'string' ? body.archetype_note.slice(0, 2000) : '';
   const PRESENTER_VALID = ['on_camera', 'voiceover_only', 'faceless_broll'];
   const presenterMode = PRESENTER_VALID.includes(body.presenter_mode) ? body.presenter_mode : 'on_camera';
+  // Arketipe hybrid A-roll/B-roll (agent_broll_hybrid) butuh 2 shot dalam 1 scene —
+  // merelaksasi aturan default "satu shot utuh" (lihat buildSystemPrompt).
+  const multiShotScene = body.multi_shot_scene === true;
   const registerInstruction = typeof body.register_instruction === 'string' ? body.register_instruction.slice(0, 400) : '';
   // Provider AI + model (default gemini). Fallback otomatis ke provider lain bila kuota habis.
   const PROVIDER_ORDER = ['gemini', 'groq', 'openrouter', 'deepseek'];
@@ -561,7 +571,7 @@ export async function onRequestPost(context) {
   const deskripsiKarakter = describeKarakter(karakter);
   const karakterDesc = describeKarakterUntukPrompt(karakter, expression);
 
-  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction });
+  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene });
   const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes });
 
   // ── Panggil AI dengan fallback berantai, respons streaming NDJSON ──────────
@@ -641,6 +651,9 @@ export async function onRequestPost(context) {
         const assignment = fotoByScene.get(s.scene);
         return {
           ...s,
+          // Sanitasi tipe — on_screen_text tidak divalidasi ketat oleh isValidScene()
+          // (opsional/best-effort), pastikan selalu string agar tidak bocor undefined/tipe lain ke frontend/ZIP.
+          on_screen_text: typeof s.on_screen_text === 'string' ? s.on_screen_text.trim() : '',
           foto_label: assignment?.foto_label ?? null,
           foto_deskripsi: assignment ? (LABEL_MAP[assignment.foto_label] ?? LABEL_MAP.lainnya) : null,
           ...(supportsRefImage ? { reference_image: `scene${s.scene}_foto.webp`, character_reference: karakterFile } : {}),

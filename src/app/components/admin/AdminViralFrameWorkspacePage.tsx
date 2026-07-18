@@ -776,7 +776,7 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
 // FOTO_LABEL_OPTIONS) diimport dari ../../lib/viralframe-constants — sumber
 // tunggal yang sama dipakai Step 1/2 agar value enum tidak divergen lagi.
 
-interface AIScene { scene: number; kamera: string; prompt: string; dialog_karakter: string; foto_label?: string; foto_deskripsi?: string }
+interface AIScene { scene: number; kamera: string; prompt: string; dialog_karakter: string; on_screen_text?: string; foto_label?: string; foto_deskripsi?: string }
 interface AIKarakter { nama: string; deskripsi: string; foto_url: string }
 interface AIMetadata {
   platform: string; ai_tool: string; bahasa: string; musik_value: string;
@@ -960,6 +960,7 @@ function AIGenerateTab({
       archetype_note,
       camera_directives,
       presenter_mode: arc?.presenterMode ?? 'on_camera',
+      multi_shot_scene: arc?.allowMultiShotPerScene === true,
       register_instruction: REGISTER_INSTRUCTION[register] ?? '',
       provider,
       model,
@@ -1068,6 +1069,7 @@ function AIGenerateTab({
           kamera: scene.kamera,
           prompt: scene.prompt,
           dialog_karakter: scene.dialog_karakter,
+          on_screen_text: scene.on_screen_text || null,
           catatan_musik: metadata.musik_value !== 'none'
             ? 'Deskripsi audio optimal untuk Veo3/Google Flow. Kling/Wan: efek suara saja, tambahkan musik via CapCut.'
             : 'Mode tanpa musik.',
@@ -1347,6 +1349,11 @@ function AIGenerateTab({
                 </div>
                 <p className="text-xs text-[#0F172A] leading-relaxed">{s.prompt.slice(0, 200)}{s.prompt.length > 200 ? '…' : ''}</p>
                 <p className="text-xs text-[#1565C0] mt-1.5 italic">"{s.dialog_karakter}"</p>
+                {s.on_screen_text && (
+                  <p className="text-xs text-[#7C3AED] mt-1 flex items-center gap-1">
+                    <span className="font-semibold">Teks on-screen:</span> {s.on_screen_text}
+                  </p>
+                )}
               </div>
             ))}
           </div>

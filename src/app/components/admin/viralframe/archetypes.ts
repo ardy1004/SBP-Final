@@ -186,6 +186,11 @@ export interface VideoArchetype {
   cameraGrammar: CameraBeat[];     // vokabuler gerakan kamera signature
   pacing: 'punchy' | 'flowing' | 'relaxed';
   shotGrammarNote: string;         // instruksi diinjeksi ke compiler (BLOK 0)
+  /** Arketipe yang butuh 2 shot berbeda dalam 1 scene (mis. A-roll/B-roll cutaway).
+   * Default false — jalur ai-generate.js (mode "AI Generate") secara default
+   * MELARANG lebih dari 1 shot per scene ("SATU shot utuh"); flag ini memberi
+   * sinyal ke backend untuk merelaksasi aturan itu khusus arketipe ini. */
+  allowMultiShotPerScene?: boolean;
 }
 
 export const ARCHETYPES: VideoArchetype[] = [
@@ -299,7 +304,8 @@ export const ARCHETYPES: VideoArchetype[] = [
       { move: 'lateral_track', speed: 'slow',   ease: 'ease-in-out', motivation: 'B-ROLL CUTAWAY: aesthetic lateral track across the scene area, no presenter' },
     ],
     pacing: 'flowing',
-    shotGrammarNote: 'SETIAP scene WAJIB dibagi 2 bagian berurutan dengan durasi kurang-lebih sama: BAGIAN 1 = A-ROLL/TALKING HEAD — agen tampil menghadap kamera dengan framing static/steady, bicara langsung ke penonton, latar belakang sesuai area foto referensi scene ini (bagian ini SELALU tampil lebih dulu, tidak pernah dibalik). BAGIAN 2 = B-ROLL CUTAWAY — potongan (hard cut, BUKAN gerakan kamera menerus dari bagian 1) ke rekaman PENUH area yang sama TANPA agen tampil di frame sama sekali, dengan gerakan kamera sinematik/estetik sesuai KOREOGRAFI KAMERA PER SCENE di bawah (koreografi itu KHUSUS untuk Bagian 2 — Bagian 1 tidak perlu gerakan kamera, cukup frame diam). Pola talking-head→cutaway INI WAJIB berulang di SETIAP scene tanpa kecuali, bukan cuma sebagian. Tuliskan pembagian dua bagian ini secara eksplisit di dalam ai_ready_prompt tiap scene (mis. "first half: ...; hard cut to; second half: ...").',
+    allowMultiShotPerScene: true,
+    shotGrammarNote: 'SETIAP scene WAJIB dibagi 2 bagian VISUAL berurutan dengan durasi kurang-lebih sama: BAGIAN 1 = A-ROLL/TALKING HEAD — agen tampil menghadap kamera dengan framing static/steady, latar belakang sesuai area foto referensi scene ini (bagian ini SELALU tampil lebih dulu, tidak pernah dibalik). BAGIAN 2 = B-ROLL CUTAWAY — potongan VISUAL (hard cut, BUKAN gerakan kamera menerus dari bagian 1) ke rekaman PENUH area yang sama TANPA agen tampil DI FRAME, dengan gerakan kamera sinematik/estetik sesuai KOREOGRAFI KAMERA PER SCENE di bawah (koreografi itu KHUSUS untuk Bagian 2 — Bagian 1 tidak perlu gerakan kamera, cukup frame diam). PENTING — AUDIO TIDAK IKUT TERPOTONG: narasi/suara agen (script_narration/dialog_karakter) mengalir TERUS-MENERUS tanpa jeda melintasi kedua bagian visual tersebut (agen tetap TERDENGAR bicara selama cutaway berlangsung, seperti VO yang menjembatani potongan gambar) — HANYA gambarnya yang cut ke b-roll, suaranya TIDAK berhenti. Word count narasi TETAP mengikuti budget durasi PENUH scene ini (jangan dipotong setengah). Pola talking-head→cutaway-VISUAL INI WAJIB berulang di SETIAP scene tanpa kecuali, bukan cuma sebagian. Tuliskan pembagian dua bagian VISUAL ini secara eksplisit di dalam teks prompt video tiap scene (mis. "first half: ...; hard cut to (visual only, audio continues); second half: ..."), sementara narasi/dialog tetap satu kesatuan utuh untuk keseluruhan durasi scene.',
   },
   {
     id: 'kinetic_typography',
@@ -316,7 +322,7 @@ export const ARCHETYPES: VideoArchetype[] = [
       { move: 'lateral_track', speed: 'slow',   ease: 'ease-in-out', motivation: 'subtle lateral motion, text remains the visual anchor' },
     ],
     pacing: 'punchy',
-    shotGrammarNote: 'Faceless total — footage properti HANYA jadi latar visual, bukan fokus utama. Fokus utama adalah TEKS ON-SCREEN bergaya kinetic typography: setiap on_screen_text WAJIB ditulis sebagai potongan kalimat pendek yang tampil kata-per-kata atau frasa-per-frasa dengan animasi bold (pop-in/scale/highlight warna), tersinkron KETAT dengan timing script_narration — bukan satu baris subtitle statis. Video ini didesain untuk ditonton TANPA suara (mayoritas viewer FYP/Reels scroll tanpa audio aktif): pesan inti HARUS tetap tersampaikan penuh hanya lewat teks, VO adalah pendukung bukan satu-satunya jalur informasi. Gerakan kamera dibuat MINIMAL dan stabil (lihat KOREOGRAFI KAMERA) supaya tidak mengganggu keterbacaan teks — jangan pernah gerakan kamera cepat/whip-pan di scene ini. Kontras warna tinggi antara teks dan footage (drop shadow/outline/background block) WAJIB disebutkan di ai_ready_prompt agar teks tetap terbaca di footage apa pun.',
+    shotGrammarNote: 'Faceless total — footage properti HANYA jadi latar visual, bukan fokus utama. Fokus utama adalah TEKS ON-SCREEN bergaya kinetic typography: setiap on_screen_text WAJIB ditulis sebagai potongan kalimat pendek yang tampil kata-per-kata atau frasa-per-frasa dengan animasi bold (pop-in/scale/highlight warna), tersinkron KETAT dengan timing script_narration — bukan satu baris subtitle statis. Video ini didesain untuk ditonton TANPA suara (mayoritas viewer FYP/Reels scroll tanpa audio aktif): pesan inti HARUS tetap tersampaikan penuh hanya lewat teks, VO adalah pendukung bukan satu-satunya jalur informasi. CATATAN TEMPO/PACING "punchy" DI ATAS MERUJUK PADA RITME PERGANTIAN SCENE (scene singkat & cepat berganti), BUKAN kecepatan gerakan kamera DI DALAM satu shot — gerakan kamera DI DALAM tiap scene WAJIB tetap MINIMAL dan stabil (lihat KOREOGRAFI KAMERA) supaya tidak mengganggu keterbacaan teks; jangan pernah gerakan kamera cepat/whip-pan di dalam satu scene meskipun ritme antar-scene-nya cepat. Kontras warna tinggi antara teks dan footage (drop shadow/outline/background block) WAJIB disebutkan di ai_ready_prompt agar teks tetap terbaca di footage apa pun.',
   },
   {
     id: 'client_testimonial',
