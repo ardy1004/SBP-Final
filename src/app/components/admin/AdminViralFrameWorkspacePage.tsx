@@ -1047,7 +1047,6 @@ function AIGenerateTab({
       const platform = PLATFORM_OPTIONS.find(p => p.value === metadata.platform);
       const musik = MUSIK_OPTIONS.find(m => m.value === metadata.musik_value);
       const musikLabel = musik?.label ?? metadata.musik_value;
-      const timestamp = new Date().toISOString().slice(0, 10);
       const kode = (metadata.kode_listing ?? 'SBP').replace(/[^a-zA-Z0-9]/g, '-');
 
       for (const scene of scenes) {
@@ -1140,7 +1139,7 @@ function AIGenerateTab({
       const url = URL.createObjectURL(out);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `viralframe_${kode}_${timestamp}.zip`;
+      a.download = `${kode}.zip`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1707,7 +1706,7 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
       const blob = await zip.generateAsync({ type: 'blob' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `youtube-long_${kode}_${new Date().toISOString().slice(0, 10)}.zip`;
+      a.download = `${kode}.zip`;
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Gagal membuat ZIP'); }
@@ -2403,7 +2402,7 @@ export default function AdminViralFrameWorkspacePage() {
       const url = URL.createObjectURL(out);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `viralframe_${prop.kode_listing}_${Date.now()}.zip`;
+      a.download = `${(prop.kode_listing ?? 'SBP').replace(/[^a-zA-Z0-9-]/g, '-')}.zip`;
       document.body.appendChild(a);
       a.click();
       a.remove();

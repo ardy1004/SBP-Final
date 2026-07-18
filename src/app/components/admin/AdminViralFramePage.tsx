@@ -1,6 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Filter, ImageOff, Video, X, Sparkles, PenLine, Clapperboard } from 'lucide-react';
+import {
+  Search, Filter, ImageOff, Video, X, Sparkles, PenLine, Clapperboard,
+  SlidersHorizontal, ChevronDown, ChevronUp, RotateCcw, Crown, Award, Flame, Star,
+} from 'lucide-react';
 
 interface PropertyRow {
   id: number;
@@ -8,10 +11,32 @@ interface PropertyRow {
   title: string;
   jenis_properti: string;
   tujuan: string;
+  harga: number;
   status_publish: string;
+  status_sold: number;
+  badge_premium: number;
+  badge_featured: number;
+  badge_hot: number;
+  properti_pilihan: number;
+  viralframe_dismissed_at: string | null;
   kecamatan: string;
   kabupaten: string;
   cover_url: string | null;
+}
+
+const BADGE_DEFS = [
+  { key: 'pilihan',  label: 'Pilihan',  col: 'properti_pilihan', icon: Star,  color: '#F5A623' },
+  { key: 'premium',  label: 'Premium',  col: 'badge_premium',    icon: Crown, color: '#7C3AED' },
+  { key: 'featured', label: 'Featured', col: 'badge_featured',   icon: Award, color: '#1565C0' },
+  { key: 'hot',      label: 'Hot',      col: 'badge_hot',        icon: Flame, color: '#EF4444' },
+] as const;
+type BadgeKey = typeof BADGE_DEFS[number]['key'];
+
+function formatRupiahShort(n: number): string {
+  if (!n) return 'Nego';
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(n % 1_000_000_000 === 0 ? 0 : 1)} M`;
+  if (n >= 1_000_000) return `${Math.round(n / 1_000_000)} Jt`;
+  return n.toLocaleString('id-ID');
 }
 
 const JENIS_COLORS: Record<string, string> = {
@@ -123,7 +148,24 @@ export default function AdminViralFramePage() {
   // Status konten per properti (R6)
   const [withScript, setWithScript] = useState<Set<number>>(new Set());
   const [withVideo, setWithVideo] = useState<Set<number>>(new Set());
+  const [latestContentAt, setLatestContentAt] = useState<Record<number, string>>({});
+  const [dismissedMap, setDismissedMap] = useState<Record<number, string | null>>({});
+  const [resettingId, setResettingId] = useState<number | null>(null);
   const [onlyEmpty, setOnlyEmpty] = useState(false);
+
+  // ── Filter (jenis, harga, lokasi, badge, sold) ──────────────────────────────
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [jenisSet, setJenisSet] = useState<Set<string>>(new Set());
+  const [kabupatenFilter, setKabupatenFilter] = useState('');
+  const [hargaMin, setHargaMin] = useState('');
+  const [hargaMax, setHargaMax] = useState('');
+  const [badgeSet, setBadgeSet] = useState<Set<BadgeKey>>(new Set());
+  const [soldFilter, setSoldFilter] = useState<'all' | 'sold' | 'available'>('all');
+
+  const toggleJenis = (j: string) => setJenisSet(prev => { const n = new Set(prev); n.has(j) ? n.delete(j) : n.add(j); return n; });
+  const toggleBadge = (b: BadgeKey) => setBadgeSet(prev => { const n = new Set(prev); n.has(b) ? n.delete(b) : n.add(b); return n; });
+  const activeFilterCount = jenisSet.size + badgeSet.size + (kabupatenFilter ? 1 : 0) + (hargaMin ? 1 : 0) + (hargaMax ? 1 : 0) + (soldFilter !== 'all' ? 1 : 0);
+  const resetFilters = () => { setJenisSet(new Set()); setKabupatenFilter(''); setHargaMin(''); setHargaMax(''); setBadgeSet(new Set()); setSoldFilter('all'); };
   // R9 batch
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [batchRunning, setBatchRunning] = useState(false);
@@ -131,7 +173,25 @@ export default function AdminViralFramePage() {
   const [batchResult, setBatchResult] = useState<{ ok: number; failed: { id: number; title: string; reason: string }[] } | null>(null);
   const toggleSelect = (id: number) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const refreshStatus = () => fetch('/api/admin/viralframe/status', { credentials: 'include' }).then(r => r.json())
-    .then(j => { if (j.success) { setWithScript(new Set(j.data?.with_script ?? [])); setWithVideo(new Set(j.data?.with_video ?? [])); } }).catch(() => {});
+    .then(j => {
+      if (j.success) {
+        setWithScript(new Set(j.data?.with_script ?? []));
+        setWithVideo(new Set(j.data?.with_video ?? []));
+        setLatestContentAt(j.data?.latest_content_at ?? {});
+      }
+    }).catch(() => {});
+
+  const handleReset = async (id: number) => {
+    setResettingId(id);
+    try {
+      const res = await fetch('/api/admin/viralframe/dismiss', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ property_id: id }),
+      });
+      if (res.ok) setDismissedMap(prev => ({ ...prev, [id]: new Date().toISOString() }));
+    } catch { /* abaikan — overlay tetap tampil, admin bisa coba lagi */ }
+    finally { setResettingId(null); }
+  };
   const runBatch = async () => {
     const ids = [...selected]; if (ids.length === 0 || batchRunning) return;
     setBatchRunning(true); setBatchDone(0); setBatchResult(null);
@@ -181,7 +241,9 @@ export default function AdminViralFramePage() {
       const res = await fetch('/api/admin/properties', { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      setProperties(json.data?.properties ?? []);
+      const rows: PropertyRow[] = json.data?.properties ?? [];
+      setProperties(rows);
+      setDismissedMap(Object.fromEntries(rows.map(p => [p.id, p.viralframe_dismissed_at])));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Gagal memuat data');
     } finally {
@@ -190,21 +252,43 @@ export default function AdminViralFramePage() {
   }, []);
 
   useEffect(() => { fetchProperties(); }, [fetchProperties]);
-  useEffect(() => { setDisplayLimit(24); }, [search, onlyEmpty]);
-
-  // Status konten (R6)
-  useEffect(() => {
-    fetch('/api/admin/viralframe/status', { credentials: 'include' })
-      .then(r => r.json())
-      .then(j => { if (j.success) { setWithScript(new Set(j.data?.with_script ?? [])); setWithVideo(new Set(j.data?.with_video ?? [])); } })
-      .catch(() => {});
-  }, []);
+  useEffect(() => { refreshStatus(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setDisplayLimit(24); }, [search, onlyEmpty, jenisSet, kabupatenFilter, hargaMin, hargaMax, badgeSet, soldFilter]);
 
   const contentStatus = (id: number): 'video' | 'script' | 'empty' =>
     withVideo.has(id) ? 'video' : withScript.has(id) ? 'script' : 'empty';
 
+  // Overlay "sudah diproses" — tersembunyi kalau admin klik Reset SETELAH konten
+  // terbaru dibuat. Kalau diproses ulang setelah dismiss, latest_content_at maju
+  // melewati dismissed_at lagi sehingga overlay otomatis muncul kembali.
+  const isProcessedOverlay = (p: PropertyRow): boolean => {
+    if (contentStatus(p.id) === 'empty') return false;
+    const dismissedAt = dismissedMap[p.id];
+    if (!dismissedAt) return true;
+    const latest = latestContentAt[p.id];
+    if (!latest) return true;
+    return dismissedAt < latest;
+  };
+
+  const kabupatenOptions = useMemo(() => {
+    const set = new Set(properties.map(p => p.kabupaten).filter(Boolean));
+    return [...set].sort();
+  }, [properties]);
+
   const filtered = properties.filter(p => {
     if (onlyEmpty && contentStatus(p.id) !== 'empty') return false;
+    if (jenisSet.size > 0 && !jenisSet.has(p.jenis_properti)) return false;
+    if (kabupatenFilter && p.kabupaten !== kabupatenFilter) return false;
+    const min = parseInt(hargaMin, 10);
+    const max = parseInt(hargaMax, 10);
+    if (Number.isInteger(min) && min > 0 && p.harga < min) return false;
+    if (Number.isInteger(max) && max > 0 && p.harga > max) return false;
+    if (badgeSet.size > 0) {
+      const hasAny = [...badgeSet].some(b => p[BADGE_DEFS.find(d => d.key === b)!.col] === 1);
+      if (!hasAny) return false;
+    }
+    if (soldFilter === 'sold' && p.status_sold !== 1) return false;
+    if (soldFilter === 'available' && p.status_sold === 1) return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -253,10 +337,95 @@ export default function AdminViralFramePage() {
             className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] transition-colors"
           />
         </div>
-        <button onClick={() => setOnlyEmpty(v => !v)}
-          className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${onlyEmpty ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}>
-          ⬜ Belum ada konten {onlyEmpty ? '(aktif)' : ''}
-        </button>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => setOnlyEmpty(v => !v)}
+            className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${onlyEmpty ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}>
+            ⬜ Belum ada konten {onlyEmpty ? '(aktif)' : ''}
+          </button>
+
+          <button onClick={() => setFilterOpen(v => !v)}
+            className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${filterOpen || activeFilterCount > 0 ? 'bg-[#0F172A] text-white border-[#0F172A]' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}>
+            <SlidersHorizontal size={13} /> Filter
+            {activeFilterCount > 0 && (
+              <span className="w-4 h-4 rounded-full bg-white/20 flex items-center justify-center text-[10px] font-bold">{activeFilterCount}</span>
+            )}
+            {filterOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          </button>
+
+          {activeFilterCount > 0 && (
+            <button onClick={resetFilters} className="text-xs text-red-500 hover:underline flex items-center gap-1">
+              <RotateCcw size={12} /> Reset filter
+            </button>
+          )}
+        </div>
+
+        {filterOpen && (
+          <div className="pt-3 border-t border-gray-100 space-y-4">
+            {/* Jenis properti */}
+            <div>
+              <div className="text-xs font-semibold text-[#64748B] mb-1.5">Jenis Properti</div>
+              <div className="flex flex-wrap gap-1.5">
+                {Object.keys(JENIS_COLORS).map(j => (
+                  <button key={j} onClick={() => toggleJenis(j)}
+                    className={`text-xs px-2.5 py-1 rounded-full border capitalize transition-colors ${jenisSet.has(j) ? 'text-white border-transparent' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}
+                    style={jenisSet.has(j) ? { background: JENIS_COLORS[j] } : undefined}>
+                    {j}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Harga */}
+            <div>
+              <div className="text-xs font-semibold text-[#64748B] mb-1.5">Rentang Harga (Rp)</div>
+              <div className="flex items-center gap-2">
+                <input type="number" min={0} value={hargaMin} onChange={e => setHargaMin(e.target.value)}
+                  placeholder="Minimum" className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0]" />
+                <span className="text-[#94A3B8] text-sm">–</span>
+                <input type="number" min={0} value={hargaMax} onChange={e => setHargaMax(e.target.value)}
+                  placeholder="Maksimum" className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0]" />
+              </div>
+            </div>
+
+            {/* Lokasi */}
+            <div>
+              <div className="text-xs font-semibold text-[#64748B] mb-1.5">Kabupaten/Kota</div>
+              <select value={kabupatenFilter} onChange={e => setKabupatenFilter(e.target.value)}
+                className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
+                <option value="">Semua lokasi</option>
+                {kabupatenOptions.map(k => <option key={k} value={k}>{k}</option>)}
+              </select>
+            </div>
+
+            {/* Badge */}
+            <div>
+              <div className="text-xs font-semibold text-[#64748B] mb-1.5">Badge</div>
+              <div className="flex flex-wrap gap-1.5">
+                {BADGE_DEFS.map(({ key, label, icon: Icon, color }) => (
+                  <button key={key} onClick={() => toggleBadge(key)}
+                    className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1 transition-colors ${badgeSet.has(key) ? 'text-white border-transparent' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}
+                    style={badgeSet.has(key) ? { background: color } : undefined}>
+                    <Icon size={11} /> {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Sold */}
+            <div>
+              <div className="text-xs font-semibold text-[#64748B] mb-1.5">Status Terjual</div>
+              <div className="flex gap-1.5">
+                {([['all', 'Semua'], ['available', 'Tersedia'], ['sold', '🔴 SOLD']] as const).map(([val, label]) => (
+                  <button key={val} onClick={() => setSoldFilter(val)}
+                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${soldFilter === val ? 'bg-[#0F172A] text-white border-[#0F172A]' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {error && (
@@ -312,6 +481,7 @@ export default function AdminViralFramePage() {
           {filtered.slice(0, displayLimit).map(p => {
             const badge = STATUS_BADGE[p.status_publish] ?? { label: p.status_publish, cls: 'bg-gray-100 text-gray-500' };
             const src = coverSrc(p.cover_url);
+            const processed = isProcessedOverlay(p);
             return (
               <div
                 key={p.id}
@@ -328,7 +498,32 @@ export default function AdminViralFramePage() {
                       <ImageOff size={24} className="text-gray-300" />
                     </div>
                   )}
-                  <span className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-xs font-medium ${badge.cls}`}>
+
+                  {/* Overlay hitam 50% — properti sudah pernah diproses (naskah/video) */}
+                  {processed && (
+                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-10">
+                      <button
+                        onClick={() => handleReset(p.id)}
+                        disabled={resettingId === p.id}
+                        title="Sembunyikan overlay ini — naskah/video lama TETAP tersimpan di Riwayat"
+                        className="px-3 py-1.5 rounded-full text-xs font-semibold bg-white/90 text-[#0F172A] hover:bg-white transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        <RotateCcw size={12} className={resettingId === p.id ? 'animate-spin' : ''} />
+                        {resettingId === p.id ? 'Mereset…' : 'Reset'}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Ribbon SOLD — sumber kebenaran: status_sold (checkbox terpisah dari status_publish) */}
+                  {p.status_sold === 1 && (
+                    <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+                      <span className="px-4 py-1 rotate-[-8deg] bg-red-600 text-white text-sm font-extrabold tracking-wider rounded shadow-lg border-2 border-white">
+                        SOLD
+                      </span>
+                    </div>
+                  )}
+
+                  <span className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-xs font-medium z-20 ${badge.cls}`}>
                     {badge.label}
                   </span>
                   {/* Badge status konten ViralFrame (R6) */}
@@ -337,11 +532,11 @@ export default function AdminViralFramePage() {
                     const meta = st === 'video' ? { t: '🎬 Video', c: 'bg-emerald-500 text-white' }
                       : st === 'script' ? { t: '📝 Naskah', c: 'bg-amber-400 text-white' }
                       : { t: '⬜ Belum', c: 'bg-white/90 text-gray-500 border border-gray-200' };
-                    return <span className={`absolute top-2 left-10 px-2 py-0.5 rounded-full text-[10px] font-semibold ${meta.c}`}>{meta.t}</span>;
+                    return <span className={`absolute top-2 left-10 px-2 py-0.5 rounded-full text-[10px] font-semibold z-20 ${meta.c}`}>{meta.t}</span>;
                   })()}
                   {/* R9: checkbox pilih untuk batch */}
                   <button onClick={() => toggleSelect(p.id)} title="Pilih untuk batch"
-                    className={`absolute top-2 left-2 w-6 h-6 rounded-md border-2 flex items-center justify-center transition-colors ${selected.has(p.id) ? 'bg-[#1565C0] border-[#1565C0]' : 'bg-white/90 border-gray-300 hover:border-[#1565C0]'}`}>
+                    className={`absolute top-2 left-2 w-6 h-6 rounded-md border-2 flex items-center justify-center transition-colors z-20 ${selected.has(p.id) ? 'bg-[#1565C0] border-[#1565C0]' : 'bg-white/90 border-gray-300 hover:border-[#1565C0]'}`}>
                     {selected.has(p.id) && <span className="text-white text-xs font-bold">✓</span>}
                   </button>
                 </div>
@@ -354,7 +549,10 @@ export default function AdminViralFramePage() {
                     <span className="text-xs text-[#94A3B8] truncate">{p.kode_listing}</span>
                   </div>
                   <div className="font-medium text-[#0F172A] text-sm leading-snug line-clamp-2">{p.title}</div>
-                  <div className="text-xs text-[#64748B]">{p.kecamatan}, {p.kabupaten}</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs text-[#64748B] truncate">{p.kecamatan}, {p.kabupaten}</div>
+                    <div className="text-xs font-semibold text-[#1565C0] whitespace-nowrap">Rp {formatRupiahShort(p.harga)}</div>
+                  </div>
                   <div className="mt-auto pt-2">
                     <button
                       onClick={() => openModeModal(p.id, p.title)}

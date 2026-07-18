@@ -31,11 +31,24 @@ function today8() {
 }
 
 
+const BADGE_COL_FILTER = {
+  pilihan:  'properti_pilihan',
+  premium:  'badge_premium',
+  featured: 'badge_featured',
+  hot:      'badge_hot',
+};
+
 export async function onRequestGet(context) {
   const { request, env } = context;
   const url = new URL(request.url);
   const statusFilter = url.searchParams.get('status') ?? '';
   const jenisFilter = (url.searchParams.get('jenis') ?? '').toLowerCase();
+  const kabupatenFilter = url.searchParams.get('kabupaten') ?? '';
+  const hargaMin = parseInt(url.searchParams.get('harga_min') ?? '', 10);
+  const hargaMax = parseInt(url.searchParams.get('harga_max') ?? '', 10);
+  const soldFilter = url.searchParams.get('sold');
+  const badgeFilter = (url.searchParams.get('badge') ?? '')
+    .split(',').map(b => b.trim()).filter(b => BADGE_COL_FILTER[b]);
 
   const conditions = [];
   const bindings = [];
@@ -50,6 +63,22 @@ export async function onRequestGet(context) {
     bindings.push(jenisFilter);
   }
 
+  if (kabupatenFilter) {
+    conditions.push('LOWER(p.kabupaten) = LOWER(?)');
+    bindings.push(kabupatenFilter);
+  }
+
+  if (Number.isInteger(hargaMin) && hargaMin > 0) { conditions.push('p.harga >= ?'); bindings.push(hargaMin); }
+  if (Number.isInteger(hargaMax) && hargaMax > 0) { conditions.push('p.harga <= ?'); bindings.push(hargaMax); }
+
+  if (soldFilter === '1') conditions.push('p.status_sold = 1');
+  else if (soldFilter === '0') conditions.push('p.status_sold = 0');
+
+  // Badge filter: OR antar-badge yang dipilih (properti "premium ATAU hot", bukan "premium DAN hot")
+  if (badgeFilter.length > 0) {
+    conditions.push(`(${badgeFilter.map(b => `p.${BADGE_COL_FILTER[b]} = 1`).join(' OR ')})`);
+  }
+
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const sql = `
@@ -59,7 +88,9 @@ export async function onRequestGet(context) {
       p.harga, p.nego, p.nett,
       p.kecamatan, p.kabupaten, p.provinsi,
       p.latitude, p.longitude,
-      p.status_publish,
+      p.status_publish, p.status_sold,
+      p.badge_premium, p.badge_featured, p.badge_hot, p.properti_pilihan,
+      p.viralframe_dismissed_at,
       p.created_at, p.updated_at, p.published_at,
       (SELECT url_webp FROM property_images
          WHERE property_id = p.id ORDER BY is_cover DESC, urutan ASC LIMIT 1) AS cover_url,
