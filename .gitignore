@@ -44,3 +44,12 @@ pnpm-debug.log*
 .claude/
 .claude-flow/
 .mcp.json
+
+# Package manager stray — project pakai npm (package-lock.json), bukan pnpm
+pnpm-lock.yaml
+
+# Data dump / artefak scratch dari scripts/ debug tools (bukan source code,
+# bisa besar dan/atau berisi data produksi) — regenerasi via script terkait bila perlu
+scripts/screenshots/
+scripts/deskripsi_backup.json
+scripts/_maps_check.json
