@@ -43,7 +43,10 @@ export async function onRequestGet(context) {
   const url = new URL(request.url);
   const statusFilter = url.searchParams.get('status') ?? '';
   const jenisFilter = (url.searchParams.get('jenis') ?? '').toLowerCase();
+  const provinsiFilter = url.searchParams.get('provinsi') ?? '';
   const kabupatenFilter = url.searchParams.get('kabupaten') ?? '';
+  const kecamatanFilter = url.searchParams.get('kecamatan') ?? '';
+  const kelurahanFilter = url.searchParams.get('kelurahan') ?? '';
   const hargaMin = parseInt(url.searchParams.get('harga_min') ?? '', 10);
   const hargaMax = parseInt(url.searchParams.get('harga_max') ?? '', 10);
   const soldFilter = url.searchParams.get('sold');
@@ -63,9 +66,24 @@ export async function onRequestGet(context) {
     bindings.push(jenisFilter);
   }
 
+  if (provinsiFilter) {
+    conditions.push('LOWER(p.provinsi) = LOWER(?)');
+    bindings.push(provinsiFilter);
+  }
+
   if (kabupatenFilter) {
     conditions.push('LOWER(p.kabupaten) = LOWER(?)');
     bindings.push(kabupatenFilter);
+  }
+
+  if (kecamatanFilter) {
+    conditions.push('LOWER(p.kecamatan) = LOWER(?)');
+    bindings.push(kecamatanFilter);
+  }
+
+  if (kelurahanFilter) {
+    conditions.push('LOWER(p.kelurahan) = LOWER(?)');
+    bindings.push(kelurahanFilter);
   }
 
   if (Number.isInteger(hargaMin) && hargaMin > 0) { conditions.push('p.harga >= ?'); bindings.push(hargaMin); }
@@ -86,7 +104,7 @@ export async function onRequestGet(context) {
       p.id, p.kode_listing, p.title, p.slug,
       p.jenis_properti, p.tujuan,
       p.harga, p.nego, p.nett,
-      p.kecamatan, p.kabupaten, p.provinsi,
+      p.kelurahan, p.kecamatan, p.kabupaten, p.provinsi,
       p.latitude, p.longitude,
       p.status_publish, p.status_sold,
       p.badge_premium, p.badge_featured, p.badge_hot, p.properti_pilihan,

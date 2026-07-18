@@ -19,8 +19,10 @@ interface PropertyRow {
   badge_hot: number;
   properti_pilihan: number;
   viralframe_dismissed_at: string | null;
-  kecamatan: string;
+  provinsi: string;
   kabupaten: string;
+  kecamatan: string;
+  kelurahan: string;
   cover_url: string | null;
 }
 
@@ -153,10 +155,16 @@ export default function AdminViralFramePage() {
   const [resettingId, setResettingId] = useState<number | null>(null);
   const [onlyEmpty, setOnlyEmpty] = useState(false);
 
-  // ── Filter (jenis, harga, lokasi, badge, sold) ──────────────────────────────
+  // ── Filter (jenis, harga, lokasi 4-level, badge, sold) ──────────────────────
   const [filterOpen, setFilterOpen] = useState(false);
   const [jenisSet, setJenisSet] = useState<Set<string>>(new Set());
+  // Lokasi cascading — pilih provinsi membatasi opsi kabupaten, dst. Opsi diambil
+  // dari data properti yang sudah dimuat (bukan /api/locations) supaya tiap opsi
+  // dijamin punya minimal 1 properti — konsisten dengan pendekatan filter client-side lain di halaman ini.
+  const [provinsiFilter, setProvinsiFilter] = useState('');
   const [kabupatenFilter, setKabupatenFilter] = useState('');
+  const [kecamatanFilter, setKecamatanFilter] = useState('');
+  const [kelurahanFilter, setKelurahanFilter] = useState('');
   const [hargaMin, setHargaMin] = useState('');
   const [hargaMax, setHargaMax] = useState('');
   const [badgeSet, setBadgeSet] = useState<Set<BadgeKey>>(new Set());
@@ -164,8 +172,18 @@ export default function AdminViralFramePage() {
 
   const toggleJenis = (j: string) => setJenisSet(prev => { const n = new Set(prev); n.has(j) ? n.delete(j) : n.add(j); return n; });
   const toggleBadge = (b: BadgeKey) => setBadgeSet(prev => { const n = new Set(prev); n.has(b) ? n.delete(b) : n.add(b); return n; });
-  const activeFilterCount = jenisSet.size + badgeSet.size + (kabupatenFilter ? 1 : 0) + (hargaMin ? 1 : 0) + (hargaMax ? 1 : 0) + (soldFilter !== 'all' ? 1 : 0);
-  const resetFilters = () => { setJenisSet(new Set()); setKabupatenFilter(''); setHargaMin(''); setHargaMax(''); setBadgeSet(new Set()); setSoldFilter('all'); };
+  const activeFilterCount = jenisSet.size + badgeSet.size
+    + (provinsiFilter ? 1 : 0) + (kabupatenFilter ? 1 : 0) + (kecamatanFilter ? 1 : 0) + (kelurahanFilter ? 1 : 0)
+    + (hargaMin ? 1 : 0) + (hargaMax ? 1 : 0) + (soldFilter !== 'all' ? 1 : 0);
+  const resetFilters = () => {
+    setJenisSet(new Set());
+    setProvinsiFilter(''); setKabupatenFilter(''); setKecamatanFilter(''); setKelurahanFilter('');
+    setHargaMin(''); setHargaMax(''); setBadgeSet(new Set()); setSoldFilter('all');
+  };
+  // Reset level anak saat level induk berubah — cegah kombinasi filter yang sudah tidak valid
+  const setProvinsi = (v: string) => { setProvinsiFilter(v); setKabupatenFilter(''); setKecamatanFilter(''); setKelurahanFilter(''); };
+  const setKabupaten = (v: string) => { setKabupatenFilter(v); setKecamatanFilter(''); setKelurahanFilter(''); };
+  const setKecamatan = (v: string) => { setKecamatanFilter(v); setKelurahanFilter(''); };
   // R9 batch
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [batchRunning, setBatchRunning] = useState(false);
@@ -253,7 +271,9 @@ export default function AdminViralFramePage() {
 
   useEffect(() => { fetchProperties(); }, [fetchProperties]);
   useEffect(() => { refreshStatus(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setDisplayLimit(24); }, [search, onlyEmpty, jenisSet, kabupatenFilter, hargaMin, hargaMax, badgeSet, soldFilter]);
+  useEffect(() => {
+    setDisplayLimit(24);
+  }, [search, onlyEmpty, jenisSet, provinsiFilter, kabupatenFilter, kecamatanFilter, kelurahanFilter, hargaMin, hargaMax, badgeSet, soldFilter]);
 
   const contentStatus = (id: number): 'video' | 'script' | 'empty' =>
     withVideo.has(id) ? 'video' : withScript.has(id) ? 'script' : 'empty';
@@ -270,15 +290,39 @@ export default function AdminViralFramePage() {
     return dismissedAt < latest;
   };
 
-  const kabupatenOptions = useMemo(() => {
-    const set = new Set(properties.map(p => p.kabupaten).filter(Boolean));
-    return [...set].sort();
+  // Opsi cascading — tiap level dibatasi oleh pilihan level di atasnya, dan hanya
+  // menampilkan nilai yang benar-benar dipakai oleh properti yang sudah dimuat.
+  const provinsiOptions = useMemo(() => {
+    return [...new Set(properties.map(p => p.provinsi).filter(Boolean))].sort();
   }, [properties]);
+
+  const kabupatenOptions = useMemo(() => {
+    const scoped = provinsiFilter ? properties.filter(p => p.provinsi === provinsiFilter) : properties;
+    return [...new Set(scoped.map(p => p.kabupaten).filter(Boolean))].sort();
+  }, [properties, provinsiFilter]);
+
+  const kecamatanOptions = useMemo(() => {
+    let scoped = properties;
+    if (provinsiFilter) scoped = scoped.filter(p => p.provinsi === provinsiFilter);
+    if (kabupatenFilter) scoped = scoped.filter(p => p.kabupaten === kabupatenFilter);
+    return [...new Set(scoped.map(p => p.kecamatan).filter(Boolean))].sort();
+  }, [properties, provinsiFilter, kabupatenFilter]);
+
+  const kelurahanOptions = useMemo(() => {
+    let scoped = properties;
+    if (provinsiFilter) scoped = scoped.filter(p => p.provinsi === provinsiFilter);
+    if (kabupatenFilter) scoped = scoped.filter(p => p.kabupaten === kabupatenFilter);
+    if (kecamatanFilter) scoped = scoped.filter(p => p.kecamatan === kecamatanFilter);
+    return [...new Set(scoped.map(p => p.kelurahan).filter(Boolean))].sort();
+  }, [properties, provinsiFilter, kabupatenFilter, kecamatanFilter]);
 
   const filtered = properties.filter(p => {
     if (onlyEmpty && contentStatus(p.id) !== 'empty') return false;
     if (jenisSet.size > 0 && !jenisSet.has(p.jenis_properti)) return false;
+    if (provinsiFilter && p.provinsi !== provinsiFilter) return false;
     if (kabupatenFilter && p.kabupaten !== kabupatenFilter) return false;
+    if (kecamatanFilter && p.kecamatan !== kecamatanFilter) return false;
+    if (kelurahanFilter && p.kelurahan !== kelurahanFilter) return false;
     const min = parseInt(hargaMin, 10);
     const max = parseInt(hargaMax, 10);
     if (Number.isInteger(min) && min > 0 && p.harga < min) return false;
@@ -388,14 +432,31 @@ export default function AdminViralFramePage() {
               </div>
             </div>
 
-            {/* Lokasi */}
+            {/* Lokasi — cascading 4 level, tiap level membatasi opsi level berikutnya */}
             <div>
-              <div className="text-xs font-semibold text-[#64748B] mb-1.5">Kabupaten/Kota</div>
-              <select value={kabupatenFilter} onChange={e => setKabupatenFilter(e.target.value)}
-                className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
-                <option value="">Semua lokasi</option>
-                {kabupatenOptions.map(k => <option key={k} value={k}>{k}</option>)}
-              </select>
+              <div className="text-xs font-semibold text-[#64748B] mb-1.5">Lokasi</div>
+              <div className="grid grid-cols-2 gap-2">
+                <select value={provinsiFilter} onChange={e => setProvinsi(e.target.value)}
+                  className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
+                  <option value="">Semua Provinsi</option>
+                  {provinsiOptions.map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+                <select value={kabupatenFilter} onChange={e => setKabupaten(e.target.value)}
+                  className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
+                  <option value="">Semua Kab./Kota</option>
+                  {kabupatenOptions.map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+                <select value={kecamatanFilter} onChange={e => setKecamatan(e.target.value)}
+                  className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
+                  <option value="">Semua Kecamatan</option>
+                  {kecamatanOptions.map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+                <select value={kelurahanFilter} onChange={e => setKelurahanFilter(e.target.value)}
+                  className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
+                  <option value="">Semua Kel./Desa</option>
+                  {kelurahanOptions.map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
             </div>
 
             {/* Badge */}
