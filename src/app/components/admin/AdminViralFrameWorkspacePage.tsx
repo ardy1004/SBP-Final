@@ -1392,14 +1392,14 @@ function AIGenerateTab({
 }
 
 // ─── Halaman utama ──────────────────────────────────────────────────────────
-// ── Caption Studio (Tahap 2): N variasi caption × 5 kombinasi hashtag ──
+// ── Caption Studio (Tahap 2): N variasi, tiap variasi = 1 caption + 1 baris hashtag (5 kombinasi) ──
 function CaptionStudio({ propertyId, platform, registerInstruction }: {
   propertyId: number; platform: string; registerInstruction: string;
 }) {
   const [variasi, setVariasi] = useState(3);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [result, setResult] = useState<{ caption: string; hashtag_sets: string[] }[]>([]);
+  const [result, setResult] = useState<{ caption: string; hashtags: string }[]>([]);
   const [copied, setCopied] = useState('');
 
   const copy = async (text: string, key: string) => {
@@ -1413,7 +1413,7 @@ function CaptionStudio({ propertyId, platform, registerInstruction }: {
         body: JSON.stringify({ property_id: propertyId, variasi, platform, register_instruction: registerInstruction }),
       });
       // Sukses = stream NDJSON (anti wall-clock 30s); error validasi = JSON biasa.
-      const data = await readNdjsonFinal<{ captions: { caption: string; hashtag_sets: string[] }[] }>(r);
+      const data = await readNdjsonFinal<{ captions: { caption: string; hashtags: string }[] }>(r);
       setResult(data.captions ?? []);
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Gagal'); } finally { setLoading(false); }
   };
@@ -1435,7 +1435,7 @@ function CaptionStudio({ propertyId, platform, registerInstruction }: {
           </button>
         </div>
       </div>
-      <p className="text-[11px] text-[#94A3B8]">Setiap caption disertai 5 kombinasi hashtag (lokasi + jenis + brand). Bisa di-generate ulang.</p>
+      <p className="text-[11px] text-[#94A3B8]">Tiap variasi = 1 caption + 1 baris hashtag (kombinasi 5, lokasi + jenis + brand). Bisa di-generate ulang.</p>
       {error && <p className="text-sm text-red-600">{error}</p>}
       {result.map((c, i) => (
         <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-[#F8FAFC]">
@@ -1445,16 +1445,14 @@ function CaptionStudio({ propertyId, platform, registerInstruction }: {
               {copied === `cap-${i}` ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
             </button>
           </div>
-          <div className="space-y-1">
-            {c.hashtag_sets.map((h, hi) => (
-              <div key={hi} className="flex items-center justify-between gap-2 bg-white rounded-lg px-2 py-1 border border-gray-100">
-                <span className="text-[11px] text-[#1565C0] font-medium truncate">{h}</span>
-                <button onClick={() => copy(h, `h-${i}-${hi}`)} className="flex-shrink-0 text-[10px] font-semibold text-[#64748B] flex items-center gap-1">
-                  {copied === `h-${i}-${hi}` ? <Check size={11} /> : <Copy size={11} />}
-                </button>
-              </div>
-            ))}
-          </div>
+          {c.hashtags && (
+            <div className="flex items-center justify-between gap-2 bg-white rounded-lg px-2 py-1 border border-gray-100">
+              <span className="text-[11px] text-[#1565C0] font-medium truncate">{c.hashtags}</span>
+              <button onClick={() => copy(c.hashtags, `h-${i}`)} className="flex-shrink-0 text-[10px] font-semibold text-[#64748B] flex items-center gap-1">
+                {copied === `h-${i}` ? <Check size={11} /> : <Copy size={11} />}
+              </button>
+            </div>
+          )}
         </div>
       ))}
     </div>

@@ -43,7 +43,7 @@ export async function onRequestPost(context) {
   if (!p) return jsonError('Properti tidak ditemukan', 404);
 
   const system = `Kamu copywriter media sosial properti Indonesia. Output HANYA JSON valid, mulai { akhiri }, tanpa markdown.`;
-  const user = `Buat ${variasi} variasi CAPTION untuk ${platform} mempromosikan properti berikut. Setiap caption punya 5 KOMBINASI HASHTAG berbeda.
+  const user = `Buat ${variasi} variasi CAPTION untuk ${platform} mempromosikan properti berikut. Setiap caption (variasi) punya SATU baris hashtag berisi kombinasi 5 hashtag — BUKAN beberapa pilihan hashtag per caption.
 
 Data properti:
 - Judul: ${p.title}
@@ -56,12 +56,13 @@ ${p.deskripsi ? `- Deskripsi: ${String(p.deskripsi).slice(0, 200)}` : ''}
 Aturan:
 - Caption menarik, ada hook di kalimat pertama, sebut 1-2 keunggulan nyata + lokasi + ajakan (DM/WA). 2-4 kalimat.
 ${registerInstruction ? `- GAYA BAHASA: ${registerInstruction}` : ''}
-- Setiap "hashtag_sets" berisi 5 string; tiap string 5-8 hashtag dipisah spasi, campurkan: lokasi (${p.kecamatan}/${p.kabupaten}/Jogja), jenis (${p.jenis_properti}), niat beli (rumahdijual/propertijogja/investasiproperti), dan brand (#salambumiproperty #salambumi). Tanpa duplikat antar-kombinasi.
+- Field "hashtags" = SATU string berisi TEPAT 5 hashtag dipisah spasi, campurkan: lokasi (${p.kecamatan}/${p.kabupaten}/Jogja), jenis (${p.jenis_properti}), niat beli (rumahdijual/propertijogja/investasiproperti), dan brand (#salambumiproperty #salambumi).
+- Jika ${variasi} > 1, tiap variasi (caption + hashtags) WAJIB berbeda kombinasi dari variasi lain — jangan mengulang kombinasi hashtag yang sama persis.
 - JANGAN mengarang fasilitas yang tidak disebutkan.
 
 Format JSON WAJIB:
-{"captions":[{"caption":"...","hashtag_sets":["#a #b #c #d #e","#...","#...","#...","#..."]}]}
-Jumlah item captions = ${variasi}. Setiap hashtag_sets berisi tepat 5 string.`;
+{"captions":[{"caption":"...","hashtags":"#a #b #c #d #e"}]}
+Jumlah item captions = ${variasi}. Setiap "hashtags" berisi TEPAT 5 hashtag dalam satu string.`;
 
   const tryOrder = [chosenProvider, ...PROVIDER_ORDER.filter(x => x !== chosenProvider)];
 
@@ -103,9 +104,13 @@ Jumlah item captions = ${variasi}. Setiap hashtag_sets berisi tepat 5 string.`;
         send({ done: true, error: 'Respons AI bukan JSON valid. Coba lagi.' });
         return;
       }
+      // hashtags = SATU string per caption (kombinasi 5 hashtag). Fallback bila
+      // model masih terbawa format lama (array hashtag_sets) — ambil elemen pertama.
       const captions = Array.isArray(parsed.captions) ? parsed.captions.slice(0, variasi).map(c => ({
         caption: String(c.caption ?? '').slice(0, 800),
-        hashtag_sets: Array.isArray(c.hashtag_sets) ? c.hashtag_sets.slice(0, 5).map(h => String(h).slice(0, 300)) : [],
+        hashtags: typeof c.hashtags === 'string'
+          ? c.hashtags.slice(0, 300)
+          : String(Array.isArray(c.hashtag_sets) ? c.hashtag_sets[0] ?? '' : '').slice(0, 300),
       })) : [];
       if (captions.length === 0) {
         send({ done: true, error: 'AI tidak mengembalikan caption. Coba lagi.' });
