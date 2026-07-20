@@ -1437,24 +1437,20 @@ function CaptionStudio({ propertyId, platform, registerInstruction }: {
       </div>
       <p className="text-[11px] text-[#94A3B8]">Tiap variasi = 1 caption + 1 baris hashtag (kombinasi 5, lokasi + jenis + brand). Bisa di-generate ulang.</p>
       {error && <p className="text-sm text-red-600">{error}</p>}
-      {result.map((c, i) => (
-        <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-[#F8FAFC]">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-sm text-[#0F172A] leading-relaxed whitespace-pre-wrap">{c.caption}</p>
-            <button onClick={() => copy(c.caption, `cap-${i}`)} className="flex-shrink-0 text-[11px] font-semibold text-[#1565C0] flex items-center gap-1">
-              {copied === `cap-${i}` ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
-            </button>
-          </div>
-          {c.hashtags && (
-            <div className="flex items-center justify-between gap-2 bg-white rounded-lg px-2 py-1 border border-gray-100">
-              <span className="text-[11px] text-[#1565C0] font-medium truncate">{c.hashtags}</span>
-              <button onClick={() => copy(c.hashtags, `h-${i}`)} className="flex-shrink-0 text-[10px] font-semibold text-[#64748B] flex items-center gap-1">
-                {copied === `h-${i}` ? <Check size={11} /> : <Copy size={11} />}
+      {result.map((c, i) => {
+        const combined = c.hashtags ? `${c.caption}\n\n${c.hashtags}` : c.caption;
+        return (
+          <div key={i} className="border border-gray-100 rounded-xl p-3 space-y-2 bg-[#F8FAFC]">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-sm text-[#0F172A] leading-relaxed whitespace-pre-wrap">{c.caption}</p>
+              <button onClick={() => copy(combined, `cap-${i}`)} className="flex-shrink-0 text-[11px] font-semibold text-[#1565C0] flex items-center gap-1">
+                {copied === `cap-${i}` ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy Semua</>}
               </button>
             </div>
-          )}
-        </div>
-      ))}
+            {c.hashtags && <p className="text-[11px] text-[#1565C0] font-medium">{c.hashtags}</p>}
+          </div>
+        );
+      })}
     </div>
   );
 }
