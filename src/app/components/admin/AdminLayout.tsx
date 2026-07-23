@@ -169,7 +169,14 @@ export default function AdminLayout() {
   }
 
   const SidebarContent = ({ mobile = false, collapsed: isCollapsed = false }: { mobile?: boolean; collapsed?: boolean }) => (
-    <aside className={`flex flex-col h-full ${mobile ? '' : isCollapsed ? 'w-[72px]' : 'w-56'} transition-[width] duration-200`} style={{ background: '#0B2447' }}>
+    <aside className={`relative flex flex-col h-full ${mobile ? '' : isCollapsed ? 'w-[72px]' : 'w-56'} transition-[width] duration-200`} style={{ background: '#0B2447' }}>
+      {!mobile && (
+        <button onClick={toggleCollapsed}
+          title={isCollapsed ? 'Perluas sidebar' : 'Ciutkan sidebar'}
+          className="absolute -right-3 top-6 z-10 w-6 h-6 rounded-full bg-[#1565C0] border-2 border-[#0B2447] text-white flex items-center justify-center hover:bg-[#0D47A1] transition-colors shadow-md">
+          {isCollapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
+        </button>
+      )}
       <div className={`flex items-center gap-3 px-5 py-5 border-b border-white/10 ${isCollapsed ? 'justify-center px-0' : ''}`}>
         <div className="w-8 h-8 rounded-lg bg-[#1565C0] flex items-center justify-center flex-shrink-0">
           <Shield size={16} className="text-white" />
@@ -213,17 +220,6 @@ export default function AdminLayout() {
           </NavLink>
         ))}
       </nav>
-
-      {!mobile && (
-        <div className="px-3 pb-2">
-          <button onClick={toggleCollapsed}
-            title={isCollapsed ? 'Perluas sidebar' : 'Ciutkan sidebar'}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors w-full ${isCollapsed ? 'justify-center' : ''}`}>
-            {isCollapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
-            {!isCollapsed && 'Ciutkan'}
-          </button>
-        </div>
-      )}
 
       <div className="px-3 pb-4 border-t border-white/10 pt-4">
         <button onClick={logout}
