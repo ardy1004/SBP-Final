@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router';
 import {
   LayoutDashboard, List, Users, LogOut, Menu, X, Bell, Shield,
   FileText, Star, BookOpen, Briefcase, Image, Settings, MapPin, Video, AlertTriangle,
+  ChevronLeft, ChevronRight,
 } from 'lucide-react';
 
 interface AdminUser {
@@ -38,6 +39,7 @@ function relTime(iso: string): string {
 export default function AdminLayout() {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [admin, setAdmin] = useState<AdminUser | null>(null);
   const [checking, setChecking] = useState(true);
   const [leadsBadge, setLeadsBadge] = useState(0);
@@ -57,6 +59,19 @@ export default function AdminLayout() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('sbp_admin_sidebar_collapsed');
+    if (saved === '1') setCollapsed(true);
+  }, []);
+
+  const toggleCollapsed = () => {
+    setCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('sbp_admin_sidebar_collapsed', next ? '1' : '0');
+      return next;
+    });
+  };
 
   useEffect(() => {
     fetch('/api/admin/me', { credentials: 'include' })
@@ -153,16 +168,18 @@ export default function AdminLayout() {
     );
   }
 
-  const SidebarContent = ({ mobile = false }: { mobile?: boolean }) => (
-    <aside className={`flex flex-col h-full ${mobile ? '' : 'w-56'}`} style={{ background: '#0B2447' }}>
-      <div className="flex items-center gap-3 px-5 py-5 border-b border-white/10">
+  const SidebarContent = ({ mobile = false, collapsed: isCollapsed = false }: { mobile?: boolean; collapsed?: boolean }) => (
+    <aside className={`flex flex-col h-full ${mobile ? '' : isCollapsed ? 'w-[72px]' : 'w-56'} transition-[width] duration-200`} style={{ background: '#0B2447' }}>
+      <div className={`flex items-center gap-3 px-5 py-5 border-b border-white/10 ${isCollapsed ? 'justify-center px-0' : ''}`}>
         <div className="w-8 h-8 rounded-lg bg-[#1565C0] flex items-center justify-center flex-shrink-0">
           <Shield size={16} className="text-white" />
         </div>
-        <div className="min-w-0">
-          <div className="font-display font-bold text-white text-sm">SBP Admin</div>
-          <div className="text-white/40 text-xs truncate">{admin?.email ?? ''}</div>
-        </div>
+        {!isCollapsed && (
+          <div className="min-w-0">
+            <div className="font-display font-bold text-white text-sm">SBP Admin</div>
+            <div className="text-white/40 text-xs truncate">{admin?.email ?? ''}</div>
+          </div>
+        )}
         {mobile && (
           <button onClick={() => setSidebarOpen(false)} className="ml-auto text-white/40 hover:text-white flex-shrink-0">
             <X size={18} />
@@ -174,27 +191,46 @@ export default function AdminLayout() {
         {navItems.map(({ to, label, icon: Icon, end, badge }) => (
           <NavLink key={to} to={to} end={end}
             onClick={() => setSidebarOpen(false)}
+            title={isCollapsed ? label : undefined}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+              `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors relative ${
+                isCollapsed ? 'justify-center' : ''
+              } ${
                 isActive ? 'bg-[#1565C0] text-white' : 'text-white/60 hover:text-white hover:bg-white/5'
               }`
             }>
             <Icon size={17} />
-            <span className="flex-1">{label}</span>
+            {!isCollapsed && <span className="flex-1">{label}</span>}
             {badge > 0 && (
-              <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#EF4444] text-white text-[10px] font-bold flex items-center justify-center">
-                {badge > 99 ? '99+' : badge}
+              <span className={
+                isCollapsed
+                  ? 'absolute top-1 right-1 min-w-[8px] h-[8px] rounded-full bg-[#EF4444]'
+                  : 'min-w-[18px] h-[18px] px-1 rounded-full bg-[#EF4444] text-white text-[10px] font-bold flex items-center justify-center'
+              }>
+                {!isCollapsed && (badge > 99 ? '99+' : badge)}
               </span>
             )}
           </NavLink>
         ))}
       </nav>
 
+      {!mobile && (
+        <div className="px-3 pb-2">
+          <button onClick={toggleCollapsed}
+            title={isCollapsed ? 'Perluas sidebar' : 'Ciutkan sidebar'}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors w-full ${isCollapsed ? 'justify-center' : ''}`}>
+            {isCollapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+            {!isCollapsed && 'Ciutkan'}
+          </button>
+        </div>
+      )}
+
       <div className="px-3 pb-4 border-t border-white/10 pt-4">
         <button onClick={logout}
-          className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors w-full">
+          title={isCollapsed ? 'Keluar' : undefined}
+          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors w-full ${isCollapsed ? 'justify-center' : ''}`}>
           <LogOut size={17} />
-          Keluar
+          {!isCollapsed && 'Keluar'}
         </button>
       </div>
     </aside>
@@ -203,8 +239,8 @@ export default function AdminLayout() {
   return (
     <div className="flex h-screen overflow-hidden bg-[#F0F4F8]">
       {/* Desktop Sidebar */}
-      <div className="hidden md:flex flex-col h-full w-56 flex-shrink-0 shadow-xl">
-        <SidebarContent />
+      <div className={`hidden md:flex flex-col h-full ${collapsed ? 'w-[72px]' : 'w-56'} flex-shrink-0 shadow-xl transition-[width] duration-200`}>
+        <SidebarContent collapsed={collapsed} />
       </div>
 
       {/* Mobile Sidebar overlay */}
