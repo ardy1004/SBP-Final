@@ -190,12 +190,13 @@ export default function AdminSettingsPage() {
   const inputClassNoPR = 'w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0]/20 focus:border-[#1565C0]';
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-6xl">
       <div>
         <h1 className="font-display text-xl font-bold text-[#0F172A]">Pengaturan</h1>
         <p className="text-[#64748B] text-sm mt-0.5">Kelola akun, keamanan, dan integrasi tracking</p>
       </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* ── Info Akun ── */}
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
         <div className="flex items-center gap-3 mb-4">
@@ -239,7 +240,7 @@ export default function AdminSettingsPage() {
       </div>
 
       {/* ── Tracking & Analytics ── */}
-      <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+      <div className="lg:col-span-2 bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
         <div className="flex items-center gap-3 mb-5">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#FFF3E0]"><BarChart2 size={17} color="#F97316" /></div>
           <div><h2 className="font-display font-semibold text-[#0F172A]">Tracking & Analytics</h2><p className="text-xs text-[#64748B]">Meta Pixel, GA4, GTM, Search Console</p></div>
@@ -373,7 +374,7 @@ export default function AdminSettingsPage() {
       </div>
 
       {/* ── AI Providers (ViralFrame) ── */}
-      <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+      <div className="lg:col-span-2 bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
         <div className="flex items-center gap-3 mb-5">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#ECFDF5]"><KeyRound size={17} color="#10B981" /></div>
           <div>
@@ -427,7 +428,10 @@ export default function AdminSettingsPage() {
         </div>
       </div>
 
-      <BadgeLogoSettings />
+      <div className="lg:col-span-2">
+        <BadgeLogoSettings />
+      </div>
+      </div>
     </div>
   );
 }
