@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router';
+import { Link } from 'react-router';
 import {
   Search, Filter, ImageOff, Video, X, Sparkles, PenLine, Clapperboard,
   SlidersHorizontal, ChevronDown, ChevronUp, RotateCcw, Crown, Award, Flame, Star,
@@ -64,11 +64,13 @@ function coverSrc(url: string | null) {
 
 interface SelectedProperty { id: number; judul: string }
 
-function ModeSelectionModal({ property, onClose, onPick }: {
+function ModeSelectionModal({ property, onClose }: {
   property: SelectedProperty;
   onClose: () => void;
-  onPick: (mode: 'ai-generate' | 'manual' | 'video-vo' | 'youtube-long') => void;
 }) {
+  const hrefFor = (mode: 'ai-generate' | 'manual' | 'video-vo' | 'youtube-long') =>
+    mode === 'manual' ? `/admin/viralframe/${property.id}` : `/admin/viralframe/${property.id}?mode=${mode}`;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
@@ -84,9 +86,10 @@ function ModeSelectionModal({ property, onClose, onPick }: {
         </div>
 
         <div className="space-y-3">
-          <button
-            onClick={() => onPick('ai-generate')}
-            className="w-full text-left p-4 rounded-xl border-2 border-[#1565C0]/30 bg-[#F0F7FF] hover:border-[#1565C0] transition-colors"
+          <Link
+            to={hrefFor('ai-generate')}
+            onClick={onClose}
+            className="block w-full text-left p-4 rounded-xl border-2 border-[#1565C0]/30 bg-[#F0F7FF] hover:border-[#1565C0] transition-colors"
           >
             <div className="flex items-center gap-2 mb-1">
               <Sparkles size={16} className="text-[#1565C0]" />
@@ -95,11 +98,12 @@ function ModeSelectionModal({ property, onClose, onPick }: {
             </div>
             <p className="text-xs text-[#64748B] mb-2">Gemini / Groq / OpenRouter / DeepSeek dengan fallback otomatis. Lewat 3 langkah singkat (foto + karakter) untuk hasil akurat, lalu naskah per-scene siap pakai.</p>
             <span className="text-xs font-semibold text-[#1565C0]">Mulai →</span>
-          </button>
+          </Link>
 
-          <button
-            onClick={() => onPick('manual')}
-            className="w-full text-left p-4 rounded-xl border border-gray-200 hover:border-[#1565C0]/40 hover:bg-gray-50 transition-colors"
+          <Link
+            to={hrefFor('manual')}
+            onClick={onClose}
+            className="block w-full text-left p-4 rounded-xl border border-gray-200 hover:border-[#1565C0]/40 hover:bg-gray-50 transition-colors"
           >
             <div className="flex items-center gap-2 mb-1">
               <PenLine size={16} className="text-[#64748B]" />
@@ -107,11 +111,12 @@ function ModeSelectionModal({ property, onClose, onPick }: {
             </div>
             <p className="text-xs text-[#64748B] mb-2">Kontrol penuh atas setiap detail.</p>
             <span className="text-xs font-semibold text-[#1565C0]">Buat Manual →</span>
-          </button>
+          </Link>
 
-          <button
-            onClick={() => onPick('video-vo')}
-            className="w-full text-left p-4 rounded-xl border border-gray-200 hover:border-[#1565C0]/40 hover:bg-gray-50 transition-colors"
+          <Link
+            to={hrefFor('video-vo')}
+            onClick={onClose}
+            className="block w-full text-left p-4 rounded-xl border border-gray-200 hover:border-[#1565C0]/40 hover:bg-gray-50 transition-colors"
           >
             <div className="flex items-center gap-2 mb-1">
               <Clapperboard size={16} className="text-[#64748B]" />
@@ -119,11 +124,12 @@ function ModeSelectionModal({ property, onClose, onPick }: {
             </div>
             <p className="text-xs text-[#64748B] mb-2">Video + voiceover AI langsung.</p>
             <span className="text-xs font-semibold text-[#1565C0]">Generate →</span>
-          </button>
+          </Link>
 
-          <button
-            onClick={() => onPick('youtube-long')}
-            className="w-full text-left p-4 rounded-xl border-2 border-red-200 bg-red-50/50 hover:border-red-400 transition-colors"
+          <Link
+            to={hrefFor('youtube-long')}
+            onClick={onClose}
+            className="block w-full text-left p-4 rounded-xl border-2 border-red-200 bg-red-50/50 hover:border-red-400 transition-colors"
           >
             <div className="flex items-center gap-2 mb-1">
               <span className="text-base">📺</span>
@@ -132,7 +138,7 @@ function ModeSelectionModal({ property, onClose, onPick }: {
             </div>
             <p className="text-xs text-[#64748B] mb-2">Pilih foto + label + gaya visual/kamera → AI susun storyboard: prompt JSON thumbnail, opening, scene per foto, ending. Siap copy-paste.</p>
             <span className="text-xs font-semibold text-red-500">Generate Storyboard →</span>
-          </button>
+          </Link>
         </div>
       </div>
     </div>
@@ -140,7 +146,6 @@ function ModeSelectionModal({ property, onClose, onPick }: {
 }
 
 export default function AdminViralFramePage() {
-  const navigate = useNavigate();
   const [properties, setProperties] = useState<PropertyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -244,13 +249,6 @@ export default function AdminViralFramePage() {
 
   const openModeModal = (id: number, judul: string) => setSelectedProperty({ id, judul });
   const closeModal = () => setSelectedProperty(null);
-  const handlePickMode = (mode: 'ai-generate' | 'manual' | 'video-vo' | 'youtube-long') => {
-    if (!selectedProperty) return;
-    const id = selectedProperty.id;
-    closeModal();
-    if (mode === 'manual') navigate(`/admin/viralframe/${id}`);
-    else navigate(`/admin/viralframe/${id}?mode=${mode}`);
-  };
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -653,7 +651,6 @@ export default function AdminViralFramePage() {
         <ModeSelectionModal
           property={selectedProperty}
           onClose={closeModal}
-          onPick={handlePickMode}
         />
       )}
     </div>
