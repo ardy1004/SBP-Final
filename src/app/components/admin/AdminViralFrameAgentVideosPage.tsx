@@ -19,6 +19,8 @@ interface AgentVideo {
   duration_sec: number | null;
   bytes: number | null;
   format: string | null;
+  width: number | null;
+  height: number | null;
   status: string;
   post_url: string | null;
   created_at: string;
@@ -32,6 +34,20 @@ function mediaUrl(key: string) {
   return `/api/admin/media?key=${encodeURIComponent(key)}`;
 }
 
+// Klasifikasi aspek rasio otomatis dari dimensi asli video (dari Cloudinary),
+// bukan input manual — supaya tidak pernah salah/lupa diisi.
+type RatioClass = 'vertikal' | 'horizontal' | 'square' | 'lainnya';
+const RATIO_LABEL: Record<RatioClass, string> = {
+  vertikal: 'Vertikal (9:16)', horizontal: 'Horizontal (16:9)', square: 'Square (1:1)', lainnya: 'Lainnya',
+};
+function classifyRatio(width: number | null, height: number | null): RatioClass {
+  if (!width || !height) return 'lainnya';
+  const r = width / height;
+  if (r <= 0.8) return 'vertikal';
+  if (r >= 1.2) return 'horizontal';
+  return 'square';
+}
+
 export default function AdminViralFrameAgentVideosPage() {
   const [characters, setCharacters] = useState<CharacterOption[]>([]);
   const [counts, setCounts] = useState<Record<number, number>>({});
@@ -42,6 +58,7 @@ export default function AdminViralFrameAgentVideosPage() {
   const [edits, setEdits] = useState<Record<number, { caption: string; hashtags: string }>>({});
   const [editingId, setEditingId] = useState<number | null>(null);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [ratioFilter, setRatioFilter] = useState<RatioClass | 'semua'>('semua');
 
   const loadCharacters = useCallback(async () => {
     setLoadingChars(true);
@@ -81,7 +98,14 @@ export default function AdminViralFrameAgentVideosPage() {
   }, []);
 
   useEffect(() => { loadCharacters(); }, [loadCharacters]);
-  useEffect(() => { if (selectedCharId != null) loadVideos(selectedCharId); }, [selectedCharId, loadVideos]);
+  useEffect(() => { if (selectedCharId != null) { setRatioFilter('semua'); loadVideos(selectedCharId); } }, [selectedCharId, loadVideos]);
+
+  const ratioCounts = videos.reduce<Record<RatioClass, number>>((acc, v) => {
+    const k = classifyRatio(v.width, v.height);
+    acc[k] = (acc[k] ?? 0) + 1;
+    return acc;
+  }, { vertikal: 0, horizontal: 0, square: 0, lainnya: 0 });
+  const filteredVideos = ratioFilter === 'semua' ? videos : videos.filter(v => classifyRatio(v.width, v.height) === ratioFilter);
 
   const del = async (id: number) => {
     if (!window.confirm('Hapus video ini? File di Cloudinary juga akan dihapus.')) return;
@@ -149,18 +173,45 @@ export default function AdminViralFrameAgentVideosPage() {
               <p className="text-xs text-[#94A3B8] mt-1">Upload dari halaman workspace properti → Step 4 → tab "Upload Hasil".</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {videos.map(v => {
+            <div className="space-y-3">
+              {/* Filter aspek rasio — otomatis dari dimensi asli video (Cloudinary), bukan input manual */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {(['semua', 'vertikal', 'horizontal', 'square'] as const).map(f => (
+                  <button key={f} onClick={() => setRatioFilter(f)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                      ratioFilter === f ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'bg-white text-[#64748B] border-gray-200 hover:border-[#1565C0]/40'
+                    }`}>
+                    {f === 'semua' ? `Semua (${videos.length})` : `${RATIO_LABEL[f]} (${ratioCounts[f]})`}
+                  </button>
+                ))}
+              </div>
+
+              {filteredVideos.length === 0 ? (
+                <div className="text-center py-16 border border-dashed border-gray-200 rounded-2xl bg-white">
+                  <p className="text-sm text-[#64748B]">Tidak ada video dengan rasio ini.</p>
+                </div>
+              ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredVideos.map(v => {
                 const e = edits[v.id] ?? { caption: '', hashtags: '' };
                 const editing = editingId === v.id;
+                const ratio = classifyRatio(v.width, v.height);
                 return (
                   <div key={v.id} className="border border-gray-100 rounded-2xl overflow-hidden bg-white flex flex-col">
-                    <video src={v.cloudinary_url} controls preload="none" className="w-full bg-black aspect-video" />
+                    <video src={v.cloudinary_url} controls preload="none" className="w-full bg-black"
+                      style={{ aspectRatio: v.width && v.height ? `${v.width} / ${v.height}` : '16 / 9', objectFit: 'contain' }} />
                     <div className="p-3 space-y-2 flex-1 flex flex-col">
                       <div className="flex items-center justify-between gap-2">
                         <Link to={`/admin/viralframe/${v.property_id}`} className="min-w-0 group">
                           <div className="text-sm font-medium text-[#0F172A] truncate group-hover:text-[#1565C0]">{v.property_title}</div>
-                          <div className="text-[11px] text-[#94A3B8]">{v.kode_listing} · {v.bytes ? `${(v.bytes / 1024 / 1024).toFixed(1)}MB` : ''} · {new Date(v.created_at).toLocaleDateString('id-ID')}</div>
+                          <div className="text-[11px] text-[#94A3B8] flex items-center gap-1.5 flex-wrap">
+                            <span>{v.kode_listing}</span>
+                            <span>·</span>
+                            <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-[#64748B] font-semibold">{RATIO_LABEL[ratio]}</span>
+                            {v.bytes && <><span>·</span><span>{(v.bytes / 1024 / 1024).toFixed(1)}MB</span></>}
+                            <span>·</span>
+                            <span>{new Date(v.created_at).toLocaleDateString('id-ID')}</span>
+                          </div>
                         </Link>
                         <div className="flex gap-1 flex-shrink-0">
                           <a href={v.cloudinary_url} download target="_blank" rel="noreferrer" className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download"><Download size={14} /></a>
@@ -199,6 +250,8 @@ export default function AdminViralFrameAgentVideosPage() {
                   </div>
                 );
               })}
+              </div>
+              )}
             </div>
           )}
         </div>

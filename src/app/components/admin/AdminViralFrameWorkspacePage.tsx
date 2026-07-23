@@ -1572,6 +1572,7 @@ const VideoLibraryMemo = memo(VideoLibrary);
 interface CharacterOption { id: number; nama: string; foto_url: string }
 interface CloudinaryUploadResult {
   public_id: string; secure_url: string; resource_type?: string; duration?: number; bytes?: number; format?: string;
+  width?: number; height?: number;
   error?: { message: string };
 }
 function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platform, registerInstruction }: {
@@ -1662,6 +1663,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
           cloudinary_public_id: cloudinaryResult.public_id, cloudinary_url: cloudinaryResult.secure_url,
           resource_type: cloudinaryResult.resource_type ?? 'video', duration_sec: cloudinaryResult.duration ?? null,
           bytes: cloudinaryResult.bytes ?? null, format: cloudinaryResult.format ?? null,
+          width: cloudinaryResult.width ?? null, height: cloudinaryResult.height ?? null,
         }),
       });
       const saveJson = await saveRes.json();

@@ -12,11 +12,45 @@ import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 const SELECT_COLS = `
   v.id, v.character_id, v.property_id, v.caption, v.hashtags,
   v.cloudinary_public_id, v.cloudinary_url, v.resource_type,
-  v.duration_sec, v.bytes, v.format, v.status, v.scheduled_at, v.posted_at,
+  v.duration_sec, v.bytes, v.format, v.width, v.height,
+  v.status, v.scheduled_at, v.posted_at,
   v.post_url, v.platform_targets, v.created_at,
   c.nama AS character_nama, c.foto_url AS character_foto_url,
   p.kode_listing, p.title AS property_title
 `;
+
+// Video lama (sebelum kolom width/height ada) tidak punya dimensi tersimpan.
+// Backfill otomatis best-effort dari Cloudinary Admin API saat pertama kali
+// terlihat lagi di GET, supaya langsung ikut terklasifikasi tanpa upload ulang.
+async function backfillDimensions(env, rows) {
+  const missing = rows.filter(r => r.width == null || r.height == null);
+  if (missing.length === 0) return;
+
+  const cloudName = env.CLOUDINARY_CLOUD_NAME;
+  const apiKey = env.CLOUDINARY_API_KEY;
+  const apiSecret = env.CLOUDINARY_API_SECRET;
+  if (!cloudName || !apiKey || !apiSecret) return; // belum dikonfigurasi, lewati diam-diam
+
+  const auth = 'Basic ' + btoa(`${apiKey}:${apiSecret}`);
+
+  await Promise.all(missing.map(async (row) => {
+    try {
+      const res = await fetch(
+        `https://api.cloudinary.com/v1_1/${cloudName}/resources/${row.resource_type || 'video'}/upload/${row.cloudinary_public_id}`,
+        { headers: { Authorization: auth } }
+      );
+      if (!res.ok) return;
+      const info = await res.json();
+      if (!info.width || !info.height) return;
+      await env.DB.prepare('UPDATE viralframe_agent_videos SET width = ?, height = ? WHERE id = ?')
+        .bind(info.width, info.height, row.id).run();
+      row.width = info.width;
+      row.height = info.height;
+    } catch (err) {
+      console.error('[vf agent-videos] backfill dimensions', row.id, err.message);
+    }
+  }));
+}
 
 export async function onRequestGet(context) {
   const { request, env } = context;
@@ -43,7 +77,9 @@ export async function onRequestGet(context) {
        LIMIT ? OFFSET ?`
     ).bind(...binds, limit, offset);
     const res = await stmt.all();
-    return jsonOk({ items: res.results ?? [] });
+    const items = res.results ?? [];
+    await backfillDimensions(env, items);
+    return jsonOk({ items });
   } catch (err) {
     console.error('[vf agent-videos] GET', err.message);
     return jsonError('Gagal mengambil daftar video agent', 500);
@@ -70,6 +106,8 @@ export async function onRequestPost(context) {
   const durationSec = body.duration_sec != null ? Number(body.duration_sec) || null : null;
   const bytes = body.bytes != null ? (parseInt(body.bytes, 10) || null) : null;
   const format = typeof body.format === 'string' ? body.format.slice(0, 20) : null;
+  const width = body.width != null ? (parseInt(body.width, 10) || null) : null;
+  const height = body.height != null ? (parseInt(body.height, 10) || null) : null;
 
   const character = await env.DB.prepare('SELECT id FROM viralframe_characters WHERE id = ?').bind(characterId).first().catch(() => null);
   if (!character) return jsonError('Karakter tidak ditemukan', 404);
@@ -79,9 +117,9 @@ export async function onRequestPost(context) {
   try {
     const res = await env.DB.prepare(
       `INSERT INTO viralframe_agent_videos
-        (character_id, property_id, caption, hashtags, cloudinary_public_id, cloudinary_url, resource_type, duration_sec, bytes, format)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`
-    ).bind(characterId, propertyId, caption, hashtags, cloudinaryPublicId, cloudinaryUrl, resourceType, durationSec, bytes, format).run();
+        (character_id, property_id, caption, hashtags, cloudinary_public_id, cloudinary_url, resource_type, duration_sec, bytes, format, width, height)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(characterId, propertyId, caption, hashtags, cloudinaryPublicId, cloudinaryUrl, resourceType, durationSec, bytes, format, width, height).run();
     return jsonOk({ id: res.meta?.last_row_id }, 201);
   } catch (err) {
     console.error('[vf agent-videos] insert', err.message);
