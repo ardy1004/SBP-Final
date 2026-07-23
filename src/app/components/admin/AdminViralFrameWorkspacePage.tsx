@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useSearchParams } from 'react-router';
 import {
   ArrowLeft, ArrowRight, ImageOff, Check, Film, AlertCircle,
-  Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles, History, Trash2, RefreshCw,
+  Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles, History, Trash2, RefreshCw, Upload,
 } from 'lucide-react';
 // JSZip di-dynamic-import di handler (bukan static) agar tidak masuk chunk awal workspace.
 import {
@@ -1568,6 +1568,192 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
 }
 const VideoLibraryMemo = memo(VideoLibrary);
 
+// ── Upload Hasil (Tahap 4): upload video jadi dari AI eksternal ke Cloudinary, tertaut karakter/agent ──
+interface CharacterOption { id: number; nama: string; foto_url: string }
+interface CloudinaryUploadResult {
+  public_id: string; secure_url: string; resource_type?: string; duration?: number; bytes?: number; format?: string;
+  error?: { message: string };
+}
+function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platform, registerInstruction }: {
+  propertyId: number; kodeListing: string; defaultCharacterId: number | null; platform: string; registerInstruction: string;
+}) {
+  const [characters, setCharacters] = useState<CharacterOption[]>([]);
+  const [characterId, setCharacterId] = useState<number | ''>('');
+  const [file, setFile] = useState<File | null>(null);
+  const [caption, setCaption] = useState('');
+  const [hashtags, setHashtags] = useState('');
+  const [capVariasi, setCapVariasi] = useState<{ caption: string; hashtags: string }[]>([]);
+  const [capLoading, setCapLoading] = useState(false);
+  const [capError, setCapError] = useState('');
+  const [progress, setProgress] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetch('/api/admin/viralframe/characters', { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => { if (j.success) setCharacters(j.data?.items ?? []); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (defaultCharacterId != null) setCharacterId(defaultCharacterId);
+  }, [defaultCharacterId]);
+
+  const generateCaption = async () => {
+    setCapLoading(true); setCapError('');
+    try {
+      const r = await fetch('/api/admin/viralframe/captions', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ property_id: propertyId, variasi: 3, platform, register_instruction: registerInstruction }),
+      });
+      const data = await readNdjsonFinal<{ captions: { caption: string; hashtags: string }[] }>(r);
+      setCapVariasi(data.captions ?? []);
+    } catch (e: unknown) { setCapError(e instanceof Error ? e.message : 'Gagal generate caption'); } finally { setCapLoading(false); }
+  };
+
+  const pickVariasi = (c: { caption: string; hashtags: string }) => { setCaption(c.caption); setHashtags(c.hashtags); };
+
+  const reset = () => {
+    setFile(null); setCaption(''); setHashtags(''); setCapVariasi([]); setProgress(0); setError(''); setSuccess(false);
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const upload = async () => {
+    if (!file) { setError('Pilih file video dulu'); return; }
+    if (!characterId) { setError('Pilih karakter/agent dulu'); return; }
+    setUploading(true); setError(''); setSuccess(false); setProgress(0);
+    try {
+      const signRes = await fetch('/api/admin/viralframe/cloudinary-sign', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ property_id: propertyId }),
+      });
+      const signJson = await signRes.json();
+      if (!signJson.success) throw new Error(signJson.error ?? 'Gagal menyiapkan upload');
+      const { cloudName, apiKey, timestamp, folder, signature } = signJson.data;
+
+      const form = new FormData();
+      form.append('file', file);
+      form.append('api_key', apiKey);
+      form.append('timestamp', String(timestamp));
+      form.append('folder', folder);
+      form.append('signature', signature);
+
+      const cloudinaryResult = await new Promise<CloudinaryUploadResult>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`);
+        xhr.upload.onprogress = (ev) => { if (ev.lengthComputable) setProgress(Math.round((ev.loaded / ev.total) * 100)); };
+        xhr.onload = () => {
+          try {
+            const j = JSON.parse(xhr.responseText);
+            if (xhr.status >= 200 && xhr.status < 300) resolve(j); else reject(new Error(j.error?.message ?? 'Upload Cloudinary gagal'));
+          } catch { reject(new Error('Respons Cloudinary tidak valid')); }
+        };
+        xhr.onerror = () => reject(new Error('Koneksi ke Cloudinary gagal'));
+        xhr.send(form);
+      });
+
+      const saveRes = await fetch('/api/admin/viralframe/agent-videos', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          character_id: characterId, property_id: propertyId, caption: caption || null, hashtags: hashtags || null,
+          cloudinary_public_id: cloudinaryResult.public_id, cloudinary_url: cloudinaryResult.secure_url,
+          resource_type: cloudinaryResult.resource_type ?? 'video', duration_sec: cloudinaryResult.duration ?? null,
+          bytes: cloudinaryResult.bytes ?? null, format: cloudinaryResult.format ?? null,
+        }),
+      });
+      const saveJson = await saveRes.json();
+      if (!saveJson.success) throw new Error(saveJson.error ?? 'Gagal menyimpan metadata video');
+      setSuccess(true);
+      reset();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Upload gagal');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4 max-w-2xl">
+      <div>
+        <h3 className="font-display font-bold text-[#0F172A] text-sm mb-1">📤 Upload Hasil Video</h3>
+        <p className="text-xs text-[#64748B]">
+          Sudah generate video di AI eksternal (Veo/Kling/dll) dari prompt di atas dan sudah di-download ke PC?
+          Upload di sini untuk properti <strong>{kodeListing}</strong> supaya tersimpan rapi per agent/karakter —
+          lihat semuanya di halaman <strong>Konten Agent</strong>.
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-[#0F172A] mb-1">File Video</label>
+        <input ref={fileRef} type="file" accept="video/*" onChange={e => setFile(e.target.files?.[0] ?? null)}
+          className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#1565C0]" />
+        {file && <p className="text-[11px] text-[#94A3B8] mt-1">{file.name} · {(file.size / 1024 / 1024).toFixed(1)}MB</p>}
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-[#0F172A] mb-1">Karakter / Agent</label>
+        <select value={characterId} onChange={e => setCharacterId(e.target.value ? parseInt(e.target.value, 10) : '')}
+          className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#1565C0]">
+          <option value="">— Pilih karakter —</option>
+          {characters.map(c => <option key={c.id} value={c.id}>{c.nama}</option>)}
+        </select>
+        {characters.length === 0 && <p className="text-[11px] text-[#94A3B8] mt-1">Belum ada karakter. Buat dulu di Step 3 — Pilih Karakter.</p>}
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <label className="block text-xs font-semibold text-[#0F172A]">Caption &amp; Hashtag</label>
+          <button type="button" onClick={generateCaption} disabled={capLoading}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF] disabled:opacity-50">
+            {capLoading ? <><Loader2 size={12} className="animate-spin" /> Membuat…</> : <><Sparkles size={12} /> Generate dengan AI</>}
+          </button>
+        </div>
+        {capError && <p className="text-xs text-red-600">{capError}</p>}
+        {capVariasi.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {capVariasi.map((c, i) => (
+              <button key={i} type="button" onClick={() => pickVariasi(c)}
+                className="text-left text-[11px] px-2.5 py-1.5 rounded-lg border border-gray-200 hover:border-[#1565C0] hover:bg-[#F0F7FF] max-w-[220px] truncate">
+                {c.caption}
+              </button>
+            ))}
+          </div>
+        )}
+        <textarea value={caption} onChange={e => setCaption(e.target.value)} placeholder="Caption..."
+          className="w-full h-20 text-sm border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#1565C0] resize-y" />
+        <textarea value={hashtags} onChange={e => setHashtags(e.target.value)} placeholder="#hashtag #hashtag ..."
+          className="w-full h-14 text-sm border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#1565C0] resize-y" />
+      </div>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {success && <p className="text-sm text-emerald-600 flex items-center gap-1"><Check size={14} /> Video tersimpan. Lihat di halaman Konten Agent.</p>}
+
+      {uploading && (
+        <div className="w-full h-2 rounded-full bg-gray-100 overflow-hidden">
+          <div className="h-full bg-[#1565C0] transition-all" style={{ width: `${progress}%` }} />
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <button onClick={upload} disabled={uploading || !file}
+          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+          style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+          {uploading ? <><Loader2 size={15} className="animate-spin" /> Mengupload… {progress}%</> : <><Upload size={15} /> Upload Video</>}
+        </button>
+        {(file || caption || hashtags) && !uploading && (
+          <button onClick={reset} className="text-xs text-[#94A3B8] hover:text-[#64748B]">Reset</button>
+        )}
+      </div>
+
+      <p className="text-[11px] text-[#94A3B8]">Batas ukuran file mengikuti kuota akun Cloudinary yang terpasang (free tier ±100MB/file).</p>
+    </div>
+  );
+}
+const UploadAgentVideoMemo = memo(UploadAgentVideo);
+
 // ── YouTube Long — storyboard terpandu (pilih foto+label+style → blok JSON) ──
 const YT_CAMERA = [
   { value: 'drone_gimbal', label: 'Kombinasi drone aerial + gimbal interior yang mulus' },
@@ -2129,7 +2315,7 @@ export default function AdminViralFrameWorkspacePage() {
   const savedPromptRef = useRef<string>('');
 
   // Step 4 — Tab Paste & Validate (Fase V4b)
-  const [step4Tab, setStep4Tab] = useState<'prompt' | 'validate' | 'video_vo' | 'ai_generate' | 'library'>('prompt');
+  const [step4Tab, setStep4Tab] = useState<'prompt' | 'validate' | 'video_vo' | 'ai_generate' | 'library' | 'upload'>('prompt');
   const [pasteRaw, setPasteRaw] = useState('');
   const [valResult, setValResult] = useState<ValidateResult | null>(null);
   const [validData, setValidData] = useState<ParsedJSON | null>(null);
@@ -2921,6 +3107,7 @@ export default function AdminViralFrameWorkspacePage() {
               { v: 'video_vo', label: 'Video VO', icon: <Film size={14} /> },
               { v: 'ai_generate', label: 'AI Generate ✨', icon: <Sparkles size={14} /> },
               { v: 'library', label: 'Library', icon: <Film size={14} /> },
+              { v: 'upload', label: 'Upload Hasil', icon: <Upload size={14} /> },
             ] as const).map(t => (
               <button key={t.v} type="button" onClick={() => setStep4Tab(t.v)}
                 className={`flex items-center gap-1.5 px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
@@ -3052,6 +3239,17 @@ export default function AdminViralFrameWorkspacePage() {
           {/* ── TAB 5: CONTENT LIBRARY ── */}
           {step4Tab === 'library' && prop && (
             <VideoLibraryMemo propertyId={prop.id} />
+          )}
+
+          {/* ── TAB 6: UPLOAD HASIL (Cloudinary, tertaut karakter/agent) ── */}
+          {step4Tab === 'upload' && prop && (
+            <UploadAgentVideoMemo
+              propertyId={prop.id}
+              kodeListing={prop.kode_listing}
+              defaultCharacterId={s3.character?.id ?? null}
+              platform={platformForAI}
+              registerInstruction={REGISTER_INSTRUCTION[s1.register] ?? ''}
+            />
           )}
 
           {/* ── TAB 2: PASTE & VALIDATE ── */}

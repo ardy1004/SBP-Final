@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router';
 import {
   LayoutDashboard, List, Users, LogOut, Menu, X, Bell, Shield,
   FileText, Star, BookOpen, Briefcase, Image, Settings, MapPin, Video, AlertTriangle,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, UserSquare2,
 } from 'lucide-react';
 
 interface AdminUser {
@@ -143,6 +143,7 @@ export default function AdminLayout() {
     { to: '/admin/agreements', label: 'Titip Jual', icon: FileText, end: false, badge: 0 },
     { to: '/admin/listing', label: 'Properti', icon: List, end: false, badge: 0 },
     { to: '/admin/viralframe', label: 'Viral Frame', icon: Video, end: false, badge: 0 },
+    { to: '/admin/viralframe/agent-videos', label: 'Konten Agent', icon: UserSquare2, end: false, badge: 0 },
     { to: '/admin/leads', label: 'Leads', icon: Users, end: false, badge: leadsBadge },
     { to: '/admin/testimoni', label: 'Testimoni', icon: Star, end: false, badge: 0 },
     { to: '/admin/blog', label: 'Blog', icon: BookOpen, end: false, badge: 0 },

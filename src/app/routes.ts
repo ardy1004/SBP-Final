@@ -31,6 +31,7 @@ export default [
     route("admin/listing", "./components/admin/AdminListingPage.tsx"),
     route("admin/listing/:id", "./components/admin/AdminPropertyDetailPage.tsx", { id: "admin-property-detail" }),
     route("admin/viralframe", "./components/admin/AdminViralFramePage.tsx", { id: "admin-viralframe" }),
+    route("admin/viralframe/agent-videos", "./components/admin/AdminViralFrameAgentVideosPage.tsx", { id: "admin-viralframe-agent-videos" }),
     route("admin/viralframe/:id", "./components/admin/AdminViralFrameWorkspacePage.tsx", { id: "admin-viralframe-workspace" }),
     route("admin/leads", "./components/admin/AdminLeadsPage.tsx"),
     route("admin/leads/:id", "./components/admin/AdminLeadDetailPage.tsx", { id: "admin-lead-detail" }),
