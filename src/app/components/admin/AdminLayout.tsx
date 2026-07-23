@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Outlet, NavLink, useNavigate } from 'react-router';
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router';
 import {
   LayoutDashboard, List, Users, LogOut, Menu, X, Bell, Shield,
   FileText, Star, BookOpen, Briefcase, Image, Settings, MapPin, Video, AlertTriangle,
@@ -38,6 +38,7 @@ function relTime(iso: string): string {
 
 export default function AdminLayout() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [admin, setAdmin] = useState<AdminUser | null>(null);
@@ -138,11 +139,12 @@ export default function AdminLayout() {
     return () => document.removeEventListener('mousedown', handler);
   }, [showNotif]);
 
-  const navItems = [
+  const navItems: { to: string; label: string; icon: typeof LayoutDashboard; end: boolean; badge: number; excludePrefix?: string }[] = [
     { to: '/admin', label: 'Ringkasan', icon: LayoutDashboard, end: true,  badge: 0 },
     { to: '/admin/agreements', label: 'Titip Jual', icon: FileText, end: false, badge: 0 },
     { to: '/admin/listing', label: 'Properti', icon: List, end: false, badge: 0 },
-    { to: '/admin/viralframe', label: 'Viral Frame', icon: Video, end: false, badge: 0 },
+    // excludePrefix: jangan aktif kalau path masuk sub-route lain yang punya menu sendiri
+    { to: '/admin/viralframe', label: 'Viral Frame', icon: Video, end: false, badge: 0, excludePrefix: '/admin/viralframe/agent-videos' },
     { to: '/admin/viralframe/agent-videos', label: 'Konten Agent', icon: UserSquare2, end: false, badge: 0 },
     { to: '/admin/leads', label: 'Leads', icon: Users, end: false, badge: leadsBadge },
     { to: '/admin/testimoni', label: 'Testimoni', icon: Star, end: false, badge: 0 },
@@ -196,17 +198,18 @@ export default function AdminLayout() {
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {navItems.map(({ to, label, icon: Icon, end, badge }) => (
+        {navItems.map(({ to, label, icon: Icon, end, badge, excludePrefix }) => (
           <NavLink key={to} to={to} end={end}
             onClick={() => setSidebarOpen(false)}
             title={isCollapsed ? label : undefined}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors relative ${
+            className={({ isActive }) => {
+              const active = isActive && !(excludePrefix && location.pathname.startsWith(excludePrefix));
+              return `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors relative ${
                 isCollapsed ? 'justify-center' : ''
               } ${
-                isActive ? 'bg-[#1565C0] text-white' : 'text-white/60 hover:text-white hover:bg-white/5'
-              }`
-            }>
+                active ? 'bg-[#1565C0] text-white' : 'text-white/60 hover:text-white hover:bg-white/5'
+              }`;
+            }}>
             <Icon size={17} />
             {!isCollapsed && <span className="flex-1">{label}</span>}
             {badge > 0 && (

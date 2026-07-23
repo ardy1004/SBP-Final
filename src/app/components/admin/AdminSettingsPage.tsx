@@ -59,7 +59,17 @@ export default function AdminSettingsPage() {
   const [settingsLayout, setSettingsLayout] = useState<Layout[]>(() => {
     try {
       const saved = localStorage.getItem(SETTINGS_LAYOUT_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed: Layout[] = JSON.parse(saved);
+        // Merge dengan default: kartu baru yang belum ada di layout tersimpan
+        // (ditambahkan di rilis berikutnya) tetap dapat posisi default yang wajar,
+        // bukan ditempatkan asal 1x1 oleh react-grid-layout.
+        const savedKeys = new Set(parsed.map(l => l.i));
+        const missing = DEFAULT_SETTINGS_LAYOUT.filter(d => !savedKeys.has(d.i));
+        const defaultKeys = new Set(DEFAULT_SETTINGS_LAYOUT.map(d => d.i));
+        const valid = parsed.filter(l => defaultKeys.has(l.i)); // buang kartu yang sudah tidak ada
+        return [...valid, ...missing];
+      }
     } catch { /* noop */ }
     return DEFAULT_SETTINGS_LAYOUT;
   });
@@ -71,6 +81,26 @@ export default function AdminSettingsPage() {
     setSettingsLayout(DEFAULT_SETTINGS_LAYOUT);
     try { localStorage.removeItem(SETTINGS_LAYOUT_STORAGE_KEY); } catch { /* noop */ }
   };
+
+  // Di layar sempit: paksa semua kartu full-width & matikan drag/resize (RGL tidak
+  // nyaman dipakai sentuh, dan kartu setengah-lebar terlalu kurus di mobile).
+  const [isNarrow, setIsNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1023px)');
+    const apply = () => setIsNarrow(mq.matches);
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
+  const stackedLayout: Layout[] = (() => {
+    let y = 0;
+    return settingsLayout.map(l => {
+      const item = { ...l, x: 0, y, w: 12 };
+      y += l.h;
+      return item;
+    });
+  })();
+  const effectiveLayout = isNarrow ? stackedLayout : settingsLayout;
 
   // ── Password form state ──
   const [form, setForm] = useState<PasswordForm>({ password_lama: '', password_baru: '', password_baru_konfirmasi: '' });
@@ -239,13 +269,15 @@ export default function AdminSettingsPage() {
 
       <ResponsiveGridLayout
         className="layout"
-        layout={settingsLayout}
-        onLayoutChange={handleSettingsLayoutChange}
+        layout={effectiveLayout}
+        onLayoutChange={isNarrow ? undefined : handleSettingsLayoutChange}
         cols={12}
         rowHeight={20}
         margin={[16, 16]}
         draggableCancel={DRAG_CANCEL_SELECTOR}
         resizeHandles={['se']}
+        isDraggable={!isNarrow}
+        isResizable={!isNarrow}
       >
       {/* ── Info Akun ── */}
       <div key="info-akun" className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 overflow-y-auto">

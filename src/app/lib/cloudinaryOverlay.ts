@@ -56,6 +56,17 @@ export function buildOverlayVideoUrl(baseUrl: string, assets: BadgeAsset[]): str
   return baseUrl.slice(0, insertAt) + transforms + '/' + baseUrl.slice(insertAt);
 }
 
+// Sisipkan fl_attachment supaya browser men-download file alih-alih memutarnya —
+// atribut `download` pada <a> diabaikan untuk URL cross-origin (Cloudinary),
+// jadi pemaksaan attachment harus dari sisi server Cloudinary via transformasi ini.
+export function toAttachmentUrl(url: string): string {
+  const marker = '/upload/';
+  const idx = url.indexOf(marker);
+  if (idx === -1) return url;
+  const insertAt = idx + marker.length;
+  return url.slice(0, insertAt) + 'fl_attachment/' + url.slice(insertAt);
+}
+
 // Ganti ekstensi video jadi .jpg — Cloudinary otomatis render 1 frame video jadi
 // gambar statis. Dipakai untuk preview posisi badge/logo yang ringan (bukan
 // <video autoplay>), karena overlay-nya statis dan tidak butuh gerakan.

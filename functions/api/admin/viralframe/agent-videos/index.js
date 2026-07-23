@@ -8,6 +8,7 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
+import { destroyCloudinaryAsset } from '../../../../_lib/cloudinary.js';
 
 const SELECT_COLS = `
   v.id, v.character_id, v.property_id, v.caption, v.hashtags,
@@ -23,8 +24,12 @@ const SELECT_COLS = `
 // Video lama (sebelum kolom width/height ada) tidak punya dimensi tersimpan.
 // Backfill otomatis best-effort dari Cloudinary Admin API saat pertama kali
 // terlihat lagi di GET, supaya langsung ikut terklasifikasi tanpa upload ulang.
+// Maks backfill per request — Workers dibatasi ±50 subrequest; sisanya kebagian
+// di request berikutnya (data lama makin lengkap tiap kali list dibuka).
+const BACKFILL_MAX_PER_REQUEST = 10;
+
 async function backfillDimensions(env, rows) {
-  const missing = rows.filter(r => r.width == null || r.height == null);
+  const missing = rows.filter(r => r.width == null || r.height == null).slice(0, BACKFILL_MAX_PER_REQUEST);
   if (missing.length === 0) return;
 
   const cloudName = env.CLOUDINARY_CLOUD_NAME;
@@ -124,7 +129,11 @@ export async function onRequestPost(context) {
     return jsonOk({ id: res.meta?.last_row_id }, 201);
   } catch (err) {
     console.error('[vf agent-videos] insert', err.message);
-    return jsonError('Video tersimpan di Cloudinary tapi gagal dicatat DB', 500);
+    // Bersihkan aset yatim di Cloudinary (best-effort) supaya storage tidak terisi
+    // file tanpa catatan DB
+    try { await destroyCloudinaryAsset(env, cloudinaryPublicId, resourceType); }
+    catch (e) { console.error('[vf agent-videos] cleanup orphan', e.message); }
+    return jsonError('Gagal mencatat video ke DB — upload dibatalkan, silakan coba lagi', 500);
   }
 }
 

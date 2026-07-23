@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { useParams, useNavigate, useSearchParams } from 'react-router';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router';
 import {
   ArrowLeft, ArrowRight, ImageOff, Check, Film, AlertCircle,
   Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles, History, Trash2, RefreshCw, Upload,
@@ -1668,8 +1668,8 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
       });
       const saveJson = await saveRes.json();
       if (!saveJson.success) throw new Error(saveJson.error ?? 'Gagal menyimpan metadata video');
-      setSuccess(true);
       reset();
+      setSuccess(true); // setelah reset() — reset() menyetel success=false
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Upload gagal');
     } finally {
@@ -1731,7 +1731,12 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
-      {success && <p className="text-sm text-emerald-600 flex items-center gap-1"><Check size={14} /> Video tersimpan. Lihat di halaman Konten Agent.</p>}
+      {success && (
+        <p className="text-sm text-emerald-600 flex items-center gap-1 flex-wrap">
+          <Check size={14} /> Video tersimpan.
+          <Link to="/admin/viralframe/agent-videos" className="font-semibold underline hover:text-emerald-700">Lihat di halaman Konten Agent →</Link>
+        </p>
+      )}
 
       {uploading && (
         <div className="w-full h-2 rounded-full bg-gray-100 overflow-hidden">

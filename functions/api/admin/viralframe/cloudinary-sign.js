@@ -9,12 +9,7 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
-
-async function sha1Hex(text) {
-  const data = new TextEncoder().encode(text);
-  const digest = await crypto.subtle.digest('SHA-1', data);
-  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
+import { sha1Hex } from '../../../_lib/cloudinary.js';
 
 export async function onRequestPost(context) {
   const { request, env } = context;

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router';
 import { Users, Loader2, Download, Trash2, Pencil, Check, X, Clock, Copy } from 'lucide-react';
-import { buildOverlayVideoUrl, composeOverlaysForProperty, pickStatusBadgeType, type BadgeAsset, type BadgeType } from '../../lib/cloudinaryOverlay';
+import { buildOverlayVideoUrl, composeOverlaysForProperty, pickStatusBadgeType, toAttachmentUrl, type BadgeAsset, type BadgeType } from '../../lib/cloudinaryOverlay';
 
 const STATUS_BADGE_LABEL: Record<BadgeType, string> = {
   sold: 'SOLD', premium: 'Premium', featured: 'Featured', hot: 'Hot', pilihan: 'Pilihan', logo: 'Logo',
@@ -282,7 +282,7 @@ export default function AdminViralFrameAgentVideosPage() {
                           </div>
                         </Link>
                         <div className="flex gap-1 flex-shrink-0">
-                          <a href={displayUrl} download target="_blank" rel="noreferrer" className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download (versi siap-post)"><Download size={14} /></a>
+                          <a href={toAttachmentUrl(displayUrl)} className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download (versi siap-post)"><Download size={14} /></a>
                           <button onClick={() => del(v.id)} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50" title="Hapus"><Trash2 size={14} /></button>
                         </div>
                       </div>
