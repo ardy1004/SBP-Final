@@ -1,5 +1,7 @@
 // POST /api/admin/viralframe/cloudinary-sign
-//   Body opsional: { folder? }
+//   Body opsional: { property_id? } → folder default sbp-viralframe/agent-videos/{id}
+//               atau { folder? } eksplisit (harus diawali "sbp-viralframe/") untuk
+//               kebutuhan lain (mis. upload badge/logo ke sbp-viralframe/badges).
 //   Membuat parameter signed upload Cloudinary (timestamp + signature) supaya
 //   browser bisa upload video langsung ke Cloudinary tanpa lewat Worker
 //   (hindari limit 30 detik wall-clock & buffering file besar) dan tanpa
@@ -27,8 +29,9 @@ export async function onRequestPost(context) {
   let body = {};
   try { body = await request.json(); } catch { /* body opsional */ }
 
+  const explicitFolder = typeof body.folder === 'string' && body.folder.startsWith('sbp-viralframe/') ? body.folder.slice(0, 200) : null;
   const propertyId = parseInt(body.property_id, 10);
-  const folder = `sbp-viralframe/agent-videos/${Number.isInteger(propertyId) && propertyId > 0 ? propertyId : 'misc'}`;
+  const folder = explicitFolder ?? `sbp-viralframe/agent-videos/${Number.isInteger(propertyId) && propertyId > 0 ? propertyId : 'misc'}`;
   const timestamp = Math.floor(Date.now() / 1000);
 
   // Cloudinary signature = SHA1(paramString + api_secret), param diurutkan alfabetis, hanya param yang dikirim ke /upload

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router';
 import { Lock, User, CheckCircle, XCircle, Eye, EyeOff, BarChart2, Plus, Trash2, Edit2, ToggleLeft, ToggleRight, KeyRound } from 'lucide-react';
 import { getAiKeys, saveAiKeys, getAiStatus, type AiProviderId, type AiKeyInfo, type AiStatusInfo } from '../../../lib/api';
+import BadgeLogoSettings from './viralframe/BadgeLogoSettings';
 
 const AI_PROVIDERS: { id: AiProviderId; label: string; hint: string }[] = [
   { id: 'gemini',     label: 'Google Gemini', hint: 'aistudio.google.com/apikey' },
@@ -425,6 +426,8 @@ export default function AdminSettingsPage() {
           </div>
         </div>
       </div>
+
+      <BadgeLogoSettings />
     </div>
   );
 }

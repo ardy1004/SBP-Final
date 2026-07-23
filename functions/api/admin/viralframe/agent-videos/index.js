@@ -16,7 +16,8 @@ const SELECT_COLS = `
   v.status, v.scheduled_at, v.posted_at,
   v.post_url, v.platform_targets, v.created_at,
   c.nama AS character_nama, c.foto_url AS character_foto_url,
-  p.kode_listing, p.title AS property_title
+  p.kode_listing, p.title AS property_title,
+  p.status_sold, p.badge_premium, p.badge_featured, p.badge_hot, p.properti_pilihan
 `;
 
 // Video lama (sebelum kolom width/height ada) tidak punya dimensi tersimpan.

@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router';
-import { Users, Loader2, Download, Trash2, Pencil, Check, X, Clock } from 'lucide-react';
+import { Users, Loader2, Download, Trash2, Pencil, Check, X, Clock, Copy } from 'lucide-react';
+import { buildOverlayVideoUrl, composeOverlaysForProperty, pickStatusBadgeType, type BadgeAsset, type BadgeType } from '../../lib/cloudinaryOverlay';
+
+const STATUS_BADGE_LABEL: Record<BadgeType, string> = {
+  sold: 'SOLD', premium: 'Premium', featured: 'Featured', hot: 'Hot', pilihan: 'Pilihan', logo: 'Logo',
+};
 
 interface CharacterOption {
   id: number;
@@ -28,6 +33,11 @@ interface AgentVideo {
   character_foto_url: string;
   kode_listing: string;
   property_title: string;
+  status_sold: number | null;
+  badge_premium: number | null;
+  badge_featured: number | null;
+  badge_hot: number | null;
+  properti_pilihan: number | null;
 }
 
 function mediaUrl(key: string) {
@@ -65,12 +75,21 @@ export default function AdminViralFrameAgentVideosPage() {
   const [edits, setEdits] = useState<Record<number, { caption: string; hashtags: string }>>({});
   const [editingId, setEditingId] = useState<number | null>(null);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
   const [ratioFilter, setRatioFilter] = useState<RatioClass | 'semua'>('semua');
   const [cardSize, setCardSize] = useState<CardSize>('sedang');
+  const [badgeAssets, setBadgeAssets] = useState<Partial<Record<BadgeType, BadgeAsset>>>({});
 
   useEffect(() => {
     const saved = localStorage.getItem(CARD_SIZE_STORAGE_KEY) as CardSize | null;
     if (saved && saved in CARD_SIZE_PX) setCardSize(saved);
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/admin/viralframe/badges', { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => { if (j.success) setBadgeAssets(Object.fromEntries((j.data?.items ?? []).map((a: BadgeAsset) => [a.type, a]))); })
+      .catch(() => {});
   }, []);
   const changeCardSize = (size: CardSize) => {
     setCardSize(size);
@@ -147,6 +166,16 @@ export default function AdminViralFrameAgentVideosPage() {
 
   const setEdit = (id: number, k: 'caption' | 'hashtags', val: string) =>
     setEdits(prev => ({ ...prev, [id]: { ...(prev[id] ?? { caption: '', hashtags: '' }), [k]: val } }));
+
+  const copyCaption = async (v: AgentVideo) => {
+    const prefix = pickStatusBadgeType(v) === 'sold' ? '[SOLD] ' : '';
+    const text = `${prefix}${v.caption ?? ''}${v.hashtags ? `\n\n${v.hashtags}` : ''}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(v.id);
+      setTimeout(() => setCopiedId(c => (c === v.id ? null : c)), 1500);
+    } catch { /* noop */ }
+  };
 
   return (
     <div className="space-y-5">
@@ -227,9 +256,12 @@ export default function AdminViralFrameAgentVideosPage() {
                 const e = edits[v.id] ?? { caption: '', hashtags: '' };
                 const editing = editingId === v.id;
                 const ratio = classifyRatio(v.width, v.height);
+                const statusBadgeType = pickStatusBadgeType(v);
+                const overlays = composeOverlaysForProperty(badgeAssets, v);
+                const displayUrl = buildOverlayVideoUrl(v.cloudinary_url, overlays);
                 return (
                   <div key={v.id} className="border border-gray-100 rounded-2xl overflow-hidden bg-white flex flex-col">
-                    <video src={v.cloudinary_url} controls preload="none" className="w-full bg-black"
+                    <video key={displayUrl} src={displayUrl} controls preload="none" className="w-full bg-black"
                       style={{ aspectRatio: v.width && v.height ? `${v.width} / ${v.height}` : '16 / 9', objectFit: 'contain' }} />
                     <div className="p-3 space-y-2 flex-1 flex flex-col">
                       <div className="flex items-center justify-between gap-2">
@@ -239,13 +271,18 @@ export default function AdminViralFrameAgentVideosPage() {
                             <span>{v.kode_listing}</span>
                             <span>·</span>
                             <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-[#64748B] font-semibold">{RATIO_LABEL[ratio]}</span>
+                            {statusBadgeType && (
+                              <span className={`px-1.5 py-0.5 rounded-full font-semibold text-white ${statusBadgeType === 'sold' ? 'bg-red-500' : 'bg-[#1565C0]'}`}>
+                                {STATUS_BADGE_LABEL[statusBadgeType]}
+                              </span>
+                            )}
                             {v.bytes && <><span>·</span><span>{(v.bytes / 1024 / 1024).toFixed(1)}MB</span></>}
                             <span>·</span>
                             <span>{new Date(v.created_at).toLocaleDateString('id-ID')}</span>
                           </div>
                         </Link>
                         <div className="flex gap-1 flex-shrink-0">
-                          <a href={v.cloudinary_url} download target="_blank" rel="noreferrer" className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download"><Download size={14} /></a>
+                          <a href={displayUrl} download target="_blank" rel="noreferrer" className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download (versi siap-post)"><Download size={14} /></a>
                           <button onClick={() => del(v.id)} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50" title="Hapus"><Trash2 size={14} /></button>
                         </div>
                       </div>
@@ -266,8 +303,16 @@ export default function AdminViralFrameAgentVideosPage() {
                       ) : (
                         <div className="pt-1 border-t border-gray-50 flex-1">
                           <div className="flex items-start justify-between gap-2">
-                            <p className="text-xs text-[#0F172A] whitespace-pre-wrap line-clamp-3 flex-1">{v.caption || <span className="text-[#94A3B8]">Belum ada caption</span>}</p>
-                            <button onClick={() => setEditingId(v.id)} className="p-1 rounded text-[#94A3B8] hover:text-[#1565C0] flex-shrink-0" title="Edit caption"><Pencil size={12} /></button>
+                            <p className="text-xs text-[#0F172A] whitespace-pre-wrap line-clamp-3 flex-1">
+                              {statusBadgeType === 'sold' && <span className="font-bold text-red-500">[SOLD] </span>}
+                              {v.caption || <span className="text-[#94A3B8]">Belum ada caption</span>}
+                            </p>
+                            <div className="flex gap-1 flex-shrink-0">
+                              <button onClick={() => copyCaption(v)} className="p-1 rounded text-[#94A3B8] hover:text-[#1565C0]" title="Copy caption (dgn prefix [SOLD] jika sold)">
+                                {copiedId === v.id ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                              </button>
+                              <button onClick={() => setEditingId(v.id)} className="p-1 rounded text-[#94A3B8] hover:text-[#1565C0]" title="Edit caption"><Pencil size={12} /></button>
+                            </div>
                           </div>
                           {v.hashtags && <p className="text-[11px] text-[#1565C0] font-medium mt-1 line-clamp-1">{v.hashtags}</p>}
                         </div>
