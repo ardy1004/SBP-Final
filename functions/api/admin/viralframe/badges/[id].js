@@ -1,10 +1,8 @@
-// PATCH  /api/admin/viralframe/badges/:id — update posisi/ukuran (gravity, offset_x, offset_y, width_pct)
+// PATCH  /api/admin/viralframe/badges/:id — update posisi/ukuran (x_pct, y_pct, width_pct — bebas, bukan preset)
 // DELETE /api/admin/viralframe/badges/:id — hapus badge (video kembali tanpa overlay jenis ini)
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
-
-const VALID_GRAVITY = ['north_west', 'north_east', 'south_west', 'south_east', 'center'];
 
 export async function onRequestPatch(context) {
   const { request, env, params } = context;
@@ -15,9 +13,8 @@ export async function onRequestPatch(context) {
   try { body = await request.json(); } catch { return jsonError('Body JSON tidak valid', 400); }
 
   const sets = [], binds = [];
-  if (VALID_GRAVITY.includes(body.gravity)) { sets.push('gravity = ?'); binds.push(body.gravity); }
-  if (body.offset_x != null && Number.isFinite(Number(body.offset_x))) { sets.push('offset_x = ?'); binds.push(Math.round(Number(body.offset_x))); }
-  if (body.offset_y != null && Number.isFinite(Number(body.offset_y))) { sets.push('offset_y = ?'); binds.push(Math.round(Number(body.offset_y))); }
+  if (body.x_pct != null && Number.isFinite(Number(body.x_pct))) { sets.push('x_pct = ?'); binds.push(Math.min(Math.max(Number(body.x_pct), 0), 1)); }
+  if (body.y_pct != null && Number.isFinite(Number(body.y_pct))) { sets.push('y_pct = ?'); binds.push(Math.min(Math.max(Number(body.y_pct), 0), 1)); }
   if (body.width_pct != null && Number.isFinite(Number(body.width_pct))) { sets.push('width_pct = ?'); binds.push(Math.min(Math.max(Number(body.width_pct), 0.02), 1)); }
   if (sets.length === 0) return jsonError('Tidak ada field diupdate', 400);
   sets.push("updated_at = datetime('now')");

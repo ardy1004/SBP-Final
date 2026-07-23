@@ -4,16 +4,16 @@
 // manual). Dipakai di halaman Pengaturan (live preview) dan Konten Agent.
 
 export type BadgeType = 'sold' | 'premium' | 'featured' | 'hot' | 'pilihan' | 'logo';
-export type BadgeGravity = 'north_west' | 'north_east' | 'south_west' | 'south_east' | 'center';
 
 export interface BadgeAsset {
   id: number;
   type: BadgeType;
   cloudinary_public_id: string;
   cloudinary_url: string;
-  gravity: BadgeGravity;
-  offset_x: number;
-  offset_y: number;
+  // Posisi bebas (persentase 0-1 dari pojok kiri-atas video) — bisa di titik mana pun,
+  // bukan cuma preset gravity. Diatur lewat drag langsung di preview (BadgeLogoSettings).
+  x_pct: number;
+  y_pct: number;
   width_pct: number;
 }
 
@@ -42,7 +42,10 @@ export function pickStatusBadgeType(flags: PropertyBadgeFlags): BadgeType | null
 
 function overlaySegment(asset: BadgeAsset): string {
   const id = asset.cloudinary_public_id.replace(/\//g, ':');
-  return `l_${id},g_${asset.gravity},x_${asset.offset_x},y_${asset.offset_y},w_${asset.width_pct},fl_relative/fl_layer_apply`;
+  // g_north_west = titik referensi (0,0) tetap di pojok kiri-atas; fl_relative membuat
+  // x/y/w dibaca sebagai pecahan (0-1) dari dimensi video dasar — jadi x_pct/y_pct
+  // adalah posisi absolut dalam persen, bebas di titik mana pun (bukan preset gravity).
+  return `l_${id},g_north_west,x_${asset.x_pct},y_${asset.y_pct},w_${asset.width_pct},fl_relative/fl_layer_apply`;
 }
 
 // Sisipkan transformasi overlay tepat setelah "/upload/" pada secure_url Cloudinary.

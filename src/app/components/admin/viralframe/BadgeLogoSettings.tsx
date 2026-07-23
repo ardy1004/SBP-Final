@@ -1,48 +1,44 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Layers, Upload, Loader2, Trash2, ImageOff } from 'lucide-react';
-import { buildOverlayVideoUrl, toImageThumbnailUrl, type BadgeAsset, type BadgeType, type BadgeGravity } from '../../../lib/cloudinaryOverlay';
+import { Layers, Upload, Loader2, Trash2, ImageOff, Move } from 'lucide-react';
+import { toImageThumbnailUrl, type BadgeAsset, type BadgeType } from '../../../lib/cloudinaryOverlay';
 
-const SLOTS: { type: BadgeType; label: string; hint: string; defaultGravity: BadgeGravity }[] = [
-  { type: 'sold', label: 'Sold', hint: 'Pojok kiri-atas · properti sudah terjual', defaultGravity: 'north_west' },
-  { type: 'premium', label: 'Premium', hint: 'Pojok kiri-atas', defaultGravity: 'north_west' },
-  { type: 'featured', label: 'Featured', hint: 'Pojok kiri-atas', defaultGravity: 'north_west' },
-  { type: 'hot', label: 'Hot', hint: 'Pojok kiri-atas', defaultGravity: 'north_west' },
-  { type: 'pilihan', label: 'Pilihan', hint: 'Pojok kiri-atas', defaultGravity: 'north_west' },
-  { type: 'logo', label: 'Logo Watermark', hint: 'Biasanya pojok kanan-bawah — menimpa watermark Google Flow/Gemini', defaultGravity: 'south_east' },
+const SLOTS: { type: BadgeType; label: string; hint: string }[] = [
+  { type: 'sold', label: 'Sold', hint: 'Properti sudah terjual' },
+  { type: 'premium', label: 'Premium', hint: '' },
+  { type: 'featured', label: 'Featured', hint: '' },
+  { type: 'hot', label: 'Hot', hint: '' },
+  { type: 'pilihan', label: 'Pilihan', hint: '' },
+  { type: 'logo', label: 'Logo Watermark', hint: 'Biasanya pojok kanan-bawah — menimpa watermark Google Flow/Gemini' },
 ];
 
-const GRAVITY_OPTIONS: { value: BadgeGravity; label: string }[] = [
-  { value: 'north_west', label: 'Kiri-Atas' },
-  { value: 'north_east', label: 'Kanan-Atas' },
-  { value: 'south_west', label: 'Kiri-Bawah' },
-  { value: 'south_east', label: 'Kanan-Bawah' },
-  { value: 'center', label: 'Tengah' },
-];
-const GRAVITY_LABEL: Record<BadgeGravity, string> = Object.fromEntries(GRAVITY_OPTIONS.map(g => [g.value, g.label])) as Record<BadgeGravity, string>;
+interface Draft { x_pct: number; y_pct: number; width_pct: number }
 
-interface Draft { gravity: BadgeGravity; offset_x: number; offset_y: number; width_pct: number }
-
-function defaultDraft(defaultGravity: BadgeGravity): Draft {
-  return { gravity: defaultGravity, offset_x: 16, offset_y: 16, width_pct: 0.18 };
+function defaultDraft(type: BadgeType): Draft {
+  return type === 'logo' ? { x_pct: 0.78, y_pct: 0.82, width_pct: 0.18 } : { x_pct: 0.05, y_pct: 0.05, width_pct: 0.18 };
 }
 
 interface SampleVideo { id: number; cloudinary_url: string; width: number | null; height: number | null; kode_listing: string; property_title: string }
 
 interface CloudinaryImageUploadResult { public_id: string; secure_url: string; error?: { message: string } }
 
-function BadgeSlot({ type, label, hint, defaultGravity, asset, sampleVideo, onSaved, onDeleted }: {
-  type: BadgeType; label: string; hint: string; defaultGravity: BadgeGravity;
+type DragMode = 'move' | 'resize';
+interface DragState { mode: DragMode; startClientX: number; startClientY: number; startDraft: Draft }
+
+function BadgeSlot({ type, label, hint, asset, sampleVideo, onSaved, onDeleted }: {
+  type: BadgeType; label: string; hint: string;
   asset: BadgeAsset | null; sampleVideo: SampleVideo | null;
   onSaved: () => void; onDeleted: () => void;
 }) {
-  const [draft, setDraft] = useState<Draft>(asset ? { gravity: asset.gravity, offset_x: asset.offset_x, offset_y: asset.offset_y, width_pct: asset.width_pct } : defaultDraft(defaultGravity));
+  const [draft, setDraft] = useState<Draft>(asset ? { x_pct: asset.x_pct, y_pct: asset.y_pct, width_pct: asset.width_pct } : defaultDraft(type));
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<DragState | null>(null);
 
   useEffect(() => {
-    if (asset) setDraft({ gravity: asset.gravity, offset_x: asset.offset_x, offset_y: asset.offset_y, width_pct: asset.width_pct });
+    if (asset) setDraft({ x_pct: asset.x_pct, y_pct: asset.y_pct, width_pct: asset.width_pct });
   }, [asset]);
 
   const upload = async (file: File) => {
@@ -80,7 +76,7 @@ function BadgeSlot({ type, label, hint, defaultGravity, asset, sampleVideo, onSa
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type, cloudinary_public_id: cloudinaryResult.public_id, cloudinary_url: cloudinaryResult.secure_url,
-          gravity: draft.gravity, offset_x: draft.offset_x, offset_y: draft.offset_y, width_pct: draft.width_pct,
+          x_pct: draft.x_pct, y_pct: draft.y_pct, width_pct: draft.width_pct,
         }),
       });
       const saveJson = await saveRes.json();
@@ -117,21 +113,41 @@ function BadgeSlot({ type, label, hint, defaultGravity, asset, sampleVideo, onSa
     onDeleted();
   };
 
-  const previewAsset: BadgeAsset = asset
-    ? { ...asset, ...draft }
-    : { id: 0, type, cloudinary_public_id: '', cloudinary_url: '', ...draft };
-  const canPreview = !!(asset && sampleVideo);
-  const previewThumbUrl = canPreview ? toImageThumbnailUrl(buildOverlayVideoUrl(sampleVideo!.cloudinary_url, [previewAsset])) : null;
+  // ── Drag (pindah posisi) & resize (ubah ukuran) langsung di atas preview ──
+  const startDrag = (mode: DragMode) => (e: React.PointerEvent) => {
+    e.preventDefault();
+    if (mode === 'resize') e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragRef.current = { mode, startClientX: e.clientX, startClientY: e.clientY, startDraft: draft };
+  };
+  const onDragMove = (e: React.PointerEvent) => {
+    const drag = dragRef.current;
+    if (!drag || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const dxPct = (e.clientX - drag.startClientX) / rect.width;
+    const dyPct = (e.clientY - drag.startClientY) / rect.height;
+    if (drag.mode === 'move') {
+      const w = drag.startDraft.width_pct;
+      const x = Math.min(Math.max(drag.startDraft.x_pct + dxPct, 0), Math.max(0, 1 - w));
+      const y = Math.min(Math.max(drag.startDraft.y_pct + dyPct, 0), 0.95);
+      setDraft(d => ({ ...d, x_pct: x, y_pct: y }));
+    } else {
+      const w = Math.min(Math.max(drag.startDraft.width_pct + dxPct, 0.02), 0.6);
+      setDraft(d => ({ ...d, width_pct: w }));
+    }
+  };
+  const endDrag = () => { dragRef.current = null; };
+
   const previewAspect = sampleVideo?.width && sampleVideo?.height ? `${sampleVideo.width} / ${sampleVideo.height}` : '16 / 9';
   const overlayWidthPx = sampleVideo?.width ? Math.round(draft.width_pct * sampleVideo.width) : null;
-  const positionChanged = asset && (draft.gravity !== asset.gravity || draft.offset_x !== asset.offset_x || draft.offset_y !== asset.offset_y || draft.width_pct !== asset.width_pct);
+  const positionChanged = asset && (draft.x_pct !== asset.x_pct || draft.y_pct !== asset.y_pct || draft.width_pct !== asset.width_pct);
 
   return (
     <div className="border border-gray-100 rounded-2xl p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="text-sm font-semibold text-[#0F172A]">{label}</div>
-          <div className="text-[11px] text-[#94A3B8]">{hint}</div>
+          {hint && <div className="text-[11px] text-[#94A3B8]">{hint}</div>}
         </div>
         {asset && (
           <button onClick={del} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 flex-shrink-0" title="Hapus badge">
@@ -140,28 +156,56 @@ function BadgeSlot({ type, label, hint, defaultGravity, asset, sampleVideo, onSa
         )}
       </div>
 
-      {/* Preview besar — gambar statis (frame video + overlay), bukan video autoplay, supaya ringan & stabil */}
-      <div className="w-full bg-[#0B2447] rounded-xl overflow-hidden flex items-center justify-center"
+      {/* Preview interaktif — frame video statis + kotak badge yang bisa di-drag & resize langsung */}
+      <div ref={containerRef} className="relative w-full bg-[#0B2447] rounded-xl overflow-hidden select-none touch-none"
         style={{ aspectRatio: previewAspect, maxHeight: 320 }}>
-        {previewThumbUrl ? (
-          <img key={previewThumbUrl} src={previewThumbUrl} alt={`Preview ${label}`} className="w-full h-full object-contain" />
-        ) : asset ? (
-          <div className="text-center px-3">
-            <img src={asset.cloudinary_url} alt={label} className="max-w-[80px] max-h-[80px] object-contain mx-auto mb-2 opacity-70" />
-            <span className="text-[10px] text-white/50">Belum ada video contoh untuk preview posisi</span>
-          </div>
+        {sampleVideo ? (
+          <img src={toImageThumbnailUrl(sampleVideo.cloudinary_url)} alt="" draggable={false}
+            className="absolute inset-0 w-full h-full object-contain pointer-events-none" />
         ) : (
-          <div className="text-center px-3">
-            <ImageOff size={20} className="text-white/30 mx-auto mb-1" />
-            <span className="text-[10px] text-white/40">Belum ada gambar {label.toLowerCase()}</span>
+          <div className="absolute inset-0 flex items-center justify-center text-center px-3">
+            <div>
+              <ImageOff size={20} className="text-white/30 mx-auto mb-1" />
+              <span className="text-[10px] text-white/40">Belum ada video contoh untuk preview posisi</span>
+            </div>
+          </div>
+        )}
+
+        {asset && sampleVideo && (
+          <div
+            onPointerDown={startDrag('move')}
+            onPointerMove={onDragMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            className="absolute cursor-move border-2 border-[#1565C0] border-dashed group"
+            style={{ left: `${draft.x_pct * 100}%`, top: `${draft.y_pct * 100}%`, width: `${draft.width_pct * 100}%` }}
+          >
+            <img src={asset.cloudinary_url} alt={label} draggable={false} className="w-full h-auto pointer-events-none select-none" />
+            <div className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-[#1565C0] text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <Move size={10} />
+            </div>
+            <div
+              onPointerDown={startDrag('resize')}
+              onPointerMove={onDragMove}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+              className="absolute -right-1.5 -bottom-1.5 w-4 h-4 bg-[#1565C0] rounded-sm cursor-se-resize border border-white"
+              title="Tarik untuk ubah ukuran"
+            />
+          </div>
+        )}
+
+        {!asset && sampleVideo && (
+          <div className="absolute inset-0 flex items-center justify-center text-center px-3">
+            <span className="text-[10px] text-white/40">Belum ada gambar {label.toLowerCase()} — upload dulu di bawah</span>
           </div>
         )}
       </div>
 
-      {canPreview && overlayWidthPx != null && (
+      {asset && sampleVideo && overlayWidthPx != null && (
         <p className="text-[10px] text-[#94A3B8]">
-          Lebar overlay ≈ <strong className="text-[#0F172A]">{overlayWidthPx}px</strong> dari {sampleVideo!.width}px ·
-          {' '}offset {GRAVITY_LABEL[draft.gravity]}: {draft.offset_x}px, {draft.offset_y}px
+          Posisi: <strong className="text-[#0F172A]">{Math.round(draft.x_pct * 100)}%, {Math.round(draft.y_pct * 100)}%</strong> ·
+          {' '}Lebar ≈ <strong className="text-[#0F172A]">{overlayWidthPx}px</strong> dari {sampleVideo.width}px ({Math.round(draft.width_pct * 100)}%)
         </p>
       )}
 
@@ -171,29 +215,31 @@ function BadgeSlot({ type, label, hint, defaultGravity, asset, sampleVideo, onSa
           onChange={e => { const f = e.target.files?.[0]; if (f) upload(f); }}
           className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0] disabled:opacity-50" />
 
-        <div className="grid grid-cols-2 gap-1.5">
-          <select value={draft.gravity} onChange={e => setDraft(d => ({ ...d, gravity: e.target.value as BadgeGravity }))}
-            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]">
-            {GRAVITY_OPTIONS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
-          </select>
-          <div className="flex items-center gap-1">
-            <span className="text-[10px] text-[#94A3B8]">Lebar</span>
-            <input type="number" min={2} max={100} value={Math.round(draft.width_pct * 100)}
-              onChange={e => setDraft(d => ({ ...d, width_pct: Math.min(Math.max(Number(e.target.value) / 100, 0.02), 1) }))}
-              className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]" />
-            <span className="text-[10px] text-[#94A3B8]">%</span>
+        {asset && (
+          <div className="grid grid-cols-3 gap-1.5">
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-[#94A3B8]">X</span>
+              <input type="number" min={0} max={100} value={Math.round(draft.x_pct * 100)}
+                onChange={e => setDraft(d => ({ ...d, x_pct: Math.min(Math.max(Number(e.target.value) / 100, 0), 1) }))}
+                className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]" />
+              <span className="text-[10px] text-[#94A3B8]">%</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-[#94A3B8]">Y</span>
+              <input type="number" min={0} max={100} value={Math.round(draft.y_pct * 100)}
+                onChange={e => setDraft(d => ({ ...d, y_pct: Math.min(Math.max(Number(e.target.value) / 100, 0), 1) }))}
+                className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]" />
+              <span className="text-[10px] text-[#94A3B8]">%</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-[#94A3B8]">Lebar</span>
+              <input type="number" min={2} max={60} value={Math.round(draft.width_pct * 100)}
+                onChange={e => setDraft(d => ({ ...d, width_pct: Math.min(Math.max(Number(e.target.value) / 100, 0.02), 0.6) }))}
+                className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]" />
+              <span className="text-[10px] text-[#94A3B8]">%</span>
+            </div>
           </div>
-          <div className="flex items-center gap-1">
-            <span className="text-[10px] text-[#94A3B8]">X</span>
-            <input type="number" value={draft.offset_x} onChange={e => setDraft(d => ({ ...d, offset_x: Number(e.target.value) || 0 }))}
-              className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]" />
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-[10px] text-[#94A3B8]">Y</span>
-            <input type="number" value={draft.offset_y} onChange={e => setDraft(d => ({ ...d, offset_y: Number(e.target.value) || 0 }))}
-              className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]" />
-          </div>
-        </div>
+        )}
 
         {asset && (
           <button onClick={savePosition} disabled={saving || !positionChanged}
@@ -246,7 +292,7 @@ export default function BadgeLogoSettings() {
         <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#FFF7ED]"><Layers size={17} color="#F97316" /></div>
         <div>
           <h2 className="font-display font-semibold text-[#0F172A]">Badge &amp; Logo (ViralFrame)</h2>
-          <p className="text-xs text-[#64748B]">Ditempel otomatis ke video Konten Agent sesuai status properti. Cuma 1 badge status yang tampil (prioritas: Sold &gt; Premium &gt; Featured &gt; Hot &gt; Pilihan), logo selalu tampil.</p>
+          <p className="text-xs text-[#64748B]">Ditempel otomatis ke video Konten Agent sesuai status properti. Cuma 1 badge status yang tampil (prioritas: Sold &gt; Premium &gt; Featured &gt; Hot &gt; Pilihan), logo selalu tampil. Geser kotak biru di preview untuk pindah posisi, tarik sudutnya untuk ubah ukuran.</p>
         </div>
       </div>
 

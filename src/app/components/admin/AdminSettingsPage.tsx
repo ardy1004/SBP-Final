@@ -275,7 +275,9 @@ export default function AdminSettingsPage() {
         rowHeight={20}
         margin={[16, 16]}
         draggableCancel={DRAG_CANCEL_SELECTOR}
-        resizeHandles={['se']}
+        resizeHandles={['s', 'w', 'e', 'n', 'sw', 'nw', 'se', 'ne']}
+        compactType={null}
+        preventCollision={false}
         isDraggable={!isNarrow}
         isResizable={!isNarrow}
       >
