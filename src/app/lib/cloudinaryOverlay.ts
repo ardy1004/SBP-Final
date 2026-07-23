@@ -56,6 +56,13 @@ export function buildOverlayVideoUrl(baseUrl: string, assets: BadgeAsset[]): str
   return baseUrl.slice(0, insertAt) + transforms + '/' + baseUrl.slice(insertAt);
 }
 
+// Ganti ekstensi video jadi .jpg — Cloudinary otomatis render 1 frame video jadi
+// gambar statis. Dipakai untuk preview posisi badge/logo yang ringan (bukan
+// <video autoplay>), karena overlay-nya statis dan tidak butuh gerakan.
+export function toImageThumbnailUrl(videoUrl: string): string {
+  return videoUrl.replace(/\.(mp4|mov|webm|mkv|avi)(\?.*)?$/i, '.jpg$2');
+}
+
 // Pilih overlay yang berlaku untuk 1 properti: 1 badge status (prioritas tertinggi) + logo (selalu, jika ada).
 export function composeOverlaysForProperty(
   byType: Partial<Record<BadgeType, BadgeAsset>>,

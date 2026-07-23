@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Layers, Upload, Loader2, Trash2 } from 'lucide-react';
-import { buildOverlayVideoUrl, type BadgeAsset, type BadgeType, type BadgeGravity } from '../../../lib/cloudinaryOverlay';
+import { Layers, Upload, Loader2, Trash2, ImageOff } from 'lucide-react';
+import { buildOverlayVideoUrl, toImageThumbnailUrl, type BadgeAsset, type BadgeType, type BadgeGravity } from '../../../lib/cloudinaryOverlay';
 
 const SLOTS: { type: BadgeType; label: string; hint: string; defaultGravity: BadgeGravity }[] = [
   { type: 'sold', label: 'Sold', hint: 'Pojok kiri-atas · properti sudah terjual', defaultGravity: 'north_west' },
@@ -18,6 +18,7 @@ const GRAVITY_OPTIONS: { value: BadgeGravity; label: string }[] = [
   { value: 'south_east', label: 'Kanan-Bawah' },
   { value: 'center', label: 'Tengah' },
 ];
+const GRAVITY_LABEL: Record<BadgeGravity, string> = Object.fromEntries(GRAVITY_OPTIONS.map(g => [g.value, g.label])) as Record<BadgeGravity, string>;
 
 interface Draft { gravity: BadgeGravity; offset_x: number; offset_y: number; width_pct: number }
 
@@ -25,11 +26,13 @@ function defaultDraft(defaultGravity: BadgeGravity): Draft {
   return { gravity: defaultGravity, offset_x: 16, offset_y: 16, width_pct: 0.18 };
 }
 
+interface SampleVideo { id: number; cloudinary_url: string; width: number | null; height: number | null; kode_listing: string; property_title: string }
+
 interface CloudinaryImageUploadResult { public_id: string; secure_url: string; error?: { message: string } }
 
-function BadgeSlot({ type, label, hint, defaultGravity, asset, sampleVideoUrl, onSaved, onDeleted }: {
+function BadgeSlot({ type, label, hint, defaultGravity, asset, sampleVideo, onSaved, onDeleted }: {
   type: BadgeType; label: string; hint: string; defaultGravity: BadgeGravity;
-  asset: BadgeAsset | null; sampleVideoUrl: string | null;
+  asset: BadgeAsset | null; sampleVideo: SampleVideo | null;
   onSaved: () => void; onDeleted: () => void;
 }) {
   const [draft, setDraft] = useState<Draft>(asset ? { gravity: asset.gravity, offset_x: asset.offset_x, offset_y: asset.offset_y, width_pct: asset.width_pct } : defaultDraft(defaultGravity));
@@ -117,7 +120,10 @@ function BadgeSlot({ type, label, hint, defaultGravity, asset, sampleVideoUrl, o
   const previewAsset: BadgeAsset = asset
     ? { ...asset, ...draft }
     : { id: 0, type, cloudinary_public_id: '', cloudinary_url: '', ...draft };
-  const previewUrl = asset && sampleVideoUrl ? buildOverlayVideoUrl(sampleVideoUrl, [previewAsset]) : null;
+  const canPreview = !!(asset && sampleVideo);
+  const previewThumbUrl = canPreview ? toImageThumbnailUrl(buildOverlayVideoUrl(sampleVideo!.cloudinary_url, [previewAsset])) : null;
+  const previewAspect = sampleVideo?.width && sampleVideo?.height ? `${sampleVideo.width} / ${sampleVideo.height}` : '16 / 9';
+  const overlayWidthPx = sampleVideo?.width ? Math.round(draft.width_pct * sampleVideo.width) : null;
   const positionChanged = asset && (draft.gravity !== asset.gravity || draft.offset_x !== asset.offset_x || draft.offset_y !== asset.offset_y || draft.width_pct !== asset.width_pct);
 
   return (
@@ -134,55 +140,67 @@ function BadgeSlot({ type, label, hint, defaultGravity, asset, sampleVideoUrl, o
         )}
       </div>
 
-      <div className="flex gap-3">
-        {/* Preview */}
-        <div className="w-28 h-28 flex-shrink-0 bg-[#0B2447] rounded-xl overflow-hidden flex items-center justify-center">
-          {previewUrl ? (
-            <video key={previewUrl} src={previewUrl} muted autoPlay loop playsInline className="w-full h-full object-contain" />
-          ) : asset ? (
-            <img src={asset.cloudinary_url} alt={label} className="max-w-full max-h-full object-contain" />
-          ) : (
-            <span className="text-[10px] text-white/40 text-center px-2">Belum ada gambar</span>
-          )}
-        </div>
-
-        {/* Controls */}
-        <div className="flex-1 min-w-0 space-y-2">
-          <input ref={fileRef} type="file" accept="image/png,image/webp" disabled={uploading}
-            onChange={e => { const f = e.target.files?.[0]; if (f) upload(f); }}
-            className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0] disabled:opacity-50" />
-
-          <div className="grid grid-cols-2 gap-1.5">
-            <select value={draft.gravity} onChange={e => setDraft(d => ({ ...d, gravity: e.target.value as BadgeGravity }))}
-              className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]">
-              {GRAVITY_OPTIONS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
-            </select>
-            <div className="flex items-center gap-1">
-              <span className="text-[10px] text-[#94A3B8]">Lebar</span>
-              <input type="number" min={2} max={100} value={Math.round(draft.width_pct * 100)}
-                onChange={e => setDraft(d => ({ ...d, width_pct: Math.min(Math.max(Number(e.target.value) / 100, 0.02), 1) }))}
-                className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]" />
-              <span className="text-[10px] text-[#94A3B8]">%</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-[10px] text-[#94A3B8]">X</span>
-              <input type="number" value={draft.offset_x} onChange={e => setDraft(d => ({ ...d, offset_x: Number(e.target.value) || 0 }))}
-                className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]" />
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-[10px] text-[#94A3B8]">Y</span>
-              <input type="number" value={draft.offset_y} onChange={e => setDraft(d => ({ ...d, offset_y: Number(e.target.value) || 0 }))}
-                className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]" />
-            </div>
+      {/* Preview besar — gambar statis (frame video + overlay), bukan video autoplay, supaya ringan & stabil */}
+      <div className="w-full bg-[#0B2447] rounded-xl overflow-hidden flex items-center justify-center"
+        style={{ aspectRatio: previewAspect, maxHeight: 320 }}>
+        {previewThumbUrl ? (
+          <img key={previewThumbUrl} src={previewThumbUrl} alt={`Preview ${label}`} className="w-full h-full object-contain" />
+        ) : asset ? (
+          <div className="text-center px-3">
+            <img src={asset.cloudinary_url} alt={label} className="max-w-[80px] max-h-[80px] object-contain mx-auto mb-2 opacity-70" />
+            <span className="text-[10px] text-white/50">Belum ada video contoh untuk preview posisi</span>
           </div>
+        ) : (
+          <div className="text-center px-3">
+            <ImageOff size={20} className="text-white/30 mx-auto mb-1" />
+            <span className="text-[10px] text-white/40">Belum ada gambar {label.toLowerCase()}</span>
+          </div>
+        )}
+      </div>
 
-          {asset && (
-            <button onClick={savePosition} disabled={saving || !positionChanged}
-              className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-[#1565C0] hover:bg-[#1565C0]/90 disabled:opacity-40">
-              {saving ? <Loader2 size={12} className="animate-spin" /> : null} Simpan Posisi
-            </button>
-          )}
+      {canPreview && overlayWidthPx != null && (
+        <p className="text-[10px] text-[#94A3B8]">
+          Lebar overlay ≈ <strong className="text-[#0F172A]">{overlayWidthPx}px</strong> dari {sampleVideo!.width}px ·
+          {' '}offset {GRAVITY_LABEL[draft.gravity]}: {draft.offset_x}px, {draft.offset_y}px
+        </p>
+      )}
+
+      {/* Controls */}
+      <div className="space-y-2">
+        <input ref={fileRef} type="file" accept="image/png,image/webp" disabled={uploading}
+          onChange={e => { const f = e.target.files?.[0]; if (f) upload(f); }}
+          className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0] disabled:opacity-50" />
+
+        <div className="grid grid-cols-2 gap-1.5">
+          <select value={draft.gravity} onChange={e => setDraft(d => ({ ...d, gravity: e.target.value as BadgeGravity }))}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]">
+            {GRAVITY_OPTIONS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+          </select>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-[#94A3B8]">Lebar</span>
+            <input type="number" min={2} max={100} value={Math.round(draft.width_pct * 100)}
+              onChange={e => setDraft(d => ({ ...d, width_pct: Math.min(Math.max(Number(e.target.value) / 100, 0.02), 1) }))}
+              className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]" />
+            <span className="text-[10px] text-[#94A3B8]">%</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-[#94A3B8]">X</span>
+            <input type="number" value={draft.offset_x} onChange={e => setDraft(d => ({ ...d, offset_x: Number(e.target.value) || 0 }))}
+              className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]" />
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-[#94A3B8]">Y</span>
+            <input type="number" value={draft.offset_y} onChange={e => setDraft(d => ({ ...d, offset_y: Number(e.target.value) || 0 }))}
+              className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]" />
+          </div>
         </div>
+
+        {asset && (
+          <button onClick={savePosition} disabled={saving || !positionChanged}
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-[#1565C0] hover:bg-[#1565C0]/90 disabled:opacity-40">
+            {saving ? <Loader2 size={12} className="animate-spin" /> : null} Simpan Posisi
+          </button>
+        )}
       </div>
 
       {uploading && <p className="text-[11px] text-[#1565C0] flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Mengupload…</p>}
@@ -193,7 +211,8 @@ function BadgeSlot({ type, label, hint, defaultGravity, asset, sampleVideoUrl, o
 
 export default function BadgeLogoSettings() {
   const [assets, setAssets] = useState<BadgeAsset[]>([]);
-  const [sampleVideoUrl, setSampleVideoUrl] = useState<string | null>(null);
+  const [sampleVideos, setSampleVideos] = useState<SampleVideo[]>([]);
+  const [selectedSampleId, setSelectedSampleId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -206,13 +225,20 @@ export default function BadgeLogoSettings() {
 
   useEffect(() => {
     load();
-    fetch('/api/admin/viralframe/agent-videos?limit=1', { credentials: 'include' })
+    fetch('/api/admin/viralframe/agent-videos?limit=10', { credentials: 'include' })
       .then(r => r.json())
-      .then(j => { if (j.success && j.data?.items?.[0]) setSampleVideoUrl(j.data.items[0].cloudinary_url); })
+      .then(j => {
+        if (j.success) {
+          const items: SampleVideo[] = j.data?.items ?? [];
+          setSampleVideos(items);
+          if (items.length > 0) setSelectedSampleId(prev => prev ?? items[0].id);
+        }
+      })
       .catch(() => {});
   }, [load]);
 
   const byType = Object.fromEntries(assets.map(a => [a.type, a])) as Partial<Record<BadgeType, BadgeAsset>>;
+  const sampleVideo = sampleVideos.find(v => v.id === selectedSampleId) ?? sampleVideos[0] ?? null;
 
   return (
     <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
@@ -224,18 +250,31 @@ export default function BadgeLogoSettings() {
         </div>
       </div>
 
-      {!sampleVideoUrl && !loading && (
+      {!loading && sampleVideos.length === 0 && (
         <p className="text-xs text-[#94A3B8] mb-3 flex items-center gap-1.5">
-          <Upload size={12} /> Belum ada video di Konten Agent untuk preview — preview akan muncul setelah ada minimal 1 video ter-upload.
+          <Upload size={12} /> Belum ada video di Konten Agent — upload minimal 1 video dulu supaya preview posisi badge/logo bisa muncul.
         </p>
+      )}
+
+      {!loading && sampleVideos.length > 0 && (
+        <div className="mb-4 flex items-center gap-2 flex-wrap">
+          <label className="text-xs font-semibold text-[#0F172A] flex-shrink-0">Video contoh untuk preview:</label>
+          <select value={selectedSampleId ?? ''} onChange={e => setSelectedSampleId(parseInt(e.target.value, 10))}
+            className="flex-1 min-w-[200px] text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-[#1565C0]">
+            {sampleVideos.map(v => (
+              <option key={v.id} value={v.id}>{v.kode_listing} — {v.property_title}</option>
+            ))}
+          </select>
+          <span className="text-[10px] text-[#94A3B8]">Pilih video yang jelas kelihatan watermark Google Flow/Gemini-nya, untuk mengepaskan posisi logo.</span>
+        </div>
       )}
 
       {loading ? (
         <div className="py-8 text-center"><Loader2 size={18} className="animate-spin mx-auto text-[#94A3B8]" /></div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           {SLOTS.map(s => (
-            <BadgeSlot key={s.type} {...s} asset={byType[s.type] ?? null} sampleVideoUrl={sampleVideoUrl} onSaved={load} onDeleted={load} />
+            <BadgeSlot key={s.type} {...s} asset={byType[s.type] ?? null} sampleVideo={sampleVideo} onSaved={load} onDeleted={load} />
           ))}
         </div>
       )}

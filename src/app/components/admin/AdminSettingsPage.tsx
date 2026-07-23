@@ -1,8 +1,26 @@
 import { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router';
-import { Lock, User, CheckCircle, XCircle, Eye, EyeOff, BarChart2, Plus, Trash2, Edit2, ToggleLeft, ToggleRight, KeyRound } from 'lucide-react';
+import GridLayout, { WidthProvider, type Layout } from 'react-grid-layout';
+import 'react-grid-layout/css/styles.css';
+import 'react-resizable/css/styles.css';
+import { Lock, User, CheckCircle, XCircle, Eye, EyeOff, BarChart2, Plus, Trash2, Edit2, ToggleLeft, ToggleRight, KeyRound, RotateCcw } from 'lucide-react';
 import { getAiKeys, saveAiKeys, getAiStatus, type AiProviderId, type AiKeyInfo, type AiStatusInfo } from '../../../lib/api';
 import BadgeLogoSettings from './viralframe/BadgeLogoSettings';
+
+const ResponsiveGridLayout = WidthProvider(GridLayout);
+
+// Blok Pengaturan bisa digeser & di-resize bebas (posisi/ukuran tersimpan di localStorage per browser).
+const DEFAULT_SETTINGS_LAYOUT: Layout[] = [
+  { i: 'info-akun',    x: 0, y: 0,  w: 6,  h: 8,  minW: 3, minH: 5 },
+  { i: 'password',     x: 6, y: 0,  w: 6,  h: 13, minW: 3, minH: 8 },
+  { i: 'tracking',     x: 0, y: 8,  w: 12, h: 20, minW: 4, minH: 8 },
+  { i: 'ai-providers', x: 0, y: 28, w: 12, h: 14, minW: 4, minH: 6 },
+  { i: 'badge-logo',   x: 0, y: 42, w: 12, h: 22, minW: 6, minH: 10 },
+];
+const SETTINGS_LAYOUT_STORAGE_KEY = 'sbp_admin_settings_layout';
+// Selector elemen yang TIDAK memicu drag (blacklist) — drag tetap aktif dari area
+// kosong/header kartu, jadi tidak perlu ubah markup tiap kartu untuk kasih drag handle.
+const DRAG_CANCEL_SELECTOR = 'input, textarea, select, button, a, label';
 
 const AI_PROVIDERS: { id: AiProviderId; label: string; hint: string }[] = [
   { id: 'gemini',     label: 'Google Gemini', hint: 'aistudio.google.com/apikey' },
@@ -36,6 +54,23 @@ function MsgBox({ msg }: { msg: Msg | null }) {
 
 export default function AdminSettingsPage() {
   const admin = useOutletContext<AdminUser | null>();
+
+  // ── Layout blok (drag & resize bebas, tersimpan di localStorage) ──
+  const [settingsLayout, setSettingsLayout] = useState<Layout[]>(() => {
+    try {
+      const saved = localStorage.getItem(SETTINGS_LAYOUT_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch { /* noop */ }
+    return DEFAULT_SETTINGS_LAYOUT;
+  });
+  const handleSettingsLayoutChange = (next: Layout[]) => {
+    setSettingsLayout(next);
+    try { localStorage.setItem(SETTINGS_LAYOUT_STORAGE_KEY, JSON.stringify(next)); } catch { /* noop */ }
+  };
+  const resetSettingsLayout = () => {
+    setSettingsLayout(DEFAULT_SETTINGS_LAYOUT);
+    try { localStorage.removeItem(SETTINGS_LAYOUT_STORAGE_KEY); } catch { /* noop */ }
+  };
 
   // ── Password form state ──
   const [form, setForm] = useState<PasswordForm>({ password_lama: '', password_baru: '', password_baru_konfirmasi: '' });
@@ -190,15 +225,30 @@ export default function AdminSettingsPage() {
   const inputClassNoPR = 'w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0]/20 focus:border-[#1565C0]';
 
   return (
-    <div className="space-y-6 max-w-6xl">
-      <div>
-        <h1 className="font-display text-xl font-bold text-[#0F172A]">Pengaturan</h1>
-        <p className="text-[#64748B] text-sm mt-0.5">Kelola akun, keamanan, dan integrasi tracking</p>
+    <div className="space-y-4 max-w-[1600px]">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="font-display text-xl font-bold text-[#0F172A]">Pengaturan</h1>
+          <p className="text-[#64748B] text-sm mt-0.5">Kelola akun, keamanan, dan integrasi tracking — geser/tarik sudut kartu untuk atur posisi &amp; ukuran</p>
+        </div>
+        <button onClick={resetSettingsLayout}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-[#64748B] border border-gray-200 hover:bg-gray-50 transition-colors flex-shrink-0">
+          <RotateCcw size={13} /> Reset Layout
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <ResponsiveGridLayout
+        className="layout"
+        layout={settingsLayout}
+        onLayoutChange={handleSettingsLayoutChange}
+        cols={12}
+        rowHeight={20}
+        margin={[16, 16]}
+        draggableCancel={DRAG_CANCEL_SELECTOR}
+        resizeHandles={['se']}
+      >
       {/* ── Info Akun ── */}
-      <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+      <div key="info-akun" className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 overflow-y-auto">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#E3F2FD]"><User size={17} color="#1565C0" /></div>
           <h2 className="font-display font-semibold text-[#0F172A]">Info Akun</h2>
@@ -211,7 +261,7 @@ export default function AdminSettingsPage() {
       </div>
 
       {/* ── Ganti Password ── */}
-      <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+      <div key="password" className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 overflow-y-auto">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#F5F3FF]"><Lock size={17} color="#7C3AED" /></div>
           <h2 className="font-display font-semibold text-[#0F172A]">Ganti Password</h2>
@@ -240,7 +290,7 @@ export default function AdminSettingsPage() {
       </div>
 
       {/* ── Tracking & Analytics ── */}
-      <div className="lg:col-span-2 bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+      <div key="tracking" className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 overflow-y-auto">
         <div className="flex items-center gap-3 mb-5">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#FFF3E0]"><BarChart2 size={17} color="#F97316" /></div>
           <div><h2 className="font-display font-semibold text-[#0F172A]">Tracking & Analytics</h2><p className="text-xs text-[#64748B]">Meta Pixel, GA4, GTM, Search Console</p></div>
@@ -374,7 +424,7 @@ export default function AdminSettingsPage() {
       </div>
 
       {/* ── AI Providers (ViralFrame) ── */}
-      <div className="lg:col-span-2 bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+      <div key="ai-providers" className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 overflow-y-auto">
         <div className="flex items-center gap-3 mb-5">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#ECFDF5]"><KeyRound size={17} color="#10B981" /></div>
           <div>
@@ -428,10 +478,10 @@ export default function AdminSettingsPage() {
         </div>
       </div>
 
-      <div className="lg:col-span-2">
+      <div key="badge-logo" className="overflow-y-auto">
         <BadgeLogoSettings />
       </div>
-      </div>
+      </ResponsiveGridLayout>
     </div>
   );
 }
