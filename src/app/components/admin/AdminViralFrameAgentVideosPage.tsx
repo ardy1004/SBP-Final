@@ -48,6 +48,13 @@ function classifyRatio(width: number | null, height: number | null): RatioClass 
   return 'square';
 }
 
+// Ukuran tampilan kartu — lebar kolom grid tetap (bukan stretch penuh), supaya
+// video vertikal tidak membengkak. Dipilih Kecil/Sedang/Besar, tersimpan per browser.
+type CardSize = 'kecil' | 'sedang' | 'besar';
+const CARD_SIZE_PX: Record<CardSize, number> = { kecil: 200, sedang: 260, besar: 340 };
+const CARD_SIZE_LABEL: Record<CardSize, string> = { kecil: 'Kecil', sedang: 'Sedang', besar: 'Besar' };
+const CARD_SIZE_STORAGE_KEY = 'sbp_agent_videos_card_size';
+
 export default function AdminViralFrameAgentVideosPage() {
   const [characters, setCharacters] = useState<CharacterOption[]>([]);
   const [counts, setCounts] = useState<Record<number, number>>({});
@@ -59,6 +66,16 @@ export default function AdminViralFrameAgentVideosPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [ratioFilter, setRatioFilter] = useState<RatioClass | 'semua'>('semua');
+  const [cardSize, setCardSize] = useState<CardSize>('sedang');
+
+  useEffect(() => {
+    const saved = localStorage.getItem(CARD_SIZE_STORAGE_KEY) as CardSize | null;
+    if (saved && saved in CARD_SIZE_PX) setCardSize(saved);
+  }, []);
+  const changeCardSize = (size: CardSize) => {
+    setCardSize(size);
+    localStorage.setItem(CARD_SIZE_STORAGE_KEY, size);
+  };
 
   const loadCharacters = useCallback(async () => {
     setLoadingChars(true);
@@ -174,16 +191,30 @@ export default function AdminViralFrameAgentVideosPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {/* Filter aspek rasio — otomatis dari dimensi asli video (Cloudinary), bukan input manual */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {(['semua', 'vertikal', 'horizontal', 'square'] as const).map(f => (
-                  <button key={f} onClick={() => setRatioFilter(f)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
-                      ratioFilter === f ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'bg-white text-[#64748B] border-gray-200 hover:border-[#1565C0]/40'
-                    }`}>
-                    {f === 'semua' ? `Semua (${videos.length})` : `${RATIO_LABEL[f]} (${ratioCounts[f]})`}
-                  </button>
-                ))}
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                {/* Filter aspek rasio — otomatis dari dimensi asli video (Cloudinary), bukan input manual */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {(['semua', 'vertikal', 'horizontal', 'square'] as const).map(f => (
+                    <button key={f} onClick={() => setRatioFilter(f)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                        ratioFilter === f ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'bg-white text-[#64748B] border-gray-200 hover:border-[#1565C0]/40'
+                      }`}>
+                      {f === 'semua' ? `Semua (${videos.length})` : `${RATIO_LABEL[f]} (${ratioCounts[f]})`}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Ukuran tampilan kartu */}
+                <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-full p-0.5">
+                  {(['kecil', 'sedang', 'besar'] as const).map(s => (
+                    <button key={s} onClick={() => changeCardSize(s)}
+                      className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+                        cardSize === s ? 'bg-[#1565C0] text-white' : 'text-[#64748B] hover:bg-gray-50'
+                      }`}>
+                      {CARD_SIZE_LABEL[s]}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {filteredVideos.length === 0 ? (
@@ -191,7 +222,7 @@ export default function AdminViralFrameAgentVideosPage() {
                   <p className="text-sm text-[#64748B]">Tidak ada video dengan rasio ini.</p>
                 </div>
               ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${CARD_SIZE_PX[cardSize]}px, ${CARD_SIZE_PX[cardSize]}px))` }}>
               {filteredVideos.map(v => {
                 const e = edits[v.id] ?? { caption: '', hashtags: '' };
                 const editing = editingId === v.id;
