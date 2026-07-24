@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react';
-import { useOutletContext } from 'react-router';
-import { TrendingUp, Home, Users, Eye, MessageCircle, FileText, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { useOutletContext, Link } from 'react-router';
+import { TrendingUp, Home, Users, Eye, MessageCircle, FileText, ArrowUpRight, ArrowDownRight, BarChart3, Settings } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
+
+interface Ga4Trend { date: string; activeUsers: number; pageviews: number; sessions: number }
+interface Ga4TopPage { pagePath: string; pageTitle: string; views: number }
+interface Ga4Channel { channel: string; sessions: number }
+interface Ga4Summary { trend: Ga4Trend[]; topPages: Ga4TopPage[]; channels: Ga4Channel[] }
+const GA4_CHANNEL_COLORS = ['#1565C0', '#7C3AED', '#10B981', '#F5A623', '#EF4444', '#06B6D4', '#EC4899'];
 
 interface AdminUser { sub: number; email: string; nama: string; role: string; }
 
@@ -40,6 +46,10 @@ export default function AdminOverviewPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
   const [chartTab, setChartTab] = useState<'leads' | 'views'>('leads');
+  const [gaData, setGaData]       = useState<Ga4Summary | null>(null);
+  const [gaLoading, setGaLoading] = useState(true);
+  const [gaError, setGaError]     = useState<string | null>(null);
+  const [gaNotConfigured, setGaNotConfigured] = useState(false);
 
   useEffect(() => {
     fetch('/api/admin/overview', { credentials: 'include' })
@@ -50,6 +60,16 @@ export default function AdminOverviewPage() {
       })
       .catch(() => setError('Koneksi ke server gagal'))
       .finally(() => setLoading(false));
+
+    fetch('/api/admin/analytics/ga4-summary', { credentials: 'include' })
+      .then(async r => {
+        const res = await r.json();
+        if (res.success) { setGaData(res.data); return; }
+        if (r.status === 422) setGaNotConfigured(true);
+        else setGaError(res.error ?? 'Gagal memuat data GA4');
+      })
+      .catch(() => setGaError('Koneksi ke Google Analytics gagal'))
+      .finally(() => setGaLoading(false));
   }, []);
 
   const k = data?.kpi;
@@ -237,6 +257,98 @@ export default function AdminOverviewPage() {
             </>
           )}
         </div>
+      </div>
+
+      {/* Analitik Website (Google Analytics) */}
+      <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+        <div className="flex items-center gap-2 mb-4">
+          <BarChart3 size={18} className="text-[#1565C0]" />
+          <h2 className="font-display font-semibold text-[#0F172A]">Analitik Website (Google Analytics)</h2>
+          <span className="text-xs text-[#94A3B8]">30 hari terakhir</span>
+        </div>
+
+        {gaLoading ? (
+          <div className="h-[200px] bg-gray-50 rounded-xl animate-pulse" />
+        ) : gaNotConfigured ? (
+          <div className="text-center py-8 border border-dashed border-gray-200 rounded-xl">
+            <p className="text-sm text-[#64748B]">Google Analytics belum terhubung.</p>
+            <p className="text-xs text-[#94A3B8] mt-1">Isi GA4 Property ID di Pengaturan → Tracking &amp; Analytics untuk mengaktifkan widget ini.</p>
+            <Link to="/admin/pengaturan" className="inline-flex items-center gap-1.5 mt-3 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF]">
+              <Settings size={13} /> Buka Pengaturan
+            </Link>
+          </div>
+        ) : gaError ? (
+          <div className="text-center py-8 border border-dashed border-red-200 rounded-xl bg-red-50">
+            <p className="text-sm text-red-700">⚠️ {gaError}</p>
+          </div>
+        ) : (
+          <div className="space-y-5">
+            <div>
+              <h3 className="text-xs font-semibold text-[#64748B] mb-2">Pengunjung &amp; Pageview Harian</h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={gaData?.trend ?? []} margin={{ top: 0, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} tickFormatter={v => v.slice(5)} interval={4} />
+                  <YAxis tick={{ fontSize: 11, fill: '#94A3B8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip contentStyle={{ borderRadius: 10, border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontSize: 12 }} labelFormatter={v => `Tgl ${v}`} />
+                  <Line dataKey="activeUsers" name="Pengunjung" stroke="#1565C0" strokeWidth={2} dot={false} />
+                  <Line dataKey="pageviews" name="Pageview" stroke="#7C3AED" strokeWidth={2} dot={false} />
+                  <Line dataKey="sessions" name="Sesi" stroke="#10B981" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div>
+                <h3 className="text-xs font-semibold text-[#64748B] mb-2">Halaman Terpopuler</h3>
+                {!gaData?.topPages.length ? (
+                  <p className="text-sm text-[#94A3B8] py-4">Belum ada data.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {gaData.topPages.map((p, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 text-xs py-1.5 border-b border-gray-50 last:border-0">
+                        <div className="min-w-0">
+                          <div className="text-[#0F172A] truncate">{p.pageTitle || p.pagePath}</div>
+                          <div className="text-[#94A3B8] truncate">{p.pagePath}</div>
+                        </div>
+                        <span className="font-semibold text-[#0F172A] flex-shrink-0">{p.views}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h3 className="text-xs font-semibold text-[#64748B] mb-2">Sumber Trafik</h3>
+                {!gaData?.channels.length ? (
+                  <p className="text-sm text-[#94A3B8] py-4">Belum ada data.</p>
+                ) : (
+                  <>
+                    <ResponsiveContainer width="100%" height={140}>
+                      <PieChart>
+                        <Pie data={gaData.channels} dataKey="sessions" nameKey="channel" cx="50%" cy="50%" innerRadius={35} outerRadius={60} paddingAngle={2}>
+                          {gaData.channels.map((_, i) => <Cell key={i} fill={GA4_CHANNEL_COLORS[i % GA4_CHANNEL_COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip contentStyle={{ borderRadius: 10, border: 'none', fontSize: 12 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="space-y-1 mt-1">
+                      {gaData.channels.map((c, i) => (
+                        <div key={c.channel} className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-2 h-2 rounded-full" style={{ background: GA4_CHANNEL_COLORS[i % GA4_CHANNEL_COLORS.length] }} />
+                            <span className="text-[#64748B]">{c.channel}</span>
+                          </div>
+                          <span className="font-semibold text-[#0F172A]">{c.sessions}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Activity Feed */}
