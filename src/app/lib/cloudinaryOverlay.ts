@@ -42,10 +42,13 @@ export function pickStatusBadgeType(flags: PropertyBadgeFlags): BadgeType | null
 
 function overlaySegment(asset: BadgeAsset): string {
   const id = asset.cloudinary_public_id.replace(/\//g, ':');
-  // g_north_west = titik referensi (0,0) tetap di pojok kiri-atas; fl_relative membuat
-  // x/y/w dibaca sebagai pecahan (0-1) dari dimensi video dasar — jadi x_pct/y_pct
-  // adalah posisi absolut dalam persen, bebas di titik mana pun (bukan preset gravity).
-  return `l_${id},g_north_west,x_${asset.x_pct},y_${asset.y_pct},w_${asset.width_pct},fl_relative/fl_layer_apply`;
+  // PENTING (bug yang sudah diperbaiki): g_/x_/y_ (posisi) HARUS ada di segmen
+  // fl_layer_apply, BUKAN di segmen "l_" (segmen "l_" cuma untuk resize/crop
+  // overlay itu sendiri — g_ di situ dibaca sbg crop-gravity, bukan penempatan,
+  // dan diam-diam diabaikan Cloudinary sehingga overlay selalu jatuh ke tengah
+  // & ukuran aslinya). c_scale wajib disertakan supaya w_ relatif benar2 dipakai
+  // untuk resize (tanpa itu w_ juga diabaikan, overlay tampil ukuran asli upload).
+  return `l_${id},w_${asset.width_pct},c_scale,fl_relative/fl_layer_apply,g_north_west,x_${asset.x_pct},y_${asset.y_pct},fl_relative`;
 }
 
 // Sisipkan transformasi overlay tepat setelah "/upload/" pada secure_url Cloudinary.
