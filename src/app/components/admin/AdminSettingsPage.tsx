@@ -34,7 +34,7 @@ const STATUS_COLOR: Record<'green' | 'yellow' | 'red', string> = {
 interface AdminUser { sub: number; email: string; nama: string; role: string; }
 interface PasswordForm { password_lama: string; password_baru: string; password_baru_konfirmasi: string; }
 interface PixelConfig { id: number; label: string; pixel_id: string; is_active: number; events_enabled: string; created_at: string; has_capi_token: 0 | 1; }
-interface TrackingSettings { ga4_measurement_id: string; gtm_container_id: string; search_console_verification: string; }
+interface TrackingSettings { ga4_measurement_id: string; ga4_property_id: string; gtm_container_id: string; search_console_verification: string; }
 interface PixelFormState { mode: 'add' | 'edit'; id?: number; label: string; pixel_id: string; events: string[]; capi_access_token: string; }
 interface Msg { type: 'success' | 'error'; text: string; }
 
@@ -114,7 +114,7 @@ export default function AdminSettingsPage() {
   const [savingPixel, setSavingPixel] = useState(false);
   const [showCapiToken, setShowCapiToken] = useState(false);
 
-  const [tracking, setTracking] = useState<TrackingSettings>({ ga4_measurement_id: '', gtm_container_id: '', search_console_verification: '' });
+  const [tracking, setTracking] = useState<TrackingSettings>({ ga4_measurement_id: '', ga4_property_id: '', gtm_container_id: '', search_console_verification: '' });
   const [savingTracking, setSavingTracking] = useState(false);
   const [trackingMsg, setTrackingMsg] = useState<Msg | null>(null);
 
@@ -156,6 +156,7 @@ export default function AdminSettingsPage() {
       if (tRes.success && tRes.data) {
         setTracking({
           ga4_measurement_id:          tRes.data.ga4_measurement_id          ?? '',
+          ga4_property_id:             tRes.data.ga4_property_id             ?? '',
           gtm_container_id:            tRes.data.gtm_container_id            ?? '',
           search_console_verification: tRes.data.search_console_verification ?? '',
         });
@@ -438,6 +439,8 @@ export default function AdminSettingsPage() {
             <h3 className="text-sm font-semibold text-[#0F172A] mb-1">Google Analytics 4</h3>
             <input value={tracking.ga4_measurement_id} onChange={e => setTracking(t => ({ ...t, ga4_measurement_id: e.target.value }))} placeholder="G-XXXXXXXXXX" className={inputClassNoPR} />
             <p className="text-[10px] text-[#94A3B8] mt-0.5">Kosongkan untuk menonaktifkan GA4</p>
+            <input value={tracking.ga4_property_id} onChange={e => setTracking(t => ({ ...t, ga4_property_id: e.target.value }))} placeholder="Property ID (mis. 123456789)" className={`${inputClassNoPR} mt-2`} />
+            <p className="text-[10px] text-[#94A3B8] mt-0.5">Beda dari Measurement ID di atas — angka saja, dari GA4 Admin → Property Settings. Dipakai untuk menarik laporan pengunjung ke tab Ringkasan (butuh Service Account terhubung, lihat dokumentasi setup).</p>
           </div>
           <div>
             <h3 className="text-sm font-semibold text-[#0F172A] mb-1">Google Tag Manager <span className="text-[#94A3B8] font-normal">(opsional)</span></h3>

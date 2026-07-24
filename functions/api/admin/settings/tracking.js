@@ -1,10 +1,15 @@
-// GET  /api/admin/settings/tracking — baca ga4_measurement_id, gtm_container_id, search_console_verification
+// GET  /api/admin/settings/tracking — baca ga4_measurement_id, ga4_property_id, gtm_container_id, search_console_verification
 // PATCH /api/admin/settings/tracking — simpan / hapus key-key tersebut
 // Auth: dilindungi _middleware.js
+//
+// ga4_measurement_id (G-XXXXXXXXXX) dipakai untuk tracking snippet di root.tsx.
+// ga4_property_id (angka saja, dari GA4 Admin > Property Settings) dipakai
+// terpisah untuk narik laporan lewat GA4 Data API (widget Ringkasan) — dua ID
+// yang berbeda dari GA4, jangan disamakan.
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 
-const TRACKING_KEYS = ['ga4_measurement_id', 'gtm_container_id', 'search_console_verification'];
+const TRACKING_KEYS = ['ga4_measurement_id', 'ga4_property_id', 'gtm_container_id', 'search_console_verification'];
 
 export async function onRequestGet({ env }) {
   try {
