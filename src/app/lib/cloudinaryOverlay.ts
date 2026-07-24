@@ -7,6 +7,7 @@ export type BadgeType = 'sold' | 'premium' | 'featured' | 'hot' | 'pilihan' | 'l
 
 export interface BadgeAsset {
   id: number;
+  character_id: number;
   type: BadgeType;
   cloudinary_public_id: string;
   cloudinary_url: string;

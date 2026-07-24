@@ -5,7 +5,6 @@ import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { Lock, User, CheckCircle, XCircle, Eye, EyeOff, BarChart2, Plus, Trash2, Edit2, ToggleLeft, ToggleRight, KeyRound, RotateCcw } from 'lucide-react';
 import { getAiKeys, saveAiKeys, getAiStatus, type AiProviderId, type AiKeyInfo, type AiStatusInfo } from '../../../lib/api';
-import BadgeLogoSettings from './viralframe/BadgeLogoSettings';
 
 const ResponsiveGridLayout = WidthProvider(GridLayout);
 
@@ -15,7 +14,6 @@ const DEFAULT_SETTINGS_LAYOUT: Layout[] = [
   { i: 'password',     x: 6, y: 0,  w: 6,  h: 13, minW: 3, minH: 8 },
   { i: 'tracking',     x: 0, y: 8,  w: 12, h: 20, minW: 4, minH: 8 },
   { i: 'ai-providers', x: 0, y: 28, w: 12, h: 14, minW: 4, minH: 6 },
-  { i: 'badge-logo',   x: 0, y: 42, w: 12, h: 22, minW: 6, minH: 10 },
 ];
 const SETTINGS_LAYOUT_STORAGE_KEY = 'sbp_admin_settings_layout';
 // Selector elemen yang TIDAK memicu drag (blacklist) — drag tetap aktif dari area
@@ -510,10 +508,6 @@ export default function AdminSettingsPage() {
             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: STATUS_COLOR.red }} /> Habis / belum diisi</span>
           </div>
         </div>
-      </div>
-
-      <div key="badge-logo" className="overflow-y-auto">
-        <BadgeLogoSettings />
       </div>
       </ResponsiveGridLayout>
     </div>

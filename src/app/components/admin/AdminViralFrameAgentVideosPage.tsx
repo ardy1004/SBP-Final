@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router';
-import { Users, Loader2, Download, Trash2, Pencil, Check, X, Clock, Copy } from 'lucide-react';
+import { Users, Loader2, Download, Trash2, Pencil, Check, X, Clock, Copy, Layers, ChevronDown, ChevronUp } from 'lucide-react';
 import { buildOverlayVideoUrl, composeOverlaysForProperty, pickStatusBadgeType, toAttachmentUrl, type BadgeAsset, type BadgeType } from '../../lib/cloudinaryOverlay';
+import BadgeLogoSettings from './viralframe/BadgeLogoSettings';
 
 const STATUS_BADGE_LABEL: Record<BadgeType, string> = {
   sold: 'SOLD', premium: 'Premium', featured: 'Featured', hot: 'Hot', pilihan: 'Pilihan', logo: 'Logo',
@@ -79,18 +80,21 @@ export default function AdminViralFrameAgentVideosPage() {
   const [ratioFilter, setRatioFilter] = useState<RatioClass | 'semua'>('semua');
   const [cardSize, setCardSize] = useState<CardSize>('sedang');
   const [badgeAssets, setBadgeAssets] = useState<Partial<Record<BadgeType, BadgeAsset>>>({});
+  const [showBadgeEditor, setShowBadgeEditor] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem(CARD_SIZE_STORAGE_KEY) as CardSize | null;
     if (saved && saved in CARD_SIZE_PX) setCardSize(saved);
   }, []);
 
-  useEffect(() => {
-    fetch('/api/admin/viralframe/badges', { credentials: 'include' })
-      .then(r => r.json())
-      .then(j => { if (j.success) setBadgeAssets(Object.fromEntries((j.data?.items ?? []).map((a: BadgeAsset) => [a.type, a]))); })
-      .catch(() => {});
+  const loadBadges = useCallback(async (characterId: number) => {
+    try {
+      const r = await fetch(`/api/admin/viralframe/badges?character_id=${characterId}`, { credentials: 'include' });
+      const j = await r.json();
+      if (j.success) setBadgeAssets(Object.fromEntries((j.data?.items ?? []).map((a: BadgeAsset) => [a.type, a])));
+    } catch { /* noop */ }
   }, []);
+
   const changeCardSize = (size: CardSize) => {
     setCardSize(size);
     localStorage.setItem(CARD_SIZE_STORAGE_KEY, size);
@@ -134,7 +138,11 @@ export default function AdminViralFrameAgentVideosPage() {
   }, []);
 
   useEffect(() => { loadCharacters(); }, [loadCharacters]);
-  useEffect(() => { if (selectedCharId != null) { setRatioFilter('semua'); loadVideos(selectedCharId); } }, [selectedCharId, loadVideos]);
+  useEffect(() => {
+    if (selectedCharId != null) { setRatioFilter('semua'); loadVideos(selectedCharId); loadBadges(selectedCharId); }
+  }, [selectedCharId, loadVideos, loadBadges]);
+
+  const selectedCharacter = characters.find(c => c.id === selectedCharId) ?? null;
 
   const ratioCounts = videos.reduce<Record<RatioClass, number>>((acc, v) => {
     const k = classifyRatio(v.width, v.height);
@@ -210,7 +218,28 @@ export default function AdminViralFrameAgentVideosPage() {
         </div>
 
         {/* Grid video */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 space-y-3">
+          {selectedCharacter && (
+            <div>
+              <button onClick={() => setShowBadgeEditor(s => !s)}
+                className="w-full flex items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-white border border-gray-100 text-sm font-semibold text-[#0F172A] hover:border-[#1565C0]/30">
+                <span className="flex items-center gap-2"><Layers size={16} className="text-[#F97316]" /> Badge &amp; Logo — {selectedCharacter.nama}</span>
+                {showBadgeEditor ? <ChevronUp size={16} className="text-[#94A3B8]" /> : <ChevronDown size={16} className="text-[#94A3B8]" />}
+              </button>
+              {showBadgeEditor && (
+                <div className="mt-3">
+                  <BadgeLogoSettings
+                    characterId={selectedCharacter.id}
+                    characterName={selectedCharacter.nama}
+                    assets={Object.values(badgeAssets).filter((a): a is BadgeAsset => !!a)}
+                    sampleVideos={videos}
+                    onChanged={() => loadBadges(selectedCharacter.id)}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           {loadingVideos ? (
             <div className="py-16 text-center text-sm text-[#94A3B8]"><Loader2 size={20} className="animate-spin mx-auto mb-2" /> Memuat video…</div>
           ) : videos.length === 0 ? (

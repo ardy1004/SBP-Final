@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Layers, Upload, Loader2, Trash2, ImageOff, Move } from 'lucide-react';
 import { toImageThumbnailUrl, toTrimmedImageUrl, type BadgeAsset, type BadgeType } from '../../../lib/cloudinaryOverlay';
 
@@ -17,17 +17,17 @@ function defaultDraft(type: BadgeType): Draft {
   return type === 'logo' ? { x_pct: 0.78, y_pct: 0.82, width_pct: 0.18 } : { x_pct: 0.05, y_pct: 0.05, width_pct: 0.18 };
 }
 
-interface SampleVideo { id: number; cloudinary_url: string; width: number | null; height: number | null; kode_listing: string; property_title: string }
+export interface SampleVideo { id: number; cloudinary_url: string; width: number | null; height: number | null; kode_listing: string; property_title: string }
 
 interface CloudinaryImageUploadResult { public_id: string; secure_url: string; error?: { message: string } }
 
 type DragMode = 'move' | 'resize';
 interface DragState { mode: DragMode; startClientX: number; startClientY: number; startDraft: Draft }
 
-function BadgeSlot({ type, label, hint, asset, sampleVideo, onSaved, onDeleted }: {
-  type: BadgeType; label: string; hint: string;
+function BadgeSlot({ type, label, hint, characterId, asset, sampleVideo, onChanged }: {
+  type: BadgeType; label: string; hint: string; characterId: number;
   asset: BadgeAsset | null; sampleVideo: SampleVideo | null;
-  onSaved: () => void; onDeleted: () => void;
+  onChanged: () => void;
 }) {
   const [draft, setDraft] = useState<Draft>(asset ? { x_pct: asset.x_pct, y_pct: asset.y_pct, width_pct: asset.width_pct } : defaultDraft(type));
   const [uploading, setUploading] = useState(false);
@@ -38,15 +38,15 @@ function BadgeSlot({ type, label, hint, asset, sampleVideo, onSaved, onDeleted }
   const dragRef = useRef<DragState | null>(null);
 
   useEffect(() => {
-    if (asset) setDraft({ x_pct: asset.x_pct, y_pct: asset.y_pct, width_pct: asset.width_pct });
-  }, [asset]);
+    setDraft(asset ? { x_pct: asset.x_pct, y_pct: asset.y_pct, width_pct: asset.width_pct } : defaultDraft(type));
+  }, [asset, type]);
 
   const upload = async (file: File) => {
     setUploading(true); setError('');
     try {
       const signRes = await fetch('/api/admin/viralframe/cloudinary-sign', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folder: 'sbp-viralframe/badges' }),
+        body: JSON.stringify({ folder: `sbp-viralframe/badges/${characterId}` }),
       });
       const signJson = await signRes.json();
       if (!signJson.success) throw new Error(signJson.error ?? 'Gagal menyiapkan upload');
@@ -75,13 +75,13 @@ function BadgeSlot({ type, label, hint, asset, sampleVideo, onSaved, onDeleted }
       const saveRes = await fetch('/api/admin/viralframe/badges', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type, cloudinary_public_id: cloudinaryResult.public_id, cloudinary_url: cloudinaryResult.secure_url,
+          character_id: characterId, type, cloudinary_public_id: cloudinaryResult.public_id, cloudinary_url: cloudinaryResult.secure_url,
           x_pct: draft.x_pct, y_pct: draft.y_pct, width_pct: draft.width_pct,
         }),
       });
       const saveJson = await saveRes.json();
       if (!saveJson.success) throw new Error(saveJson.error ?? 'Gagal menyimpan badge');
-      onSaved();
+      onChanged();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Upload gagal');
     } finally {
@@ -100,7 +100,7 @@ function BadgeSlot({ type, label, hint, asset, sampleVideo, onSaved, onDeleted }
       });
       const j = await r.json();
       if (!j.success) throw new Error(j.error ?? 'Gagal menyimpan posisi');
-      onSaved();
+      onChanged();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Gagal menyimpan');
     } finally { setSaving(false); }
@@ -110,7 +110,7 @@ function BadgeSlot({ type, label, hint, asset, sampleVideo, onSaved, onDeleted }
     if (!asset) return;
     if (!window.confirm(`Hapus badge ${label}?`)) return;
     try { await fetch(`/api/admin/viralframe/badges/${asset.id}`, { method: 'DELETE', credentials: 'include' }); } catch { /* noop */ }
-    onDeleted();
+    onChanged();
   };
 
   // ── Drag (pindah posisi) & resize (ubah ukuran) langsung di atas preview ──
@@ -259,33 +259,16 @@ function BadgeSlot({ type, label, hint, asset, sampleVideo, onSaved, onDeleted }
   );
 }
 
-export default function BadgeLogoSettings() {
-  const [assets, setAssets] = useState<BadgeAsset[]>([]);
-  const [sampleVideos, setSampleVideos] = useState<SampleVideo[]>([]);
-  const [selectedSampleId, setSelectedSampleId] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    try {
-      const r = await fetch('/api/admin/viralframe/badges', { credentials: 'include' });
-      const j = await r.json();
-      if (j.success) setAssets(j.data?.items ?? []);
-    } catch { /* noop */ } finally { setLoading(false); }
-  }, []);
+export default function BadgeLogoSettings({ characterId, characterName, assets, sampleVideos, onChanged }: {
+  characterId: number; characterName: string;
+  assets: BadgeAsset[]; sampleVideos: SampleVideo[];
+  onChanged: () => void;
+}) {
+  const [selectedSampleId, setSelectedSampleId] = useState<number | null>(sampleVideos[0]?.id ?? null);
 
   useEffect(() => {
-    load();
-    fetch('/api/admin/viralframe/agent-videos?limit=10', { credentials: 'include' })
-      .then(r => r.json())
-      .then(j => {
-        if (j.success) {
-          const items: SampleVideo[] = j.data?.items ?? [];
-          setSampleVideos(items);
-          if (items.length > 0) setSelectedSampleId(prev => prev ?? items[0].id);
-        }
-      })
-      .catch(() => {});
-  }, [load]);
+    setSelectedSampleId(prev => (prev != null && sampleVideos.some(v => v.id === prev)) ? prev : (sampleVideos[0]?.id ?? null));
+  }, [sampleVideos]);
 
   const byType = Object.fromEntries(assets.map(a => [a.type, a])) as Partial<Record<BadgeType, BadgeAsset>>;
   const sampleVideo = sampleVideos.find(v => v.id === selectedSampleId) ?? sampleVideos[0] ?? null;
@@ -295,18 +278,18 @@ export default function BadgeLogoSettings() {
       <div className="flex items-center gap-3 mb-2">
         <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#FFF7ED]"><Layers size={17} color="#F97316" /></div>
         <div>
-          <h2 className="font-display font-semibold text-[#0F172A]">Badge &amp; Logo (ViralFrame)</h2>
-          <p className="text-xs text-[#64748B]">Ditempel otomatis ke video Konten Agent sesuai status properti. Cuma 1 badge status yang tampil (prioritas: Sold &gt; Premium &gt; Featured &gt; Hot &gt; Pilihan), logo selalu tampil. Geser kotak biru di preview untuk pindah posisi, tarik sudutnya untuk ubah ukuran.</p>
+          <h2 className="font-display font-semibold text-[#0F172A]">Badge &amp; Logo — {characterName}</h2>
+          <p className="text-xs text-[#64748B]">Ditempel otomatis ke video karakter ini sesuai status properti. Cuma 1 badge status yang tampil (prioritas: Sold &gt; Premium &gt; Featured &gt; Hot &gt; Pilihan), logo selalu tampil. Geser kotak biru di preview untuk pindah posisi, tarik sudutnya untuk ubah ukuran.</p>
         </div>
       </div>
 
-      {!loading && sampleVideos.length === 0 && (
+      {sampleVideos.length === 0 && (
         <p className="text-xs text-[#94A3B8] mb-3 flex items-center gap-1.5">
-          <Upload size={12} /> Belum ada video di Konten Agent — upload minimal 1 video dulu supaya preview posisi badge/logo bisa muncul.
+          <Upload size={12} /> Belum ada video untuk karakter ini — upload minimal 1 video dulu supaya preview posisi badge/logo bisa muncul.
         </p>
       )}
 
-      {!loading && sampleVideos.length > 0 && (
+      {sampleVideos.length > 0 && (
         <div className="mb-4 flex items-center gap-2 flex-wrap">
           <label className="text-xs font-semibold text-[#0F172A] flex-shrink-0">Video contoh untuk preview:</label>
           <select value={selectedSampleId ?? ''} onChange={e => setSelectedSampleId(parseInt(e.target.value, 10))}
@@ -319,15 +302,11 @@ export default function BadgeLogoSettings() {
         </div>
       )}
 
-      {loading ? (
-        <div className="py-8 text-center"><Loader2 size={18} className="animate-spin mx-auto text-[#94A3B8]" /></div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-          {SLOTS.map(s => (
-            <BadgeSlot key={s.type} {...s} asset={byType[s.type] ?? null} sampleVideo={sampleVideo} onSaved={load} onDeleted={load} />
-          ))}
-        </div>
-      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+        {SLOTS.map(s => (
+          <BadgeSlot key={s.type} {...s} characterId={characterId} asset={byType[s.type] ?? null} sampleVideo={sampleVideo} onChanged={onChanged} />
+        ))}
+      </div>
     </div>
   );
 }
