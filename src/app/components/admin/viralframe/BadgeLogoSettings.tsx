@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Layers, Upload, Loader2, Trash2, ImageOff, Move } from 'lucide-react';
-import { toImageThumbnailUrl, type BadgeAsset, type BadgeType } from '../../../lib/cloudinaryOverlay';
+import { toImageThumbnailUrl, toTrimmedImageUrl, type BadgeAsset, type BadgeType } from '../../../lib/cloudinaryOverlay';
 
 const SLOTS: { type: BadgeType; label: string; hint: string }[] = [
   { type: 'sold', label: 'Sold', hint: 'Properti sudah terjual' },
@@ -184,7 +184,7 @@ function BadgeSlot({ type, label, hint, asset, sampleVideo, onSaved, onDeleted }
             className="absolute cursor-move border-2 border-[#1565C0] border-dashed group"
             style={{ left: `${draft.x_pct * 100}%`, top: `${draft.y_pct * 100}%`, width: `${draft.width_pct * 100}%` }}
           >
-            <img src={asset.cloudinary_url} alt={label} draggable={false} className="w-full h-auto pointer-events-none select-none" />
+            <img src={toTrimmedImageUrl(asset.cloudinary_url)} alt={label} draggable={false} className="w-full h-auto pointer-events-none select-none" />
             <div className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-[#1565C0] text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
               <Move size={10} />
             </div>

@@ -48,7 +48,22 @@ function overlaySegment(asset: BadgeAsset): string {
   // dan diam-diam diabaikan Cloudinary sehingga overlay selalu jatuh ke tengah
   // & ukuran aslinya). c_scale wajib disertakan supaya w_ relatif benar2 dipakai
   // untuk resize (tanpa itu w_ juga diabaikan, overlay tampil ukuran asli upload).
-  return `l_${id},w_${asset.width_pct},c_scale,fl_relative/fl_layer_apply,g_north_west,x_${asset.x_pct},y_${asset.y_pct},fl_relative`;
+  // e_trim: banyak file badge/logo diekspor dengan padding transparan di
+  // sekeliling gambar (kanvas persegi tapi isinya cuma mengisi bagian tengah)
+  // — tanpa trim, width_pct% yang di-drag sebagian besar berisi area kosong,
+  // jadi ukuran/posisi tampak "tidak menutup" target padahal sudah sesuai
+  // kotak yang di-drag. e_trim memangkas padding itu otomatis sebelum discale.
+  return `l_${id},e_trim,w_${asset.width_pct},c_scale,fl_relative/fl_layer_apply,g_north_west,x_${asset.x_pct},y_${asset.y_pct},fl_relative`;
+}
+
+// Versi trimmed dari gambar badge/logo (image resource) — dipakai di preview
+// editor supaya WYSIWYG dengan hasil akhir video (yang juga di-trim via e_trim).
+export function toTrimmedImageUrl(imageUrl: string): string {
+  const marker = '/upload/';
+  const idx = imageUrl.indexOf(marker);
+  if (idx === -1) return imageUrl;
+  const insertAt = idx + marker.length;
+  return imageUrl.slice(0, insertAt) + 'e_trim/' + imageUrl.slice(insertAt);
 }
 
 // Sisipkan transformasi overlay tepat setelah "/upload/" pada secure_url Cloudinary.
