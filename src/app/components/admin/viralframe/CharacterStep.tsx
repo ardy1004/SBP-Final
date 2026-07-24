@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Check, Trash2, ImageOff, Upload, X, Loader2 } from 'lucide-react';
+import { Plus, Check, Trash2, ImageOff, Upload, X, Loader2, Pencil } from 'lucide-react';
 import {
   EXPRESSIONS, ETHNIC_OPTIONS, STYLE_OPTIONS, GENDER_OPTIONS,
 } from './options';
@@ -81,6 +81,7 @@ export default function CharacterStep({ value, onChange }: {
   const [uploading, setUploading] = useState(false);
   const [formError, setFormError] = useState('');
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const fetchChars = useCallback(async () => {
@@ -114,31 +115,58 @@ export default function CharacterStep({ value, onChange }: {
     }
   };
 
+  const openCreate = () => { setEditingId(null); setForm(EMPTY_FORM); setFormError(''); setShowForm(true); };
+
+  // Edit TIDAK menghapus baris karakter — foto lama diganti foto baru di R2, tapi
+  // character_id tetap sama, jadi video & badge/logo yang sudah terhubung aman
+  // (beda dengan hapus+upload-ulang yang memicu ON DELETE CASCADE).
+  const openEdit = (c: Character) => {
+    setEditingId(c.id);
+    setForm({
+      nama: c.nama, gender: c.gender ?? 'Pria', usia: c.usia != null ? String(c.usia) : '',
+      etnik: c.etnik ?? 'asia_tenggara', style: c.style ?? 'kasual_modern',
+      ciri_fisik: c.ciri_fisik ?? '', preview: cfImg(charSrc(c.foto_url) ?? '', 400) ?? '',
+    });
+    setFormError('');
+    setShowForm(true);
+  };
+
   const submitUpload = async () => {
     if (!form.nama.trim()) { setFormError('Nama karakter wajib diisi'); return; }
-    if (!form.preview) { setFormError('Foto karakter wajib diunggah'); return; }
+    if (!editingId && !form.preview) { setFormError('Foto karakter wajib diunggah'); return; }
     setUploading(true); setFormError('');
     try {
-      const res = await fetch('/api/admin/viralframe/characters', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nama: form.nama.trim(),
-          foto: form.preview,
-          gender: form.gender,
-          usia: form.usia ? parseInt(form.usia, 10) : null,
-          etnik: form.etnik,
-          style: form.style,
-          ciri_fisik: form.ciri_fisik.trim() || null,
-        }),
-      });
+      const isEdit = editingId != null;
+      const body: Record<string, unknown> = {
+        nama: form.nama.trim(),
+        gender: form.gender,
+        usia: form.usia ? parseInt(form.usia, 10) : null,
+        etnik: form.etnik,
+        style: form.style,
+        ciri_fisik: form.ciri_fisik.trim() || null,
+      };
+      // Foto cuma disertakan kalau pengguna benar-benar pilih file baru (preview data:image/webp;base64,...) —
+      // preview yang cuma nampilin foto lama (URL /api/media?...) tidak dikirim, supaya foto lama dipertahankan.
+      if (form.preview.startsWith('data:image/webp;base64,')) body.foto = form.preview;
+
+      const res = await fetch(
+        isEdit ? `/api/admin/viralframe/characters/${editingId}` : '/api/admin/viralframe/characters',
+        {
+          method: isEdit ? 'PATCH' : 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }
+      );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-      const created: Character | null = json.data?.karakter ?? null;
+      const saved: Character | null = json.data?.karakter ?? null;
       await fetchChars();
-      if (created) onChange({ characterId: created.id, character: created });
+      if (saved && (isEdit ? value.characterId === editingId : true)) {
+        onChange({ characterId: saved.id, character: saved });
+      }
       setShowForm(false);
+      setEditingId(null);
       setForm(EMPTY_FORM);
     } catch (err: unknown) {
       setFormError(err instanceof Error ? err.message : 'Gagal menyimpan karakter');
@@ -214,7 +242,7 @@ export default function CharacterStep({ value, onChange }: {
               <span className="text-sm font-medium text-[#0F172A]">Character Library</span>
               <p className="text-xs text-[#64748B] mt-0.5">🌍 Tersedia di semua properti</p>
             </div>
-            <button type="button" onClick={() => { setShowForm(true); setFormError(''); }}
+            <button type="button" onClick={openCreate}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF] transition-colors">
               <Plus size={14} /> Upload Karakter Baru
             </button>
@@ -259,11 +287,18 @@ export default function CharacterStep({ value, onChange }: {
                         </span>
                       )}
                     </button>
-                    <button type="button" onClick={() => handleDelete(c)} disabled={deletingId === c.id}
-                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-white/90 hover:bg-red-50 border border-gray-200 flex items-center justify-center text-red-500 disabled:opacity-40"
-                      title="Hapus karakter">
-                      {deletingId === c.id ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
-                    </button>
+                    <div className="absolute top-1 right-1 flex gap-1">
+                      <button type="button" onClick={() => openEdit(c)}
+                        className="w-5 h-5 rounded-full bg-white/90 hover:bg-[#F0F7FF] border border-gray-200 flex items-center justify-center text-[#1565C0]"
+                        title="Edit foto/data karakter (aman — video & badge yang sudah ada tidak hilang)">
+                        <Pencil size={10} />
+                      </button>
+                      <button type="button" onClick={() => handleDelete(c)} disabled={deletingId === c.id}
+                        className="w-5 h-5 rounded-full bg-white/90 hover:bg-red-50 border border-gray-200 flex items-center justify-center text-red-500 disabled:opacity-40"
+                        title="Hapus karakter (video & badge/logo terkait ikut terhapus permanen)">
+                        {deletingId === c.id ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -288,16 +323,22 @@ export default function CharacterStep({ value, onChange }: {
       {/* ── MODAL UPLOAD KARAKTER ── */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => !uploading && setShowForm(false)} />
+          <div className="absolute inset-0 bg-black/50" onClick={() => !uploading && (setShowForm(false), setEditingId(null))} />
           <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-display font-bold text-[#0F172A]">Upload Karakter Baru</h3>
-              <button onClick={() => !uploading && setShowForm(false)} className="text-[#94A3B8] hover:text-[#0F172A]"><X size={18} /></button>
+              <h3 className="font-display font-bold text-[#0F172A]">{editingId != null ? 'Edit Karakter' : 'Upload Karakter Baru'}</h3>
+              <button onClick={() => !uploading && (setShowForm(false), setEditingId(null))} className="text-[#94A3B8] hover:text-[#0F172A]"><X size={18} /></button>
             </div>
+            {editingId != null && (
+              <p className="text-xs text-[#64748B] -mt-2">Video &amp; preset Badge/Logo yang sudah terhubung ke karakter ini tetap aman — tidak ikut berubah.</p>
+            )}
 
             {/* Foto */}
             <div>
-              <label className="block text-sm font-medium text-[#0F172A] mb-1.5">Foto Karakter <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-[#0F172A] mb-1.5">
+                Foto Karakter {editingId == null && <span className="text-red-500">*</span>}
+                {editingId != null && <span className="text-[#94A3B8] font-normal"> (opsional — biarkan kalau tidak ganti foto)</span>}
+              </label>
               <input ref={fileRef} type="file" accept="image/*" className="hidden"
                 onChange={e => handlePick(e.target.files?.[0])} />
               <button type="button" onClick={() => fileRef.current?.click()}
@@ -352,7 +393,7 @@ export default function CharacterStep({ value, onChange }: {
             {formError && <p className="text-sm text-red-600">{formError}</p>}
 
             <div className="flex items-center justify-end gap-2 pt-1">
-              <button onClick={() => setShowForm(false)} disabled={uploading}
+              <button onClick={() => { setShowForm(false); setEditingId(null); }} disabled={uploading}
                 className="px-4 py-2 rounded-xl text-sm font-semibold text-[#64748B] border border-gray-200 hover:bg-gray-50 disabled:opacity-40">
                 Batal
               </button>
@@ -360,7 +401,7 @@ export default function CharacterStep({ value, onChange }: {
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
                 {uploading && <Loader2 size={14} className="animate-spin" />}
-                {uploading ? 'Menyimpan…' : 'Simpan Karakter'}
+                {uploading ? 'Menyimpan…' : (editingId != null ? 'Simpan Perubahan' : 'Simpan Karakter')}
               </button>
             </div>
           </div>
