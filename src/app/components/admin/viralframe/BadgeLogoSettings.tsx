@@ -157,8 +157,12 @@ function BadgeSlot({ type, label, hint, asset, sampleVideo, onSaved, onDeleted }
       </div>
 
       {/* Preview interaktif — frame video statis + kotak badge yang bisa di-drag & resize langsung */}
-      <div ref={containerRef} className="relative w-full bg-[#0B2447] rounded-xl overflow-hidden select-none touch-none"
-        style={{ aspectRatio: previewAspect, maxHeight: 320 }}>
+      {/* maxWidth (bukan maxHeight) supaya kotak preview SELALU sama persis rasionya
+          dengan video asli — kalau dibatasi via maxHeight, lebar kotak tetap 100% kartu
+          sementara tingginya dipangkas, foto jadi "pesek"/pillarbox di tengah, dan posisi
+          badge (dihitung dari lebar kotak) jadi meleset dari posisi asli di video. */}
+      <div ref={containerRef} className="relative mx-auto bg-[#0B2447] rounded-xl overflow-hidden select-none touch-none"
+        style={{ aspectRatio: previewAspect, width: '100%', maxWidth: 260 }}>
         {sampleVideo ? (
           <img src={toImageThumbnailUrl(sampleVideo.cloudinary_url)} alt="" draggable={false}
             className="absolute inset-0 w-full h-full object-contain pointer-events-none" />
