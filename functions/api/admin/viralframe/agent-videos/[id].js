@@ -36,11 +36,16 @@ export async function onRequestPatch(context) {
   const caption = typeof body.caption === 'string' ? body.caption.slice(0, 1000) || null : undefined;
   const hashtags = typeof body.hashtags === 'string' ? body.hashtags.slice(0, 500) || null : undefined;
   const post_url = typeof body.post_url === 'string' ? body.post_url.slice(0, 500) || null : undefined;
+  const trash = typeof body.trash === 'boolean' ? body.trash : undefined;
 
   const sets = [], binds = [];
   if (caption !== undefined) { sets.push('caption = ?'); binds.push(caption); }
   if (hashtags !== undefined) { sets.push('hashtags = ?'); binds.push(hashtags); }
   if (post_url !== undefined) { sets.push('post_url = ?'); binds.push(post_url); }
+  // trash: true -> pindah ke Sampah (soft-delete, dihapus permanen otomatis 30 hari
+  // kemudian oleh worker cron); false -> pulihkan ke Aktif.
+  if (trash === true) { sets.push("trashed_at = datetime('now')"); }
+  else if (trash === false) { sets.push('trashed_at = NULL'); }
   if (sets.length === 0) return jsonError('Tidak ada field diupdate', 400);
 
   try {

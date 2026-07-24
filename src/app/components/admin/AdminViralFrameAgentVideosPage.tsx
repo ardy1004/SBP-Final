@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router';
-import { Users, Loader2, Download, Trash2, Pencil, Check, X, Clock, Copy, Layers, ChevronDown, ChevronUp } from 'lucide-react';
+import {
+  Users, Loader2, Download, Trash2, Pencil, Check, X, Clock, Copy, Layers, ChevronDown, ChevronUp,
+  Archive, RotateCcw, CheckCircle2, Circle,
+} from 'lucide-react';
 import { buildOverlayVideoUrl, composeOverlaysForProperty, pickStatusBadgeType, toAttachmentUrl, toImageThumbnailUrl, type BadgeAsset, type BadgeType } from '../../lib/cloudinaryOverlay';
 import BadgeLogoSettings from './viralframe/BadgeLogoSettings';
 
@@ -29,6 +32,7 @@ interface AgentVideo {
   height: number | null;
   status: string;
   post_url: string | null;
+  trashed_at: string | null;
   created_at: string;
   character_nama: string;
   character_foto_url: string;
@@ -59,12 +63,25 @@ function classifyRatio(width: number | null, height: number | null): RatioClass 
   return 'square';
 }
 
+// Sisa hari sebelum dihapus permanen otomatis oleh worker cron (30 hari sejak
+// dipindah ke Sampah). Kalau sudah lewat 0, berarti cron belum sempat jalan lagi.
+function daysUntilPurge(trashedAt: string): number {
+  const trashedMs = new Date(trashedAt).getTime();
+  if (Number.isNaN(trashedMs)) return 30;
+  const purgeMs = trashedMs + 30 * 24 * 60 * 60 * 1000;
+  return Math.ceil((purgeMs - Date.now()) / (24 * 60 * 60 * 1000));
+}
+
 // Ukuran tampilan kartu — lebar kolom grid tetap (bukan stretch penuh), supaya
 // video vertikal tidak membengkak. Dipilih Kecil/Sedang/Besar, tersimpan per browser.
 type CardSize = 'kecil' | 'sedang' | 'besar';
 const CARD_SIZE_PX: Record<CardSize, number> = { kecil: 200, sedang: 260, besar: 340 };
 const CARD_SIZE_LABEL: Record<CardSize, string> = { kecil: 'Kecil', sedang: 'Sedang', besar: 'Besar' };
 const CARD_SIZE_STORAGE_KEY = 'sbp_agent_videos_card_size';
+
+type ViewMode = 'active' | 'trash';
+
+interface ContextMenuState { x: number; y: number; videoId: number }
 
 export default function AdminViralFrameAgentVideosPage() {
   const [characters, setCharacters] = useState<CharacterOption[]>([]);
@@ -81,6 +98,10 @@ export default function AdminViralFrameAgentVideosPage() {
   const [cardSize, setCardSize] = useState<CardSize>('sedang');
   const [badgeAssets, setBadgeAssets] = useState<Partial<Record<BadgeType, BadgeAsset>>>({});
   const [showBadgeEditor, setShowBadgeEditor] = useState(false);
+  const [view, setView] = useState<ViewMode>('active');
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem(CARD_SIZE_STORAGE_KEY) as CardSize | null;
@@ -113,7 +134,8 @@ export default function AdminViralFrameAgentVideosPage() {
     } catch { /* noop */ } finally { setLoadingChars(false); }
 
     try {
-      const r = await fetch('/api/admin/viralframe/agent-videos?limit=200', { credentials: 'include' });
+      // view=active eksplisit — badge angka di sidebar cuma menghitung video aktif, bukan yang di Sampah.
+      const r = await fetch('/api/admin/viralframe/agent-videos?limit=200&view=active', { credentials: 'include' });
       const j = await r.json();
       if (j.success) {
         const items: AgentVideo[] = j.data?.items ?? [];
@@ -124,10 +146,10 @@ export default function AdminViralFrameAgentVideosPage() {
     } catch { /* noop */ }
   }, []);
 
-  const loadVideos = useCallback(async (characterId: number) => {
+  const loadVideos = useCallback(async (characterId: number, viewMode: ViewMode) => {
     setLoadingVideos(true);
     try {
-      const r = await fetch(`/api/admin/viralframe/agent-videos?character_id=${characterId}`, { credentials: 'include' });
+      const r = await fetch(`/api/admin/viralframe/agent-videos?character_id=${characterId}&view=${viewMode}`, { credentials: 'include' });
       const j = await r.json();
       if (j.success) {
         const items: AgentVideo[] = j.data?.items ?? [];
@@ -139,8 +161,12 @@ export default function AdminViralFrameAgentVideosPage() {
 
   useEffect(() => { loadCharacters(); }, [loadCharacters]);
   useEffect(() => {
-    if (selectedCharId != null) { setRatioFilter('semua'); loadVideos(selectedCharId); loadBadges(selectedCharId); }
-  }, [selectedCharId, loadVideos, loadBadges]);
+    if (selectedCharId != null) {
+      setRatioFilter('semua'); setSelectedIds(new Set()); setContextMenu(null);
+      loadVideos(selectedCharId, view);
+      if (view === 'active') loadBadges(selectedCharId);
+    }
+  }, [selectedCharId, view, loadVideos, loadBadges]);
 
   const selectedCharacter = characters.find(c => c.id === selectedCharId) ?? null;
 
@@ -151,11 +177,83 @@ export default function AdminViralFrameAgentVideosPage() {
   }, { vertikal: 0, horizontal: 0, square: 0, lainnya: 0 });
   const filteredVideos = ratioFilter === 'semua' ? videos : videos.filter(v => classifyRatio(v.width, v.height) === ratioFilter);
 
-  const del = async (id: number) => {
-    if (!window.confirm('Hapus video ini? File di Cloudinary juga akan dihapus.')) return;
-    try { await fetch(`/api/admin/viralframe/agent-videos/${id}`, { method: 'DELETE', credentials: 'include' }); } catch { /* noop */ }
-    if (selectedCharId != null) loadVideos(selectedCharId);
+  const refreshAfterAction = () => {
+    if (selectedCharId != null) loadVideos(selectedCharId, view);
     loadCharacters();
+  };
+
+  // ── Seleksi multi ──
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (document.activeElement?.tagName ?? '').toLowerCase();
+      const typing = tag === 'input' || tag === 'textarea';
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !typing) {
+        e.preventDefault();
+        setSelectedIds(new Set(filteredVideos.map(v => v.id)));
+      }
+      if (e.key === 'Escape') { setSelectedIds(new Set()); setContextMenu(null); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [filteredVideos]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [contextMenu]);
+
+  const openContextMenu = (e: React.MouseEvent, videoId: number) => {
+    e.preventDefault();
+    if (!selectedIds.has(videoId)) setSelectedIds(new Set([videoId]));
+    setContextMenu({ x: e.clientX, y: e.clientY, videoId });
+  };
+
+  // ── Aksi bulk (dipakai toolbar & context menu) ──
+  const bulkAction = async (action: 'trash' | 'restore' | 'delete', ids: number[]) => {
+    if (ids.length === 0) return;
+    if (action === 'delete' && !window.confirm(`Hapus permanen ${ids.length} video? File Cloudinary ikut terhapus, tidak bisa dipulihkan.`)) return;
+    setBulkBusy(true);
+    try {
+      await fetch('/api/admin/viralframe/agent-videos/bulk', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, action }),
+      });
+    } catch { /* noop */ } finally {
+      setBulkBusy(false);
+      clearSelection();
+      setContextMenu(null);
+      refreshAfterAction();
+    }
+  };
+
+  // ── Aksi per-item (klik cepat tanpa perlu select dulu) ──
+  const trashOne = async (id: number) => {
+    try { await fetch(`/api/admin/viralframe/agent-videos/${id}`, {
+      method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trash: true }),
+    }); } catch { /* noop */ }
+    refreshAfterAction();
+  };
+  const restoreOne = async (id: number) => {
+    try { await fetch(`/api/admin/viralframe/agent-videos/${id}`, {
+      method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trash: false }),
+    }); } catch { /* noop */ }
+    refreshAfterAction();
+  };
+  const deletePermanentOne = async (id: number) => {
+    if (!window.confirm('Hapus permanen video ini? File di Cloudinary juga akan dihapus, tidak bisa dipulihkan.')) return;
+    try { await fetch(`/api/admin/viralframe/agent-videos/${id}`, { method: 'DELETE', credentials: 'include' }); } catch { /* noop */ }
+    refreshAfterAction();
   };
 
   const saveEdit = async (id: number) => {
@@ -168,7 +266,7 @@ export default function AdminViralFrameAgentVideosPage() {
       });
     } catch { /* noop */ } finally {
       setSavingId(null); setEditingId(null);
-      if (selectedCharId != null) loadVideos(selectedCharId);
+      if (selectedCharId != null) loadVideos(selectedCharId, view);
     }
   };
 
@@ -219,7 +317,19 @@ export default function AdminViralFrameAgentVideosPage() {
 
         {/* Grid video */}
         <div className="flex-1 min-w-0 space-y-3">
-          {selectedCharacter && (
+          {/* Tab Aktif/Sampah */}
+          <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-full p-0.5 w-fit">
+            {([{ v: 'active', label: 'Aktif' }, { v: 'trash', label: 'Sampah' }] as const).map(t => (
+              <button key={t.v} onClick={() => setView(t.v)}
+                className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                  view === t.v ? 'bg-[#1565C0] text-white' : 'text-[#64748B] hover:bg-gray-50'
+                }`}>
+                {t.v === 'trash' && <Archive size={12} />} {t.label}
+              </button>
+            ))}
+          </div>
+
+          {view === 'active' && selectedCharacter && (
             <div>
               <button onClick={() => setShowBadgeEditor(s => !s)}
                 className="w-full flex items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-white border border-gray-100 text-sm font-semibold text-[#0F172A] hover:border-[#1565C0]/30">
@@ -240,12 +350,38 @@ export default function AdminViralFrameAgentVideosPage() {
             </div>
           )}
 
+          {/* Toolbar seleksi bulk */}
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-[#0F172A] text-white text-sm sticky top-2 z-10">
+              <span className="font-semibold">{selectedIds.size} video dipilih</span>
+              <div className="flex-1" />
+              {view === 'active' ? (
+                <button disabled={bulkBusy} onClick={() => bulkAction('trash', Array.from(selectedIds))}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 disabled:opacity-50">
+                  <Archive size={13} /> Pindahkan ke Sampah
+                </button>
+              ) : (
+                <>
+                  <button disabled={bulkBusy} onClick={() => bulkAction('restore', Array.from(selectedIds))}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 disabled:opacity-50">
+                    <RotateCcw size={13} /> Pulihkan
+                  </button>
+                  <button disabled={bulkBusy} onClick={() => bulkAction('delete', Array.from(selectedIds))}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500/90 hover:bg-red-500 disabled:opacity-50">
+                    <Trash2 size={13} /> Hapus Permanen
+                  </button>
+                </>
+              )}
+              <button onClick={clearSelection} className="text-xs text-white/70 hover:text-white">Batal</button>
+            </div>
+          )}
+
           {loadingVideos ? (
             <div className="py-16 text-center text-sm text-[#94A3B8]"><Loader2 size={20} className="animate-spin mx-auto mb-2" /> Memuat video…</div>
           ) : videos.length === 0 ? (
             <div className="text-center py-16 border border-dashed border-gray-200 rounded-2xl bg-white">
-              <p className="text-sm text-[#64748B]">Belum ada video untuk karakter ini.</p>
-              <p className="text-xs text-[#94A3B8] mt-1">Upload dari halaman workspace properti → Step 4 → tab "Upload Hasil".</p>
+              <p className="text-sm text-[#64748B]">{view === 'trash' ? 'Sampah kosong.' : 'Belum ada video untuk karakter ini.'}</p>
+              {view === 'active' && <p className="text-xs text-[#94A3B8] mt-1">Upload dari halaman workspace properti → Step 4 → tab "Upload Hasil".</p>}
             </div>
           ) : (
             <div className="space-y-3">
@@ -288,10 +424,25 @@ export default function AdminViralFrameAgentVideosPage() {
                 const statusBadgeType = pickStatusBadgeType(v);
                 const overlays = composeOverlaysForProperty(badgeAssets, v);
                 const displayUrl = buildOverlayVideoUrl(v.cloudinary_url, overlays);
+                const selected = selectedIds.has(v.id);
+                const purgeDays = v.trashed_at ? daysUntilPurge(v.trashed_at) : null;
                 return (
-                  <div key={v.id} className="border border-gray-100 rounded-2xl overflow-hidden bg-white flex flex-col">
-                    <video key={displayUrl} src={displayUrl} poster={toImageThumbnailUrl(displayUrl)} controls preload="none" className="w-full bg-black"
-                      style={{ aspectRatio: v.width && v.height ? `${v.width} / ${v.height}` : '16 / 9', objectFit: 'contain' }} />
+                  <div key={v.id} onContextMenu={e2 => openContextMenu(e2, v.id)}
+                    className={`border rounded-2xl overflow-hidden bg-white flex flex-col transition-colors ${selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-gray-100'}`}>
+                    <div className="relative">
+                      <video key={displayUrl} src={displayUrl} poster={toImageThumbnailUrl(displayUrl)} controls preload="none" className="w-full bg-black"
+                        style={{ aspectRatio: v.width && v.height ? `${v.width} / ${v.height}` : '16 / 9', objectFit: 'contain' }} />
+                      <button onClick={() => toggleSelect(v.id)}
+                        className="absolute top-2 left-2 w-6 h-6 rounded-full bg-black/50 hover:bg-black/70 flex items-center justify-center text-white"
+                        title="Pilih video">
+                        {selected ? <CheckCircle2 size={16} className="text-[#4FC3F7]" /> : <Circle size={16} />}
+                      </button>
+                      {purgeDays != null && (
+                        <span className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-semibold text-white ${purgeDays <= 0 ? 'bg-[#94A3B8]' : 'bg-red-500'}`}>
+                          {purgeDays <= 0 ? 'Menunggu pembersihan…' : `Terhapus otomatis ${purgeDays} hari lagi`}
+                        </span>
+                      )}
+                    </div>
                     <div className="p-3 space-y-2 flex-1 flex flex-col">
                       <div className="flex items-center justify-between gap-2">
                         <Link to={`/admin/viralframe/${v.property_id}`} className="min-w-0 group">
@@ -312,7 +463,14 @@ export default function AdminViralFrameAgentVideosPage() {
                         </Link>
                         <div className="flex gap-1 flex-shrink-0">
                           <a href={toAttachmentUrl(displayUrl)} className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download (versi siap-post)"><Download size={14} /></a>
-                          <button onClick={() => del(v.id)} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50" title="Hapus"><Trash2 size={14} /></button>
+                          {view === 'active' ? (
+                            <button onClick={() => trashOne(v.id)} className="p-1.5 rounded-lg text-[#64748B] hover:bg-gray-100" title="Pindahkan ke Sampah"><Archive size={14} /></button>
+                          ) : (
+                            <>
+                              <button onClick={() => restoreOne(v.id)} className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50" title="Pulihkan ke Aktif"><RotateCcw size={14} /></button>
+                              <button onClick={() => deletePermanentOne(v.id)} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50" title="Hapus permanen sekarang"><Trash2 size={14} /></button>
+                            </>
+                          )}
                         </div>
                       </div>
 
@@ -361,6 +519,31 @@ export default function AdminViralFrameAgentVideosPage() {
           )}
         </div>
       </div>
+
+      {/* Context menu klik-kanan */}
+      {contextMenu && (
+        <div className="fixed z-50 bg-white rounded-xl shadow-xl border border-gray-100 py-1 min-w-[200px]"
+          style={{ left: contextMenu.x, top: contextMenu.y }} onClick={e => e.stopPropagation()}>
+          <div className="px-3 py-1.5 text-[11px] text-[#94A3B8] border-b border-gray-50">{selectedIds.size} video dipilih</div>
+          {view === 'active' ? (
+            <button onClick={() => bulkAction('trash', Array.from(selectedIds))}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#0F172A] hover:bg-gray-50 text-left">
+              <Archive size={14} /> Pindahkan ke Sampah
+            </button>
+          ) : (
+            <>
+              <button onClick={() => bulkAction('restore', Array.from(selectedIds))}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#0F172A] hover:bg-gray-50 text-left">
+                <RotateCcw size={14} /> Pulihkan
+              </button>
+              <button onClick={() => bulkAction('delete', Array.from(selectedIds))}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 text-left">
+                <Trash2 size={14} /> Hapus Permanen
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,7 @@
+name = "viralframe-purge-cron"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Jam 20:00 UTC = 03:00 WIB — di luar jam kerja, sebelum admin mulai aktivitas pagi.
+[triggers]
+crons = ["0 20 * * *"]

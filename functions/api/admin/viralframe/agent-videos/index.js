@@ -15,7 +15,7 @@ const SELECT_COLS = `
   v.cloudinary_public_id, v.cloudinary_url, v.resource_type,
   v.duration_sec, v.bytes, v.format, v.width, v.height,
   v.status, v.scheduled_at, v.posted_at,
-  v.post_url, v.platform_targets, v.created_at,
+  v.post_url, v.platform_targets, v.trashed_at, v.created_at,
   c.nama AS character_nama, c.foto_url AS character_foto_url,
   p.kode_listing, p.title AS property_title,
   p.status_sold, p.badge_premium, p.badge_featured, p.badge_hot, p.properti_pilihan
@@ -65,12 +65,14 @@ export async function onRequestGet(context) {
   const propertyId = parseInt(url.searchParams.get('property_id') ?? '', 10);
   const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '', 10) || 100, 200);
   const offset = parseInt(url.searchParams.get('offset') ?? '', 10) || 0;
+  const view = url.searchParams.get('view') === 'trash' ? 'trash' : 'active';
 
-  const conds = [];
+  const conds = [view === 'trash' ? 'v.trashed_at IS NOT NULL' : 'v.trashed_at IS NULL'];
   const binds = [];
   if (Number.isInteger(characterId) && characterId > 0) { conds.push('v.character_id = ?'); binds.push(characterId); }
   if (Number.isInteger(propertyId) && propertyId > 0) { conds.push('v.property_id = ?'); binds.push(propertyId); }
-  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+  const where = `WHERE ${conds.join(' AND ')}`;
+  const orderBy = view === 'trash' ? 'v.trashed_at DESC, v.id DESC' : 'v.created_at DESC, v.id DESC';
 
   try {
     const stmt = env.DB.prepare(
@@ -79,7 +81,7 @@ export async function onRequestGet(context) {
        JOIN viralframe_characters c ON c.id = v.character_id
        JOIN properties p ON p.id = v.property_id
        ${where}
-       ORDER BY v.created_at DESC, v.id DESC
+       ORDER BY ${orderBy}
        LIMIT ? OFFSET ?`
     ).bind(...binds, limit, offset);
     const res = await stmt.all();
