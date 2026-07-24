@@ -180,7 +180,15 @@ Respond HANYA dengan JSON valid, tanpa markdown, tanpa komentar, tanpa penjelasa
     return Response.json({ error: `DeepSeek error ${dsRes.status}: ${errText}` }, { status: 502 });
   }
 
-  const dsJson = await dsRes.json();
+  let dsJson;
+  try {
+    dsJson = await dsRes.json();
+  } catch (err) {
+    // dsRes.ok true tapi body bukan JSON valid (mis. halaman HTML dari timeout/gateway
+    // di depan DeepSeek) — tanpa guard ini exception lolos tak tertangkap dan Cloudflare
+    // Pages Functions membalas HTML generiknya sendiri, bukan JSON, ke frontend.
+    return Response.json({ error: `Respons DeepSeek bukan JSON valid: ${err.message}` }, { status: 502 });
+  }
   const raw = dsJson.choices?.[0]?.message?.content ?? '';
 
   let parsed;
