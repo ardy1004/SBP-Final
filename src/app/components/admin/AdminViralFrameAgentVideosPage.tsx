@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router';
 import { Users, Loader2, Download, Trash2, Pencil, Check, X, Clock, Copy, Layers, ChevronDown, ChevronUp } from 'lucide-react';
-import { buildOverlayVideoUrl, composeOverlaysForProperty, pickStatusBadgeType, toAttachmentUrl, type BadgeAsset, type BadgeType } from '../../lib/cloudinaryOverlay';
+import { buildOverlayVideoUrl, composeOverlaysForProperty, pickStatusBadgeType, toAttachmentUrl, toImageThumbnailUrl, type BadgeAsset, type BadgeType } from '../../lib/cloudinaryOverlay';
 import BadgeLogoSettings from './viralframe/BadgeLogoSettings';
 
 const STATUS_BADGE_LABEL: Record<BadgeType, string> = {
@@ -290,7 +290,7 @@ export default function AdminViralFrameAgentVideosPage() {
                 const displayUrl = buildOverlayVideoUrl(v.cloudinary_url, overlays);
                 return (
                   <div key={v.id} className="border border-gray-100 rounded-2xl overflow-hidden bg-white flex flex-col">
-                    <video key={displayUrl} src={displayUrl} controls preload="none" className="w-full bg-black"
+                    <video key={displayUrl} src={displayUrl} poster={toImageThumbnailUrl(displayUrl)} controls preload="none" className="w-full bg-black"
                       style={{ aspectRatio: v.width && v.height ? `${v.width} / ${v.height}` : '16 / 9', objectFit: 'contain' }} />
                     <div className="p-3 space-y-2 flex-1 flex flex-col">
                       <div className="flex items-center justify-between gap-2">
