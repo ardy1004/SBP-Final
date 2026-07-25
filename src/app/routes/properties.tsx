@@ -7,6 +7,7 @@ import { parseProgrammaticSlug } from "../../lib/programmaticSeo";
 // functions/_lib import bersama backend↔frontend (lihat CLAUDE.md) — sama pola
 // dgn generateMetaSeo di AdminPropertyDetailPage.tsx.
 import { parseLandmarkSlug, resolveApproxCoord, haversineKm, LANDMARK_RADIUS_KM } from "../../../functions/_lib/geoLandmarks.js";
+import { isInertParam } from "../../../functions/_lib/queryParams.js";
 
 // Route module SSR untuk /properties DAN programmatic SEO /:slug
 // (mis. /rumah-dijual-jogja, /kost-dijual-sleman).
@@ -20,6 +21,9 @@ const SSR_LIMIT = 20; // = state `limit` awal PropertiesPage — hasil identik d
 // Param URL yang di-support loader ini. Ada param lain (harga_min, q, kt, …)
 // → fallback CSR seperti sebelumnya (hindari mismatch data SSR vs fetch client).
 const SUPPORTED_PARAMS = ['tujuan', 'jenis', 'provinsi', 'kabupaten', 'kecamatan'];
+
+// Sumber yang sama dipakai cache edge untuk membersihkan cache key — kedua sisi
+// WAJIB sepakat, kalau tidak halaman kosong bisa ter-cache di kunci bersih.
 
 const VALID_JENIS = ['rumah', 'tanah', 'kost', 'hotel', 'homestay', 'villa', 'apartment', 'ruko', 'gudang', 'komersial'];
 
@@ -140,8 +144,15 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
     provinsi = url.searchParams.get('provinsi');
     kabupaten = url.searchParams.get('kabupaten');
     kecamatan = url.searchParams.get('kecamatan');
-    // Param di luar yang di-support → serahkan ke fetch client (CSR)
-    ssrEligible = ![...url.searchParams.keys()].some(k => !SUPPORTED_PARAMS.includes(k));
+    // Param di luar yang di-support → serahkan ke fetch client (CSR), KECUALI
+    // param inert (pelacak iklan + diagnostik) yang terbukti tidak memengaruhi
+    // hasil query. Tanpa pengecualian ini, satu klik iklan ber-fbclid membuat
+    // halaman dirender KOSONG, lalu cache edge menyimpannya di bawah cache key
+    // yang sudah dibersihkan dari fbclid — sehingga Googlebot ikut menerima
+    // halaman tanpa satu pun listing. Lihat functions/_lib/queryParams.js.
+    ssrEligible = ![...url.searchParams.keys()].some(
+      k => !SUPPORTED_PARAMS.includes(k) && !isInertParam(k),
+    );
   }
 
   // ── 2. SEO copy (dipakai meta di bawah, dihitung setelah total didapat) ─────

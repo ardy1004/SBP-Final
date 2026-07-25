@@ -57,3 +57,11 @@ pnpm-lock.yaml
 scripts/screenshots/
 scripts/deskripsi_backup.json
 scripts/_maps_check.json
+
+# Ekspor D1. CLAUDE.md MEWAJIBKAN `wrangler d1 export --remote` sebelum setiap
+# operasi tulis ke produksi, jadi berkas ini akan terus bermunculan (±22 MB).
+# Isinya seluruh database produksi: leads (nama + nomor telepon) dan agreements
+# (nik_encrypted). JANGAN sampai ikut ter-commit oleh `git add -A`.
+*.sql
+!migrations/*.sql
+backup-*.sql

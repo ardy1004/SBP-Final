@@ -26,6 +26,13 @@
  * ATURAN: allowlist, bukan blocklist. Lihat NEVER_CACHE_PREFIXES.
  */
 
+// Daftar parameter pelacak tinggal di queryParams.js karena loader SSR WAJIB
+// memakai daftar yang sama. Saat keduanya sempat terpisah (26 Juli 2026), cache
+// key membuang fbclid sementara loader menolaknya sebagai parameter asing →
+// halaman KOSONG tersimpan di bawah cache key BERSIH lalu disajikan ke Googlebot.
+// Catatan insiden lengkap ada di functions/_lib/queryParams.js.
+import { TRACKING_PARAMS } from './queryParams.js';
+
 /**
  * Path yang TIDAK BOLEH masuk cache dalam kondisi apa pun.
  * - /sign   : merender NIK terdekripsi (PII). Kebocoran ke cache bersama = insiden data.
@@ -35,16 +42,6 @@
  * - /titip-jual : alur form multi-langkah dengan state.
  */
 export const NEVER_CACHE_PREFIXES = ['/admin', '/api', '/sign', '/titip-jual'];
-
-/**
- * Parameter yang hanya menandai sumber trafik dan tidak mengubah HTML sedikit pun.
- * Dibuang dari cache key supaya trafik iklan Meta (setiap klik membawa fbclid unik)
- * tidak melahirkan satu entri cache per klik — tanpa ini hit rate iklan = 0%.
- */
-const TRACKING_PARAMS = [
-  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'utm_id',
-  'fbclid', 'gclid', 'msclkid', 'igshid', 'ttclid', 'mc_cid', 'mc_eid',
-];
 
 /** Normalisasi URL menjadi cache key yang stabil. */
 export function cacheKeyUrl(rawUrl) {

@@ -9,7 +9,12 @@
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { destroyCloudinaryAsset } from '../../../_lib/cloudinary.js';
 
-const PURGE_LIMIT_PER_RUN = 200; // pengaman batas subrequest Workers per eksekusi
+// Batas D1 = 100 bound parameter per query, dan DELETE di bawah memakai
+// `IN (?, ?, ...)` sebanyak jumlah baris. Nilai 200 yang lama membuat cron GAGAL
+// setiap kali sampah menumpuk lebih dari 100 — sampah lalu tidak pernah terhapus
+// dan biaya penyimpanan Cloudinary terus berjalan tanpa ketahuan.
+// Cron dijalankan berkala, jadi memproses 100 per eksekusi sudah memadai.
+const PURGE_LIMIT_PER_RUN = 100;
 
 export async function onRequestPost(context) {
   const { request, env } = context;

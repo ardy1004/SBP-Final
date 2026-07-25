@@ -57,7 +57,13 @@ function wrapText(text, font, size, maxW) {
 
 function fmtTanggal(iso) {
   try {
-    return new Date(iso).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+    // timeZone WAJIB: runtime Cloudflare selalu UTC, jadi tanpa ini penandatanganan
+    // antara 00.00-07.00 WIB tercetak mundur satu hari pada dokumen perjanjian.
+    // (2026-07-25T20:00:00Z = 26 Juli 03.00 WIB, dulu tercetak "25 Juli 2026".)
+    return new Date(iso).toLocaleDateString('id-ID', {
+      day: 'numeric', month: 'long', year: 'numeric',
+      timeZone: 'Asia/Jakarta',
+    });
   } catch { return iso; }
 }
 
