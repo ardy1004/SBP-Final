@@ -1,0 +1,59 @@
+{
+  "//": [
+    "Konfigurasi TypeScript. Sebelum ini project TIDAK punya tsconfig sama sekali,",
+    "sehingga tidak pernah ada satu pun pemeriksaan tipe atas ~28.700 baris TS/TSX.",
+    "Build memakai esbuild yang menghapus tipe tanpa memeriksanya, jadi kesalahan",
+    "tipe lolos diam-diam sampai runtime. Itulah kelas kesalahan yang meloloskan bug",
+    "cache poisoning /properties ke produksi pada 26 Juli 2026.",
+    "",
+    "Konfigurasi ini SENGAJA belum ketat (strict: false). Tujuannya menegakkan",
+    "gerbang yang bisa dilewati hari ini lalu diperketat bertahap, bukan menyalakan",
+    "ratusan error sekaligus yang ujungnya diabaikan semua orang.",
+    "Urutan pengetatan yang disarankan: noUnusedLocals -> strictNullChecks -> strict."
+  ],
+
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+
+    // Vite/esbuild yang mengeluarkan berkas; tsc hanya memeriksa.
+    "noEmit": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowJs": true,
+
+    // functions/_lib/*.js diimpor lintas backend-frontend (pola CLAUDE.md),
+    // jadi JS ikut di-resolve tapi tidak diperiksa isinya.
+    "checkJs": false,
+
+    "strict": false,
+    "forceConsistentCasingInFileNames": true,
+
+    // vite/client memberi tipe untuk import.meta.env (dipakai src/lib/img.ts).
+    "types": ["@cloudflare/workers-types", "vite/client"],
+
+    // WAJIB untuk React Router framework mode: berkas tipe hasil generate di
+    // .react-router/types/ memakai path relatif terhadap appDirectory
+    // ("./src/app/./routes/home.tsx"). Tanpa rootDirs, tsc melaporkan 176
+    // "Cannot find module" palsu untuk setiap route.
+    "rootDirs": [".", "./.react-router/types"],
+
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    ".react-router/types/**/*"
+  ],
+  "exclude": ["node_modules", "dist", "workers", "scripts"]
+}

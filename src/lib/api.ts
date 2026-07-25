@@ -133,9 +133,17 @@ export interface ApiPropertyDetail extends ApiPropertyListItem {
   details: Record<string, unknown> | null;
   images: ApiImage[];
   investment_intelligence: InvestmentIntelligence | null;
-  // field tambahan yang mungkin ada di detail
-  status_legalitas?: string | null;
   video_youtube?: string | null;
+  // Dikembalikan GET /api/properties/:slug (lihat SELECT di
+  // functions/api/properties/[slug].js) tapi dulu tidak dideklarasikan di sini,
+  // padahal normalizePropertyDetail() membacanya. Tipe tertinggal dari API.
+  meta_title?: string | null;
+  meta_description?: string | null;
+  // CATATAN: `status_legalitas` SENGAJA tidak diulang di sini. Dulu ia
+  // dideklarasikan ulang sebagai opsional padahal di ApiPropertyListItem
+  // bersifat wajib, sehingga ApiPropertyDetail gagal meng-extend induknya dan
+  // setiap pemakaiannya sebagai ApiPropertyListItem ikut error. Kedua endpoint
+  // sama-sama mengembalikan kolom itu, jadi warisan dari induk sudah benar.
 }
 
 export interface ApiLocation {
