@@ -13,12 +13,21 @@
  * Bukti: gzip bundle hanya ~1,12 MB, jauh di bawah batas ukuran skrip Cloudflare
  * (10 MB). Yang mahal adalah mengevaluasi badan modul saat isolate lahir.
  *
- * KENAPA IMPORT DINAMIS MENOLONG (terverifikasi di bundle nyata):
- * wrangler mengeluarkan satu index.js dan meng-INLINE import dinamis, tapi
- * membungkusnya dalam initialiser malas `__esm(...)` + `init_*()`. Bundle ini sudah
- * berisi 616 wrapper semacam itu. Jadi mengubah import statis → dinamis nyaris tidak
- * mengurangi byte, tetapi MEMINDAHKAN badan modul keluar dari evaluasi startup —
- * dan itulah yang ditagih.
+ * APA YANG SEBENARNYA DIEVALUASI SAAT STARTUP — DIUKUR, BUKAN DIDUGA
+ * wrangler mengeluarkan satu index.js dan meng-INLINE import dinamis, membungkusnya
+ * dalam initialiser malas `__esm(...)` + `init_*()` (bundle ini punya 616 wrapper).
+ * Dengan menghitung kedalaman kurawal tiap rantai `init_*()`, hanya SATU rantai yang
+ * berada di scope modul (kedalaman 0) = benar-benar dievaluasi saat startup.
+ * Isinya per 2026-07-25: tabel route Functions + ~99 modul ikon lucide-react,
+ * lalu berlanjut ke paket-paket yang diimpor statis oleh entry SSR (embla, dll).
+ *
+ * KONSEKUENSI YANG PENTING DAN BERLAWANAN DENGAN DUGAAN AWAL:
+ *   - `_lib/pdf.js` (pdf-lib) TIDAK ada di rantai eager meski diimpor statis oleh
+ *     functions/api/sign/[token].js. Handler Pages Functions sudah malas dengan
+ *     sendirinya. Mengubahnya jadi `await import()` TIDAK mengubah apa pun — sudah
+ *     dicoba dan diukur: rantai eager tetap identik. Jangan ulangi percobaan itu.
+ *   - Yang benar-benar menentukan adalah DAFTAR IMPORT TOP-LEVEL `dist/server/index.js`,
+ *     karena entry SSR diimpor statis oleh functions/[[catchall]].js.
  *
  * KARENA ITU ASERSI A ADALAH YANG PALING TAJAM. Byte hanyalah proksi kasar;
  * daftar import top-level SSR adalah pengukuran langsung atas permukaan eager.
@@ -34,7 +43,7 @@
 
 import { readFileSync, existsSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
-import { execFileSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -70,7 +79,7 @@ const SSR_IMPORT_ALLOWLIST = new Set([
   'tailwind-merge',
   'embla-carousel-react',   // publik (HomePage, PropertyDetailPage) — sah
   'recharts',               // TODO Tahap 3: keluarkan (AdminOverviewPage)
-  'papaparse',              // TODO Tahap 3: keluarkan (CsvImportModal)
+  // papaparse: SUDAH keluar dari jalur eager (Tahap 3a) — jangan ditambahkan lagi.
   'react-grid-layout',      // TODO Tahap 3: keluarkan (AdminSettingsPage)
 ]);
 
@@ -149,11 +158,10 @@ function assertSsrChunk() {
 function assertFunctionsBundle() {
   try {
     rmSync(FN_OUTDIR, { recursive: true, force: true });
-    // npx.cmd di Windows — hindari shell:true (argumen tidak ter-escape).
-    const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-    execFileSync(npx, ['wrangler', 'pages', 'functions', 'build', `--outdir=${FN_OUTDIR}`], {
-      stdio: 'pipe',
-    });
+    // execSync (perintah satu string) — execFileSync tidak bisa menjalankan npx.cmd
+    // di Windows tanpa shell (EINVAL). Tidak ada input dari luar di sini, jadi
+    // string tetap sepenuhnya literal.
+    execSync(`npx wrangler pages functions build --outdir=${FN_OUTDIR}`, { stdio: 'pipe' });
   } catch (err) {
     // Bila wrangler butuh kredensial di CI, jangan gagalkan build — laporkan saja.
     // Asersi A dan B sudah menangkap kelas kegagalan utama tanpa wrangler.

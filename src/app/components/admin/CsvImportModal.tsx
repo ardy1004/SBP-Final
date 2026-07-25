@@ -1,5 +1,7 @@
 import { useState, useRef } from 'react';
-import Papa from 'papaparse';
+// papaparse di-import dinamis di dalam handler (bukan statis) agar tidak ikut
+// dievaluasi di entry SSR — lihat scripts/check-bundle-budget.mjs Asersi A.
+import type Papa from 'papaparse';
 import { X, Download, Upload, CheckCircle, AlertCircle, FileText } from 'lucide-react';
 
 interface Props {
@@ -74,12 +76,14 @@ export default function CsvImportModal({ isOpen, onClose, onSuccess }: Props) {
     if (fileRef.current) fileRef.current.value = '';
   };
 
-  const handleFile = (file: File) => {
+  const handleFile = async (file: File) => {
     if (!file.name.toLowerCase().endsWith('.csv')) {
       setParseErr('File harus berformat .csv'); return;
     }
     setParseErr(''); setRows([]); setResult(null);
     setFileName(file.name);
+
+    const { default: Papa } = await import('papaparse');
 
     Papa.parse<ParsedRow>(file, {
       header: true,
