@@ -2,6 +2,7 @@ import { Link } from 'react-router';
 import { Phone, Mail, MapPin, Instagram, Facebook, Youtube } from 'lucide-react';
 import { useContactEmail } from './useContactEmail';
 import { cfImg } from '../../lib/img';
+import { trackWaClick } from '../../lib/waTrack';
 
 export default function Footer() {
   const { display: emailDisplay, href: emailHref } = useContactEmail();
@@ -33,6 +34,7 @@ export default function Footer() {
             </p>
             <div className="space-y-2 text-sm">
               <a href="https://wa.me/6281391278889" target="_blank" rel="noopener noreferrer"
+                onClick={() => trackWaClick('footer')}
                 className="flex items-center gap-2 hover:text-[#29B6F6] transition-colors">
                 <Phone size={14} /> 0813-9127-8889
               </a>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Phone, Mail, MapPin, Clock, MessageCircle, Send, AlertCircle } from 'lucide-react';
 import { useContactEmail } from './useContactEmail';
 import { pageMeta } from '../../lib/pageMeta';
+import { trackWaClick } from '../../lib/waTrack';
 
 export const meta = () => pageMeta({
   title: 'Hubungi Kami | Salam Bumi Property',
@@ -99,7 +100,9 @@ export default function ContactPage() {
                     </div>
                     <div>
                       <div className="text-xs text-[#64748B] font-semibold uppercase">{label}</div>
-                      <a href={href} className="text-[#0F172A] text-sm hover:text-[#1565C0] transition-colors">{value}</a>
+                      <a href={href}
+                        onClick={label === 'WhatsApp' ? () => trackWaClick('contact_page') : undefined}
+                        className="text-[#0F172A] text-sm hover:text-[#1565C0] transition-colors">{value}</a>
                     </div>
                   </div>
                 ))}
@@ -166,6 +169,7 @@ export default function ContactPage() {
                       {loading ? 'Mengirim…' : 'Kirim Pesan'}
                     </button>
                     <a href="https://wa.me/6281391278889" target="_blank" rel="noopener noreferrer"
+                      onClick={() => trackWaClick('contact_page')}
                       className="flex-1 py-3 rounded-xl font-semibold text-white bg-[#10B981] hover:bg-[#059669] transition-colors flex items-center justify-center gap-2 text-center">
                       <MessageCircle size={16} /> WhatsApp
                     </a>

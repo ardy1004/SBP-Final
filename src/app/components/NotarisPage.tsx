@@ -1,6 +1,7 @@
 import { Link } from 'react-router';
 import { Shield, FileText, Scale, CheckCircle, MessageCircle } from 'lucide-react';
 import { pageMeta } from '../../lib/pageMeta';
+import { trackWaClick } from '../../lib/waTrack';
 
 export const meta = () => pageMeta({
   title: 'Jasa Notaris & PPAT Yogyakarta | Salam Bumi Property',
@@ -87,6 +88,7 @@ export default function NotarisPage() {
             <p className="text-[#64748B] mb-6">Konsultasikan proses legalitas properti Anda dengan tim SBP</p>
             <a href="https://wa.me/6281391278889?text=Halo SBP, saya ingin konsultasi legalitas properti"
               target="_blank" rel="noopener noreferrer"
+              onClick={() => trackWaClick('notaris')}
               className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-[#10B981] hover:bg-[#059669] transition-colors">
               <MessageCircle size={18} /> Konsultasi via WhatsApp
             </a>
