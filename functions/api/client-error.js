@@ -9,8 +9,34 @@
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { logServerError } from '../_lib/logError.js';
 
+// Endpoint ini publik dan tanpa CAPTCHA, jadi laju insert-nya harus dibatasi di
+// sisi server. Satu error nyata biasanya datang beberapa kali per menit; angka di
+// bawah jauh di atas itu tapi tetap menutup skenario flood yang membengkakkan D1
+// sekaligus menenggelamkan error asli.
+const MAX_CLIENT_ERRORS_PER_MINUTE = 60;
+
+// Backstop pertumbuhan tabel. Admin tetap bisa menghapus lebih agresif lewat
+// DELETE /api/admin/errors?older_than_days=N — ini hanya jaring pengaman agar
+// error_logs tidak tumbuh tanpa batas kalau housekeeping manual tidak pernah jalan.
+const RETENTION_DAYS = 90;
+
 function clip(v, max) {
   return typeof v === 'string' ? v.trim().slice(0, max) : null;
+}
+
+// Berapa banyak error klien yang sudah masuk dalam 60 detik terakhir.
+// Gagal baca → kembalikan 0 (fail-open): kehilangan rem lebih baik daripada
+// membuang error report asli karena D1 sedang bermasalah.
+async function recentClientErrorCount(db) {
+  try {
+    const row = await db
+      .prepare(`SELECT COUNT(*) AS cnt FROM error_logs
+                WHERE source = 'client' AND created_at > datetime('now', '-60 seconds')`)
+      .first();
+    return row?.cnt ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 export async function onRequestPost(context) {
@@ -30,6 +56,22 @@ export async function onRequestPost(context) {
   const userAgent = clip(request.headers.get('User-Agent') ?? '', 500);
 
   const errCtx = body.context && typeof body.context === 'object' ? body.context : undefined;
+
+  // Housekeeping otomatis, non-blocking.
+  if (env.DB) {
+    context.waitUntil(
+      env.DB.prepare(`DELETE FROM error_logs WHERE created_at < datetime('now', ?)`)
+        .bind(`-${RETENTION_DAYS} days`)
+        .run()
+        .catch(() => {})
+    );
+  }
+
+  // Throttle: balas 200 (bukan 429) supaya ErrorBoundary di browser tidak memicu
+  // error susulan gara-gara laporan errornya sendiri ditolak.
+  if (env.DB && (await recentClientErrorCount(env.DB)) >= MAX_CLIENT_ERRORS_PER_MINUTE) {
+    return jsonOk({ logged: false, throttled: true });
+  }
 
   await logServerError(env, { source: 'client', message, stack, url, userAgent, context: errCtx });
 

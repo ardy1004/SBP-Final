@@ -57,9 +57,11 @@ export default function ContactPage() {
 
       setSent(true);
 
-      // Buka WA admin setelah data tersimpan (perilaku lama dipertahankan)
+      // Buka WA admin setelah data tersimpan (perilaku lama dipertahankan).
+      // Gunakan location.href (bukan window.open) agar tidak diblokir in-app
+      // browser (Meta Ads, IG) — window.open setelah await selalu ditolak di sana.
       const msg = encodeURIComponent(`Halo SBP!\nNama: ${nama}\nWA: ${noWa}\nPesan: ${pesan}`);
-      window.open(`https://wa.me/6281391278889?text=${msg}`, '_blank');
+      window.location.href = `https://wa.me/6281391278889?text=${msg}`;
 
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Terjadi kesalahan, coba lagi.';
