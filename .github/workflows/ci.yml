@@ -7,6 +7,13 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  # Smoke test memprobe situs LIVE — hanya dijalankan manual, jangan di tiap PR.
+  workflow_dispatch:
+    inputs:
+      smoke_url:
+        description: 'URL yang di-smoke test (produksi atau kanari preview)'
+        required: false
+        default: 'https://salambumi.xyz'
 
 permissions:
   contents: read
@@ -34,3 +41,27 @@ jobs:
 
       - name: Build (react-router build)
         run: npm run build
+
+      # Gate anggaran bundle Worker — mencegah terulangnya Error 1102
+      # (produksi mati 2026-07-25 karena penambahan ~10 KB saat bundle sudah
+      # mepet batas CPU startup Cloudflare). Lihat scripts/check-bundle-budget.mjs.
+      - name: Bundle budget guard
+        run: npm run check:bundle
+
+  smoke:
+    name: Smoke test (live)
+    # Hanya manual — job ini memprobe situs yang sedang melayani pengguna.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Tidak perlu npm ci — script hanya memakai modul bawaan Node.
+      - name: Smoke test
+        run: node scripts/smoke-deploy.mjs "${{ github.event.inputs.smoke_url }}"

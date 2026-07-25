@@ -22,26 +22,29 @@ export default [
     route("sign/:token", "./components/SignPage.tsx"),
   ]),
 
-  // Admin — CSR saja (tidak perlu SSR)
+  // Admin — CSR saja (tidak perlu SSR).
+  // Route yang menunjuk ke ./routes/admin/* dibungkus src/app/lib/clientOnly.tsx
+  // supaya grafnya TIDAK ikut dievaluasi saat startup Worker (penyebab Error 1102
+  // pada 2026-07-25). Route admin baru WAJIB mengikuti pola yang sama.
   route("admin/login", "./components/admin/AdminLoginPage.tsx"),
   layout("./components/admin/AdminLayout.tsx", [
-    route("admin", "./components/admin/AdminOverviewPage.tsx"),
-    route("admin/agreements", "./components/admin/AdminAgreementsPage.tsx", { id: "admin-agreements" }),
-    route("admin/agreements/:id", "./components/admin/AdminAgreementDetailPage.tsx", { id: "admin-agreement-detail" }),
-    route("admin/listing", "./components/admin/AdminListingPage.tsx"),
-    route("admin/listing/:id", "./components/admin/AdminPropertyDetailPage.tsx", { id: "admin-property-detail" }),
-    route("admin/viralframe", "./components/admin/AdminViralFramePage.tsx", { id: "admin-viralframe" }),
-    route("admin/viralframe/agent-videos", "./components/admin/AdminViralFrameAgentVideosPage.tsx", { id: "admin-viralframe-agent-videos" }),
-    route("admin/viralframe/:id", "./components/admin/AdminViralFrameWorkspacePage.tsx", { id: "admin-viralframe-workspace" }),
-    route("admin/leads", "./components/admin/AdminLeadsPage.tsx"),
-    route("admin/leads/:id", "./components/admin/AdminLeadDetailPage.tsx", { id: "admin-lead-detail" }),
-    route("admin/testimoni", "./components/admin/AdminTestimoniPage.tsx", { id: "admin-testimoni" }),
-    route("admin/blog", "./components/admin/AdminBlogPage.tsx", { id: "admin-blog" }),
-    route("admin/portfolio", "./components/admin/AdminPlaceholderPage.tsx", { id: "admin-portfolio" }),
-    route("admin/media", "./components/admin/AdminPlaceholderPage.tsx", { id: "admin-media" }),
-    route("admin/pengaturan", "./components/admin/AdminSettingsPage.tsx", { id: "admin-pengaturan" }),
-    route("admin/lokasi", "./components/admin/AdminLokasiPage.tsx"),
-    route("admin/errors", "./components/admin/AdminErrorsPage.tsx", { id: "admin-errors" }),
+    route("admin", "./routes/admin/overview.tsx"),
+    route("admin/agreements", "./routes/admin/agreements.tsx", { id: "admin-agreements" }),
+    route("admin/agreements/:id", "./routes/admin/agreement-detail.tsx", { id: "admin-agreement-detail" }),
+    route("admin/listing", "./routes/admin/listing.tsx"),
+    route("admin/listing/:id", "./routes/admin/property-detail.tsx", { id: "admin-property-detail" }),
+    route("admin/viralframe", "./routes/admin/viralframe.tsx", { id: "admin-viralframe" }),
+    route("admin/viralframe/agent-videos", "./routes/admin/viralframe-agent-videos.tsx", { id: "admin-viralframe-agent-videos" }),
+    route("admin/viralframe/:id", "./routes/admin/viralframe-workspace.tsx", { id: "admin-viralframe-workspace" }),
+    route("admin/leads", "./routes/admin/leads.tsx"),
+    route("admin/leads/:id", "./routes/admin/lead-detail.tsx", { id: "admin-lead-detail" }),
+    route("admin/testimoni", "./routes/admin/testimoni.tsx", { id: "admin-testimoni" }),
+    route("admin/blog", "./routes/admin/blog.tsx", { id: "admin-blog" }),
+    route("admin/portfolio", "./routes/admin/placeholder.tsx", { id: "admin-portfolio" }),
+    route("admin/media", "./routes/admin/placeholder.tsx", { id: "admin-media" }),
+    route("admin/pengaturan", "./routes/admin/pengaturan.tsx", { id: "admin-pengaturan" }),
+    route("admin/lokasi", "./routes/admin/lokasi.tsx"),
+    route("admin/errors", "./routes/admin/errors.tsx", { id: "admin-errors" }),
   ]),
 
   route("*", "./components/NotFoundPage.tsx"),
