@@ -26,9 +26,10 @@
 - Setiap ubah route/file yang di-bundle SSR: clean build wajib (`Remove-Item -Recurse -Force dist, .react-router && npm run build`) — hash manifest server/client bisa tidak sinkron kalau tidak
 
 ## Secrets di Cloudflare Production
-`JWT_SECRET`, `NIK_ENC_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `SILICONFLOW_API_KEY`, `TURNSTILE_SECRET` — di-set via `wrangler pages secret put <KEY> --project-name sbp-final` atau Dashboard (Production **dan** Preview, keduanya harus diisi manual, tidak otomatis sinkron). Untuk Pages gunakan `wrangler pages secret put` (BUKAN `wrangler secret put` yang untuk Worker).
+`JWT_SECRET`, `NIK_ENC_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `SILICONFLOW_API_KEY`, `TURNSTILE_SECRET`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `GA4_SERVICE_ACCOUNT_EMAIL`, `GA4_SERVICE_ACCOUNT_PRIVATE_KEY`, `VIRALFRAME_PURGE_SECRET` — di-set via `wrangler pages secret put <KEY> --project-name sbp-final` atau Dashboard (Production **dan** Preview, keduanya harus diisi manual, tidak otomatis sinkron). Untuk Pages gunakan `wrangler pages secret put` (BUKAN `wrangler secret put` yang untuk Worker).
+- ⚠️ **Environment Preview saat ini hanya berisi `JWT_SECRET` + `NIK_ENC_KEY`** (audit 2026-07-25). Preview memakai binding D1/R2 yang **sama dengan produksi**, jadi deployment preview tanpa secret lengkap = URL publik yang menulis ke database produksi dengan fitur setengah mati. Cek dengan `wrangler pages secret list --project-name sbp-final --env preview`.
 - **API key AI provider** (Gemini/Groq/OpenRouter/DeepSeek) untuk ViralFrame disimpan di tabel D1 `settings` (key `<provider>_api_key`), diinput via Admin → Pengaturan → AI Providers, ditampilkan ter-mask. `getProviderKey()` (`functions/_lib/aiProviders.js`) baca D1 dulu, fallback ke Cloudflare Secret lama (`GROQ_API_KEY`/`DEEPSEEK_API_KEY`).
-- **TURNSTILE_SECRET**: verifikasi anti-bot fail-open bila belum di-set (form tetap jalan), fail-closed bila sudah. Site key publik ada di `src/app/components/Turnstile.tsx`.
+- **TURNSTILE_SECRET**: verifikasi anti-bot fail-open bila belum di-set (form tetap jalan), fail-closed bila sudah. Site key publik ada di `src/app/components/Turnstile.tsx`. **Fail-open hanya berlaku di host `FAIL_OPEN_HOSTS`** (`salambumi.xyz`, `localhost`) — di host lain (preview `*.pages.dev`) secret kosong = request DITOLAK, agar preview tanpa secret tidak jadi pintu spam ke tabel `leads` produksi.
 
 ## Pattern Arsitektur
 - API client: `src/lib/api.ts` — tambah tipe dan fungsi fetch di sini
@@ -37,6 +38,7 @@
 - Public components: `src/app/components/`
 - SSR routes: `src/app/routes/` (loader query D1 langsung di server, hydrate di client)
 - Komponen ber-`window` (recharts/leaflet/dsb) di SSR: WAJIB dynamic import dalam `useEffect` + mounted-flag. JANGAN `React.lazy` — itu menyebabkan hydration mismatch #421 (server render fallback Suspense, client render komponen asli).
+  - Pengecualian sah: `React.lazy` aman bila komponennya **tidak pernah dirender saat SSR sama sekali**. Contoh yang sudah ada dan JANGAN "diperbaiki": `PropertiesPage.tsx` merender `LazyPropertyMap` di balik `viewMode === 'map' && isMounted`, sedangkan `viewMode` default `'grid'` — server tidak pernah merender Suspense-nya, jadi tidak ada mismatch.
 
 ## Modul Admin — Peta Cepat
 13 area sidebar admin, 11 sudah terisi penuh (Overview, Listing, Detail Properti, Titip Jual/Agreements, Leads/CRM, Testimoni, Blog, Lokasi, Pengaturan, ViralFrame). **Portfolio dan Media masih placeholder** ("Segera hadir") — belum dikerjakan sama sekali. Lihat `CATATAN_PROGRES.md` section "AUDIT KOMPREHENSIF" untuk status lengkap per modul dan endpoint.
@@ -58,7 +60,7 @@
 - **Content Library**: video SiliconFlow otomatis diupload ke R2 (`viralframe-videos/`) + tabel D1 `viralframe_videos` (punya kolom `post_url/views/likes` untuk analitik). Endpoint `videos` (POST bytes mentah, GET, `[id]` DELETE/PATCH). Tab "Library" (putar/download/hapus). Tabel dibuat via `wrangler d1 execute --remote` (BUKAN migrations apply, agar tak re-run migrasi lama).
 - **List page = dashboard**: badge status (🎬/📝/⬜) dari endpoint `/viralframe/status`, filter "belum ada konten", KPI banner, **batch** multi-select → Storyboard massal.
 - **Gaya baru**: arketipe 🤳 Selfie Vlog (tongsis) + parameter **Register Bahasa** (formal/santai/gaul/jawa) lintas arketipe.
-- **Caption Studio** (`/captions`): N variasi caption × 5 kombinasi hashtag. **YouTube Long 1-klik** (`/youtube-long`, `?mode=youtube-long`): storyboard 16:9 dari data properti tanpa parameter. **Preset tim** (`/presets`, settings JSON). **Analitik** (`/analytics`): gaya pemenang dari metrik. **SRT** di ZIP.
+- **Caption Studio**, **YouTube Long 1-klik** (`?mode=youtube-long`), **Preset tim** (settings JSON), **Analitik** (gaya pemenang dari metrik), **SRT** di ZIP. Semuanya **tab di dalam `AdminViralFrameWorkspacePage`**, BUKAN route tersendiri — tidak ada entri `/captions`, `/presets`, `/analytics` di `src/app/routes.ts`. Endpoint API-nya tetap terpisah (`/api/admin/viralframe/{captions,presets,analytics,youtube-long}`).
 - Semua endpoint AI baru pakai abstraksi `aiProviders.js` + fallback + anggaran waktu <30s.
 
 ## Gotcha Wajib Diingat
@@ -76,3 +78,6 @@
 - **Verifikasi bundle Functions sebelum deploy** perubahan di `functions/`: `npx wrangler pages functions build --outdir=<tmp>` (exit 0 = aman). `npm run build` HANYA cek bundle React, bukan Functions.
 - **`functions/` BISA import file bersama dari `functions/_lib/*.js`** yang juga di-import frontend via Vite (mis. `viralframe-shared.js`) — bukan dari `src/app/`. Ini cara dedup konstanta lintas backend↔frontend tanpa duplikasi.
 - **Deploy dari branch**: `wrangler pages deploy dist/client --project-name sbp-final --branch=master` (flag `--branch=master` = produksi; tanpa itu masuk preview). Setelah menggabung beberapa branch fitur untuk deploy, jaga `master` = produksi (push master).
+- **Ledger migrasi D1 pernah drift dan sudah direkonsiliasi (2026-07-25)**. Migrasi 0015–0023 dibuat lewat `d1 execute --remote` sehingga objeknya ada tapi tidak tercatat di `d1_migrations`; `migrations apply --remote` berikutnya akan menyeretnya dan GAGAL (0017/0019/0021/0023 = `ALTER TABLE ADD COLUMN` telanjang → "duplicate column name"), bahkan berpotensi menghapus data (0022 = RENAME→CREATE→DROP). Sudah diperbaiki via `scripts/reconcile_d1_migrations_0015_0023.sql`; `migrations list --remote` sekarang bersih.
+  - **Aturannya sekarang**: bikin tabel/kolom baru **lewat migrasi**, lalu `wrangler d1 migrations apply sbp-db --remote`. Kalau terpaksa pakai `d1 execute --remote`, WAJIB langsung catat namanya ke `d1_migrations` di transaksi yang sama. Cek `wrangler d1 migrations list sbp-db --remote` harus selalu "No migrations to apply" sebelum menambah migrasi baru.
+  - Selalu `wrangler d1 export sbp-db --remote --output=...` sebelum operasi tulis apa pun ke D1 produksi.
