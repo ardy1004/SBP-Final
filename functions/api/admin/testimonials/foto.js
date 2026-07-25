@@ -9,6 +9,13 @@ import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 
 const WEBP_PREFIX = 'data:image/webp;base64,';
 
+// Batas ukuran foto klien. Sebelumnya tanpa batas sama sekali: base64 raksasa
+// akan di-decode utuh ke memori Worker (limit 128 MB) sebelum sempat ditolak.
+// 2 MB sudah sangat longgar untuk WebP foto profil.
+const MAX_BYTES = 2 * 1024 * 1024;
+// base64 mengembang ~4/3 dari ukuran biner.
+const MAX_BASE64_LEN = Math.ceil(MAX_BYTES * 4 / 3) + 128;
+
 export async function onRequestPost(context) {
   const { env, request } = context;
 
@@ -22,6 +29,11 @@ export async function onRequestPost(context) {
   }
   if (!photo.startsWith(WEBP_PREFIX)) {
     return jsonError('Foto harus berformat WebP (data:image/webp;base64,...)', 400);
+  }
+  // Cek panjang string SEBELUM atob() — menolak lebih dulu, bukan setelah
+  // seluruh payload terlanjur di-decode ke memori.
+  if (photo.length > MAX_BASE64_LEN) {
+    return jsonError('Ukuran foto maksimal 2 MB', 413);
   }
 
   let uploadBuf;

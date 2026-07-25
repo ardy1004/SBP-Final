@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router';
-import { Search, Filter, ChevronDown, Edit, Plus, FileUp, Trash2, ImageOff, MapPin } from 'lucide-react';
+import { Search, Filter, ChevronDown, Edit, Plus, FileUp, Trash2, ImageOff, MapPin, AlertTriangle } from 'lucide-react';
 import { getLocations, type ApiLocation } from '../../../lib/api';
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
 import CsvImportModal from './CsvImportModal';
@@ -89,6 +89,8 @@ export default function AdminListingPage() {
   const [provId, setProvId] = useState<number | null>(null);
   const [kabId, setKabId] = useState<number | null>(null);
   const [kecName, setKecName] = useState('');
+  // Non-null saat backend memangkas hasil (data melewati plafon MAX_ROWS).
+  const [truncated, setTruncated] = useState<{ total: number; ditampilkan: number } | null>(null);
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -102,6 +104,11 @@ export default function AdminListingPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setProperties(json.data?.properties ?? []);
+      setTruncated(
+        json.data?.truncated
+          ? { total: json.data.total ?? 0, ditampilkan: json.data.ditampilkan ?? 0 }
+          : null
+      );
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Gagal memuat data');
     } finally {
@@ -251,7 +258,7 @@ export default function AdminListingPage() {
     if (!provinsi || !kabupaten || !kecamatan) return;
 
     const ids = [...selectedIds];
-    if (!window.confirm(`Set lokasi "${kecamatan}, ${kabupaten}, ${provinsi}" untuk ${ids.length} properti? Kolom lokasi lama akan ditimpa.`)) return;
+    if (!window.confirm(`Set lokasi "${kecamatan}, ${kabupaten}, ${provinsi}" untuk ${ids.length} properti?\n\nLokasi lama akan ditimpa, dan kolom Kelurahan/Desa DIKOSONGKAN (kelurahan lama milik kecamatan lama). Isi ulang lewat form edit properti bila perlu.`)) return;
     setBulkLoading(true);
     try {
       const CHUNK = 50;
@@ -324,6 +331,12 @@ export default function AdminListingPage() {
           <p className="text-[#64748B] text-sm mt-0.5">
             {loading ? 'Memuat…' : `${filtered.length} properti ditampilkan`}
           </p>
+          {truncated && (
+            <p className="text-xs mt-1 text-[#B45309] bg-[#FEF3C7] border border-[#FDE68A] rounded-lg px-2.5 py-1.5 inline-flex items-center gap-1.5">
+              <AlertTriangle size={13} />
+              Menampilkan {truncated.ditampilkan} dari {truncated.total} properti. Persempit dengan filter untuk melihat sisanya.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button

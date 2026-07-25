@@ -18,7 +18,12 @@ export async function onRequestPost(context) {
 
   if (!Array.isArray(ids)) return jsonError('ids harus berupa array', 400);
   if (ids.length === 0) return jsonError('ids tidak boleh kosong', 400);
-  if (ids.length > 500) return jsonError('Maksimal 500 id per operasi', 400);
+  // D1 membatasi 100 bound parameter per query (batas resmi Cloudflare). Batas lama
+  // 500 membuat endpoint ini gagal kalau benar-benar dikirimi sebanyak itu. UI saat
+  // ini sudah memecah jadi chunk 50 (update) dan 20 (hapus) sehingga tidak pernah
+  // terpicu, tapi batasnya harus jujur untuk pemanggil lain. Bandingkan
+  // viralframe/agent-videos/bulk.js yang sudah benar memakai 100.
+  if (ids.length > 100) return jsonError('Maksimal 100 id per operasi (batas bound parameter D1)', 400);
   const BADGE_COL = {
     premium:  'badge_premium',
     featured: 'badge_featured',
@@ -43,9 +48,14 @@ export async function onRequestPost(context) {
       if (!provinsi || !kabupaten || !kecamatan) {
         return jsonError('provinsi, kabupaten, dan kecamatan wajib diisi', 422);
       }
+      // kelurahan WAJIB ikut dikosongkan. Kelurahan lama milik kecamatan lama, dan
+      // form ini tidak mengumpulkan kelurahan baru — membiarkannya berarti properti
+      // menyimpan kelurahan yang tidak ada di kecamatan barunya. NULL lebih jujur
+      // daripada nilai yang salah, dan bisa diisi ulang lewat form edit properti.
       const result = await env.DB.prepare(
         `UPDATE properties
          SET provinsi = ?, kabupaten = ?, kecamatan = ?,
+             kelurahan = NULL,
              updated_at = CURRENT_TIMESTAMP
          WHERE id IN (${placeholders})`
       ).bind(provinsi, kabupaten, kecamatan, ...numericIds).run();
