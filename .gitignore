@@ -65,3 +65,9 @@ scripts/_maps_check.json
 *.sql
 !migrations/*.sql
 backup-*.sql
+
+# Artefak dari redireksi shell yang salah kutip saat sesi debug (nama berkas
+# seperti "0)" atau "p.col"). Bukan source code — jangan pernah ikut ter-commit.
+[0-9])
+p.col
+rows.length
