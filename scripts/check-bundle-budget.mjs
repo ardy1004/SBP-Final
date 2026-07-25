@@ -51,10 +51,18 @@ import { join } from 'node:path';
 //
 // 2026-07-25  baseline pasca-insiden (Tahap 0):
 //             SSR main chunk 1.205.877 B · Functions index.js 5.769.307 B (gzip 1.171.268 B)
-//             Nilai di bawah = baseline + margin kecil. Ini "jangan tumbuh", bukan headroom.
+//             Nilai saat itu = baseline + margin kecil. "Jangan tumbuh", bukan headroom.
+//
+// 2026-07-25  RATCHET setelah Tahap 4 (seluruh 17 route admin jadi client-only):
+//             SSR main chunk 503.003 B  (-702.874 B, -58%)  <- inilah yang dievaluasi startup
+//             Functions index.js 5.709.994 B (-59.313 B)
+//             Import top-level SSR 12 -> 8 paket.
+//             Catatan: byte Functions turun sedikit saja karena kode admin tetap
+//             ADA di bundle, hanya pindah ke chunk malas. Yang penting bukan byte
+//             total melainkan porsi yang dievaluasi saat isolate lahir.
 // ─────────────────────────────────────────────────────────────────────────────
-const BUDGET_SSR_MAIN_CHUNK = 1_270_000;  // baseline +5%
-const BUDGET_FUNCTIONS_RAW  = 5_900_000;  // baseline +2,3%
+const BUDGET_SSR_MAIN_CHUNK = 560_000;    // 503.003 +11% — headroom nyata, bukan tepi jurang
+const BUDGET_FUNCTIONS_RAW  = 5_850_000;  // 5.709.994 +2,5%
 const BUDGET_FUNCTIONS_GZIP = 8_000_000;  // jauh di bawah batas 10 MB; alarm jaring pengaman saja
 
 /**
@@ -64,23 +72,19 @@ const BUDGET_FUNCTIONS_GZIP = 8_000_000;  // jauh di bawah batas 10 MB; alarm ja
  * setiap isolate Worker lahir. JANGAN tambahkan hanya supaya CI hijau — perbaiki
  * import-nya jadi dinamis (lihat src/app/lib/clientOnly.tsx).
  *
- * 2026-07-25: recharts/papaparse/react-grid-layout masih di sini HANYA karena
- * warisan; ketiganya dijadwalkan keluar di Tahap 3 dan harus dihapus dari daftar
- * ini begitu itu selesai.
+ * 2026-07-25 pasca-Tahap 4: recharts, papaparse, react-grid-layout, dan react-dom
+ * SUDAH keluar dari jalur eager karena seluruh route admin kini client-only.
+ * Jangan pernah menambahkannya kembali ke daftar ini.
  */
 const SSR_IMPORT_ALLOWLIST = new Set([
   'react/jsx-runtime',
   'react-dom/server',
   'react-router',
   'react',
-  'react-dom',
   'lucide-react',
   'clsx',
   'tailwind-merge',
   'embla-carousel-react',   // publik (HomePage, PropertyDetailPage) — sah
-  'recharts',               // TODO Tahap 3: keluarkan (AdminOverviewPage)
-  // papaparse: SUDAH keluar dari jalur eager (Tahap 3a) — jangan ditambahkan lagi.
-  'react-grid-layout',      // TODO Tahap 3: keluarkan (AdminSettingsPage)
 ]);
 
 const SSR_INDEX = 'dist/server/index.js';
