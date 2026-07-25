@@ -7,6 +7,11 @@ import { generateMetaSeo } from '../../../_lib/metaSeo.js';
 import { parseGmapsCoords } from '../../../_lib/parseGmapsCoords.js';
 import { nextKodeSeq, fmtSeq, isUniqueErr } from '../../../_lib/kodeSeq.js';
 
+// Plafon baris untuk daftar admin (belum ada paginasi). 533 properti per Juli 2026.
+// Response menyertakan total sebenarnya + flag truncated supaya pemotongan terlihat
+// begitu angkanya terlampaui, bukan terpangkas diam-diam.
+const MAX_ROWS = 1000;
+
 const VALID_STATUSES = new Set(['draft', 'published', 'sold', 'archived']);
 const VALID_JENIS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
 const VALID_TUJUAN = ['dijual','disewa','dijual_disewa'];
@@ -116,19 +121,32 @@ export async function onRequestGet(context) {
     FROM properties p
     ${where}
     ORDER BY p.created_at DESC
-    LIMIT 1000
+    LIMIT ${MAX_ROWS}
   `;
-  // 529 properti per Juli 2026, LIMIT 1000 memberi headroom 2x.
 
   try {
-    const stmt = env.DB.prepare(sql);
-    const result = bindings.length > 0
-      ? await stmt.bind(...bindings).all()
-      : await stmt.all();
+    // COUNT terpisah: tanpa ini `total` dihitung dari hasil yang SUDAH terpotong,
+    // sehingga saat data menembus MAX_ROWS daftarnya terpangkas diam-diam dan
+    // admin mengira itulah seluruh isinya.
+    const countSql = `SELECT COUNT(*) AS cnt FROM properties p ${where}`;
+
+    const stmtList  = env.DB.prepare(sql);
+    const stmtCount = env.DB.prepare(countSql);
+
+    const [result, countRow] = await Promise.all([
+      bindings.length > 0 ? stmtList.bind(...bindings).all()    : stmtList.all(),
+      bindings.length > 0 ? stmtCount.bind(...bindings).first() : stmtCount.first(),
+    ]);
+
+    const rows  = result.results ?? [];
+    const total = countRow?.cnt ?? rows.length;
 
     return jsonOk({
-      properties: result.results ?? [],
-      total: (result.results ?? []).length,
+      properties: rows,
+      total,                            // jumlah SEBENARNYA yang cocok filter
+      ditampilkan: rows.length,
+      truncated: total > rows.length,   // frontend menampilkan peringatan bila true
+      max_rows: MAX_ROWS,
     });
   } catch (err) {
     console.error('[admin properties list]', err.message);
