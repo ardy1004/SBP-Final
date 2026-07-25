@@ -129,7 +129,15 @@ const SHOW_LANTAI        = new Set(['rumah','kost','hotel','homestay','villa','a
 const SHOW_KT_KM         = new Set(['rumah','kost','hotel','homestay','villa','apartment']);
 const SHOW_FURNISHED     = new Set(['kost','hotel','homestay','villa','apartment']);
 const SHOW_SEWA_KAMAR    = new Set(['kost','hotel','homestay','villa']);
-const SHOW_INCOME        = new Set(['hotel','homestay','villa']);
+// 'kost' WAJIB ada di sini. Kost di SBP dijual utuh sebagai aset investasi
+// (Rp 850 juta - Rp 25 miliar), dan Investment Intelligence — yield, cap rate,
+// payback, skor 1-5 — dihitung dari income_per_bulan. Tanpa 'kost' di daftar
+// ini, field-nya tersembunyi di form sehingga admin TIDAK BISA mengisinya sama
+// sekali; per audit 2026-07-26 seluruh 184 kost berakhir dengan income kosong
+// dan blok investasinya padam justru di listing yang dijual sebagai investasi.
+// Janggal pula karena 'kost' sudah ada di SHOW_PENGELUARAN — bisa isi
+// pengeluaran tapi tidak pendapatan.
+const SHOW_INCOME        = new Set(['kost','hotel','homestay','villa']);
 const SHOW_PENGELUARAN   = new Set(['kost','hotel','homestay','villa']);
 
 // ─── UI primitives ────────────────────────────────────────────────────────────
