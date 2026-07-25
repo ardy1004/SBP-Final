@@ -8,6 +8,7 @@ import { parseProgrammaticSlug } from "../../lib/programmaticSeo";
 // dgn generateMetaSeo di AdminPropertyDetailPage.tsx.
 import { parseLandmarkSlug, resolveApproxCoord, haversineKm, LANDMARK_RADIUS_KM } from "../../../functions/_lib/geoLandmarks.js";
 import { isInertParam } from "../../../functions/_lib/queryParams.js";
+import { buildPropertyUrl } from "../../../functions/_lib/propertyUrl.js";
 
 // Route module SSR untuk /properties DAN programmatic SEO /:slug
 // (mis. /rumah-dijual-jogja, /kost-dijual-sleman).
@@ -388,6 +389,32 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     { name: 'twitter:title', content: seo.title },
     { name: 'twitter:description', content: seo.description },
     { name: 'twitter:image', content: OG_IMAGE },
+    // ItemList: halaman detail sudah punya RealEstateListing, halaman listing
+    // belum punya structured data sama sekali — padahal halaman inilah yang
+    // menerima trafik pencarian generik ("rumah dijual jogja"). Hanya diisi
+    // saat SSR benar-benar membawa data; kalau tidak, kita akan mengirim daftar
+    // kosong ke Google dan itu lebih buruk daripada tidak mengirim apa pun.
+    ...(data?.ssr && data.properties.length > 0 ? [{
+      'script:ld+json': {
+        '@context': 'https://schema.org',
+        '@type': 'ItemList',
+        name: seo.title,
+        numberOfItems: data.total,
+        itemListElement: data.properties.slice(0, 20).map((p, i) => ({
+          '@type': 'ListItem',
+          position: i + 1,
+          url: buildPropertyUrl({
+            tujuan: p.tujuan,
+            jenis_properti: p.jenisRaw ?? p.jenis,
+            provinsi: p.provinsi,
+            kabupaten: p.kabupaten,
+            kecamatan: p.kecamatan,
+            slug: p.slug,
+          }),
+          name: p.title,
+        })),
+      },
+    }] : []),
   ];
 };
 
