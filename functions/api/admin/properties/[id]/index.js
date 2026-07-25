@@ -6,6 +6,7 @@ import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { parseGmapsCoords } from '../../../../_lib/parseGmapsCoords.js';
 import { normalizeWA, isValidWA } from '../../../../_lib/waUtils.js';
 import { collectPropertyR2Keys, deleteR2Keys } from '../../../../_lib/r2Cleanup.js';
+import { normalisasiHarga } from '../../../../_lib/hargaTanah.js';
 
 const VALID_JENIS = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
 const VALID_TUJUAN = ['dijual','disewa','dijual_disewa'];
@@ -30,7 +31,7 @@ export async function onRequestGet(context) {
       SELECT
         id, kode_listing, title, slug,
         jenis_properti, tujuan,
-        harga, harga_lama, harga_sewa_tahun, nego, nett, harga_per_m2,
+        harga, harga_lama, harga_sewa_tahun, nego, nett, harga_per_m2, harga_mode,
         jumlah_kamar_tidur, jumlah_kamar_mandi,
         luas_tanah, luas_bangunan, lebar_depan, lantai,
         legalitas, status_legalitas, bank_agunan, outstanding_bank,
@@ -99,7 +100,11 @@ export async function onRequestPatch(context) {
   try { body = await request.json(); }
   catch { return jsonError('Body JSON tidak valid', 400); }
 
-  const exists = await env.DB.prepare('SELECT id, harga, luas_tanah FROM properties WHERE id = ?').bind(id).first();
+  // jenis_properti + harga_mode ikut diambil: PATCH bersifat partial, jadi
+  // normalisasi harga di bawah butuh nilai lama untuk field yang tidak dikirim.
+  const exists = await env.DB
+    .prepare('SELECT id, harga, luas_tanah, jenis_properti, harga_mode FROM properties WHERE id = ?')
+    .bind(id).first();
   if (!exists) return jsonError('Properti tidak ditemukan', 404);
 
   // Dicek di awal (bukan di dalam try setelah UPDATE properties berjalan) supaya
@@ -245,20 +250,42 @@ export async function onRequestPatch(context) {
     if (body[f] !== undefined) pairs.push({ col: f, val: body[f] ? 1 : 0 });
   }
 
+  // ── Harga: total vs per-m² ────────────────────────────────────────────────
+  // Tanah diiklankan per-m² (judul buatan agen sendiri: "Turun Harga Jadi 4,9
+  // Juta/m²!"), jadi admin boleh mengetik per-m² dan biarkan total dihitung.
+  // Kolom `harga` tetap SELALU total karena dipakai filter dan ORDER BY;
+  // harga_per_m2 SELALU turunan. Aturan lengkap di functions/_lib/hargaTanah.js.
+  //
+  // PATCH bersifat partial, jadi nilai yang tidak dikirim WAJIB diambil dari
+  // baris lama lebih dulu — tanpa itu, mengubah luas_tanah saja akan menghitung
+  // ulang dengan harga undefined dan mengosongkan harga_per_m2.
+  const hargaPair = pairs.find(p => p.col === 'harga');
+  const luasPair  = pairs.find(p => p.col === 'luas_tanah');
+  const jenisPair = pairs.find(p => p.col === 'jenis_properti');
+
+  if (hargaPair || luasPair || jenisPair || body.harga_mode !== undefined || body.harga_per_m2 !== undefined) {
+    const hasil = normalisasiHarga({
+      jenis_properti: jenisPair ? jenisPair.val : exists.jenis_properti,
+      luas_tanah:     luasPair  ? luasPair.val  : exists.luas_tanah,
+      harga:          hargaPair ? hargaPair.val : exists.harga,
+      harga_per_m2:   body.harga_per_m2,
+      harga_mode:     body.harga_mode !== undefined ? String(body.harga_mode) : exists.harga_mode,
+    });
+
+    if (!hasil.ok) {
+      // Menolak jauh lebih baik daripada menyimpan angka per-m² ke kolom total —
+      // persis kesalahan yang membuat 39 listing tanah tampil ~1000x lebih murah.
+      errors.harga = hasil.error;
+    } else {
+      if (hargaPair) hargaPair.val = hasil.harga;
+      else pairs.push({ col: 'harga', val: hasil.harga });
+      pairs.push({ col: 'harga_per_m2', val: hasil.harga_per_m2 });
+      pairs.push({ col: 'harga_mode',   val: hasil.harga_mode });
+    }
+  }
+
   if (Object.keys(errors).length > 0) return jsonError('Validasi gagal', 422, errors);
   if (pairs.length === 0 && !ownerPhoneUpdate) return jsonError('Tidak ada field yang dikirim', 400);
-
-  // harga_per_m2 dihitung ulang app-layer setiap kali harga atau luas_tanah berubah
-  // (kolom ini dibaca langsung oleh fitur lain seperti sort/filter, jadi harus konsisten
-  // dengan nilai final, bukan cuma fallback hitung on-the-fly di halaman publik).
-  const hargaPair = pairs.find(p => p.col === 'harga');
-  const luasPair = pairs.find(p => p.col === 'luas_tanah');
-  if (hargaPair || luasPair) {
-    const finalHarga = hargaPair ? hargaPair.val : exists.harga;
-    const finalLuas = luasPair ? luasPair.val : exists.luas_tanah;
-    const hargaPerM2 = (finalHarga && finalLuas) ? Math.round(finalHarga / finalLuas) : null;
-    pairs.push({ col: 'harga_per_m2', val: hargaPerM2 });
-  }
 
   // Auto-extract lat/lng from gmaps_link jika field tersebut dikirim
   if (body.gmaps_link !== undefined) {

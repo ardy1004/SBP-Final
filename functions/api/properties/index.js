@@ -101,7 +101,7 @@ export async function onRequestGet(context) {
       p.id, p.kode_listing, p.title, p.slug,
       p.jenis_properti, p.tujuan,
       p.harga, p.harga_lama, p.harga_sewa_tahun,
-      p.nego, p.nett, p.harga_per_m2,
+      p.nego, p.nett, p.harga_per_m2, p.harga_mode,
       p.jumlah_kamar_tidur, p.jumlah_kamar_mandi,
       p.luas_tanah, p.luas_bangunan, p.lebar_depan, p.lantai,
       p.legalitas, p.status_legalitas, p.furnished,

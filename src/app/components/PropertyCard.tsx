@@ -54,6 +54,11 @@ export default function PropertyCard({ property, className = '' }: Props) {
     ? Math.round(property.harga / property.luas_tanah)
     : null;
 
+  // Tanah diiklankan per meter, bukan gelondongan — agen menulisnya begitu di
+  // judul listing sendiri ("Turun Harga Jadi 4,9 Juta/m²!"). Saat harga_mode
+  // 'per_m2', angka per-m² jadi headline dan totalnya turun jadi baris kedua.
+  const utamakanPerM2 = property.harga_mode === 'per_m2' && hargaPerM2 != null;
+
   function prevSlide(e: React.MouseEvent) {
     e.preventDefault();
     setSlideIdx(i => (i - 1 + total) % total);
@@ -234,10 +239,14 @@ export default function PropertyCard({ property, className = '' }: Props) {
             <span className="text-gray-500 text-xs line-through mr-2">{formatHargaShort(property.harga_lama)}</span>
           )}
           <span className="font-bold text-[#1565C0] text-lg font-display" style={{ fontVariantNumeric: 'tabular-nums' }}>
-            {formatHargaShort(property.harga)}
+            {utamakanPerM2 ? <>{formatHargaShort(hargaPerM2!)}<span className="text-sm font-semibold">/m²</span></> : formatHargaShort(property.harga)}
           </span>
           {property.nego && <span className="ml-1 text-xs text-gray-500">(Nego)</span>}
-          {hargaPerM2 && (
+          {utamakanPerM2 ? (
+            <div className="text-xs text-gray-500 mt-0.5">
+              Total {formatHargaShort(property.harga)}
+            </div>
+          ) : hargaPerM2 && (
             <div className="text-xs text-gray-500 mt-0.5">
               ~{formatHargaShort(hargaPerM2)}/m²
             </div>

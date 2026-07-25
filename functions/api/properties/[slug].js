@@ -50,7 +50,7 @@ export async function onRequestGet(context) {
       SELECT
         id, kode_listing, title, slug,
         jenis_properti, tujuan,
-        harga, harga_lama, harga_sewa_tahun, nego, nett, harga_per_m2,
+        harga, harga_lama, harga_sewa_tahun, nego, nett, harga_per_m2, harga_mode,
         jumlah_kamar_tidur, jumlah_kamar_mandi,
         luas_tanah, luas_bangunan, lebar_depan, lantai,
         legalitas, status_legalitas, bank_agunan, outstanding_bank,

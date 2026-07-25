@@ -451,6 +451,9 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
 
   const images = property.images.length > 0 ? property.images : [''];
   const hargaPerM2 = property.harga_per_m2 ?? (property.luas_tanah ? Math.round(property.harga / property.luas_tanah) : null);
+  // Tanah diiklankan per meter — saat harga_mode 'per_m2', angka per-m2 jadi
+  // headline dan total turun ke baris kedua. Kolom `harga` tetap total.
+  const utamakanPerM2 = property.harga_mode === 'per_m2' && hargaPerM2 != null;
 
   const breadcrumbParts = [
     { label: 'Home', href: '/' },
@@ -642,7 +645,9 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                     <div className="text-sm text-gray-400 line-through">{formatRupiah(property.harga_lama)}</div>
                   )}
                   <div className="text-3xl font-bold font-display text-[#1565C0]" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    {formatRupiah(property.harga)}
+                    {utamakanPerM2
+                      ? <>{formatRupiah(hargaPerM2!)}<span className="text-xl font-semibold">/m²</span></>
+                      : formatRupiah(property.harga)}
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -660,7 +665,9 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                   </button>
                 </div>
               </div>
-              {hargaPerM2 && <div className="text-xs text-gray-400 mb-2">~{formatRupiah(hargaPerM2)}/m²</div>}
+              {utamakanPerM2
+                ? <div className="text-sm text-gray-500 mb-2">Total {formatRupiah(property.harga)}{property.luas_tanah ? ` untuk ${property.luas_tanah} m²` : ''}</div>
+                : hargaPerM2 ? <div className="text-xs text-gray-400 mb-2">~{formatRupiah(hargaPerM2)}/m²</div> : null}
               <div className="flex gap-2 mb-3">
                 {property.nego && <span className="px-2 py-0.5 rounded-full text-xs bg-orange-50 text-orange-600 border border-orange-200">Nego</span>}
                 {property.nett && <span className="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-[#1565C0] border border-blue-200">Nett</span>}

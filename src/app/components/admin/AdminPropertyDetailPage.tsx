@@ -41,6 +41,11 @@ interface PropertyDetail {
   nego: number;
   nett: number;
   luas_tanah: number | null;
+  /** 'per_m2' hanya berlaku untuk tanah. Menentukan cara MENGETIK harga di
+   *  form ini dan cara menampilkannya di situs — kolom `harga` yang dikirim
+   *  ke API SELALU total. Lihat functions/_lib/hargaTanah.js. */
+  harga_mode?: 'total' | 'per_m2';
+  harga_per_m2?: number | null;
   luas_bangunan: number | null;
   lebar_depan: number | null;
   lantai: number | null;
@@ -351,6 +356,7 @@ export default function AdminPropertyDetailPage() {
         harga: d.harga, harga_lama: d.harga_lama, harga_sewa_tahun: d.harga_sewa_tahun,
         nego: d.nego, nett: d.nett,
         luas_tanah: d.luas_tanah, luas_bangunan: d.luas_bangunan,
+        harga_mode: d.harga_mode ?? 'total', harga_per_m2: d.harga_per_m2 ?? null,
         lebar_depan: d.lebar_depan, lantai: d.lantai,
         jumlah_kamar_tidur: d.jumlah_kamar_tidur, jumlah_kamar_mandi: d.jumlah_kamar_mandi,
         legalitas: d.legalitas, status_legalitas: d.status_legalitas,
@@ -470,6 +476,10 @@ export default function AdminPropertyDetailPage() {
       jenis_properti: form.jenis_properti,
       tujuan: form.tujuan,
       harga: form.harga,
+      // Backend yang mengalikan per-m2 x luas_tanah (satu tempat, dipakai create
+      // maupun update) supaya klien tidak bisa mengirim total yang tidak konsisten.
+      harga_mode: form.harga_mode ?? 'total',
+      harga_per_m2: form.harga_mode === 'per_m2' ? (form.harga_per_m2 ?? null) : null,
       harga_lama: form.harga_lama ?? null,
         harga_sewa_tahun: form.harga_sewa_tahun ?? null,
         nego: form.nego ? 1 : 0,
@@ -626,6 +636,21 @@ export default function AdminPropertyDetailPage() {
 
   const jenis   = form.jenis_properti ?? 'rumah';
   const tujuan  = form.tujuan ?? 'dijual';
+  // Pratinjau total di form. Angka tanah bisa mencapai ratusan miliar, jadi
+  // "Rp 135,9 M" jauh lebih mudah diperiksa mata daripada 12 digit penuh.
+  const rupiahRingkas = (n: number) => {
+    if (n >= 1_000_000_000) return `Rp ${(n / 1_000_000_000).toLocaleString('id-ID', { maximumFractionDigits: 2 })} M`;
+    if (n >= 1_000_000)     return `Rp ${(n / 1_000_000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} jt`;
+    return `Rp ${n.toLocaleString('id-ID')}`;
+  };
+
+  // Mode per-m² hanya sah untuk tanah: kalau jenis diganti ke selain tanah,
+  // mode ikut gugur supaya form tidak menampilkan input yang akan ditolak backend.
+  const modePerM2 = form.jenis_properti === 'tanah' && form.harga_mode === 'per_m2';
+  const totalDariPerM2 = modePerM2 && form.harga_per_m2 && form.luas_tanah
+    ? Math.round(form.harga_per_m2 * form.luas_tanah)
+    : null;
+
   const showHarga = tujuan === 'dijual' || tujuan === 'dijual_disewa';
   const showSewa  = tujuan === 'disewa' || tujuan === 'dijual_disewa';
   const currentBadge = isNew
@@ -735,8 +760,42 @@ export default function AdminPropertyDetailPage() {
           <h3 className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Harga</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {showHarga && <>
-              <Field label="Harga Penawaran (Rp)">
-                <input type="number" min={0} value={form.harga ?? ''} onChange={e => setF({ harga: e.target.value ? parseInt(e.target.value) : null })} className={inputCls} placeholder="0" />
+              <Field label={modePerM2 ? 'Harga per m² (Rp)' : 'Harga Penawaran (Rp)'}>
+                {/* Toggle hanya untuk tanah — jenis lain tidak diperjualbelikan per meter. */}
+                {form.jenis_properti === 'tanah' && (
+                  <div className="flex gap-1 mb-2">
+                    {([['total', 'Harga total'], ['per_m2', 'Harga per m²']] as const).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setF({ harga_mode: mode })}
+                        className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${
+                          (form.harga_mode ?? 'total') === mode
+                            ? 'bg-[#1565C0] text-white border-[#1565C0]'
+                            : 'bg-white text-gray-600 border-gray-200 hover:border-[#1565C0]'
+                        }`}
+                      >{label}</button>
+                    ))}
+                  </div>
+                )}
+                {modePerM2 ? (
+                  <input
+                    type="number" min={0}
+                    value={form.harga_per_m2 ?? ''}
+                    onChange={e => setF({ harga_per_m2: e.target.value ? parseInt(e.target.value) : null })}
+                    className={inputCls}
+                    placeholder="mis. 4900000"
+                  />
+                ) : (
+                  <input type="number" min={0} value={form.harga ?? ''} onChange={e => setF({ harga: e.target.value ? parseInt(e.target.value) : null })} className={inputCls} placeholder="0" />
+                )}
+                {modePerM2 && (
+                  <p className={`mt-1 text-xs ${form.luas_tanah ? 'text-gray-500' : 'text-red-600'}`}>
+                    {form.luas_tanah
+                      ? <>Total: <strong>{totalDariPerM2 != null ? rupiahRingkas(totalDariPerM2) : '—'}</strong> untuk {form.luas_tanah} m²</>
+                      : 'Isi Luas Tanah dulu — total tidak bisa dihitung tanpa itu.'}
+                  </p>
+                )}
               </Field>
               <Field label="Harga Lama / Coret (Rp)">
                 <input type="number" min={0} value={form.harga_lama ?? ''} onChange={e => handleHargaLama(e.target.value ? parseInt(e.target.value) : null)} className={inputCls} placeholder="Kosong jika tidak ada" />

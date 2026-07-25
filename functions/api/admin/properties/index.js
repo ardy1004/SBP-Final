@@ -6,6 +6,7 @@ import { jsonOk, jsonCreated, jsonError, handleOptions } from '../../_shared/res
 import { generateMetaSeo } from '../../../_lib/metaSeo.js';
 import { parseGmapsCoords } from '../../../_lib/parseGmapsCoords.js';
 import { nextKodeSeq, fmtSeq, isUniqueErr } from '../../../_lib/kodeSeq.js';
+import { normalisasiHarga } from '../../../_lib/hargaTanah.js';
 
 // Plafon baris untuk daftar admin (belum ada paginasi). 533 properti per Juli 2026.
 // Response menyertakan total sebenarnya + flag truncated supaya pemotongan terlihat
@@ -184,6 +185,21 @@ export async function onRequestPost(context) {
   if (!VALID_JENIS.includes(jenis))  errors.jenis_properti = 'jenis_properti tidak valid';
   if (!VALID_TUJUAN.includes(tujuan)) errors.tujuan        = 'tujuan harus: dijual, disewa, atau dijual_disewa';
   if (!Number.isInteger(harga) || harga < 0) errors.harga  = 'Harga harus angka non-negatif';
+
+  // Harga total vs per-m² — lihat functions/_lib/hargaTanah.js. Endpoint create
+  // sebelumnya sama sekali TIDAK mengisi harga_per_m2 (kolomnya tidak ada di
+  // INSERT), sehingga properti baru selalu lahir dengan per-m² kosong sampai
+  // ada PATCH pertama. Sekarang keduanya dihitung di satu tempat yang sama
+  // dengan endpoint update, jadi keduanya tidak bisa berbeda perilaku.
+  const hrg = normalisasiHarga({
+    jenis_properti: jenis,
+    luas_tanah,
+    harga,
+    harga_per_m2: body.harga_per_m2,
+    harga_mode: body.harga_mode,
+  });
+  if (!hrg.ok) errors.harga = hrg.error;
+
   if (Object.keys(errors).length > 0) return jsonError('Validasi gagal', 422, errors);
 
   const date8  = today8();
@@ -215,19 +231,23 @@ export async function onRequestPost(context) {
   }
 
   const meta = !body.meta_title
-    ? generateMetaSeo({ jenis_properti: jenis, tujuan, harga, kecamatan, kabupaten, luas_tanah, luas_bangunan, nego })
+    // hrg.harga, BUKAN harga mentah: pada mode per-m² nilai mentahnya adalah
+    // harga per meter, sehingga meta SEO akan mengiklankan harga yang salah.
+    ? generateMetaSeo({ jenis_properti: jenis, tujuan, harga: hrg.harga, kecamatan, kabupaten, luas_tanah, luas_bangunan, nego })
     : { meta_title: sanitize(body.meta_title, 60), meta_description: sanitize(body.meta_description ?? '', 155) };
 
   try {
     const insertProperty = () => env.DB.prepare(`
       INSERT INTO properties
-        (kode_listing, title, slug, jenis_properti, tujuan, harga,
+        (kode_listing, title, slug, jenis_properti, tujuan,
+         harga, harga_per_m2, harga_mode, luas_tanah,
          provinsi, kabupaten, kecamatan, kelurahan, alamat,
          gmaps_link, latitude, longitude,
          details, meta_title, meta_description,
          status_publish, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,  ?,?,?,?,?,  ?,?,?,  ?,?,?,  'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-    `).bind(kode_listing, title, slug, jenis, tujuan, harga,
+      VALUES (?,?,?,?,?,  ?,?,?,?,  ?,?,?,?,?,  ?,?,?,  ?,?,?,  'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    `).bind(kode_listing, title, slug, jenis, tujuan,
+            hrg.harga, hrg.harga_per_m2, hrg.harga_mode, luas_tanah,
             provinsi, kabupaten, kecamatan, '', '', gmaps_link, geo_lat, geo_lng,
             detailsVal, meta.meta_title, meta.meta_description).run();
 

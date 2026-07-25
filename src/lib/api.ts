@@ -32,6 +32,9 @@ export interface ApiPropertyListItem {
   nego: number;          // 0|1 — SQLite boolean
   nett: number;
   harga_per_m2: number | null;
+  /** 'per_m2' = tanah yang diiklankan per meter; tampilkan per-m2 sebagai
+   *  angka utama. Kolom `harga` TETAP total apa pun modenya. */
+  harga_mode?: 'total' | 'per_m2';
   jumlah_kamar_tidur: number | null;
   jumlah_kamar_mandi: number | null;
   luas_tanah: number | null;
@@ -296,6 +299,7 @@ export function normalizeProperty(p: ApiPropertyListItem) {
     updated_at: p.updated_at,
     // harga_per_m2 tersedia langsung dari API
     harga_per_m2: p.harga_per_m2 ?? undefined,
+    harga_mode: p.harga_mode ?? 'total',
   };
 }
 
