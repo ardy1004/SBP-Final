@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ChevronDown, MessageCircle } from 'lucide-react';
 import { FAQ_DATA } from '../data/mockData';
 import { pageMeta } from '../../lib/pageMeta';
+import { trackWaClick } from '../../lib/waTrack';
 
 export const meta = () => [
   ...pageMeta({
@@ -98,6 +99,7 @@ export default function FAQPage() {
               href="https://wa.me/6281391278889?text=Halo SBP, saya ingin bertanya..."
               target="_blank"
               rel="noopener noreferrer"
+              onClick={() => trackWaClick('faq')}
               className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-[#10B981] hover:bg-[#059669] transition-colors"
             >
               <MessageCircle size={18} /> Hubungi via WhatsApp

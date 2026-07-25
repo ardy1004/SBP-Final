@@ -4,6 +4,7 @@ import { MessageCircle, Sparkles, X, Send, CheckCircle } from 'lucide-react';
 import ChatPropertyCard, { type ChatPropItem } from './ChatPropertyCard';
 import Turnstile from './Turnstile';
 import { formatRupiah } from '../../lib/api';
+import { trackWaClick } from '../../lib/waTrack';
 
 // suppress unused import warning — formatRupiah not used here but exported from api
 void formatRupiah;
@@ -269,7 +270,7 @@ export default function ChatWidget() {
           </button>
           {/* WhatsApp */}
           <button
-            onClick={() => { window.open(WA_HREF, '_blank', 'noopener,noreferrer'); setShowMenu(false); }}
+            onClick={() => { trackWaClick('chat_widget'); window.open(WA_HREF, '_blank', 'noopener,noreferrer'); setShowMenu(false); }}
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '10px 16px', borderRadius: 999,

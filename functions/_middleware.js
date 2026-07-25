@@ -16,6 +16,20 @@ const SECURITY_HEADERS = {
   'Cross-Origin-Opener-Policy': 'same-origin',
 };
 
+// Hostname kanonik produksi. Setiap deployment Pages juga mendapat alias permanen
+// <hash>.sbp-final.pages.dev yang menyajikan situs yang sama persis — duplikat yang
+// bisa terindeks Google. rel="canonical" di route SSR sudah mengarah ke salambumi.xyz,
+// tapi canonical hanya sinyal; X-Robots-Tag: noindex bersifat direktif.
+const CANONICAL_HOSTS = new Set(['salambumi.xyz', 'www.salambumi.xyz']);
+
+function isCanonicalHost(request) {
+  try {
+    return CANONICAL_HOSTS.has(new URL(request.url).hostname.toLowerCase());
+  } catch {
+    return true; // URL tak terparse → jangan sampai men-noindex produksi karena salah baca
+  }
+}
+
 export async function onRequest(context) {
   const { request, next, env } = context;
   const origin = env.ALLOWED_ORIGIN || DEFAULT_ORIGIN;
@@ -39,6 +53,11 @@ export async function onRequest(context) {
   headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
+
+  // Alias *.pages.dev (preview maupun alias per-deploy produksi) tidak boleh diindeks.
+  if (!isCanonicalHost(request)) {
+    headers.set('X-Robots-Tag', 'noindex, nofollow');
+  }
 
   return new Response(response.body, {
     status: response.status,
