@@ -36,6 +36,7 @@ export default function ChatWidget() {
   const [loading, setLoading] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
+  const chatPassRef = useRef<string>('');
   const inputRef  = useRef<HTMLInputElement>(null);
 
   // Sembunyikan di halaman detail properti (sudah punya CTA WA sendiri) dan di
@@ -60,7 +61,6 @@ export default function ChatWidget() {
     const text = input.trim();
     if (!text || loading) return;
 
-    const isFirstMessage = messages.length === 0;
     const newMessages: ChatMsg[] = [...messages, { role: 'user', content: text }];
     setMessages(newMessages);
     setInput('');
@@ -79,12 +79,20 @@ export default function ChatWidget() {
         body: JSON.stringify({
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
           context_properties: contextProperties.length > 0 ? contextProperties : undefined,
-          // Token anti-bot hanya dikirim pada pesan pertama (backend verifikasi di giliran pertama)
-          cf_turnstile_token: isFirstMessage ? (turnstileToken || undefined) : undefined,
+          // Token CAPTCHA dikirim selama tiket belum dipegang. Backend TIDAK LAGI
+          // menyimpulkan "giliran keberapa" dari panjang riwayat — riwayat itu
+          // milik klien dan bisa dikarang, sehingga dulu bisa dipakai melewati
+          // CAPTCHA sepenuhnya. Sekarang buktinya tiket ber-HMAC dari server.
+          cf_turnstile_token: turnstileToken || undefined,
+          chat_pass: chatPassRef.current || undefined,
         }),
       });
-      const json = await res.json() as { success: boolean; data?: { reply: string; properties: ChatPropItem[]; leadSubmitted?: boolean; waUrl?: string | null }; error?: string };
+      const json = await res.json() as { success: boolean; data?: { reply: string; properties: ChatPropItem[]; leadSubmitted?: boolean; waUrl?: string | null; chat_pass?: string | null }; error?: string };
       if (json.success && json.data) {
+        // Server hanya menerbitkan tiket pada giliran yang lolos CAPTCHA.
+        // Disimpan di ref, bukan state: nilainya tidak memengaruhi render dan
+        // harus langsung terbaca oleh request berikutnya tanpa menunggu render.
+        if (json.data.chat_pass) chatPassRef.current = json.data.chat_pass;
         setMessages(prev => [...prev, {
           role: 'assistant',
           content: json.data!.reply,

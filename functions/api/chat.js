@@ -2,6 +2,7 @@ import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { searchProperties } from '../_lib/searchProperties.js';
 import { createLead } from '../_lib/createLead.js';
 import { verifyTurnstile } from '../_lib/turnstile.js';
+import { signJWT, verifyJWT } from './_shared/jwt.js';
 import { getProviderKey } from '../_lib/aiProviders.js';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
@@ -161,15 +162,44 @@ export async function onRequestPost(context) {
     return jsonError('Pesan terakhir harus dari role user', 400);
   }
 
-  // ── Anti-bot: verifikasi Turnstile pada pesan PERTAMA saja ──────────────────
-  // Melindungi kuota Groq (2 panggilan LLM/pesan) dari bot, tanpa memaksa user
-  // menyelesaikan CAPTCHA di setiap giliran percakapan.
-  const userTurns = clientMessages.filter(m => m.role === 'user').length;
-  if (userTurns <= 1) {
-    const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? null;
+  // ── Anti-bot: CAPTCHA sekali, lalu tiket bertanda tangan server ────────────
+  // User cukup menyelesaikan CAPTCHA satu kali per percakapan — memaksanya tiap
+  // giliran akan merusak pengalaman chat. Tapi "giliran keberapa" TIDAK BOLEH
+  // ditentukan oleh jumlah pesan yang dikirim klien: riwayat itu milik klien,
+  // jadi bot cukup mengarang dua giliran untuk melewati CAPTCHA sepenuhnya.
+  // (Terbukti di produksi 2026-07-26: 1 giliran tanpa token -> 403, sedangkan
+  // 3 pesan karangan tanpa token -> 200 + jawaban LLM lengkap.)
+  //
+  // Karena itu buktinya dipindah ke tiket ber-HMAC yang hanya bisa diterbitkan
+  // server setelah CAPTCHA lolos. Klien boleh mengarang riwayat sesuka hati —
+  // tanpa tiket yang sah, tetap ditolak.
+  const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? null;
+  let chatPassBaru = null;
+
+  if (!env.JWT_SECRET) {
+    // Tanpa secret, tiket tidak bisa ditandatangani maupun diverifikasi. Ikuti
+    // pola turnstile.js: fail-open agar dev lokal tetap jalan, tapi biarkan
+    // verifikasi Turnstile di bawah yang tetap menjaga host non-kanonik.
     const captcha = await verifyTurnstile(body.cf_turnstile_token, env.TURNSTILE_SECRET, ip, new URL(request.url).hostname);
     if (!captcha.ok) {
       return jsonError('Verifikasi anti-bot gagal. Silakan muat ulang halaman dan coba lagi.', 403);
+    }
+  } else {
+    const tiket = await verifyJWT(body.chat_pass, env.JWT_SECRET);
+    const tiketSah = tiket?.scope === 'chat';
+
+    if (!tiketSah) {
+      // Belum punya tiket → wajib CAPTCHA, apa pun isi riwayat yang dikirim.
+      const captcha = await verifyTurnstile(body.cf_turnstile_token, env.TURNSTILE_SECRET, ip, new URL(request.url).hostname);
+      if (!captcha.ok) {
+        return jsonError('Verifikasi anti-bot gagal. Silakan muat ulang halaman dan coba lagi.', 403);
+      }
+      // 2 jam: cukup panjang untuk satu sesi percakapan, cukup pendek agar
+      // tiket yang bocor tidak jadi kunci permanen ke kuota LLM.
+      chatPassBaru = await signJWT(
+        { scope: 'chat', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 7200 },
+        env.JWT_SECRET,
+      );
     }
   }
 
@@ -208,7 +238,7 @@ export async function onRequestPost(context) {
 
     // ── Tidak ada function call → kembalikan langsung ────────────────────────
     if (!toolCalls || toolCalls.length === 0) {
-      return jsonOk({ reply: assistantMsg.content ?? '', properties: [], leadSubmitted: false, waUrl: null });
+      return jsonOk({ reply: assistantMsg.content ?? '', properties: [], leadSubmitted: false, waUrl: null, chat_pass: chatPassBaru });
     }
 
     // ── Ada tool_calls → eksekusi tools, lalu putaran 2 ───────────────────
@@ -264,6 +294,9 @@ export async function onRequestPost(context) {
       properties:    lastSearchResults,
       leadSubmitted: leadResult?.success === true,
       waUrl:         leadResult?.wa_url ?? null,
+      // Diterbitkan hanya pada giliran yang lolos CAPTCHA; null di giliran
+      // berikutnya. Klien menyimpannya dan mengirim balik tiap request.
+      chat_pass:     chatPassBaru,
     });
 
   } catch (err) {
