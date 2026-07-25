@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
-import { jsonOk, jsonError, handleOptions } from '../_shared/response.js';
+import { jsonError, handleOptions } from '../_shared/response.js';
+import { signJWT, makePayload, makeSessionCookie } from '../_shared/jwt.js';
 
 function sanitize(val, maxLen = 100) {
   if (typeof val !== 'string') return '';
@@ -36,7 +37,7 @@ export async function onRequestPut(context) {
   }
 
   const row = await env.DB
-    .prepare('SELECT password_hash FROM admins WHERE id = ? LIMIT 1')
+    .prepare('SELECT id, email, nama, role, password_hash FROM admins WHERE id = ? LIMIT 1')
     .bind(adminCtx.sub)
     .first()
     .catch(() => null);
@@ -61,12 +62,31 @@ export async function onRequestPut(context) {
     return jsonError('Terjadi kesalahan saat hashing', 500);
   }
 
+  // password_changed_at menandai batas: semua JWT yang iat-nya lebih awal dari ini
+  // ditolak _middleware.js, sehingga sesi lain yang masih hidup langsung terputus.
   await env.DB
-    .prepare('UPDATE admins SET password_hash = ? WHERE id = ?')
+    .prepare('UPDATE admins SET password_hash = ?, password_changed_at = CURRENT_TIMESTAMP WHERE id = ?')
     .bind(hash, adminCtx.sub)
     .run();
 
-  return jsonOk({ message: 'Password berhasil diubah' });
+  // Terbitkan cookie baru untuk sesi yang SEDANG dipakai — tanpa ini admin akan
+  // menendang dirinya sendiri keluar tepat setelah berhasil ganti password.
+  // Di-sign SETELAH UPDATE agar iat-nya tidak lebih awal dari password_changed_at.
+  const token  = await signJWT(makePayload(row), env.JWT_SECRET);
+  const cookie = makeSessionCookie(token);
+
+  return new Response(
+    JSON.stringify({ success: true, data: { message: 'Password berhasil diubah' } }),
+    {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Set-Cookie': cookie,
+        'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || 'https://salambumi.xyz',
+        'Access-Control-Allow-Credentials': 'true',
+      },
+    }
+  );
 }
 
 export async function onRequestOptions() {

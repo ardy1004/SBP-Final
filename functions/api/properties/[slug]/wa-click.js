@@ -6,6 +6,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { buildPropertyUrl } from '../../../_lib/propertyUrl.js';
 import { sendCapiEvent } from '../../../_lib/metaCapi.js';
+import { SQL_TANGGAL_WIB } from '../../../_lib/waktu.js';
 
 export async function onRequestPost(context) {
   const { env, params } = context;
@@ -45,7 +46,7 @@ export async function onRequestPost(context) {
   const [clickResult, leadResult] = await Promise.allSettled([
     env.DB.prepare(`
       INSERT INTO property_view_daily (property_id, tanggal, wa_clicks)
-      VALUES (?, DATE('now','localtime'), 1)
+      VALUES (?, ${SQL_TANGGAL_WIB}, 1)
       ON CONFLICT(property_id, tanggal) DO UPDATE SET wa_clicks = wa_clicks + 1
     `).bind(propertyId).run(),
 

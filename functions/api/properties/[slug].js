@@ -1,4 +1,5 @@
 import { jsonOk, jsonError, handleOptions } from '../_shared/response.js';
+import { SQL_TANGGAL_WIB } from '../../_lib/waktu.js';
 
 // Skor investasi 1–5 bintang berdasarkan yield (spec 8.4)
 function hitungSkorInvestasi(yieldPersen) {
@@ -101,7 +102,7 @@ export async function onRequestGet(context) {
           .catch(err => console.error('[views] increment failed:', err.message)),
         env.DB.prepare(`
           INSERT INTO property_view_daily (property_id, tanggal, views)
-          VALUES (?, DATE('now','localtime'), 1)
+          VALUES (?, ${SQL_TANGGAL_WIB}, 1)
           ON CONFLICT(property_id, tanggal) DO UPDATE SET views = views + 1
         `)
           .bind(property.id)

@@ -251,7 +251,7 @@ export default function AdminListingPage() {
     if (!provinsi || !kabupaten || !kecamatan) return;
 
     const ids = [...selectedIds];
-    if (!window.confirm(`Set lokasi "${kecamatan}, ${kabupaten}, ${provinsi}" untuk ${ids.length} properti? Kolom lokasi lama akan ditimpa.`)) return;
+    if (!window.confirm(`Set lokasi "${kecamatan}, ${kabupaten}, ${provinsi}" untuk ${ids.length} properti?\n\nLokasi lama akan ditimpa, dan kolom Kelurahan/Desa DIKOSONGKAN (kelurahan lama milik kecamatan lama). Isi ulang lewat form edit properti bila perlu.`)) return;
     setBulkLoading(true);
     try {
       const CHUNK = 50;

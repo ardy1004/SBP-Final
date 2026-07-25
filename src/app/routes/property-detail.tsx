@@ -2,6 +2,11 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData } from "react-router";
 import { normalizePropertyDetail } from "../../lib/api";
 import PropertyDetailPage from "../components/PropertyDetailPage";
+// Import lintas backend↔frontend dari functions/_lib (pola CLAUDE.md, sama seperti
+// geoLandmarks.js di routes/properties.tsx) — bucket harian WAJIB memakai ekspresi
+// yang sama persis dengan jalur API, kalau tidak satu view bisa masuk tanggal
+// berbeda tergantung dilayani SSR atau API.
+import { SQL_TANGGAL_WIB } from "../../../functions/_lib/waktu.js";
 
 // Identik dengan functions/api/properties/[slug].js
 function hitungInvestmentIntelligence(p: {
@@ -148,7 +153,7 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
           .bind(r.id).run(),
         db.prepare(`
           INSERT INTO property_view_daily (property_id, tanggal, views)
-          VALUES (?, DATE('now','localtime'), 1)
+          VALUES (?, ${SQL_TANGGAL_WIB}, 1)
           ON CONFLICT(property_id, tanggal) DO UPDATE SET views = views + 1
         `).bind(r.id).run(),
       ]);

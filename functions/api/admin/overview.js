@@ -2,6 +2,7 @@
 // Auth: _middleware.js (admin-only, otomatis mencakup semua /api/admin/*)
 
 import { jsonOk, jsonError, handleOptions } from '../_shared/response.js';
+import { SQL_TANGGAL_WIB, sqlTanggalWibMinus, tanggalWib } from '../../_lib/waktu.js';
 
 const JENIS_LABEL = {
   apartment: 'Apartment', rumah: 'Rumah', tanah: 'Tanah', kost: 'Kost',
@@ -58,7 +59,7 @@ export async function onRequestGet(context) {
       db.prepare(`
         SELECT COALESCE(SUM(wa_clicks), 0) AS cnt
         FROM property_view_daily
-        WHERE tanggal = DATE('now','localtime')
+        WHERE tanggal = ${SQL_TANGGAL_WIB}
       `).first(),
 
       // 4. Breakdown agreements per status
@@ -112,7 +113,7 @@ export async function onRequestGet(context) {
       db.prepare(`
         SELECT tanggal, SUM(views) AS views, SUM(wa_clicks) AS wa_clicks
         FROM property_view_daily
-        WHERE tanggal >= DATE('now','-29 days','localtime')
+        WHERE tanggal >= ${sqlTanggalWibMinus(29)}
         GROUP BY tanggal
         ORDER BY tanggal ASC
       `).all(),
@@ -194,11 +195,12 @@ export async function onRequestGet(context) {
     const viewsMap = Object.fromEntries(
       (viewsPerHariRes.results ?? []).map(r => [r.tanggal, { views: r.views, wa_clicks: r.wa_clicks }])
     );
-    const today = new Date();
+    // tanggalWib(), BUKAN toISOString(): bucket di DB sekarang bertanggal WIB, jadi
+    // pengisi hari kosong harus memakai kalender yang sama — kalau tidak, label
+    // grafik meleset satu hari dan data hari terakhir tampak selalu nol.
+    const now2 = new Date();
     const views_per_hari = Array.from({ length: 30 }, (_, i) => {
-      const d = new Date(today);
-      d.setDate(today.getDate() - (29 - i));
-      const tgl = d.toISOString().slice(0, 10);
+      const tgl = tanggalWib(now2, -(29 - i));
       const entry = viewsMap[tgl] ?? { views: 0, wa_clicks: 0 };
       return { tanggal: tgl, views: entry.views, wa_clicks: entry.wa_clicks };
     });
@@ -206,8 +208,10 @@ export async function onRequestGet(context) {
     return jsonOk({ kpi, leads_per_bulan, distribusi_jenis, aktivitas_terbaru, views_per_hari });
 
   } catch (err) {
+    // Pesan error internal cukup ke log (wrangler tail), JANGAN ke body response —
+    // detail SQL/skema tidak perlu sampai ke browser meski route ini admin-only.
     console.error('[admin/overview]', err.message);
-    return jsonError('Gagal mengambil data overview', 500, err.message);
+    return jsonError('Gagal mengambil data overview', 500);
   }
 }
 
