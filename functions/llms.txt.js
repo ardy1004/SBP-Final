@@ -3,9 +3,16 @@
 // lalu daftar link markdown per seksi. Konten listing diambil live dari D1.
 // Di-cache 1 jam di edge, sama seperti sitemap.xml.
 
+import { withEdgeCache } from './_lib/edgeCache.js';
 import { buildPropertyUrl } from './_lib/propertyUrl.js';
 
 export async function onRequestGet(context) {
+  // Sama seperti sitemap.xml: header 'Cache-Control' saja tidak melewati Worker,
+  // hanya Cache API yang benar-benar melewatkan query D1 + perangkaian teks.
+  return withEdgeCache(context, { ttl: 3600 }, () => bangunLlmsTxt(context));
+}
+
+async function bangunLlmsTxt(context) {
   const { env } = context;
   const base = (env.APP_URL || 'https://salambumi.xyz').replace(/\/$/, '');
 

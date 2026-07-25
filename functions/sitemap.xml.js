@@ -3,6 +3,7 @@
 // Di-cache 1 jam di edge. Route ini lebih spesifik dari [[catchall]].js sehingga
 // dijalankan lebih dulu (Pages Functions: exact route > catch-all).
 
+import { withEdgeCache } from './_lib/edgeCache.js';
 import { buildPropertyUrl } from './_lib/propertyUrl.js';
 import { LANDMARKS, LANDMARK_RADIUS_KM, resolveApproxCoord, haversineKm } from './_lib/geoLandmarks.js';
 
@@ -32,6 +33,15 @@ function urlEntry(loc, lastmod, changefreq, priority) {
 }
 
 export async function onRequestGet(context) {
+  // Merangkai 533+ URL dari D1 pada tiap request tidak muat di 10 ms CPU paket Free:
+  // smoke 2026-07-26 mencatat /sitemap.xml gagal 47,5% dengan Error 1102. Header
+  // 'Cache-Control' di bawah TIDAK cukup — Worker berjalan sebelum cache CDN, jadi
+  // ia tetap dieksekusi ulang. Cache API-lah yang benar-benar melewati perangkaian.
+  // TTL 1 jam: sitemap tidak perlu real-time, dan crawler tidak menuntut itu.
+  return withEdgeCache(context, { ttl: 3600 }, () => bangunSitemap(context));
+}
+
+async function bangunSitemap(context) {
   const { env } = context;
   const base = (env.APP_URL || 'https://salambumi.xyz').replace(/\/$/, '');
   const urls = [];

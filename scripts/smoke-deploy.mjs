@@ -25,12 +25,28 @@
  * KEAMANAN DATA: GET SAJA, tidak pernah POST. Deployment preview memakai binding
  * D1/R2 yang SAMA dengan produksi, jadi request tulis akan mengubah data nyata.
  *
+ * DUA MODE — KEDUANYA PERLU DIUKUR
+ * Sejak cache edge dipasang (functions/_lib/edgeCache.js), satu angka saja
+ * menyesatkan, jadi jangan pernah melaporkan salah satunya sendirian:
+ *
+ *   default (cache-bust aktif) → setiap probe URL unik ⇒ SELALU cache miss.
+ *       Ini SKENARIO TERBURUK: mengukur jalur render yang tidak ter-cache.
+ *       Angka ini tidak akan membaik hanya karena cache dipasang, dan memang
+ *       tidak boleh membaik — ia mengukur biaya render yang masih ada.
+ *
+ *   --cached → URL tetap sama di seluruh gelombang ⇒ gelombang 1 mengisi cache,
+ *       gelombang 2-4 seharusnya HIT. Ini PENGALAMAN PENGGUNA NYATA, karena
+ *       pengunjung sungguhan memang meminta URL yang sama berulang kali.
+ *
  * Pemakaian:
- *   node scripts/smoke-deploy.mjs                                  → produksi
+ *   node scripts/smoke-deploy.mjs                                  → produksi, terburuk
+ *   node scripts/smoke-deploy.mjs https://salambumi.xyz --cached    → produksi, nyata
  *   node scripts/smoke-deploy.mjs https://<hash>.sbp-final.pages.dev → kanari preview
  */
 
-const BASE = (process.argv[2] ?? 'https://salambumi.xyz').replace(/\/$/, '');
+const ARGS = process.argv.slice(2);
+const CACHED_MODE = ARGS.includes('--cached');
+const BASE = (ARGS.find(a => a.startsWith('http')) ?? 'https://salambumi.xyz').replace(/\/$/, '');
 
 const WAVES = 4;              // gelombang terpisah waktu
 const PER_WAVE = 10;          // request per kelas per gelombang (juga = konkurensi)
@@ -60,9 +76,16 @@ const FAIL_MARKERS = [
   'error 1102',
 ];
 
+// Mode --cached memakai SATU nonce untuk seluruh run, bukan per-probe. Tujuannya
+// agar run ini dimulai dari cache yang benar-benar dingin (gelombang 1 = MISS)
+// lalu mengukur gelombang 2-4 sebagai HIT. Tanpa nonce, sisa cache dari run
+// sebelumnya membuat gelombang 1 ikut HIT dan biaya render tidak pernah terlihat.
+const NONCE_RUN = crypto.randomUUID();
+
 function bust(path) {
   const sep = path.includes('?') ? '&' : '?';
-  return `${BASE}${path}${sep}_smoke=${crypto.randomUUID()}`;
+  const nonce = CACHED_MODE ? NONCE_RUN : crypto.randomUUID();
+  return `${BASE}${path}${sep}_smoke=${nonce}`;
 }
 
 async function probe(route) {
@@ -74,7 +97,10 @@ async function probe(route) {
       method: 'GET',                       // GET saja — lihat catatan keamanan data di atas
       redirect: 'follow',
       signal: ctrl.signal,
-      headers: { 'Cache-Control': 'no-cache', 'User-Agent': 'SBP-Smoke/1' },
+      headers: CACHED_MODE
+        // Jangan kirim no-cache di mode ini: tujuannya justru mengukur cache.
+        ? { 'User-Agent': 'SBP-Smoke/1' }
+        : { 'Cache-Control': 'no-cache', 'User-Agent': 'SBP-Smoke/1' },
     });
     const body = await res.text().catch(() => '');
     const low = body.toLowerCase();
@@ -84,10 +110,11 @@ async function probe(route) {
       ok: statusOk && !marker,
       status: res.status,
       colo: (res.headers.get('cf-ray') ?? '').split('-')[1] ?? '?',
+      cache: res.headers.get('x-sbp-cache') ?? '-',
       reason: marker ? `body memuat "${marker}"` : (statusOk ? null : `HTTP ${res.status}`),
     };
   } catch (err) {
-    return { ok: false, status: 0, colo: '?', reason: err.name === 'AbortError' ? 'timeout' : err.message };
+    return { ok: false, status: 0, colo: '?', cache: '-', reason: err.name === 'AbortError' ? 'timeout' : err.message };
   } finally {
     clearTimeout(t);
   }
@@ -95,9 +122,12 @@ async function probe(route) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-const results = new Map(ROUTES.map(r => [r.path, { route: r, sent: 0, failed: 0, statuses: new Map(), colos: new Set(), reasons: new Set() }]));
+const results = new Map(ROUTES.map(r => [r.path, { route: r, sent: 0, failed: 0, statuses: new Map(), cache: new Map(), colos: new Set(), reasons: new Set() }]));
 
 console.log(`Smoke test — ${BASE}`);
+console.log(CACHED_MODE
+  ? 'MODE --cached: URL identik sepanjang run → mengukur PENGALAMAN PENGGUNA NYATA (cache aktif).'
+  : 'MODE default: setiap probe URL unik → selalu cache miss → mengukur SKENARIO TERBURUK (jalur render).');
 console.log(`${WAVES} gelombang × ${PER_WAVE} probe × ${ROUTES.length} kelas = ${WAVES * PER_WAVE * ROUTES.length} request total`);
 console.log('='.repeat(74));
 
@@ -109,6 +139,7 @@ for (let w = 1; w <= WAVES; w++) {
     const acc = results.get(route.path);
     acc.sent++;
     acc.statuses.set(res.status, (acc.statuses.get(res.status) ?? 0) + 1);
+    acc.cache.set(res.cache, (acc.cache.get(res.cache) ?? 0) + 1);
     acc.colos.add(res.colo);
     if (!res.ok) { acc.failed++; if (res.reason) acc.reasons.add(res.reason); }
   }
@@ -123,7 +154,8 @@ let controlFailed = false;
 for (const [, acc] of results) {
   const statuses = [...acc.statuses.entries()].map(([s, n]) => `${s}×${n}`).join(' ');
   const mark = acc.failed === 0 ? 'OK  ' : 'GAGAL';
-  console.log(`${mark} ${acc.route.name.padEnd(24)} ${String(acc.sent - acc.failed).padStart(3)}/${acc.sent}  [${statuses}]  colo:${[...acc.colos].join(',')}`);
+  const cacheRingkas = [...acc.cache.entries()].map(([c, n]) => `${c}×${n}`).join(' ');
+  console.log(`${mark} ${acc.route.name.padEnd(24)} ${String(acc.sent - acc.failed).padStart(3)}/${acc.sent}  [${statuses}]  cache:[${cacheRingkas}]  colo:${[...acc.colos].join(',')}`);
   if (acc.reasons.size > 0) console.log(`      sebab: ${[...acc.reasons].join(' | ')}`);
   totalFailed += acc.failed;
   if (acc.failed > 0 && acc.route.control) controlFailed = true;
