@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../lib/api';
 import { useState, useRef } from 'react';
 // papaparse di-import dinamis di dalam handler (bukan statis) agar tidak ikut
 // dievaluasi di entry SSR — lihat scripts/check-bundle-budget.mjs Asersi A.
@@ -119,7 +120,7 @@ export default function CsvImportModal({ isOpen, onClose, onSuccess }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rows }),
       });
-      const data = await res.json();
+      const data = await bacaJson(res);
       if (!data.success) { setParseErr(data.error ?? 'Import gagal'); return; }
 
       const batchResult = data.data as { inserted: number; errors: BatchError[]; total: number; inserted_rows: InsertedRow[] };

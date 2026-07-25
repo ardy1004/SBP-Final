@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../lib/api';
 import { useState, useEffect } from 'react';
 import { useOutletContext, Link } from 'react-router';
 import { TrendingUp, Home, Users, Eye, MessageCircle, FileText, ArrowUpRight, ArrowDownRight, BarChart3, Settings } from 'lucide-react';
@@ -53,7 +54,7 @@ export default function AdminOverviewPage() {
 
   useEffect(() => {
     fetch('/api/admin/overview', { credentials: 'include' })
-      .then(r => r.json())
+      .then(r => bacaJson(r))
       .then(res => {
         if (res.success) setData(res.data);
         else setError(res.error ?? 'Gagal memuat data');
@@ -63,7 +64,7 @@ export default function AdminOverviewPage() {
 
     fetch('/api/admin/analytics/ga4-summary', { credentials: 'include' })
       .then(async r => {
-        const res = await r.json();
+        const res = await bacaJson(r);
         if (res.success) { setGaData(res.data); return; }
         if (r.status === 422) setGaNotConfigured(true);
         else setGaError(res.error ?? 'Gagal memuat data GA4');

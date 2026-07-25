@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router';
 import { Search, Filter, ChevronDown, Edit, Plus, FileUp, Trash2, ImageOff, MapPin, AlertTriangle } from 'lucide-react';
-import { getLocations, type ApiLocation } from '../../../lib/api';
+import { getLocations, type ApiLocation, bacaJson } from '../../../lib/api';
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
 import CsvImportModal from './CsvImportModal';
 
@@ -102,7 +102,7 @@ export default function AdminListingPage() {
       const params = qs.toString() ? `?${qs.toString()}` : '';
       const res = await fetch(`/api/admin/properties${params}`, { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const json = await bacaJson(res);
       setProperties(json.data?.properties ?? []);
       setTruncated(
         json.data?.truncated
@@ -197,7 +197,7 @@ export default function AdminListingPage() {
           body: JSON.stringify({ action: 'publish', ids: chunks[i] }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
+        const json = await bacaJson(res);
         published += json.data?.affected ?? chunks[i].length;
       }
       await fetchProperties();
@@ -231,7 +231,7 @@ export default function AdminListingPage() {
           body: JSON.stringify({ action, ids: chunks[i] }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
+        const json = await bacaJson(res);
         affected += json.data?.affected ?? chunks[i].length;
       }
       await fetchProperties();
@@ -274,7 +274,7 @@ export default function AdminListingPage() {
           body: JSON.stringify({ action: 'set_location', ids: chunks[i], provinsi, kabupaten, kecamatan }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
+        const json = await bacaJson(res);
         affected += json.data?.affected ?? chunks[i].length;
       }
       await fetchProperties();
@@ -307,7 +307,7 @@ export default function AdminListingPage() {
           body: JSON.stringify({ action: 'delete', ids: chunks[i] }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
+        const json = await bacaJson(res);
         deleted += json.data?.affected ?? chunks[i].length;
         if (i < chunks.length - 1) await new Promise(r => setTimeout(r, 500));
       }

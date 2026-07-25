@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router';
 import {
@@ -111,7 +112,7 @@ export default function AdminViralFrameAgentVideosPage() {
   const loadBadges = useCallback(async (characterId: number) => {
     try {
       const r = await fetch(`/api/admin/viralframe/badges?character_id=${characterId}`, { credentials: 'include' });
-      const j = await r.json();
+      const j = await bacaJson(r);
       if (j.success) setBadgeAssets(Object.fromEntries((j.data?.items ?? []).map((a: BadgeAsset) => [a.type, a])));
     } catch { /* noop */ }
   }, []);
@@ -125,7 +126,7 @@ export default function AdminViralFrameAgentVideosPage() {
     setLoadingChars(true);
     try {
       const r = await fetch('/api/admin/viralframe/characters', { credentials: 'include' });
-      const j = await r.json();
+      const j = await bacaJson(r);
       if (j.success) {
         const items: CharacterOption[] = j.data?.items ?? [];
         setCharacters(items);
@@ -136,7 +137,7 @@ export default function AdminViralFrameAgentVideosPage() {
     try {
       // view=active eksplisit — badge angka di sidebar cuma menghitung video aktif, bukan yang di Sampah.
       const r = await fetch('/api/admin/viralframe/agent-videos?limit=200&view=active', { credentials: 'include' });
-      const j = await r.json();
+      const j = await bacaJson(r);
       if (j.success) {
         const items: AgentVideo[] = j.data?.items ?? [];
         const c: Record<number, number> = {};
@@ -150,7 +151,7 @@ export default function AdminViralFrameAgentVideosPage() {
     setLoadingVideos(true);
     try {
       const r = await fetch(`/api/admin/viralframe/agent-videos?character_id=${characterId}&view=${viewMode}`, { credentials: 'include' });
-      const j = await r.json();
+      const j = await bacaJson(r);
       if (j.success) {
         const items: AgentVideo[] = j.data?.items ?? [];
         setVideos(items);

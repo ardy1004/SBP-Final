@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { MessageCircle, X, Star } from 'lucide-react';
-import { postLead, formatRupiah, type NormalizedPropertyDetail } from '../../lib/api';
+import { postLead, formatRupiah, type NormalizedPropertyDetail, bacaJson } from '../../lib/api';
 import { trackEvent } from '../../lib/tracking';
 import Turnstile from './Turnstile';
 import { cfImg } from '../../lib/img';
@@ -87,7 +87,7 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
     let contactEventId: string | undefined;
     try {
       const r = await fetch(`/api/properties/${property.slug}/wa-click`, { method: 'POST' });
-      const d = await r.json();
+      const d = await bacaJson(r);
       waUrl = d?.data?.wa_url ?? fallback;
       contactEventId = d?.data?.event_id;
     } catch { /* pakai fallback */ }

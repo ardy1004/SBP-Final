@@ -18,6 +18,35 @@ export interface ApiResponse<T> {
   details?: Record<string, string>;
 }
 
+/**
+ * Baca body JSON sebagai amplop standar `{success, data, error}` yang dihasilkan
+ * jsonOk()/jsonError() di functions/api/_shared/response.js.
+ *
+ * KENAPA HELPER INI ADA. `Response.json()` bertipe `Promise<any>` di lib DOM
+ * lama, tapi `Promise<unknown>` di TypeScript modern. Setelah type checking
+ * dinyalakan (26 Juli 2026), 76 pemanggilan `await res.json()` di panel admin
+ * melahirkan 165 error "Property 'success' does not exist on type 'unknown'".
+ * Semuanya berasal dari satu sebab yang sama, jadi diperbaiki di satu tempat
+ * alih-alih menaburkan `as any` ke seluruh berkas.
+ *
+ * `T = any` DISENGAJA sebagai langkah pertama: tujuannya menutup 165 error
+ * tanpa memaksa 76 pemanggil menuliskan tipe payload sekarang juga. Pemanggil
+ * yang tahu bentuk datanya sebaiknya menyebutkannya — `bacaJson<Lead[]>(res)` —
+ * dan dengan begitu pengetatan bisa berjalan bertahap per-berkas.
+ */
+export async function bacaJson<T = any>(res: Response): Promise<ApiResponse<T>> {
+  // Body kosong / bukan JSON (mis. halaman error HTML dari platform) tidak boleh
+  // melempar SyntaxError mentah ke UI — kembalikan amplop gagal yang bisa dibaca.
+  try {
+    return await res.json() as ApiResponse<T>;
+  } catch {
+    return {
+      success: false,
+      error: `Server mengembalikan respons tak terduga (HTTP ${res.status}).`,
+    };
+  }
+}
+
 /** Item properti dari GET /api/properties (list) */
 export interface ApiPropertyListItem {
   id: number;
@@ -42,7 +71,10 @@ export interface ApiPropertyListItem {
   lebar_depan: number | null;
   lantai: number | null;
   legalitas: string;
-  status_legalitas: string | null;
+  // Opsional karena ApiPropertyDetail meng-extend interface ini, sedangkan
+  // jalur detail tidak selalu membawanya: field ini hanya dipakai badge di
+  // PropertyCard ("Sertif Di Tangan"/"Di Bank"), bukan halaman detail.
+  status_legalitas?: string | null;
   furnished: string | null;
   kecamatan: string;
   kabupaten: string;
@@ -60,7 +92,10 @@ export interface ApiPropertyListItem {
   updated_at: string;
   cover_url: string | null;
   cover_alt: string | null;
-  images_raw: string | null;  // GROUP_CONCAT url_webp dipisah '|||' (maks 5) — untuk slider card
+  // HANYA ada di respons DAFTAR (GROUP_CONCAT url_webp dipisah '|||', maks 5)
+  // untuk slider di kartu. Respons DETAIL memakai `images: ApiImage[]` sebagai
+  // gantinya, jadi field ini wajib opsional agar ApiPropertyDetail valid.
+  images_raw?: string | null;
 }
 
 export interface ApiPagination {
@@ -139,11 +174,10 @@ export interface ApiPropertyDetail extends ApiPropertyListItem {
   // padahal normalizePropertyDetail() membacanya. Tipe tertinggal dari API.
   meta_title?: string | null;
   meta_description?: string | null;
-  // CATATAN: `status_legalitas` SENGAJA tidak diulang di sini. Dulu ia
-  // dideklarasikan ulang sebagai opsional padahal di ApiPropertyListItem
-  // bersifat wajib, sehingga ApiPropertyDetail gagal meng-extend induknya dan
-  // setiap pemakaiannya sebagai ApiPropertyListItem ikut error. Kedua endpoint
-  // sama-sama mengembalikan kolom itu, jadi warisan dari induk sudah benar.
+  // CATATAN: `status_legalitas` SENGAJA tidak diulang di sini — sudah opsional
+  // di induknya. Dulu ia dideklarasikan ulang sebagai opsional padahal induknya
+  // mewajibkannya, sehingga interface ini gagal meng-extend induk dan setiap
+  // pemakaiannya sebagai ApiPropertyListItem ikut rusak.
 }
 
 export interface ApiLocation {

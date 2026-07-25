@@ -1,9 +1,11 @@
+import { bacaJson } from '../../../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
   ArrowLeft, Edit2, Check, X, AlertCircle, Copy, MessageCircle,
   FileText, ExternalLink, User, Home, Image as ImageIcon, CheckCircle,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -134,7 +136,9 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 function CardHeader({
   icon: Icon, title, color, onEdit, editLabel = 'Edit',
 }: {
-  icon: React.FC<{ size?: number; className?: string }>;
+  // LucideIcon, BUKAN React.FC: ikon lucide adalah ForwardRefExoticComponent dan
+  // menerima seluruh SVGProps (termasuk `style` yang dipakai di bawah).
+  icon: LucideIcon;
   title: string;
   color: string;
   onEdit?: () => void;
@@ -217,7 +221,7 @@ export default function AdminAgreementDetailPage() {
   // ─── Load detail ─────────────────────────────────────────────────
   const loadDetail = useCallback(async () => {
     const res = await fetch(`/api/admin/agreements/${id}`, { credentials: 'include' });
-    const json = await res.json();
+    const json = await bacaJson(res);
     if (!json.success) throw new Error(json.error ?? 'Gagal memuat data');
     const d: AgreementDetail = json.data;
     setData(d);
@@ -275,7 +279,7 @@ export default function AdminAgreementDetailPage() {
           no_wa: ownerForm.no_wa,
         }),
       });
-      const json = await res.json();
+      const json = await bacaJson(res);
       if (json.success) {
         await loadDetail();
         setEditingOwner(false);
@@ -308,7 +312,7 @@ export default function AdminAgreementDetailPage() {
           kabupaten: propForm.kabupaten,
         }),
       });
-      const json = await res.json();
+      const json = await bacaJson(res);
       if (json.success) {
         await loadDetail();
         setEditingProp(false);
@@ -340,7 +344,7 @@ export default function AdminAgreementDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const json = await res.json();
+      const json = await bacaJson(res);
       if (json.success) {
         setSignToken(json.data.sign_token);
         await loadDetail();

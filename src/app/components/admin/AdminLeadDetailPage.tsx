@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
@@ -108,7 +109,7 @@ export default function AdminLeadDetailPage() {
 
   const loadDetail = useCallback(async () => {
     const res = await fetch(`/api/admin/leads/${id}`, { credentials: 'include' });
-    const json = await res.json();
+    const json = await bacaJson(res);
     if (!json.success) throw new Error(json.error ?? 'Gagal memuat data');
     setData(json.data.lead);
   }, [id]);
@@ -135,7 +136,7 @@ export default function AdminLeadDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status_pipeline: status }),
       });
-      const json = await res.json();
+      const json = await bacaJson(res);
       if (json.success) setData(json.data.lead);
     } finally {
       setStatusSaving(false);
@@ -154,7 +155,7 @@ export default function AdminLeadDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note_baru: teks }),
       });
-      const json = await res.json();
+      const json = await bacaJson(res);
       if (json.success) {
         setData(json.data.lead);
         setNoteText('');

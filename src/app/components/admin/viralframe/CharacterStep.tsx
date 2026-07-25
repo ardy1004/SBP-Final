@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../../lib/api';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Check, Trash2, ImageOff, Upload, X, Loader2, Pencil } from 'lucide-react';
 import {
@@ -89,7 +90,7 @@ export default function CharacterStep({ value, onChange }: {
     try {
       const res = await fetch('/api/admin/viralframe/characters', { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const json = await bacaJson(res);
       setChars(json.data?.items ?? []);
     } catch (err: unknown) {
       setListError(err instanceof Error ? err.message : 'Gagal memuat karakter');
@@ -158,7 +159,7 @@ export default function CharacterStep({ value, onChange }: {
           body: JSON.stringify(body),
         }
       );
-      const json = await res.json();
+      const json = await bacaJson(res);
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       const saved: Character | null = json.data?.karakter ?? null;
       await fetchChars();

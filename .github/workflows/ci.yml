@@ -39,6 +39,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Gate tipe. Build memakai esbuild yang MEMBUANG tipe tanpa memeriksanya,
+      # jadi tanpa langkah ini kesalahan tipe lolos diam-diam sampai runtime —
+      # kelas kesalahan yang meloloskan bug cache poisoning /properties dan bug
+      # pembacaan amplop di AdminLeadsPage ke produksi. Dijalankan SEBELUM build
+      # supaya gagal cepat.
+      - name: Type check
+        run: npm run typecheck
+
       - name: Build (react-router build)
         run: npm run build
 

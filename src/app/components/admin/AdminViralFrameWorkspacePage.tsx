@@ -17,7 +17,7 @@ import { readNdjsonFinal } from '../../../lib/ndjson';
 const CharacterStep = memo(CharacterStepBase);
 import { ARCHETYPES, findArchetype, ARCHETYPE_CUSTOM_ID, compileCameraChoreography } from './viralframe/archetypes';
 import { cfImg } from '../../../lib/img';
-import { getAiModels, getAiStatus, type AiProviderId, type AiStatusInfo } from '../../../lib/api';
+import { getAiModels, getAiStatus, type AiProviderId, type AiStatusInfo, bacaJson } from '../../../lib/api';
 
 const AI_PROVIDER_LIST: { id: AiProviderId; label: string }[] = [
   { id: 'gemini', label: 'Gemini' },
@@ -365,7 +365,10 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
         credentials: 'include',
         body: JSON.stringify({ property_title: propertyTitle, jenis_properti: jenisProperti, lokasi, jumlah_scene: voScenes.length, durasi_per_scene: 8 }),
       });
-      const json = await res.json();
+      // CATATAN: generate-naskah.js memakai Response.json() polos, BUKAN jsonOk(),
+      // jadi TIDAK ada amplop {success,data}. Satu-satunya endpoint admin yang
+      // menyimpang dari konvensi response.js — jangan pasang bacaJson di sini.
+      const json = await res.json() as { naskah?: string; error?: string };
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       setNaskah(json.naskah ?? '');
     } catch (err: unknown) {
@@ -402,11 +405,15 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
         }
         // Gunakan dimensi penuh dari rasio option — tidak ada MAX limit
         // karena SiliconFlow dipanggil langsung dari browser (tidak lewat Worker)
-        let cw = opt.w;
-        let ch = opt.h;
+        // number eksplisit: opt.w/opt.h bertipe literal union (1280|960|720),
+        // sedangkan keduanya diskalakan ulang beberapa baris di bawah.
+        let cw: number = opt.w;
+        let ch: number = opt.h;
         // Jika source crop area lebih kecil dari target, scale down proportionally
         if (sw < cw || sh < ch) {
           const scale = Math.min(sw / cw, sh / ch);
+          // cw/ch berasal dari literal union (1280|960|720); setelah diskalakan
+          // nilainya jadi sembarang, jadi lebarkan tipenya ke number.
           cw = Math.round(cw * scale);
           ch = Math.round(ch * scale);
         }
@@ -450,7 +457,8 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
           const errText = await sfSubmitRes.text();
           throw new Error(`Scene ${i + 1}: submit gagal HTTP ${sfSubmitRes.status} — ${errText.slice(0, 200)}`);
         }
-        const sfJson = await sfSubmitRes.json();
+        // SiliconFlow API eksternal — bentuk responsnya milik mereka, bukan amplop kita.
+        const sfJson = await sfSubmitRes.json() as Record<string, any>;
         const request_id = sfJson.request_id ?? sfJson.requestId ?? null;
         if (!request_id) {
           throw new Error(`Scene ${i + 1}: server tidak return request_id: ${JSON.stringify(sfJson).slice(0, 200)}`);
@@ -461,7 +469,8 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
         for (let p = 0; p < 40 && !done; p++) {
           await new Promise(r => setTimeout(r, 3000));
           const statusRes = await fetch(`/api/admin/viralframe/video-status/${request_id}`, { credentials: 'include' });
-          const statusJson = await statusRes.json();
+          // Sama seperti submit: proxy status meneruskan bentuk SiliconFlow apa adanya.
+          const statusJson = await statusRes.json() as Record<string, any>;
           const status: VideoResult['status'] = statusJson.status ?? 'pending';
           setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, status, video_url: statusJson.video_url ?? null } : r));
           if (status === 'succeed' && statusJson.video_url) {
@@ -501,7 +510,7 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
         body: JSON.stringify({ naskah: naskah.trim(), voice: 'alloy' }),
       });
       if (!res.ok) {
-        const err = await res.json();
+        const err = await bacaJson(res);
         throw new Error(err.error ?? 'Gagal generate voiceover');
       }
       const blob = new Blob([await res.arrayBuffer()], { type: res.headers.get('Content-Type') || 'audio/mpeg' });
@@ -1444,14 +1453,14 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
     setLoading(true);
     try {
       const r = await fetch(`/api/admin/viralframe/videos?property_id=${propertyId}`, { credentials: 'include' });
-      const j = await r.json();
+      const j = await bacaJson(r);
       if (j.success) {
         const list: VideoItem[] = j.data?.items ?? [];
         setItems(list);
         setEdits(Object.fromEntries(list.map(v => [v.id, { post_url: v.post_url ?? '', views: v.views != null ? String(v.views) : '', likes: v.likes != null ? String(v.likes) : '' }])));
       }
     } catch { /* noop */ } finally { setLoading(false); }
-    try { const a = await fetch('/api/admin/viralframe/analytics', { credentials: 'include' }); const aj = await a.json(); if (aj.success) setAnalytics(aj.data?.items ?? []); } catch { /* noop */ }
+    try { const a = await fetch('/api/admin/viralframe/analytics', { credentials: 'include' }); const aj = await bacaJson(a); if (aj.success) setAnalytics(aj.data?.items ?? []); } catch { /* noop */ }
   }, [propertyId]);
   useEffect(() => { load(); }, [load]);
 
@@ -1568,7 +1577,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
 
   useEffect(() => {
     fetch('/api/admin/viralframe/characters', { credentials: 'include' })
-      .then(r => r.json())
+      .then(r => bacaJson(r))
       .then(j => { if (j.success) setCharacters(j.data?.items ?? []); })
       .catch(() => {});
   }, []);
@@ -1605,7 +1614,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ property_id: propertyId }),
       });
-      const signJson = await signRes.json();
+      const signJson = await bacaJson(signRes);
       if (!signJson.success) throw new Error(signJson.error ?? 'Gagal menyiapkan upload');
       const { cloudName, apiKey, timestamp, folder, signature } = signJson.data;
 
@@ -1640,7 +1649,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
           width: cloudinaryResult.width ?? null, height: cloudinaryResult.height ?? null,
         }),
       });
-      const saveJson = await saveRes.json();
+      const saveJson = await bacaJson(saveRes);
       if (!saveJson.success) throw new Error(saveJson.error ?? 'Gagal menyimpan metadata video');
       reset();
       setSuccess(true); // setelah reset() — reset() menyetel success=false
@@ -1780,7 +1789,7 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
   useEffect(() => {
     if (!useAgent || agents !== null) return;
     fetch('/api/admin/viralframe/characters', { credentials: 'include' })
-      .then(r => r.json())
+      .then(r => bacaJson(r))
       .then(j => setAgents(j.data?.items ?? []))
       .catch(() => setAgents([]));
   }, [useAgent, agents]);
@@ -1808,7 +1817,7 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
       // wall-clock 30s Worker saat panggilan AI lambat.
       const ct = r.headers.get('content-type') ?? '';
       if (ct.includes('application/json')) {
-        const j = await r.json();
+        const j = await bacaJson(r);
         throw new Error(j.error ?? 'Gagal generate');
       }
       if (!r.ok || !r.body) throw new Error('Gagal generate (koneksi)');
@@ -2204,7 +2213,7 @@ export default function AdminViralFrameWorkspacePage() {
     if (!id) return;
     try {
       const r = await fetch(`/api/admin/viralframe/generations?property_id=${id}`, { credentials: 'include' });
-      const j = await r.json();
+      const j = await bacaJson(r);
       if (j.success) setHistory(j.data?.items ?? []);
     } catch { /* ignore */ }
   }, [id]);
@@ -2216,7 +2225,7 @@ export default function AdminViralFrameWorkspacePage() {
     setDeletingHistoryId(hid);
     try {
       const r = await fetch(`/api/admin/viralframe/generations/${hid}`, { method: 'DELETE', credentials: 'include' });
-      const j = await r.json();
+      const j = await bacaJson(r);
       if (j.success) setHistory(prev => prev.filter(h => h.id !== hid));
     } catch { /* ignore */ }
     setDeletingHistoryId(null);
@@ -2227,7 +2236,7 @@ export default function AdminViralFrameWorkspacePage() {
     setDeletingHistoryId('all');
     try {
       const r = await fetch(`/api/admin/viralframe/generations?property_id=${id}`, { method: 'DELETE', credentials: 'include' });
-      const j = await r.json();
+      const j = await bacaJson(r);
       if (j.success) { setHistory([]); setShowHistory(false); }
     } catch { /* ignore */ }
     setDeletingHistoryId(null);
@@ -2237,7 +2246,7 @@ export default function AdminViralFrameWorkspacePage() {
   interface PresetItem { name: string; params: Partial<Step1State>; updated_at?: string }
   const [presets, setPresets] = useState<PresetItem[]>([]);
   const loadPresets = useCallback(async () => {
-    try { const r = await fetch('/api/admin/viralframe/presets', { credentials: 'include' }); const j = await r.json(); if (j.success) setPresets(j.data?.items ?? []); } catch { /* noop */ }
+    try { const r = await fetch('/api/admin/viralframe/presets', { credentials: 'include' }); const j = await bacaJson(r); if (j.success) setPresets(j.data?.items ?? []); } catch { /* noop */ }
   }, []);
   useEffect(() => { loadPresets(); }, [loadPresets]);
   const savePreset = async () => {
@@ -2312,7 +2321,7 @@ export default function AdminViralFrameWorkspacePage() {
       try {
         const res = await fetch(`/api/admin/properties/${id}`, { credentials: 'include' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
+        const json = await bacaJson(res);
         if (!cancel) setProp(json.data ?? null);
       } catch (err: unknown) {
         if (!cancel) setError(err instanceof Error ? err.message : 'Gagal memuat properti');
@@ -2499,7 +2508,7 @@ export default function AdminViralFrameWorkspacePage() {
         master_prompt: masterPrompt,
       }),
     })
-      .then(r => r.json())
+      .then(r => bacaJson(r))
       .then(j => { if (j?.data?.id) setGenerationId(j.data.id); })
       .catch(() => {})
       .finally(() => setSaving(false));

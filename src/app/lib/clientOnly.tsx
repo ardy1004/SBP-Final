@@ -30,10 +30,18 @@ import { useEffect, useState, type ComponentType } from 'react';
  * (mounted-flag + await import) sama dengan KPRCalculatorClient di
  * src/app/components/PropertyDetailPage.tsx yang sudah terbukti aman.
  */
+/**
+ * Nilai kembalinya sengaja `FunctionComponent<P>`, BUKAN `ComponentType<P>`.
+ * `ComponentType` ikut mencakup class component, sedangkan React Router menuntut
+ * `module.default` sebuah route berupa fungsi yang bisa dipanggil. Memakai
+ * ComponentType membuat typegen menolak ke-17 route admin dengan
+ * "ComponentClass provides no match for the signature '(...args: any[]): unknown'".
+ * Implementasi di bawah memang selalu mengembalikan function component.
+ */
 export function clientOnly<P extends object>(
   loader: () => Promise<{ default: ComponentType<P> }>,
   Fallback: ComponentType,
-): ComponentType<P> {
+): React.FunctionComponent<P> {
   return function ClientOnlyRoute(props: P) {
     const [Comp, setComp] = useState<ComponentType<P> | null>(null);
 

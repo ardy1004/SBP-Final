@@ -10,6 +10,11 @@ export interface Property {
   harga: number;
   harga_lama?: number;
   harga_sewa?: number;
+  /** 'per_m2' = tanah yang diiklankan per meter; PropertyCard menampilkan
+   *  per-m² sebagai angka utama. Kolom `harga` TETAP total apa pun modenya.
+   *  Lihat functions/_lib/hargaTanah.js. */
+  harga_mode?: 'total' | 'per_m2';
+  harga_per_m2?: number;
   nego: boolean;
   nett?: boolean;
   provinsi: string;

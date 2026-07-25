@@ -23,7 +23,7 @@ export async function readNdjsonFinal<T>(r: Response, opts: NdjsonProgress = {})
   // lebih awal — mis. 401 dari middleware auth atau 422 validasi.
   const ct = r.headers.get('content-type') ?? '';
   if (ct.includes('application/json')) {
-    const j = await r.json().catch(() => ({}));
+    const j = await r.json().catch(() => ({})) as { error?: string };
     throw new Error(j.error ?? `Gagal memproses permintaan (HTTP ${r.status})`);
   }
 

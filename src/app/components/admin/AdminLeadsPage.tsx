@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import {
@@ -86,8 +87,8 @@ export default function AdminLeadsPage() {
     setLoading(true);
     setError(null);
     fetch('/api/admin/leads?limit=200', { credentials: 'include' })
-      .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); })
-      .then(d => setLeads(d.data?.leads ?? d.leads ?? []))
+      .then(r => { if (!r.ok) throw new Error(`${r.status}`); return bacaJson<{ leads: Lead[] }>(r); })
+      .then(d => setLeads(d.data?.leads ?? []))
       .catch(e => setError(`Gagal memuat leads: ${e.message}`))
       .finally(() => setLoading(false));
   }, []);
@@ -130,8 +131,13 @@ export default function AdminLeadsPage() {
         body: JSON.stringify({ note_baru: teks }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
-      const data = await res.json();
-      setLeads(prev => prev.map(l => l.id === id ? { ...l, notes: data.lead?.notes ?? l.notes } : l));
+      // BUG (ketangkap type check 2026-07-26): dulu membaca `data.lead`, padahal
+      // PATCH /api/admin/leads/:id membalas jsonOk({ pesan, lead }) sehingga
+      // bentuknya {success, data:{pesan, lead}}. `data.lead` selalu undefined,
+      // lalu `?? l.notes` menelan kegagalannya tanpa suara — catatan yang baru
+      // ditambahkan tidak muncul di daftar sampai halaman dimuat ulang.
+      const data = await bacaJson<{ pesan: string; lead: { notes: Note[] } }>(res);
+      setLeads(prev => prev.map(l => l.id === id ? { ...l, notes: data.data?.lead?.notes ?? l.notes } : l));
       setNoteInputs(prev => ({ ...prev, [id]: '' }));
     } catch {
       // silent — user can retry

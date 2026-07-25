@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../../lib/api';
 import { useState, useEffect, useRef } from 'react';
 import { Layers, Upload, Loader2, Trash2, ImageOff, Move } from 'lucide-react';
 import { toImageThumbnailUrl, toTrimmedImageUrl, type BadgeAsset, type BadgeType } from '../../../lib/cloudinaryOverlay';
@@ -48,7 +49,7 @@ function BadgeSlot({ type, label, hint, characterId, asset, sampleVideo, onChang
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ folder: `sbp-viralframe/badges/${characterId}` }),
       });
-      const signJson = await signRes.json();
+      const signJson = await bacaJson(signRes);
       if (!signJson.success) throw new Error(signJson.error ?? 'Gagal menyiapkan upload');
       const { cloudName, apiKey, timestamp, folder, signature } = signJson.data;
 
@@ -79,7 +80,7 @@ function BadgeSlot({ type, label, hint, characterId, asset, sampleVideo, onChang
           x_pct: draft.x_pct, y_pct: draft.y_pct, width_pct: draft.width_pct,
         }),
       });
-      const saveJson = await saveRes.json();
+      const saveJson = await bacaJson(saveRes);
       if (!saveJson.success) throw new Error(saveJson.error ?? 'Gagal menyimpan badge');
       onChanged();
     } catch (e: unknown) {
@@ -98,7 +99,7 @@ function BadgeSlot({ type, label, hint, characterId, asset, sampleVideo, onChang
         method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(draft),
       });
-      const j = await r.json();
+      const j = await bacaJson(r);
       if (!j.success) throw new Error(j.error ?? 'Gagal menyimpan posisi');
       onChanged();
     } catch (e: unknown) {

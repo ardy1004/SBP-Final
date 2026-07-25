@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../lib/api';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Star, Plus, Pencil, Trash2, Loader2, AlertCircle, Eye, EyeOff, Upload, User } from 'lucide-react';
 
@@ -44,7 +45,7 @@ async function apiFetch(path: string, opts?: RequestInit) {
     headers: { 'Content-Type': 'application/json', ...(opts?.headers ?? {}) },
     ...opts,
   });
-  const json = await res.json();
+  const json = await bacaJson(res);
   if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
   // Backend membungkus payload sebagai { success, data: {...} } (lihat _shared/response.js).
   // Kembalikan isi `data` agar pemanggil bisa membaca field (mis. items) secara langsung.
@@ -183,7 +184,7 @@ function Modal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ photo: base64 }),
       });
-      const json = await res.json();
+      const json = await bacaJson(res);
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
       set('foto_url', json.data?.key ?? '');
     } catch (e: unknown) {

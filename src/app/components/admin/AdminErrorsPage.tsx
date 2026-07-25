@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import { AlertTriangle, Monitor, Server, Check, Trash2, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 
@@ -34,7 +35,7 @@ async function apiFetch(path: string, opts?: RequestInit) {
     headers: { 'Content-Type': 'application/json', ...(opts?.headers ?? {}) },
     ...opts,
   });
-  const json = await res.json();
+  const json = await bacaJson(res);
   if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`);
   return json.data ?? json;
 }

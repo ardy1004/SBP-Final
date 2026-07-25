@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../lib/api';
 import { useState, useRef } from 'react';
 import { Star, Trash2, ImageOff, ChevronDown, ChevronUp, Upload } from 'lucide-react';
 
@@ -70,7 +71,7 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
         method: 'PATCH',
         credentials: 'include',
       });
-      const json = await res.json();
+      const json = await bacaJson(res);
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       setPhotos(json.data?.images ?? []);
       setPhotoMsg('Cover diubah ✓');
@@ -92,7 +93,7 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
         method: 'DELETE',
         credentials: 'include',
       });
-      const json = await res.json();
+      const json = await bacaJson(res);
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       setPhotos(json.data?.images ?? []);
       setPhotoMsg('Foto dihapus ✓');
@@ -121,7 +122,7 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
           credentials: 'include',
           body: JSON.stringify({ photo: base64 }),
         });
-        const json = await res.json();
+        const json = await bacaJson(res);
         if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
         setPhotos(prev => [...prev, json.data.image]);
       } catch (err: unknown) {
@@ -153,7 +154,7 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
         credentials: 'include',
         body: JSON.stringify({ order: newPhotos.map(p => p.id) }),
       });
-      const json = await res.json();
+      const json = await bacaJson(res);
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
     } catch (err: unknown) {
       setPhotos(prevPhotos);

@@ -342,7 +342,11 @@ async function loadLandmarkPage(env: { DB: D1Database }, parsed: LandmarkParsed,
     const total = withinRadius.length;
     const properties: NormalizedProperty[] = withinRadius
       .slice(0, SSR_LIMIT)
-      .map(x => normalizeProperty(x.row as Parameters<typeof normalizeProperty>[0]));
+      // Baris D1 datang sebagai Record<string, unknown> sehingga TypeScript tidak
+      // melihat irisan dengan ApiPropertyListItem — lewat `unknown` dulu, sesuai
+      // saran compiler. Bentuknya dijamin oleh SELECT di atas yang kolomnya
+      // sengaja disamakan dengan GET /api/properties.
+      .map(x => normalizeProperty(x.row as unknown as Parameters<typeof normalizeProperty>[0]));
 
     return {
       ssr: true as const,

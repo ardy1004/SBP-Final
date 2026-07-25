@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../lib/api';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Eye, EyeOff, Lock, Mail, Shield } from 'lucide-react';
@@ -32,7 +33,7 @@ export default function AdminLoginPage() {
       } else {
         let msg = 'Email atau password salah.';
         try {
-          const data = await res.json();
+          const data = await bacaJson(res);
           if (data?.error) msg = data.error;
         } catch {}
         setError(msg);

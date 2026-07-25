@@ -4,7 +4,7 @@ import GridLayout, { WidthProvider, type Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { Lock, User, CheckCircle, XCircle, Eye, EyeOff, BarChart2, Plus, Trash2, Edit2, ToggleLeft, ToggleRight, KeyRound, RotateCcw } from 'lucide-react';
-import { getAiKeys, saveAiKeys, getAiStatus, type AiProviderId, type AiKeyInfo, type AiStatusInfo } from '../../../lib/api';
+import { getAiKeys, saveAiKeys, getAiStatus, type AiProviderId, type AiKeyInfo, type AiStatusInfo, bacaJson } from '../../../lib/api';
 
 const ResponsiveGridLayout = WidthProvider(GridLayout);
 
@@ -149,8 +149,8 @@ export default function AdminSettingsPage() {
   // ── Load pixel configs + tracking settings ──
   useEffect(() => {
     Promise.all([
-      fetch('/api/admin/pixel-configs', { credentials: 'include' }).then(r => r.json()),
-      fetch('/api/admin/settings/tracking', { credentials: 'include' }).then(r => r.json()),
+      fetch('/api/admin/pixel-configs', { credentials: 'include' }).then(r => bacaJson(r)),
+      fetch('/api/admin/settings/tracking', { credentials: 'include' }).then(r => bacaJson(r)),
     ]).then(([pRes, tRes]) => {
       if (pRes.success) setPixels(pRes.data?.pixels ?? []);
       if (tRes.success && tRes.data) {
@@ -175,7 +175,7 @@ export default function AdminSettingsPage() {
     setPwLoading(true); setPwMsg(null);
     try {
       const res = await fetch('/api/admin/password', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
-      const data = await res.json();
+      const data = await bacaJson(res);
       if (data.success) { setPwMsg({ type: 'success', text: data.data?.message ?? 'Password berhasil diubah' }); setForm({ password_lama: '', password_baru: '', password_baru_konfirmasi: '' }); }
       else setPwMsg({ type: 'error', text: data.error ?? 'Gagal mengubah password' });
     } catch { setPwMsg({ type: 'error', text: 'Koneksi ke server gagal' }); }
@@ -209,7 +209,7 @@ export default function AdminSettingsPage() {
         // edit mode, blank = no change (don't send key)
       }
       const res = await fetch(url, { method, credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patchBody) });
-      const data = await res.json();
+      const data = await bacaJson(res);
       if (data.success) {
         const saved: PixelConfig = data.data.pixel;
         setPixels(prev => isEdit ? prev.map(p => p.id === saved.id ? saved : p) : [...prev, saved]);
@@ -223,7 +223,7 @@ export default function AdminSettingsPage() {
   const handleTogglePixel = async (px: PixelConfig) => {
     try {
       const res = await fetch(`/api/admin/pixel-configs/${px.id}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_active: px.is_active ? 0 : 1 }) });
-      const data = await res.json();
+      const data = await bacaJson(res);
       if (data.success) setPixels(prev => prev.map(p => p.id === px.id ? data.data.pixel : p));
     } catch { setPixelMsg({ type: 'error', text: 'Gagal mengubah status pixel' }); }
   };
@@ -232,7 +232,7 @@ export default function AdminSettingsPage() {
     if (!window.confirm('Hapus pixel config ini?')) return;
     try {
       const res = await fetch(`/api/admin/pixel-configs/${id}`, { method: 'DELETE', credentials: 'include' });
-      const data = await res.json();
+      const data = await bacaJson(res);
       if (data.success) { setPixels(prev => prev.filter(p => p.id !== id)); setPixelMsg({ type: 'success', text: 'Pixel dihapus' }); }
       else setPixelMsg({ type: 'error', text: data.error ?? 'Gagal menghapus pixel' });
     } catch { setPixelMsg({ type: 'error', text: 'Koneksi gagal' }); }
@@ -243,7 +243,7 @@ export default function AdminSettingsPage() {
     setSavingTracking(true); setTrackingMsg(null);
     try {
       const res = await fetch('/api/admin/settings/tracking', { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tracking) });
-      const data = await res.json();
+      const data = await bacaJson(res);
       if (data.success) setTrackingMsg({ type: 'success', text: 'Tracking settings disimpan' });
       else setTrackingMsg({ type: 'error', text: data.error ?? 'Gagal menyimpan' });
     } catch { setTrackingMsg({ type: 'error', text: 'Koneksi gagal' }); }

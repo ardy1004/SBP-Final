@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../lib/api';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { FileText, ChevronRight, AlertCircle } from 'lucide-react';
@@ -50,7 +51,7 @@ export default function AdminAgreementsPage() {
     setError(null);
     const qs = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : '';
     fetch(`/api/admin/agreements${qs}`, { credentials: 'include' })
-      .then(r => r.json())
+      .then(r => bacaJson(r))
       .then(d => {
         if (d.success) setAgreements(d.data.agreements ?? []);
         else setError(d.error ?? 'Gagal memuat data');

@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../lib/api';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router';
 import {
@@ -52,10 +53,11 @@ export default function AdminLayout() {
 
   const fetchBadge = useCallback(() => {
     fetch('/api/admin/leads?count=1', { credentials: 'include' })
-      .then(r => r.ok ? r.json() : null)
+      .then(r => r.ok ? bacaJson<{ count: number }>(r) : null)
       .then(d => {
-        // Backend membungkus payload: { success, data: { count } }
-        const count = d?.data?.count ?? d?.count;
+        // GET /api/admin/leads?count=1 membalas jsonOk({count}) => {success,data:{count}}.
+        // Fallback lama `?? d.count` sudah kode mati (diverifikasi 2026-07-26).
+        const count = d?.data?.count;
         if (count !== undefined) setLeadsBadge(count);
       })
       .catch(() => {});
@@ -78,7 +80,7 @@ export default function AdminLayout() {
     fetch('/api/admin/me', { credentials: 'include' })
       .then(res => {
         if (!res.ok) throw new Error('unauth');
-        return res.json();
+        return bacaJson(res);
       })
       .then(data => {
         setAdmin(data.data ?? data);
@@ -91,7 +93,7 @@ export default function AdminLayout() {
 
   const fetchErrorsBadge = useCallback(() => {
     fetch('/api/admin/errors?resolved=0&limit=1', { credentials: 'include' })
-      .then(r => r.ok ? r.json() : null)
+      .then(r => r.ok ? bacaJson(r) : null)
       .then(d => { const total = d?.data?.total; if (total !== undefined) setErrorsBadge(total); })
       .catch(() => {});
   }, []);
@@ -119,8 +121,8 @@ export default function AdminLayout() {
       setShowNotif(true);
       setNotifLoading(true);
       fetch('/api/admin/leads?limit=5', { credentials: 'include' })
-        .then(r => r.ok ? r.json() : null)
-        .then(d => setNotifLeads(d?.data?.leads ?? d?.leads ?? []))
+        .then(r => r.ok ? bacaJson<{ leads: NotifLead[] }>(r) : null)
+        .then(d => setNotifLeads(d?.data?.leads ?? []))
         .catch(() => setNotifLeads([]))
         .finally(() => setNotifLoading(false));
     } else {

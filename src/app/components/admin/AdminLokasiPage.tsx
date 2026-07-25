@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../lib/api';
 import { useState, useEffect } from 'react';
 import { MapPin, RefreshCw, Download, CheckCircle, AlertCircle, Database } from 'lucide-react';
 
@@ -14,7 +15,7 @@ type Status = 'idle' | 'running' | 'done' | 'error';
 async function fetchJSON(url: string) {
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return bacaJson(res);
 }
 
 /** Jalankan `fn` atas `items` dengan maksimal `limit` request paralel. */
@@ -43,7 +44,7 @@ export default function AdminLokasiPage() {
     try {
       const res = await fetch('/api/admin/locations/stats', { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const json = await bacaJson(res);
       const counts = json.data ?? json;
       setStats({
         provinsi: counts.provinsi ?? 0,
@@ -70,7 +71,7 @@ export default function AdminLokasiPage() {
       res = await doPost();
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
+    const json = await bacaJson(res);
     // jsonOk() backend membungkus payload di bawah `data` — {success,data:{inserted}}.
     // Bug lama di sini membaca json.inserted langsung (selalu undefined -> 0),
     // sehingga UI melaporkan "0 lokasi" walau data benar-benar tersimpan di D1.
@@ -90,7 +91,7 @@ export default function AdminLokasiPage() {
     try {
       // 1. Reset
       await fetch(IMPORT_URL, { method: 'DELETE', credentials: 'include' });
-      const verifyReset = await fetch('/api/locations').then(r => r.json());
+      const verifyReset = await fetch('/api/locations').then(r => bacaJson(r));
       if ((verifyReset.data?.items ?? []).length > 0) {
         throw new Error('Reset gagal, tidak bisa lanjut import');
       }

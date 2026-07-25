@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router';
 import { ArrowLeft, Save, AlertTriangle, ChevronDown, Sparkles, MessageCircle } from 'lucide-react';
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
 import PropertyPhotosCard from './PropertyPhotosCard';
-import { getLocations, type ApiLocation } from '../../../lib/api';
+import { getLocations, type ApiLocation, bacaJson } from '../../../lib/api';
 // Reuse logic generate meta SEO yang sama dengan endpoint CREATE (jangan duplikasi).
 import { generateMetaSeo } from '../../../../functions/_lib/metaSeo.js';
 import { readNdjsonFinal } from '../../../lib/ndjson';
@@ -344,7 +344,7 @@ export default function AdminPropertyDetailPage() {
     try {
       const res = await fetch(`/api/admin/properties/${id}`, { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const json = await bacaJson(res);
       const d: PropertyDetail = json.data;
       setProperty(d);
       setLoadedPhotos(d.images ?? []);
@@ -533,7 +533,7 @@ export default function AdminPropertyDetailPage() {
       credentials: 'include',
       body: JSON.stringify(buildPatchBody()),
     });
-    const json = await res.json();
+    const json = await bacaJson(res);
     if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
     return json;
   };
@@ -560,7 +560,7 @@ export default function AdminPropertyDetailPage() {
             details: detailsVal,
           }),
         });
-        const json = await res.json();
+        const json = await bacaJson(res);
         if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
         // POST create hanya menyimpan field dasar — kirim SEMUA field form yang
         // lain via PATCH ke id baru agar tidak ada isian yang hilang, baru pindah.
@@ -595,7 +595,7 @@ export default function AdminPropertyDetailPage() {
         credentials: 'include',
         body: JSON.stringify({ status: statusPending }),
       });
-      const json = await res.json();
+      const json = await bacaJson(res);
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       setProperty(prev => prev ? { ...prev, status_publish: statusPending } : prev);
       setStatusMsg(`Status diubah ke "${statusPending}" ✓`);

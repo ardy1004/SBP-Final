@@ -1,3 +1,4 @@
+import { bacaJson } from '../../lib/api';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router';
 import {
@@ -449,7 +450,7 @@ export default function SignPage() {
     if (!token) { setState({ kind: 'not_found' }); return; }
 
     fetch(`/api/sign/${token}`)
-      .then(r => r.json())
+      .then(r => bacaJson(r))
       .then((json: any) => {
         if (!json.success) { setState({ kind: 'not_found' }); return; }
         const d = json.data;
@@ -539,7 +540,7 @@ export default function SignPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ signature: dataUrl, persetujuan: true }),
       });
-      const json = await res.json();
+      const json = await bacaJson(res);
       if (!json.success) throw new Error(json.error || 'Gagal mengirim tanda tangan');
       const d = json.data;
       const propertyUrl = buildPropertyUrl(state.data.properti);

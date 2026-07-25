@@ -1,3 +1,4 @@
+import { bacaJson } from '../../lib/api';
 import { useState } from 'react';
 import { Phone, Mail, MapPin, Clock, MessageCircle, Send, AlertCircle } from 'lucide-react';
 import { useContactEmail } from './useContactEmail';
@@ -52,7 +53,7 @@ export default function ContactPage() {
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+        const data = await bacaJson(res).catch(() => ({}));
         throw new Error((data as { message?: string }).message ?? `Error ${res.status}`);
       }
 

@@ -1,3 +1,4 @@
+import { bacaJson } from '../../../lib/api';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router';
 import {
@@ -195,7 +196,7 @@ export default function AdminViralFramePage() {
   const [batchDone, setBatchDone] = useState(0);
   const [batchResult, setBatchResult] = useState<{ ok: number; failed: { id: number; title: string; reason: string }[] } | null>(null);
   const toggleSelect = (id: number) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const refreshStatus = () => fetch('/api/admin/viralframe/status', { credentials: 'include' }).then(r => r.json())
+  const refreshStatus = () => fetch('/api/admin/viralframe/status', { credentials: 'include' }).then(r => bacaJson(r))
     .then(j => {
       if (j.success) {
         setWithScript(new Set(j.data?.with_script ?? []));
@@ -226,7 +227,7 @@ export default function AdminViralFramePage() {
       try {
         const detailRes = await fetch(`/api/admin/properties/${id}`, { credentials: 'include' });
         if (!detailRes.ok) throw new Error(`Gagal ambil detail properti (HTTP ${detailRes.status})`);
-        const detailJson = await detailRes.json();
+        const detailJson = await bacaJson(detailRes);
         const images: { url_webp: string }[] = detailJson.data?.images ?? [];
         if (images.length < 2) throw new Error('Foto kurang dari 2 — lewati');
         const photos = images.slice(0, 12).map((img, idx) => ({ label: `Foto ${idx + 1}`, url_webp: img.url_webp }));
@@ -235,7 +236,7 @@ export default function AdminViralFramePage() {
           body: JSON.stringify({ property_id: id, photos, visual_style: '', camera_style: '' }),
         });
         if (!res.ok) {
-          const errJson = await res.json().catch(() => null);
+          const errJson = await bacaJson(res).catch(() => null);
           throw new Error(errJson?.error || `HTTP ${res.status}`);
         }
         ok++;
@@ -256,7 +257,7 @@ export default function AdminViralFramePage() {
     try {
       const res = await fetch('/api/admin/properties', { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const json = await bacaJson(res);
       const rows: PropertyRow[] = json.data?.properties ?? [];
       setProperties(rows);
       setDismissedMap(Object.fromEntries(rows.map(p => [p.id, p.viralframe_dismissed_at])));
