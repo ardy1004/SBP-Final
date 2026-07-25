@@ -38,7 +38,13 @@ export default function ChatWidget() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLInputElement>(null);
 
-  const shouldHide = /^\/(dijual|disewa)\/[^/]+\//.test(pathname);
+  // Sembunyikan di halaman detail properti (sudah punya CTA WA sendiri) dan di
+  // seluruh panel admin — G-CHAT adalah widget untuk calon pembeli, tidak ada
+  // gunanya mengambang di atas alat kerja internal.
+  const shouldHide =
+    /^\/(dijual|disewa)\/[^/]+\//.test(pathname) ||
+    pathname === '/admin' ||
+    pathname.startsWith('/admin/');
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
