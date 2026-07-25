@@ -6,8 +6,19 @@ import PropertyPhotosCard from './PropertyPhotosCard';
 import { getLocations, type ApiLocation } from '../../../lib/api';
 // Reuse logic generate meta SEO yang sama dengan endpoint CREATE (jangan duplikasi).
 import { generateMetaSeo } from '../../../../functions/_lib/metaSeo.js';
+import { readNdjsonFinal } from '../../../lib/ndjson';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+/** Payload final dari /api/admin/ai/generate-description (NDJSON streaming). */
+interface AiGenerateResult {
+  judul: string;
+  deskripsi: string;
+  meta_title: string;
+  meta_description: string;
+  provider_used: string | null;
+  fell_back: boolean;
+}
 
 interface PropertyImage {
   id: number;
@@ -219,6 +230,7 @@ export default function AdminPropertyDetailPage() {
 
   const [isGenerating, setIsGenerating]   = useState(false);
   const [aiNotif, setAiNotif]             = useState('');
+  const aiAbortRef = useRef<AbortController | null>(null);
 
   const setF        = (patch: Partial<PropertyDetail>) => setForm(f => ({ ...f, ...patch }));
 
@@ -227,6 +239,10 @@ export default function AdminPropertyDetailPage() {
       alert('Lengkapi data lokasi terlebih dahulu');
       return;
     }
+    // Rantai fallback bisa mencoba beberapa provider, jadi admin WAJIB punya
+    // cara membatalkan alih-alih terjebak menatap tombol "Generating…".
+    const ac = new AbortController();
+    aiAbortRef.current = ac;
     setIsGenerating(true);
     setAiNotif('');
     try {
@@ -234,6 +250,7 @@ export default function AdminPropertyDetailPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        signal: ac.signal,
         body: JSON.stringify({
           jenis_properti: form.jenis_properti,
           tujuan: form.tujuan,
@@ -251,23 +268,38 @@ export default function AdminPropertyDetailPage() {
           fasilitas: null,
         }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+      // Endpoint membalas NDJSON streaming (lihat src/lib/ndjson.ts). readNdjsonFinal
+      // memeriksa content-type lebih dulu, jadi halaman HTML error dari platform
+      // tidak akan pernah lagi masuk ke JSON.parse dan memunculkan
+      // "Unexpected token '<'" yang tidak berarti apa-apa bagi admin.
+      const data = await readNdjsonFinal<AiGenerateResult>(res, { signal: ac.signal });
       // Judul TIDAK ikut diganti — tombol ini generate deskripsi & SEO saja.
-      // json.judul sengaja diabaikan (backend tetap menghasilkannya sbg
+      // data.judul sengaja diabaikan (backend tetap menghasilkannya sbg
       // konteks internal utk kualitas deskripsi, tapi tak dipakai di form).
       setF({
-        deskripsi: json.deskripsi,
-        meta_title: json.meta_title,
-        meta_description: json.meta_description,
+        deskripsi: data.deskripsi,
+        meta_title: data.meta_title,
+        meta_description: data.meta_description,
       });
-      setAiNotif('Deskripsi & SEO berhasil di-generate — silakan review sebelum menyimpan.');
+      setAiNotif(data.fell_back
+        ? `Deskripsi & SEO berhasil di-generate (fallback ke ${data.provider_used}) — silakan review sebelum menyimpan.`
+        : 'Deskripsi & SEO berhasil di-generate — silakan review sebelum menyimpan.');
       setTimeout(() => setAiNotif(''), 5000);
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Gagal generate konten AI');
+      // Pembatalan oleh user bukan error — jangan munculkan dialog.
+      const dibatalkan = err instanceof DOMException && err.name === 'AbortError';
+      if (!dibatalkan) alert(err instanceof Error ? err.message : 'Gagal generate konten AI');
     } finally {
+      aiAbortRef.current = null;
       setIsGenerating(false);
     }
+  };
+
+  const handleCancelAI = () => {
+    aiAbortRef.current?.abort();
+    aiAbortRef.current = null;
+    setAiNotif('Generate dibatalkan.');
+    setTimeout(() => setAiNotif(''), 3000);
   };
 
   // Auto-fill Meta Title/Description dari data form (reuse generateMetaSeo, hanya isi — tidak auto-save).
@@ -1003,6 +1035,15 @@ export default function AdminPropertyDetailPage() {
                 </>
               )}
             </button>
+            {isGenerating && (
+              <button
+                type="button"
+                onClick={handleCancelAI}
+                className="w-full py-2 rounded-xl text-xs font-semibold text-[#64748B] border border-gray-200 hover:bg-gray-50 transition-colors"
+              >
+                Batalkan
+              </button>
+            )}
             {aiNotif && (
               <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
                 {aiNotif}

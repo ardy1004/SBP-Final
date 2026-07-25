@@ -1,5 +1,29 @@
 // POST /api/admin/ai/generate-description
 // Auth via functions/api/admin/_middleware.js (cookie session)
+//
+// RESPONS: NDJSON streaming (application/x-ndjson), BUKAN JSON biasa.
+// Dulu endpoint ini memanggil DeepSeek langsung tanpa timeout dan menunggu
+// respons utuh sebelum membalas apa pun. deepseek-chat butuh 20-60 detik untuk
+// menghasilkan 4 paragraf, sehingga Worker sering melewati batas 30 detik
+// wall-clock Cloudflare → Cloudflare membalas halaman HTML-nya sendiri →
+// frontend gagal dengan `Unexpected token '<', "<!DOCTYPE "...`.
+// Heartbeat tiap 2 detik membuat respons mengalir sejak awal sehingga batas
+// wall-clock tidak berlaku. Pola ini sama persis dengan viralframe/ai-generate.js.
+//
+// Key dibaca lewat getProviderKey() (settings D1 → fallback Cloudflare Secret),
+// bukan env.DEEPSEEK_API_KEY langsung — sebelumnya key yang diisi lewat
+// Admin → Pengaturan → AI Providers tidak pernah terbaca di sini.
+
+import { getProviderKey, callChatCompletion, PROVIDERS } from '../../../_lib/aiProviders.js';
+import { handleOptions } from '../../_shared/response.js';
+
+// DeepSeek didahulukan agar gaya tulisan tetap sama seperti sebelumnya; sisanya
+// hanya dipakai bila DeepSeek gagal/lambat/kehabisan kuota.
+const PROVIDER_ORDER = ['deepseek', 'gemini', 'groq', 'openrouter'];
+
+// Per provider. Longgar karena streaming sudah melindungi dari wall-clock,
+// tapi tetap berbatas supaya rantai fallback tidak menggantung tanpa akhir.
+const PER_PROVIDER_TIMEOUT_MS = 40000;
 
 function formatHarga(harga) {
   if (!harga || harga <= 0) return null;
@@ -55,6 +79,38 @@ function buildKamarDesc(jenis_properti, kamar_tidur, kamar_mandi) {
   return parts.join(', ');
 }
 
+// Parse + validasi output model. Dipakai sebagai gerbang kualitas: output yang
+// tidak lolos diperlakukan sebagai KEGAGALAN PROVIDER sehingga rantai fallback
+// mencoba provider berikutnya, bukan menyerahkan hasil rusak ke admin.
+function parseKontenJson(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) return { ok: false, error: 'respons kosong' };
+
+  // Model kadang membungkus JSON dalam ```json ... ``` meski diminta tidak.
+  let cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  // Atau menambah kalimat pengantar/penutup — ambil objek JSON terluar saja.
+  if (!cleaned.startsWith('{')) {
+    const a = cleaned.indexOf('{');
+    const b = cleaned.lastIndexOf('}');
+    if (a >= 0 && b > a) cleaned = cleaned.slice(a, b + 1);
+  }
+
+  let obj;
+  try { obj = JSON.parse(cleaned); }
+  catch { return { ok: false, error: 'bukan JSON valid' }; }
+  if (!obj || typeof obj !== 'object') return { ok: false, error: 'JSON bukan objek' };
+
+  // deskripsi adalah satu-satunya field yang benar-benar wajib — tanpa itu
+  // tombolnya tidak ada gunanya. Field SEO boleh kosong (ada tombol auto-fill
+  // terpisah yang bisa mengisinya dari data properti).
+  const deskripsi = typeof obj.deskripsi === 'string' ? obj.deskripsi.trim() : '';
+  if (deskripsi.length < 80) {
+    return { ok: false, error: `deskripsi terlalu pendek (${deskripsi.length} karakter)` };
+  }
+
+  return { ok: true, data: obj };
+}
+
 export async function onRequestPost(context) {
   const { request, env } = context;
 
@@ -76,11 +132,6 @@ export async function onRequestPost(context) {
       { error: 'Lengkapi data lokasi terlebih dahulu' },
       { status: 422 }
     );
-  }
-
-  const apiKey = env.DEEPSEEK_API_KEY;
-  if (!apiKey) {
-    return Response.json({ error: 'DEEPSEEK_API_KEY tidak dikonfigurasi' }, { status: 500 });
   }
 
   const hargaReadable = formatHarga(harga) ?? 'Harga tidak tersedia';
@@ -153,64 +204,104 @@ FORMAT RESPONSE:
 Respond HANYA dengan JSON valid, tanpa markdown, tanpa komentar, tanpa penjelasan apapun di luar JSON:
 {"judul": "...", "deskripsi": "...", "meta_title": "...", "meta_description": "..."}`;
 
-  let dsRes;
-  try {
-    dsRes = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        max_tokens: 1200,
-        temperature: 0.3,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      }),
-    });
-  } catch (err) {
-    return Response.json({ error: `Gagal menghubungi DeepSeek: ${err.message}` }, { status: 502 });
-  }
+  // ── Panggil AI dengan fallback berantai, respons streaming NDJSON ──────────
+  const enc = new TextEncoder();
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const send = (obj) => writer.write(enc.encode(JSON.stringify(obj) + '\n')).catch(() => {});
 
-  if (!dsRes.ok) {
-    const errText = await dsRes.text().catch(() => '');
-    return Response.json({ error: `DeepSeek error ${dsRes.status}: ${errText}` }, { status: 502 });
-  }
+  const work = (async () => {
+    const heartbeat = setInterval(() => send({ status: 'progress' }), 2000);
+    try {
+      let parsed = null;
+      let usedProvider = null;
+      const attempts = [];
 
-  let dsJson;
-  try {
-    dsJson = await dsRes.json();
-  } catch (err) {
-    // dsRes.ok true tapi body bukan JSON valid (mis. halaman HTML dari timeout/gateway
-    // di depan DeepSeek) — tanpa guard ini exception lolos tak tertangkap dan Cloudflare
-    // Pages Functions membalas HTML generiknya sendiri, bukan JSON, ke frontend.
-    return Response.json({ error: `Respons DeepSeek bukan JSON valid: ${err.message}` }, { status: 502 });
-  }
-  const raw = dsJson.choices?.[0]?.message?.content ?? '';
+      for (const provider of PROVIDER_ORDER) {
+        const key = await getProviderKey(env, provider);
+        if (!key) { attempts.push({ provider, skipped: 'no_key' }); continue; }
 
-  let parsed;
-  try {
-    const cleaned = raw.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
-    parsed = JSON.parse(cleaned);
-  } catch {
-    return Response.json({ error: 'DeepSeek tidak mengembalikan JSON valid', raw }, { status: 502 });
-  }
+        send({ status: 'progress', provider });
 
-  // Safety net: untuk kost en-suite, koreksi penyebutan kamar mandi yang salah di deskripsi
-  if (isKostEnSuite) {
-    const wrongPattern = new RegExp(`${Number(kamar_tidur)}\\s*kamar\\s*mandi`, 'gi');
-    const correctText = `${Number(kamar_tidur)} kamar tidur`;
-    if (parsed.deskripsi) parsed.deskripsi = parsed.deskripsi.replace(wrongPattern, correctText);
-    if (parsed.meta_description) parsed.meta_description = parsed.meta_description.replace(wrongPattern, correctText);
-  }
+        const result = await callChatCompletion({
+          provider,
+          apiKey: key,
+          model: PROVIDERS[provider].defaultModel,
+          systemPrompt,
+          userPrompt,
+          maxTokens: 1200,
+          temperature: 0.3,
+          timeoutMs: PER_PROVIDER_TIMEOUT_MS,
+          // Gemini model thinking: tanpa 'none', token reasoning tersembunyi bikin lambat.
+          reasoningEffort: provider === 'gemini' ? 'none' : undefined,
+        });
 
-  const judul = truncateAtWord(String(parsed.judul ?? ''), 60);
-  const meta_title = truncateAtWord(String(parsed.meta_title ?? ''), 60);
-  const meta_description = truncateAtWord(String(parsed.meta_description ?? ''), 155);
-  const deskripsi = String(parsed.deskripsi ?? '');
+        if (!result.ok) {
+          attempts.push({ provider, error: result.error?.slice(0, 140) });
+          console.error(`[generate-description] ${provider} gagal:`, result.error?.slice(0, 160));
+          continue;
+        }
 
-  return Response.json({ judul, deskripsi, meta_title, meta_description });
+        // Output tidak valid = kegagalan provider juga → coba provider berikutnya,
+        // jangan langsung menyerah ke user (pola sama dengan viralframe/ai-generate.js).
+        const cand = parseKontenJson(result.content);
+        if (!cand.ok) {
+          attempts.push({ provider, error: cand.error });
+          console.error(`[generate-description] ${provider} output tidak valid:`, cand.error);
+          continue;
+        }
+
+        parsed = cand.data;
+        usedProvider = provider;
+        break;
+      }
+
+      if (!parsed) {
+        const allNoKey = attempts.length > 0 && attempts.every(a => a.skipped === 'no_key');
+        send({
+          done: true,
+          error: allNoKey
+            ? 'Belum ada API key AI yang diatur. Buka Pengaturan → AI Providers dan simpan minimal satu API key.'
+            : `Semua provider AI gagal. ${attempts.map(a => `${a.provider}: ${a.error || a.skipped || 'gagal'}`).join(' | ')}`.slice(0, 480),
+        });
+        return;
+      }
+
+      // Safety net: untuk kost en-suite, koreksi penyebutan kamar mandi yang salah di deskripsi
+      if (isKostEnSuite) {
+        const wrongPattern = new RegExp(`${Number(kamar_tidur)}\\s*kamar\\s*mandi`, 'gi');
+        const correctText = `${Number(kamar_tidur)} kamar tidur`;
+        if (parsed.deskripsi) parsed.deskripsi = parsed.deskripsi.replace(wrongPattern, correctText);
+        if (parsed.meta_description) parsed.meta_description = parsed.meta_description.replace(wrongPattern, correctText);
+      }
+
+      send({
+        done: true,
+        data: {
+          judul:            truncateAtWord(String(parsed.judul ?? ''), 60),
+          deskripsi:        String(parsed.deskripsi ?? ''),
+          meta_title:       truncateAtWord(String(parsed.meta_title ?? ''), 60),
+          meta_description: truncateAtWord(String(parsed.meta_description ?? ''), 155),
+          provider_used:    usedProvider,
+          fell_back:        usedProvider !== PROVIDER_ORDER[0],
+        },
+      });
+    } catch (err) {
+      console.error('[generate-description] stream', err.message);
+      send({ done: true, error: 'Terjadi kesalahan internal saat generate. Coba lagi.' });
+    } finally {
+      clearInterval(heartbeat);
+      await writer.close().catch(() => {});
+    }
+  })();
+
+  context.waitUntil?.(work);
+
+  return new Response(readable, {
+    headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
+}
+
+export async function onRequestOptions() {
+  return handleOptions();
 }
