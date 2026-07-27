@@ -19,6 +19,10 @@ export interface VeoPrompt {
   style?: string;
   dialogue?: { speaker?: string; language?: string; line?: string; voice?: string; delivery?: string };
   audio?: string;
+  /** Beat bertimecode opsional (Fase 6, riset resmi Veo 3.1) — environment/foto SAMA di
+   * semua elemen, hanya aksi/kamera yang berubah per timecode. Wajib untuk scene > 6 detik
+   * (lihat BLOK 3e masterPromptCompiler.ts), opsional/1-elemen untuk scene lain. */
+  sequences?: { sequence?: number; timestamp?: string; action?: string; audio?: string }[];
   negative_prompt?: string;
   duration_sec?: number;
   aspect_ratio?: string;
@@ -27,6 +31,8 @@ export interface VeoPrompt {
 
 export interface ParsedScene {
   scene_number?: number;
+  /** Part naratif opsional (Fase 6) — hanya ada bila Master Prompt dikompilasi dengan `parts`. */
+  part_number?: number;
   role?: string;
   duration_sec?: number;
   photo_reference_label?: string;

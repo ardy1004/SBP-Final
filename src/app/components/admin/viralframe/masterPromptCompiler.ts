@@ -6,9 +6,11 @@ import {
   AI_TOOLS, AI_TOOL_FORMAT_SPEC, PLATFORM_BEHAVIOR, PLATFORMS,
   REAL_ESTATE_CONTEXT, PHOTO_LABEL_HINT, HOOK_TYPES, CTA_TYPES,
   VISUAL_STYLES, TONES, LANGUAGES, RATIOS, EXPRESSIONS,
-  ETHNIC_EN, STYLE_EN, EXPRESSION_EN, getLipsync, sceneRole,
+  ETHNIC_EN, STYLE_EN, EXPRESSION_EN, getLipsync,
   sceneFileName, characterFileName, REGISTER_INSTRUCTION,
   isNativeAudioTool, getClipMaxSec, NEGATIVE_PROMPT_VIDEO,
+  REALISM_QUALITY_CUES, REALISM_BANNED_QUALITY_PHRASES,
+  sceneRoleFromParts, partIndexForScene, partsValidForTotal, type PartDef,
 } from './options';
 import { findArchetype, compileCameraChoreography } from './archetypes';
 
@@ -35,6 +37,9 @@ export interface CompilerS1 {
   /** Nomor scene (1-based) dikecualikan dari cutaway arketipe hybrid — jadi
    * talking-head/selfie murni. Hanya relevan bila archetype.allowMultiShotPerScene. */
   cutawayExcluded?: number[];
+  /** Pengelompokan naratif opsional di atas Scene (Fase 6) — lihat PartDef di options.ts.
+   * undefined/tidak valid (jumlah sceneCount != sceneCount total) = fallback sceneRole() posisi lama. */
+  parts?: PartDef[];
 }
 export interface CompilerScene { photoId: number | null; label: string }
 export interface CompilerS3 {
@@ -223,16 +228,28 @@ export function compileMasterPrompt(
     }
   }
   L.push('');
+  const usesParts = partsValidForTotal(s1.parts, n);
+  if (usesParts) {
+    L.push('PART (pengelompokan naratif — role & konsistensi mengikuti Part, bukan per-scene):');
+    let acc = 0;
+    s1.parts!.forEach((p, pi) => {
+      const partScenes = Array.from({ length: p.sceneCount }, (_, k) => acc + k + 1);
+      L.push(`  PART ${pi + 1} — ${p.role}${p.label ? `: ${p.label}` : ''} (Scene ${partScenes.join(', ')})`);
+      acc += p.sceneCount;
+    });
+    L.push('');
+  }
   L.push('STRUKTUR SCENE:');
   for (let i = 0; i < n; i++) {
-    const role = sceneRole(i, n);
+    const role = sceneRoleFromParts(i, n, s1.parts);
     let extra = '';
     if (role === 'Hook') extra = ` — Tipe Hook: ${labelOf(HOOK_TYPES, s1.hookType)}`;
     if (role === 'CTA') {
       extra = ` — CTA: ${labelOf(CTA_TYPES, s1.ctaType)}`;
       if (s1.ctaType === 'comment_keyword' && s1.ctaKeyword) extra += ` (keyword: "${s1.ctaKeyword}")`;
     }
-    L.push(`  Scene ${i + 1} = ${role}${extra}`);
+    const partTag = usesParts ? ` [PART ${partIndexForScene(i, s1.parts, n) + 1}]` : '';
+    L.push(`  Scene ${i + 1} = ${role}${partTag}${extra}`);
   }
   L.push('');
 
@@ -242,7 +259,7 @@ export function compileMasterPrompt(
     const cutawayExcluded = archetype.allowMultiShotPerScene ? (s1.cutawayExcluded ?? []).filter(x => x >= 1 && x <= n) : [];
     L.push('KOREOGRAFI KAMERA PER SCENE (WAJIB dijadikan dasar field camera/motion di ai_ready_prompt):');
     for (let i = 0; i < n; i++) {
-      const role = sceneRole(i, n);
+      const role = sceneRoleFromParts(i, n, s1.parts);
       const d = durationOf(s1, i);
       const sceneNum = i + 1;
       if (cutawayExcluded.includes(sceneNum)) {
@@ -288,6 +305,46 @@ export function compileMasterPrompt(
     L.push('  - DILARANG meminta teks, caption, subtitle, atau tulisan apa pun muncul di dalam frame lewat field mana pun di ai_ready_prompt.');
     L.push('  - Field on_screen_text (di luar ai_ready_prompt) adalah untuk EDITOR — ditambahkan belakangan di CapCut/Premiere. Jangan pernah menyebut isinya di dalam ai_ready_prompt.');
     L.push('  - ai_ready_prompt.negative_prompt WAJIB diisi (lihat nilai bakunya di BLOK 5) untuk menekan subtitle bakar.');
+    L.push('');
+  }
+
+  // ── BLOK 3d: REALISME TEKNIS (WAJIB) ──
+  // Instruksi kualitas generik ('cinematic 4K', 'professional videography') adalah
+  // sinyal yang mendorong model video ke hasil terlalu mulus/menyerupai CGI, bukan
+  // rekaman kamera sungguhan (audit kualitas 2026-07-29, lihat viralframe-shared.js
+  // REALISM_*). Blok ini berlaku untuk SEMUA tool (bukan hanya audio-native).
+  L.push('═══════════════════════════════════════════════');
+  L.push('BLOK 3d — REALISME TEKNIS (WAJIB, SEMUA SCENE)');
+  L.push('═══════════════════════════════════════════════');
+  L.push('Deskripsi visual (field lighting/mood/style untuk tool audio-native, atau bagian akhir ai_ready_prompt untuk tool lain) WAJIB memakai KOSAKATA FISIK KAMERA NYATA, bukan kata sifat generik. Pilih yang relevan dari contoh berikut (boleh diparafrase, jaga maknanya):');
+  for (const cue of REALISM_QUALITY_CUES) L.push(`  - ${cue}`);
+  L.push(`DILARANG menutup deskripsi visual dengan frasa generik seperti: ${REALISM_BANNED_QUALITY_PHRASES.join(', ')}. Frasa ini terbukti mendorong hasil video terlihat CGI/render 3D, bukan rekaman kamera sungguhan.`);
+  L.push('Bila tool tujuan mendukung field negative_prompt terpisah, nilainya WAJIB memuat istilah anti-CGI/plastic/uncanny (lihat NEGATIVE_PROMPT_VIDEO di BLOK 5).');
+  L.push('');
+
+  // ── BLOK 3e: SEQUENCES TIMESTAMP (opsional per scene) ──
+  // Riset resmi Veo 3.1 (Google Cloud, Juli 2026): 1 panggilan generate TIDAK bisa
+  // menerima banyak foto referensi berbeda dengan hard-cut per timecode — tapi BISA
+  // menerima "sequences" bertimecode (foto/environment SAMA, aksi & kamera berubah
+  // per beat) via field ai_ready_prompt.sequences[]. Ini pengganti/pelengkap yang
+  // lebih presisi dari camera_movement satu-kalimat untuk scene yang cukup panjang
+  // untuk berisi >1 aksi berbeda. Dibatasi ke tool audio-native dulu karena hanya
+  // di sana ai_ready_prompt sudah berbentuk objek JSON terstruktur (BLOK 5).
+  const scenesLayakSequences = nativeAudio
+    ? Array.from({ length: n }, (_, i) => i + 1).filter(num => durationOf(s1, num - 1) > 6)
+    : [];
+  if (nativeAudio && scenesLayakSequences.length > 0) {
+    L.push('═══════════════════════════════════════════════');
+    L.push('BLOK 3e — SEQUENCES TIMESTAMP (WAJIB untuk scene > 6 detik)');
+    L.push('═══════════════════════════════════════════════');
+    L.push(`Scene ${scenesLayakSequences.join(', ')} berdurasi > 6 detik — cukup panjang untuk memuat lebih dari 1 aksi/beat kamera berbeda dalam satu take.`);
+    L.push('Untuk scene tersebut, ai_ready_prompt WAJIB menambah field "sequences": array beat bertimecode, MASING-MASING dalam environment/foto referensi yang SAMA (JANGAN ganti lokasi/foto antar sequence — itu tidak didukung tool video-gen manapun):');
+    L.push('  { "sequence": 1, "timestamp": "00:00-00:0Xs", "action": "aksi/kamera pada beat ini", "audio": "lapisan suara pada beat ini (opsional)" }');
+    L.push('Aturan sequences:');
+    L.push('  - Timecode berurutan tanpa celah/tumpang tindih, total menutup penuh duration_sec scene.');
+    L.push('  - Environment/subjek/karakter yang terlihat WAJIB identik di semua sequence — hanya aksi, gerakan kamera, dan penekanan yang boleh berubah per beat.');
+    L.push('  - Scene ≤ 6 detik atau tidak disebut di atas: field "sequences" boleh diisi 1 elemen saja (mewakili keseluruhan durasi) atau dikosongkan — TIDAK wajib dipecah.');
+    L.push('  - dialogue.line (BLOK 3c) tetap 1 nilai untuk keseluruhan scene, TIDAK dipecah per sequence.');
     L.push('');
   }
 
@@ -410,6 +467,7 @@ export function compileMasterPrompt(
   L.push('  "scenes": [');
   L.push('    {');
   L.push('      "scene_number": 1,');
+  if (usesParts) L.push('      "part_number": 1,');
   L.push('      "role": "Hook | Body | CTA",');
   L.push('      "duration_sec": 0,');
   L.push('      "photo_reference_label": "label foto scene ini",');
@@ -426,9 +484,9 @@ export function compileMasterPrompt(
     L.push('        "action": "aksi yang terjadi SELAMA klip (bukan deskripsi statis)",');
     L.push('        "scene": "lingkungan/area — rujuk ke reference image, jangan mengarang arsitektur",');
     L.push('        "camera_movement": "gerakan kamera sesuai KOREOGRAFI KAMERA scene ini",');
-    L.push('        "lighting": "kondisi pencahayaan",');
+    L.push('        "lighting": "kondisi pencahayaan — pakai kosakata fisik BLOK 3d (practical light source, falloff, shadow), BUKAN kata sifat generik",');
     L.push('        "mood": "atmosfer emosional",');
-    L.push('        "style": "gaya sinematografi + color grade (konsisten semua scene)",');
+    L.push('        "style": "gaya sinematografi + color grade (konsisten semua scene) — WAJIB pakai kosakata realisme BLOK 3d (lensa/DOF/grain/micro-jitter), DILARANG frasa generik seperti cinematic 4K/hyperrealistic",');
     L.push('        "dialogue": {');
     L.push('          "speaker": "nama karakter, atau \'narrator (voiceover, off-screen)\'",');
     L.push(`          "language": "${s1.language}",`);
@@ -437,13 +495,17 @@ export function compileMasterPrompt(
     L.push('          "delivery": "tempo & artikulasi sesuai tabel lipsync scene ini"');
     L.push('        },');
     L.push('        "audio": "ambience & musik latar SAJA — tanpa kalimat narasi",');
+    if (scenesLayakSequences.length > 0) {
+      L.push('        "sequences": [{ "sequence": 1, "timestamp": "00:00-00:0Xs", "action": "...", "audio": "..." }],');
+      L.push('          // WAJIB diisi untuk scene > 6 detik (lihat BLOK 3e) — array kosong/1-elemen untuk scene lain.');
+    }
     L.push(`        "negative_prompt": "${NEGATIVE_PROMPT_VIDEO}",`);
     L.push(`        "duration_sec": ${durasiKlip},`);
     L.push(`        "aspect_ratio": "${s1.ratio}"`);
     L.push('      },');
     L.push('      "on_screen_text": "teks overlay untuk EDITOR (jangan disebut di ai_ready_prompt)",');
   } else {
-    L.push('      "ai_ready_prompt": "prompt video siap-pakai untuk tool, ground pada foto referensi",');
+    L.push('      "ai_ready_prompt": "prompt video siap-pakai untuk tool, ground pada foto referensi — kualitas visual WAJIB pakai kosakata realisme BLOK 3d, DILARANG frasa generik seperti cinematic 4K/hyperrealistic",');
     L.push('      "on_screen_text": "teks overlay singkat",');
   }
   L.push('      "transition_to_next": "transisi eksplisit + audio cue"');

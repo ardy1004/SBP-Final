@@ -11,6 +11,8 @@ import {
   isNativeAudioTool as sharedIsNativeAudioTool,
   getClipMaxSec as sharedGetClipMaxSec,
   NEGATIVE_PROMPT_VIDEO as SHARED_NEGATIVE_PROMPT_VIDEO,
+  REALISM_QUALITY_CUES as SHARED_REALISM_QUALITY_CUES,
+  REALISM_BANNED_QUALITY_PHRASES as SHARED_REALISM_BANNED_QUALITY_PHRASES,
   namaFileKarakter as sharedNamaFileKarakter,
 } from '../../../../../functions/_lib/viralframe-shared.js';
 
@@ -151,6 +153,49 @@ export function sceneRole(index: number, total: number): 'Hook' | 'Body' | 'CTA'
   if (index === 0) return 'Hook';
   if (index === total - 1) return 'CTA';
   return 'Body';
+}
+
+// ─── Part — pengelompokan naratif di atas Scene (Fase 6) ──────────────────────
+// Part TIDAK mengubah mekanisme Scene (tetap 1 foto = 1 panggilan generate AI).
+// Part hanya membawa role di level yang lebih tinggi + label naratif opsional,
+// dengan mengonsumsi N scene berurutan dari array `scenes[]` yang sudah ada.
+// Opsional & backward-compatible: draft/riwayat lama tanpa field ini otomatis
+// fallback ke sceneRole() posisi-based di atas — lihat sceneRoleFromParts().
+export interface PartDef {
+  role: 'Hook' | 'Body' | 'CTA';
+  sceneCount: number;   // jumlah scene berurutan (dari scenes[]) milik part ini
+  label?: string;       // label naratif opsional, mis. "Interior Tour"
+}
+
+/** true bila `parts` valid dipakai untuk scene sejumlah `total` (jumlah sceneCount cocok). */
+export function partsValidForTotal(parts: PartDef[] | undefined, total: number): boolean {
+  return Array.isArray(parts) && parts.length > 0
+    && parts.every(p => Number.isInteger(p.sceneCount) && p.sceneCount > 0)
+    && parts.reduce((sum, p) => sum + p.sceneCount, 0) === total;
+}
+
+// Role scene: pakai `parts` kalau valid (jumlah sceneCount = total), else fallback sceneRole() lama.
+export function sceneRoleFromParts(index: number, total: number, parts?: PartDef[]): 'Hook' | 'Body' | 'CTA' {
+  if (partsValidForTotal(parts, total)) {
+    let acc = 0;
+    for (const p of parts!) {
+      if (index < acc + p.sceneCount) return p.role;
+      acc += p.sceneCount;
+    }
+  }
+  return sceneRole(index, total);
+}
+
+// Index part (0-based) tempat scene `index` berada, atau -1 bila parts tidak valid/tidak ada.
+export function partIndexForScene(index: number, parts?: PartDef[], total?: number): number {
+  if (!Array.isArray(parts) || parts.length === 0) return -1;
+  if (total != null && !partsValidForTotal(parts, total)) return -1;
+  let acc = 0;
+  for (let i = 0; i < parts.length; i++) {
+    if (index < acc + parts[i].sceneCount) return i;
+    acc += parts[i].sceneCount;
+  }
+  return -1;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -329,6 +374,10 @@ export const isNativeAudioTool: (toolId: string) => boolean = sharedIsNativeAudi
 /** Batas panjang satu klip (detik) untuk tool ini, atau null bila tidak dibatasi. */
 export const getClipMaxSec: (toolId: string) => number | null = sharedGetClipMaxSec;
 export const NEGATIVE_PROMPT_VIDEO: string = SHARED_NEGATIVE_PROMPT_VIDEO;
+/** Kosakata realisme fisik kamera (lensa/grain/imperfection) — pengganti frasa kualitas generik. */
+export const REALISM_QUALITY_CUES: string[] = SHARED_REALISM_QUALITY_CUES;
+/** Frasa penutup kualitas yang DILARANG (terbukti mendorong hasil CGI-like). */
+export const REALISM_BANNED_QUALITY_PHRASES: string[] = SHARED_REALISM_BANNED_QUALITY_PHRASES;
 /** Nama berkas foto karakter di ZIP Jalur C — sinkron dengan ai-generate.js. */
 export const namaFileKarakter: (nama: string) => string = sharedNamaFileKarakter;
 

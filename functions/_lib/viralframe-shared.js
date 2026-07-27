@@ -113,14 +113,50 @@ export function getClipMaxSec(toolId) {
   return CLIP_MAX_SEC[toolId] ?? null;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// KOSAKATA REALISME TEKNIS (audit kualitas video 2026-07-29)
+// ════════════════════════════════════════════════════════════════════════════
+// Ditemukan: instruksi kualitas lama (Jalur C, ai-generate.js) menyuruh AI
+// menutup SETIAP prompt scene dengan 'cinematic 4K, smooth motion, professional
+// real estate videography' — frasa generik ini menjadi SINYAL bagi model video
+// generatif untuk membuat visual yang terlalu mulus/sempurna, mendekati CGI/
+// render 3D, bukan rekaman kamera sungguhan ("kelihatan AI banget").
+// Perbaikan: ganti sinyal "sempurna" dengan sinyal FISIK KAMERA NYATA (lensa,
+// depth of field, grain) + ketidaksempurnaan kecil yang disengaja (micro-jitter,
+// practical lighting) — dipakai KEDUA jalur (Master Prompt manual & AI Generate).
+export const REALISM_QUALITY_CUES = [
+  'shot on mirrorless camera look, natural lens equivalent, shallow depth of field',
+  'subtle natural film grain, not overly clean digital sharpness',
+  'natural handheld micro-jitter (not gimbal-perfect), organic camera motion',
+  'practical light sources visible in frame, realistic falloff and soft shadow',
+];
+
+// Frasa penutup kualitas yang DILARANG — generik dan terbukti mendorong hasil
+// video ke arah CGI/plastic (lihat catatan REALISM_QUALITY_CUES di atas).
+export const REALISM_BANNED_QUALITY_PHRASES = [
+  'cinematic 4K', '8K', 'UHD', 'hyperrealistic', 'ultra high quality', 'perfect quality',
+];
+
+// Term negatif anti-CGI/plastic — digabung ke NEGATIVE_PROMPT_VIDEO di bawah.
+const REALISM_NEGATIVE_TERMS = [
+  'CGI render', 'video game graphics', 'plastic skin', 'waxy texture',
+  'over-smoothed skin', 'symmetrical perfect face', 'studio-flat lighting',
+  'oversaturated colors', 'artificial rim light glow', '3D animation look',
+  'uncanny valley', 'overly stabilized robotic motion',
+];
+
 // Negative prompt inti untuk video generator berbasis teks (Veo/Flow dan sejenis).
 // BEDA dari NEG_CORE di submit-video.js yang khusus image-to-video SiliconFlow
-// (fokus mencegah adegan berubah dari foto). Yang di sini fokus pada dua hal:
+// (fokus mencegah adegan berubah dari foto). Yang di sini fokus pada tiga hal:
 //   1. 'subtitles/captions/burned-in text' — Veo punya kebiasaan MEMBAKAR subtitle
 //      ke frame begitu ada dialog di prompt. Tanpa ini, menanam dialog (perbaikan
 //      di atas) justru menghasilkan video berteks acak yang tidak bisa dihapus.
 //   2. artefak umum yang merusak kesan profesional.
-export const NEGATIVE_PROMPT_VIDEO = 'subtitles, captions, burned-in text, on-screen text, watermark, logo, distorted hands, extra fingers, morphing, warping, deformed face, flickering, blurry, low quality, extra people';
+//   3. REALISM_NEGATIVE_TERMS — menekan hasil yang terlihat CGI/plastic/render.
+export const NEGATIVE_PROMPT_VIDEO = [
+  'subtitles, captions, burned-in text, on-screen text, watermark, logo, distorted hands, extra fingers, morphing, warping, deformed face, flickering, blurry, low quality, extra people',
+  ...REALISM_NEGATIVE_TERMS,
+].join(', ');
 
 /**
  * Nama berkas foto karakter di dalam ZIP Jalur C (AI Generate).

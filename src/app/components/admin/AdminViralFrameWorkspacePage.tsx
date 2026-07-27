@@ -8,9 +8,10 @@ import {
 // JSZip di-dynamic-import di handler (bukan static) agar tidak masuk chunk awal workspace.
 import {
   AI_TOOLS, RATIOS, LANGUAGES, HOOK_TYPES, CTA_TYPES, VISUAL_STYLES,
-  TONES, PLATFORMS, PHOTO_LABELS, sceneRole, LANGUAGE_REGISTERS, REGISTER_INSTRUCTION,
+  TONES, PLATFORMS, PHOTO_LABELS, LANGUAGE_REGISTERS, REGISTER_INSTRUCTION,
   sceneFileName, characterFileName, AI_TOOL_FORMAT_SPEC,
   isNativeAudioTool, getClipMaxSec, namaFileKarakter, PLATFORM_BEHAVIOR,
+  sceneRoleFromParts, partIndexForScene, partsValidForTotal, type PartDef,
 } from './viralframe/options';
 import CharacterStepBase, { type Step3State } from './viralframe/CharacterStep';
 import { readNdjsonFinal } from '../../../lib/ndjson';
@@ -85,6 +86,9 @@ interface Step1State {
   // (agent_broll_hybrid/selfie_luxury_hybrid) — scene itu jadi talking-head/selfie
   // penuh durasi tanpa cutaway. Hanya relevan bila archetype.allowMultiShotPerScene.
   cutawayExcluded: number[];
+  /** Pengelompokan naratif opsional di atas Scene (Fase 6) — lihat PartDef di options.ts.
+   * undefined/tidak valid = fallback sceneRole() posisi lama (draft/riwayat lama tetap jalan). */
+  parts?: PartDef[];
 }
 
 interface SceneAssign { photoId: number | null; label: string }
@@ -2399,9 +2403,9 @@ export default function AdminViralFrameWorkspacePage() {
     : null;
   const sceneRolesForAI = useMemo(() => {
     const map: Record<number, 'Hook' | 'Body' | 'CTA'> = {};
-    for (let i = 0; i < s1.sceneCount; i++) map[i + 1] = sceneRole(i, s1.sceneCount);
+    for (let i = 0; i < s1.sceneCount; i++) map[i + 1] = sceneRoleFromParts(i, s1.sceneCount, s1.parts);
     return map;
-  }, [s1.sceneCount]);
+  }, [s1.sceneCount, s1.parts]);
 
   // Step 4 — compile + save history
   const [copied, setCopied] = useState(false);
@@ -2462,11 +2466,17 @@ export default function AdminViralFrameWorkspacePage() {
     setS1(prev => {
       const wasDefaultCtaOnly = prev.cutawayExcluded.length === 1 && prev.cutawayExcluded[0] === prev.sceneCount;
       const cutawayExcluded = wasDefaultCtaOnly ? [n] : prev.cutawayExcluded.filter(x => x <= n);
+      // Jumlah scene berubah → rancangan Part lama (kalau ada) kemungkinan besar
+      // sum-nya sudah tidak cocok lagi. Dari pada diam-diam fallback ke role posisi
+      // (membingungkan user yang sudah rancang Part), hapus saja — user rancang ulang.
+      const partsSum = (prev.parts ?? []).reduce((s, p) => s + p.sceneCount, 0);
+      const parts = prev.parts && partsSum === n ? prev.parts : undefined;
       return {
         ...prev,
         sceneCount: n,
         manualDurations: resize(prev.manualDurations, n, () => prev.uniformDuration || 6),
         cutawayExcluded,
+        parts,
       };
     });
     setScenes(prev => resize(prev, n, () => ({ photoId: null, label: '' })));
@@ -2474,6 +2484,40 @@ export default function AdminViralFrameWorkspacePage() {
 
   const update1 = <K extends keyof Step1State>(key: K, val: Step1State[K]) =>
     setS1(prev => ({ ...prev, [key]: val }));
+
+  // ─── Part designer (Fase 6) ─────────────────────────────────────────────────
+  const addPart = useCallback(() => {
+    setS1(prev => {
+      // Klik pertama (belum ada Part sama sekali): seed 3 part yang MENCERMINKAN
+      // distribusi role legacy (Hook scene pertama, CTA scene terakhir, sisanya
+      // Body) — supaya mengaktifkan fitur Part TIDAK diam-diam mengubah role
+      // scene yang sudah ada jadi "Body" semua (footgun kalau langsung 1 part).
+      if (!prev.parts || prev.parts.length === 0) {
+        const n = prev.sceneCount;
+        const bodyCount = Math.max(0, n - 2);
+        const seeded: PartDef[] = n >= 2
+          ? [
+              { role: 'Hook', sceneCount: 1 },
+              ...(bodyCount > 0 ? [{ role: 'Body' as const, sceneCount: bodyCount }] : []),
+              { role: 'CTA', sceneCount: 1 },
+            ]
+          : [{ role: 'Body', sceneCount: n }];
+        return { ...prev, parts: seeded };
+      }
+      const used = prev.parts.reduce((s, p) => s + p.sceneCount, 0);
+      const sisa = Math.max(1, prev.sceneCount - used);
+      return { ...prev, parts: [...prev.parts, { role: 'Body', sceneCount: sisa }] };
+    });
+  }, []);
+  const removePart = useCallback((idx: number) => {
+    setS1(prev => ({ ...prev, parts: (prev.parts ?? []).filter((_, i) => i !== idx) }));
+  }, []);
+  const updatePart = useCallback((idx: number, patch: Partial<PartDef>) => {
+    setS1(prev => ({
+      ...prev,
+      parts: (prev.parts ?? []).map((p, i) => (i === idx ? { ...p, ...patch } : p)),
+    }));
+  }, []);
 
   // Pilih arketipe → prefill visualStyle/tone (Step 1) + expression & useCharacter (Step 3).
   // Nilai tetap bisa di-override manual setelahnya (memilih 'custom' tidak mereset).
@@ -2956,7 +3000,7 @@ export default function AdminViralFrameWorkspacePage() {
               <Field label="Per-Scene: Cutaway B-Roll" hint='Nonaktifkan cutaway di scene tertentu (mis. CTA/penutup) — scene itu jadi talking-head/selfie murni tanpa disela b-roll.'>
                 <div className="space-y-1.5">
                   {Array.from({ length: s1.sceneCount }, (_, i) => i + 1).map(sceneNum => {
-                    const role = sceneRole(sceneNum - 1, s1.sceneCount);
+                    const role = sceneRoleFromParts(sceneNum - 1, s1.sceneCount, s1.parts);
                     const excluded = s1.cutawayExcluded.includes(sceneNum);
                     return (
                       <div key={sceneNum} className="flex items-center justify-between px-3 py-2 border border-gray-100 rounded-xl">
@@ -2974,6 +3018,49 @@ export default function AdminViralFrameWorkspacePage() {
               </Field>
             );
           })()}
+
+          {/* Rancang Part (Fase 6, opsional) — pengelompokan naratif di atas Scene.
+              Part TIDAK mengubah mekanisme Scene (tetap 1 foto = 1 generate call);
+              hanya membawa role di level lebih tinggi + label naratif. Kosong = fallback
+              role otomatis berdasar posisi (Hook scene pertama, CTA scene terakhir). */}
+          <Field label="Rancang Part (opsional)" hint="Kelompokkan scene jadi babak naratif (Hook/Body/CTA) — kosongkan untuk perilaku otomatis berdasar posisi seperti biasa.">
+            <div className="space-y-2">
+              {(s1.parts ?? []).map((p, idx) => (
+                <div key={idx} className="flex items-center gap-2 px-3 py-2 border border-gray-100 rounded-xl">
+                  <span className="text-xs font-semibold text-[#94A3B8] w-14 shrink-0">Part {idx + 1}</span>
+                  <select value={p.role} onChange={e => updatePart(idx, { role: e.target.value as PartDef['role'] })}
+                    className="text-sm border border-gray-200 rounded-lg px-2 py-1">
+                    <option value="Hook">Hook</option>
+                    <option value="Body">Body</option>
+                    <option value="CTA">CTA</option>
+                  </select>
+                  <input type="number" min={1} max={s1.sceneCount} value={p.sceneCount}
+                    onChange={e => updatePart(idx, { sceneCount: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+                    className="w-16 text-sm border border-gray-200 rounded-lg px-2 py-1" title="Jumlah scene" />
+                  <span className="text-xs text-[#94A3B8]">scene</span>
+                  <input type="text" value={p.label ?? ''} placeholder="Label (opsional)"
+                    onChange={e => updatePart(idx, { label: e.target.value })}
+                    className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1 min-w-0" />
+                  <button type="button" onClick={() => removePart(idx)}
+                    className="text-xs text-red-500 hover:text-red-700 shrink-0">Hapus</button>
+                </div>
+              ))}
+              <div className="flex items-center justify-between">
+                <button type="button" onClick={addPart}
+                  className="text-xs font-semibold text-[#1565C0] hover:text-[#0F4C9E]">+ Tambah Part</button>
+                {(s1.parts ?? []).length > 0 && (() => {
+                  const sum = s1.parts!.reduce((s, p) => s + p.sceneCount, 0);
+                  return sum !== s1.sceneCount ? (
+                    <span className="text-xs text-amber-600">
+                      Jumlah scene di Part ({sum}) belum sama dengan Jumlah Scene total ({s1.sceneCount}) — role fallback ke otomatis sampai cocok.
+                    </span>
+                  ) : (
+                    <span className="text-xs text-emerald-600">✓ Sum cocok, Part aktif</span>
+                  );
+                })()}
+              </div>
+            </div>
+          </Field>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* (a) Jumlah Scene */}
@@ -3022,7 +3109,7 @@ export default function AdminViralFrameWorkspacePage() {
                 <tbody className="divide-y divide-gray-50">
                   {Array.from({ length: s1.sceneCount }).map((_, i) => (
                     <tr key={i}>
-                      <td className="px-3 py-1.5 text-[#0F172A]">Scene {i + 1} <span className="text-[#94A3B8] text-xs">({sceneRole(i, s1.sceneCount)})</span></td>
+                      <td className="px-3 py-1.5 text-[#0F172A]">Scene {i + 1} <span className="text-[#94A3B8] text-xs">({sceneRoleFromParts(i, s1.sceneCount, s1.parts)})</span></td>
                       <td className="px-3 py-1.5">
                         {/* 2–30 detik, SAMA dengan mode seragam. Dulu 1–60 padahal
                             getLipsync() meng-clamp ke 2–30, jadi durasi 45 detik
@@ -3147,11 +3234,21 @@ export default function AdminViralFrameWorkspacePage() {
           ) : (
             Array.from({ length: s1.sceneCount }).map((_, i) => {
               const sc = scenes[i];
-              const role = sceneRole(i, s1.sceneCount);
+              const role = sceneRoleFromParts(i, s1.sceneCount, s1.parts);
               const isOpen = activeStep2Scene === i + 1;
               const selectedImg = sc?.photoId != null ? prop.images.find(im => im.id === sc.photoId) : null;
+              const usesParts = partsValidForTotal(s1.parts, s1.sceneCount);
+              const partIdx = usesParts ? partIndexForScene(i, s1.parts, s1.sceneCount) : -1;
+              const isFirstOfPart = usesParts && partIdx >= 0 && (i === 0 || partIndexForScene(i - 1, s1.parts, s1.sceneCount) !== partIdx);
+              const part = isFirstOfPart ? s1.parts![partIdx] : null;
               return (
-                <div key={i} className="border border-gray-100 rounded-xl">
+                <div key={i}>
+                  {part && (
+                    <div className="text-xs font-semibold text-[#1565C0] uppercase tracking-wide px-1 pt-2 pb-1">
+                      Part {partIdx + 1} — {part.role}{part.label ? `: ${part.label}` : ''}
+                    </div>
+                  )}
+                <div className="border border-gray-100 rounded-xl">
                   <button type="button"
                     onClick={() => setActiveStep2Scene(isOpen ? 0 : i + 1)}
                     className={`w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors ${isOpen ? 'rounded-t-xl' : 'rounded-xl'}`}>
@@ -3215,6 +3312,7 @@ export default function AdminViralFrameWorkspacePage() {
                       </button>
                     </div>
                   )}
+                </div>
                 </div>
               );
             })

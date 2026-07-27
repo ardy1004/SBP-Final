@@ -18,6 +18,7 @@ import { jsonError, handleOptions } from '../../_shared/response.js';
 import {
   getMaxWords, EXPRESSION_EN,
   isNativeAudioTool, getClipMaxSec, NEGATIVE_PROMPT_VIDEO,
+  REALISM_QUALITY_CUES, REALISM_BANNED_QUALITY_PHRASES,
   namaFileKarakter,
 } from '../../../_lib/viralframe-shared.js';
 import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
@@ -375,11 +376,14 @@ Setiap field 'prompt' HARUS mengandung SEMUA elemen ini secara natural:
   • PROPERTI: 1-2 fitur nyata yang terlihat sesuai jenis foto
   • PENCAHAYAAN: kondisi cahaya yang sesuai (golden hour / warm ambient / natural daylight)
   • MOOD: atmosfer emosional yang diinginkan (inviting / professional / homey / aspirational)
-  • KUALITAS: 'cinematic 4K', 'smooth motion', 'professional real estate videography'
+  • KUALITAS: pilih 1-2 dari KOSAKATA REALISME FISIK berikut (boleh diparafrase, jaga maknanya) — BUKAN kata sifat generik:
+${REALISM_QUALITY_CUES.map(c => `      - ${c}`).join('\n')}
+    DILARANG menutup prompt dengan frasa generik seperti: ${REALISM_BANNED_QUALITY_PHRASES.join(', ')}. Frasa ini terbukti mendorong model video menghasilkan visual yang terlalu mulus/menyerupai CGI-render, bukan rekaman kamera sungguhan — hasilnya "kelihatan AI banget".
 ✗ SALAH prompt: 'A building exterior shot.' (terlalu generik, < 30 kata)
+✗ SALAH kualitas: '...Professional real estate videography, cinematic 4K.' (frasa generik dilarang, lihat larangan KUALITAS di atas)
 ${supportsRefImage
-    ? `✓ BENAR prompt: 'Steady handheld selfie-stick shot. Ayu — the exact same person as the attached character reference image, identical face, hair, and outfit — already standing in the exact front area shown in the attached scene reference image, gesturing warmly toward it with a confident smile. Warm natural daylight, smooth motion. Professional real estate videography, cinematic 4K.' (spesifik pada aksi & kamera, setia ke reference image, > 50 kata)`
-    : `✓ BENAR prompt: 'Cinematic drone pull-back revealing the modern 4-story boarding house facade in Depok, Sleman. Property consultant Ayu in black SBP uniform stands at entrance, gestures warmly toward the building with a confident smile. Warm golden hour lighting, smooth aerial motion. Professional real estate videography, cinematic 4K.' (spesifik, > 50 kata)`}
+    ? `✓ BENAR prompt: 'Steady handheld selfie-stick shot. Ayu — the exact same person as the attached character reference image, identical face, hair, and outfit — already standing in the exact front area shown in the attached scene reference image, gesturing warmly toward it with a confident smile. Warm natural daylight with soft practical falloff, subtle handheld micro-jitter, shallow depth of field.' (spesifik pada aksi & kamera, setia ke reference image, kualitas pakai kosakata fisik bukan generik, > 50 kata)`
+    : `✓ BENAR prompt: 'Cinematic drone pull-back revealing the modern 4-story boarding house facade in Depok, Sleman. Property consultant Ayu in black SBP uniform stands at entrance, gestures warmly toward the building with a confident smile. Warm golden hour lighting, natural film grain, shot on mirrorless camera look with shallow depth of field.' (spesifik, kualitas pakai kosakata fisik bukan generik, > 50 kata)`}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [4] BAHASA & TEMPO DIALOG KARAKTER — WAJIB
@@ -425,10 +429,17 @@ Format yang diharapkan:
     "kamera": "nama singkat gerakan kamera dalam 3-5 kata",
     "prompt": "teks prompt lengkap bahasa Inggris minimum 50 kata",
     "dialog_karakter": "klausa delivery + dialog karakter dalam ${bahasa}, sesuai pola wajib di [4], maksimal ${batasKata} untuk bagian dialog",
-    "on_screen_text": "teks overlay singkat untuk scene ini — kosongkan string \\"\\" jika arketipe/gaya tidak menekankan teks on-screen"
+    "on_screen_text": "teks overlay singkat untuk scene ini — kosongkan string \\"\\" jika arketipe/gaya tidak menekankan teks on-screen"${nativeAudio ? `,
+    "sequences": [{ "sequence": 1, "timestamp": "00:00-00:0Xs", "action": "aksi/kamera beat ini (Inggris)", "audio": "opsional" }]` : ''}
   }
 ]
 Field WAJIB ada dan non-empty: scene (integer), kamera (string), prompt (string min 50 kata), dialog_karakter (string, format sesuai [4]). on_screen_text WAJIB ada di setiap object tapi BOLEH string kosong "" jika tidak relevan untuk gaya video ini.
+${nativeAudio ? `
+FIELD OPSIONAL 'sequences' — HANYA untuk scene berdurasi > 6 detik (cek "Durasi" di user prompt):
+  • Array beat bertimecode, environment/subjek/karakter WAJIB SAMA di semua elemen — HANYA aksi/gerakan kamera yang berubah per beat (JANGAN ganti lokasi/foto antar beat, tool video-gen tidak mendukung itu dalam satu generate).
+  • Timecode berurutan tanpa celah, total menutup penuh durasi scene.
+  • Scene ≤ 6 detik: field ini BOLEH dikosongkan/diisi 1 elemen saja, TIDAK wajib dipecah.
+  • 'dialog_karakter' TETAP 1 nilai untuk keseluruhan scene, TIDAK ikut dipecah per sequence.` : ''}
 
 ATURAN TAMBAHAN FIELD 'prompt' — WAJIB, PELANGGARAN = OUTPUT DITOLAK:
   ${nativeAudio
