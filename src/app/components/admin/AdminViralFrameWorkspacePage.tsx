@@ -958,7 +958,7 @@ function AIGenerateTab({
             scene: sceneNum,
             camera: isExcluded
               ? 'steady handheld shot, presenter stays in frame throughout, no cutaway'
-              : compileCameraChoreography(arc.cameraGrammar, sceneRoles[sceneNum] ?? 'Body', durasiScene(sceneNum), i, aiTool),
+              : compileCameraChoreography(arc.cameraGrammar, sceneRoles[sceneNum] ?? 'Body', durasiScene(sceneNum), i, aiTool, supportsRefImage),
           };
         })
       : [];

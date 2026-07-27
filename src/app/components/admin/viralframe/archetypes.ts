@@ -51,6 +51,68 @@ const SPEED_PHRASE: Record<CameraSpeed, string> = {
   slow: 'slow', medium: 'steady', fast: 'fast',
 };
 
+/**
+ * Frasa PENGGANTI untuk mode reference image (image-to-video seperti Google Flow).
+ *
+ * KENAPA ADA. Foto referensi hanya memuat apa yang ada di dalam bingkainya. Gerakan
+ * yang membawa kamera keluar bingkai — crane naik, orbit mengelilingi bangunan,
+ * lateral track melintasi properti, fly-through antar ruang — memaksa AI MENGARANG
+ * area yang tidak ada di foto, sehingga hasilnya melenceng dari gambar yang diunggah.
+ *
+ * Terbukti pada uji nyata 2026-07-28: prompt scene 1 keluar sebagai "slow crane
+ * rising upward ... hero-shot orbit arc around the building" dan propertinya tidak
+ * konsisten dengan foto. Aturan umum di system prompt sudah melarang gerakan itu,
+ * TAPI kalah karena koreografi dikirim sebagai instruksi per-scene ber-label
+ * "WAJIB diikuti" — instruksi konkret mengalahkan aturan umum. Karena itu
+ * perbaikannya harus di SUMBER frasa, bukan di imbauan.
+ *
+ * Nuansanya sengaja dipertahankan (tetap lambat/elegan), hanya geometrinya ditahan.
+ * Gerakan yang memang sudah aman (push-in, static, selfie, handheld) tidak dipetakan
+ * di sini dan tetap memakai MOVE_PHRASE biasa.
+ */
+const MOVE_PHRASE_FRAMESAFE: Partial<Record<CameraMove, string>> = {
+  crane_up:        'slow upward tilt that keeps the same view in frame',
+  crane_down:      'slow downward tilt that keeps the same view in frame',
+  orbit:           'very slight arc around the subject without leaving the reference framing',
+  pull_back:       'gentle pull-back that keeps the same view in frame',
+  lateral_track:   'slow lateral drift across the same view, without panning to a new area',
+  fpv_flythrough:  'slow forward push deeper into the same view',
+  whip_pan:        'quick nudge that settles back on the same view',
+  tilt_up:         'small tilt-up within the same view',
+  gimbal_glide:    'smooth slow glide toward the same view',
+};
+
+/** Penegasan yang ditempel di akhir koreografi saat mode reference image. */
+const FRAMESAFE_SUFFIX = 'camera stays within the framing of the reference image';
+
+/**
+ * Netralkan kata di `motivation` yang menyeret AI keluar bingkai.
+ *
+ * Motivation ikut disisipkan verbatim ke prompt, dan terbukti dipakai ulang oleh
+ * model: motivation "hero-shot orbit around the scene area" keluar sebagai
+ * "hero-shot orbit arc AROUND THE BUILDING" pada uji 2026-07-28 — mengelilingi
+ * bangunan berarti menampilkan sisi yang tidak ada di foto.
+ *
+ * Yang fungsional (mis. "B-ROLL CUTAWAY", "no presenter") sengaja DIPERTAHANKAN;
+ * hanya kata sifat berskala megah dan preposisi "around" yang diredam.
+ */
+function motivasiAmanBingkai(m: string): string {
+  return m
+    .replace(/\b(grand|majestic|hero-shot|sweeping|epic)\s+/gi, '')
+    .replace(/\baround the\b/gi, 'within the');
+}
+
+/**
+ * Gabungkan kecepatan + frasa tanpa mengulang kata yang sama.
+ * `SPEED_PHRASE.slow` + `MOVE_PHRASE.slow_push` ('slow push-in') menghasilkan
+ * "slow slow push-in" — cacat lama yang makin terlihat setelah frasa frame-safe
+ * juga diawali "slow".
+ */
+function gabungKecepatan(speed: CameraSpeed, frasa: string): string {
+  const kata = SPEED_PHRASE[speed];
+  return frasa.toLowerCase().startsWith(`${kata.toLowerCase()} `) ? frasa : `${kata} ${frasa}`;
+}
+
 // Token pendek per gerakan — dipakai dialek "structured" (Kling/Wan/Minimax).
 const MOVE_TOKEN: Record<CameraMove, string> = {
   dolly_in: 'push-in', slow_push: 'slow push-in', pull_back: 'pull-back',
@@ -98,10 +160,12 @@ function beatCountForDuration(durationSec: number): number {
  * @param durationSec durasi scene
  * @param sceneIndex untuk rotasi beat antar Body scene
  * @param toolId    value AI tool (opsional) → memilih dialek frasa kamera
+ * @param frameSafe tool memakai foto referensi → gerakan ditahan di dalam bingkai
+ *                  (lihat MOVE_PHRASE_FRAMESAFE)
  */
 export function compileCameraChoreography(
   grammar: CameraBeat[], role: 'Hook' | 'Body' | 'CTA', durationSec: number, sceneIndex: number,
-  toolId?: string,
+  toolId?: string, frameSafe = false,
 ): string {
   const dialect: ToolDialect = (toolId && TOOL_DIALECT[toolId]) || 'cinematic';
 
@@ -125,33 +189,36 @@ export function compileCameraChoreography(
     picked.push(ordered[(sceneIndex + i) % ordered.length]);
   }
 
-  return assembleDialect(dialect, picked);
+  return assembleDialect(dialect, picked, frameSafe);
 }
 
 // Rakit beat menjadi string sesuai dialek tool.
-function assembleDialect(dialect: ToolDialect, beats: CameraBeat[]): string {
+function assembleDialect(dialect: ToolDialect, beats: CameraBeat[], frameSafe = false): string {
+  // Mode reference image: pakai frasa yang menahan gerakan di dalam bingkai.
+  const frasa = (m: CameraMove) => (frameSafe && MOVE_PHRASE_FRAMESAFE[m]) || MOVE_PHRASE[m];
+  const tutup = (t: string) => (frameSafe ? `${t}; ${FRAMESAFE_SUFFIX}` : t);
   switch (dialect) {
     case 'structured': {
       // Token ringkas dipisah panah — Kling/Wan/Minimax paham format ini.
       const tokens = beats.map(b => `${MOVE_TOKEN[b.move]} (${b.speed})`);
-      return `[camera motion: ${tokens.join(' → ')}]`;
+      return `[camera motion: ${tokens.join(' → ')}${frameSafe ? ', stay within reference framing' : ''}]`;
     }
     case 'directive': {
       // Instruksi singkat imperatif — Runway/Luma.
-      const parts = beats.map(b => `${SPEED_PHRASE[b.speed]} ${MOVE_PHRASE[b.move]}`);
-      return parts.join('; ');
+      const parts = beats.map(b => gabungKecepatan(b.speed, frasa(b.move)));
+      return tutup(parts.join('; '));
     }
     case 'motion_strength': {
       // Frasa natural + parameter -motion (Pika).
-      const parts = beats.map(b => `${MOVE_PHRASE[b.move]}`);
+      const parts = beats.map(b => frasa(b.move));
       const strength = speedToMotionStrength(beats.map(b => b.speed));
-      return `${parts.join(', then ')} -motion ${strength}`;
+      return tutup(`${parts.join(', then ')} -motion ${strength}`);
     }
     case 'cinematic':
     default: {
       // Natural language kaya dengan motivasi — Veo3/Sora/Flow/CogVideoX.
-      const phrases = beats.map(b => `${SPEED_PHRASE[b.speed]} ${MOVE_PHRASE[b.move]} (${b.motivation})`);
-      return phrases.join(', then ');
+      const phrases = beats.map(b => `${gabungKecepatan(b.speed, frasa(b.move))} (${frameSafe ? motivasiAmanBingkai(b.motivation) : b.motivation})`);
+      return tutup(phrases.join(', then '));
     }
   }
 }

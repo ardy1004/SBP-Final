@@ -248,7 +248,9 @@ export function compileMasterPrompt(
       if (cutawayExcluded.includes(sceneNum)) {
         L.push(`  Scene ${sceneNum} (${role}, ${d}s): [PENGECUALIAN] Talking-head/selfie PENUH durasi TANPA cutaway b-roll — kamera stabil/steady mengikuti presenter sepanjang scene, JANGAN terapkan pola 2-bagian arketipe ini di scene ini.`);
       } else {
-        const choreo = compileCameraChoreography(archetype.cameraGrammar, role, d, i, s1.aiTool);
+        // Tool ber-reference image: koreografi ditahan di dalam bingkai foto,
+        // kalau tidak AI mengarang area di luar frame (audit uji 2026-07-28).
+        const choreo = compileCameraChoreography(archetype.cameraGrammar, role, d, i, s1.aiTool, toolSpec?.supportsRefImage === true);
         L.push(`  Scene ${sceneNum} (${role}, ${d}s): ${choreo}`);
       }
     }
