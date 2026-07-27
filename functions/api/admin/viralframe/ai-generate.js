@@ -182,8 +182,68 @@ Setiap scene akan dieksekusi dengan DUA gambar terlampir: foto ruangan/area scen
   • Aksi/gerak karakter dan kamera = satu-satunya hal yang kamu tambahkan di atas foto referensi.
 ✗ SALAH: 'Lisa stands in front of a massive 16-room boarding house facade'
 ✓ BENAR: 'Lisa — the exact same person as the attached character reference image (identical face, hair, and outfit) — already standing in the exact front area shown in the attached scene reference image, greeting the viewer selfie-style'
+
+GERAKAN KAMERA WAJIB TETAP DI DALAM BINGKAI FOTO:
+Foto referensi hanya memuat apa yang terlihat di dalam bingkainya. Gerakan yang membawa
+kamera KELUAR dari bingkai memaksa AI mengarang area yang tidak ada di foto — itulah
+penyebab hasil melenceng dari referensi.
+  • AMAN (tetap di sekitar subjek): slow push-in, pull-back ringan, orbit sempit,
+    tilt/pan kecil, handheld micro-movement, dolly maju-mundur pendek.
+  • HINDARI untuk scene ber-reference image: lateral tracking "across the property",
+    fly-through antar ruangan, crane naik tinggi, drone sweep lebar, whip-pan ke area lain.
+  • Kalau instruksi Kamera per scene memuat gerakan berisiko itu, TERJEMAHKAN jadi versi
+    yang tertahan di bingkai — mis. 'lateral track across the property' → 'slow lateral
+    drift across the same facade, staying within the framing of the reference image'.
+  • Selalu tambahkan penegasan seperti 'camera stays within the framing of the reference
+    image' pada bagian b-roll/cutaway.
+✗ SALAH: 'smooth lateral tracking shot across the property'
+✓ BENAR: 'slow lateral drift across the same facade, staying within the framing of the reference image'
 `
     : '';
+
+  // ── [6] VARIASI ANTAR SCENE ──
+  // Versi lama TANPA SYARAT menyuruh "N scene → N suasana berbeda (golden hour,
+  // natural daylight, warm ambient, dramatic sunset)". Itu BERTABRAKAN LANGSUNG
+  // dengan aturan anchoring [2d] saat tool memakai reference image: mengubah
+  // pencahayaan berarti menyuruh Veo MENGGAMBAR ULANG properti di bawah cahaya
+  // lain, sehingga hasilnya melenceng dari foto.
+  //
+  // Terbukti pada uji nyata 2026-07-28: dua scene memakai foto fasad yang sama,
+  // scene 1 dapat "Natural daylight", scene 2 dapat "Warm ambient lighting"
+  // (persis contoh yang ditulis di blok lama) — properti di scene 2 tidak lagi
+  // konsisten dengan foto yang dilampirkan.
+  //
+  // Untuk tool ber-reference image, variasi kini dibatasi pada hal yang TIDAK
+  // mengubah isi frame: gerakan kamera, angle, jarak, dan aksi karakter.
+  const variasiBlock = supportsRefImage
+    ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[6] VARIASI ANTAR SCENE — TERBATAS (mode reference image)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Setiap scene HARUS terasa berbeda, TAPI hanya lewat hal yang tidak mengubah isi frame:
+  • gerakan kamera & kecepatannya
+  • angle dan jarak (wide / medium / close)
+  • posisi, gestur, dan aksi karakter
+  • penekanan pada elemen berbeda dari area yang sama
+JANGAN copy-paste struktur kalimat prompt yang sama antar scene.
+
+DILARANG memvariasikan PENCAHAYAAN, WAKTU HARI, CUACA, atau COLOR GRADE antar scene.
+Foto referensi sudah menentukan cahayanya; mengubahnya memaksa AI menggambar ulang
+properti sehingga hasilnya TIDAK LAGI SESUAI foto yang dilampirkan user.
+  ✗ SALAH: scene 1 "natural daylight", scene 2 "warm ambient lighting" / "golden hour"
+  ✓ BENAR: semua scene memakai deskripsi cahaya yang SAMA dan netral, sesuai kondisi
+    yang terlihat di foto (mis. "natural daylight consistent with the reference image")
+Jika dua scene atau lebih memakai area/label foto yang SAMA, deskripsi lingkungannya
+WAJIB identik — yang boleh berbeda hanya kamera, angle, dan aksi karakter.
+
+`
+    : `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[6] VARIASI ANTAR SCENE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Setiap scene HARUS berbeda dalam: gerakan kamera, posisi karakter, angle, pencahayaan.
+JANGAN copy-paste struktur prompt yang sama antar scene.
+Jika ada ${jumlahScene} scene → ${jumlahScene} suasana berbeda (misal: golden hour, natural daylight, warm ambient, dramatic sunset).
+
+`;
 
   // Struktur retensi psikologis: versi simplified (scene sedikit, tidak ada ruang
   // untuk open loop penuh) vs versi lengkap (open loop di scene 1, rehook di scene
@@ -293,14 +353,7 @@ JIKA bahasa = Jawa: gunakan Bahasa Jawa Krama yang sopan.
 
 ${nativeAudioBlock}${karakterBlock}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[6] VARIASI ANTAR SCENE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Setiap scene HARUS berbeda dalam: gerakan kamera, posisi karakter, angle, pencahayaan.
-JANGAN copy-paste struktur prompt yang sama antar scene.
-Jika ada ${jumlahScene} scene → ${jumlahScene} suasana berbeda (misal: golden hour, natural daylight, warm ambient, dramatic sunset).
-
-${retensiBlock}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${variasiBlock}${retensiBlock}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [7] KATA/FRASA TERLARANG
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DILARANG menggunakan kata/frasa ini (ganti dengan alternatif):

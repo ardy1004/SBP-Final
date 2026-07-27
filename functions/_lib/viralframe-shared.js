@@ -11,26 +11,71 @@
 // File ini WAJIB plain JS tanpa React / API browser agar aman di Workers runtime.
 
 // Tabel lipsync (PRD 3.8) — sinkronisasi durasi klip ↔ jumlah kata narasi.
-export const LIPSYNC_TABLE = [
-  { minSec: 2,  maxSec: 3,  maxWords: 8,   pace: 'ultra_fast',    instruksi: 'Ucapan sangat cepat, 1 kalimat pendek punchy, tanpa jeda.' },
-  { minSec: 4,  maxSec: 5,  maxWords: 16,  pace: 'fast',          instruksi: 'Ucapan cepat, 1–2 kalimat ringkas, jeda minimal.' },
-  { minSec: 6,  maxSec: 8,  maxWords: 26,  pace: 'normal',        instruksi: 'Tempo natural, 2 kalimat, jeda wajar antar frasa.' },
-  { minSec: 9,  maxSec: 12, maxWords: 44,  pace: 'medium',        instruksi: 'Tempo sedang, 2–3 kalimat, ada penekanan kata kunci.' },
-  { minSec: 13, maxSec: 20, maxWords: 72,  pace: 'relaxed',       instruksi: 'Tempo santai, 3–4 kalimat, ruang untuk storytelling.' },
-  { minSec: 21, maxSec: 30, maxWords: 108, pace: 'slow_dramatic', instruksi: 'Tempo lambat dramatis, jeda sengaja untuk emosi.' },
+//
+// ⚠️ DIKALIBRASI ULANG 2026-07-28 setelah uji video nyata pertama.
+// Versi lama memberi `maxWords` TETAP per rentang (mis. 44 kata untuk 9–12 detik).
+// Dua cacatnya:
+//   1. Lajunya mustahil. 44 kata / 10 detik = 246 kata/menit; presenter manusia
+//      tercepat ~180–200 wpm. Di 13 detik, 72 kata = 332 wpm.
+//   2. Budget per RENTANG, bukan per detik — scene 9 detik dapat jatah sama dengan
+//      12 detik, jadi ujung pendek tiap rentang paling parah.
+// Akibat nyata: narasi 41 kata untuk klip 10 detik TERPOTONG di Google Flow.
+//
+// Sekarang `maxWords` DIHITUNG dari durasi: `durasi × kataPerDetik`, dengan
+// kataPerDetik yang sudah memuat margin nafas di awal/akhir klip. Tabel ini
+// tinggal menyimpan sifat kualitatif (pace + instruksi) dan lajunya.
+//
+// Angka laju berasal dari satu titik data nyata (41 kata @10s = terpotong), jadi
+// ini perkiraan konservatif — kalau uji berikutnya menyisakan hening di akhir,
+// naikkan `kataPerDetik`, jangan kembalikan tabel tetap.
+const LIPSYNC_ROWS = [
+  { minSec: 2,  maxSec: 3,  kataPerDetik: 2.4, pace: 'ultra_fast',    instruksi: 'Ucapan sangat cepat, 1 kalimat pendek punchy, tanpa jeda.' },
+  { minSec: 4,  maxSec: 5,  kataPerDetik: 2.4, pace: 'fast',          instruksi: 'Ucapan cepat, 1 kalimat ringkas, jeda minimal.' },
+  { minSec: 6,  maxSec: 8,  kataPerDetik: 2.2, pace: 'normal',        instruksi: 'Tempo natural, 1–2 kalimat, jeda wajar antar frasa.' },
+  { minSec: 9,  maxSec: 12, kataPerDetik: 2.2, pace: 'medium',        instruksi: 'Tempo sedang, 2 kalimat, ada penekanan kata kunci.' },
+  { minSec: 13, maxSec: 20, kataPerDetik: 2.1, pace: 'relaxed',       instruksi: 'Tempo santai, 2–3 kalimat, ruang untuk storytelling.' },
+  { minSec: 21, maxSec: 30, kataPerDetik: 1.9, pace: 'slow_dramatic', instruksi: 'Tempo lambat dramatis, jeda sengaja untuk emosi.' },
 ];
 
-export function getLipsync(durasiDetik) {
-  const d = Math.max(2, Math.min(30, Math.round(durasiDetik || 0)));
-  for (const row of LIPSYNC_TABLE) {
+function barisLipsync(d) {
+  for (const row of LIPSYNC_ROWS) {
     if (d >= row.minSec && d <= row.maxSec) return row;
   }
-  return d <= 3 ? LIPSYNC_TABLE[0] : LIPSYNC_TABLE[LIPSYNC_TABLE.length - 1];
+  return d <= 3 ? LIPSYNC_ROWS[0] : LIPSYNC_ROWS[LIPSYNC_ROWS.length - 1];
+}
+
+/**
+ * Baris lipsync untuk sebuah durasi, dengan `maxWords` yang SUDAH dihitung dari
+ * durasi itu sendiri — bukan angka tetap per rentang. Bentuk kembaliannya sengaja
+ * dipertahankan (`{minSec,maxSec,maxWords,pace,instruksi}`) agar seluruh pemakai
+ * lama (compiler, validator, SceneCards, ai-generate) tidak perlu diubah.
+ */
+export function getLipsync(durasiDetik) {
+  const d = Math.max(2, Math.min(30, Math.round(durasiDetik || 0)));
+  const row = barisLipsync(d);
+  return {
+    minSec: row.minSec,
+    maxSec: row.maxSec,
+    maxWords: Math.max(4, Math.round(d * row.kataPerDetik)),
+    pace: row.pace,
+    instruksi: row.instruksi,
+  };
 }
 
 export function getMaxWords(durasiDetik) {
   return getLipsync(durasiDetik).maxWords;
 }
+
+// Dipertahankan untuk kompatibilitas konsumen lama yang mengimpor tabelnya langsung
+// (options.ts me-re-export bertipe). `maxWords` di sini memakai durasi TERPANJANG
+// rentangnya — untuk angka yang benar per scene, selalu pakai getLipsync(durasi).
+export const LIPSYNC_TABLE = LIPSYNC_ROWS.map(r => ({
+  minSec: r.minSec,
+  maxSec: r.maxSec,
+  maxWords: Math.max(4, Math.round(r.maxSec * r.kataPerDetik)),
+  pace: r.pace,
+  instruksi: r.instruksi,
+}));
 
 // ════════════════════════════════════════════════════════════════════════════
 // AUDIO NATIVE & BATAS KLIP PER TOOL (Tahap 1 — perbaikan audit 2026-07-26)
