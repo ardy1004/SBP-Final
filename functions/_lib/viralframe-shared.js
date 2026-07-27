@@ -48,12 +48,19 @@ export function isNativeAudioTool(toolId) {
   return NATIVE_AUDIO_TOOLS.includes(toolId);
 }
 
-// Batas panjang SATU klip per generate, dalam detik. Veo 3.x (termasuk lewat
-// Google Flow) menghasilkan klip 8 detik — durasi lebih panjang harus disusun
-// dari beberapa klip/Extend, bukan diminta sekaligus. Tool yang tidak terdaftar
-// = tidak ada batas keras yang kita tegakkan (null).
+// Batas panjang SATU klip per generate, dalam detik. Durasi lebih panjang harus
+// disusun dari beberapa klip/Extend, bukan diminta sekaligus. Tool yang tidak
+// terdaftar = tidak ada batas keras yang kita tegakkan (null).
+//
+// ⚠️ ANGKA INI BERUBAH SEIRING VERSI TOOL — jangan diisi dari asumsi.
+// google_flow = 10 detik, diverifikasi langsung oleh pemilik akun di Google Flow
+// (2026-07-28). Sebelumnya diisi 8 berdasarkan dugaan saya tentang Veo 3, dan itu
+// SALAH: skema youtube-long.js aslinya sudah benar memakai 10, lalu saya turunkan
+// ke 8 karena mengira ada kontradiksi. Kalau ragu, tanya — jangan tebak.
 export const CLIP_MAX_SEC = {
-  google_flow: 8,
+  google_flow: 10,
+  // Veo 3 standalone (labs.google/video) BELUM diverifikasi ulang — masih 8.
+  // Kalau ternyata juga 10, cukup ubah angka ini: enam pemakainya membaca dari sini.
   veo3: 8,
 };
 
