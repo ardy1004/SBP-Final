@@ -1047,6 +1047,10 @@ function AIGenerateTab({
     if (!generatedResult || regenScene != null) return;
     setRegenScene(sceneNum);
     setError(null);
+    // Ikut dibatalkan lewat abortRef yang sama seperti generate penuh — kalau tidak,
+    // regenerate satu scene jadi satu-satunya panggilan AI yang tak bisa dihentikan.
+    const ac = new AbortController();
+    abortRef.current = ac;
     try {
       const payload = buildGeneratePayload();
       if (!payload) throw new Error('Konfigurasi belum lengkap');
@@ -1054,6 +1058,7 @@ function AIGenerateTab({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        signal: ac.signal,
         body: JSON.stringify({
           ...payload,
           regenerate_scene: sceneNum,
@@ -1062,7 +1067,7 @@ function AIGenerateTab({
           })),
         }),
       });
-      const data = await readNdjsonFinal<AIGeneratedResult>(res);
+      const data = await readNdjsonFinal<AIGeneratedResult>(res, { signal: ac.signal });
       const newScene = data.scenes?.[0];
       if (!newScene) throw new Error('AI tidak mengembalikan scene baru');
       setGeneratedResult(prev => prev
@@ -1070,9 +1075,12 @@ function AIGenerateTab({
         : prev);
       getAiStatus().then(r => { if (r.success && r.data) setAiStatus(r.data); });
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : `Gagal regenerate scene ${sceneNum}`);
+      // Pembatalan oleh user bukan kegagalan.
+      if (e instanceof DOMException && e.name === 'AbortError') { /* diam */ }
+      else setError(e instanceof Error ? e.message : `Gagal regenerate scene ${sceneNum}`);
     } finally {
       setRegenScene(null);
+      abortRef.current = null;
     }
   };
 

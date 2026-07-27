@@ -11,7 +11,13 @@
 import { jsonError, handleOptions } from '../../_shared/response.js';
 import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
 // Negative prompt video = sumber tunggal bersama Jalur A & C (audit 2026-07-26).
-import { NEGATIVE_PROMPT_VIDEO } from '../../../_lib/viralframe-shared.js';
+import { NEGATIVE_PROMPT_VIDEO, getClipMaxSec } from '../../../_lib/viralframe-shared.js';
+
+// Jalur ini diasumsikan untuk Veo/Google Flow (keputusan 2026-07-26), jadi batas
+// panjang satu klip mengikuti tool itu. Sebelumnya skema meminta 10 detik untuk
+// scene — melebihi kemampuan Veo sekali generate, padahal konstanta di
+// viralframe-shared.js sudah menyatakan batasnya 8.
+const KLIP_MAKS = getClipMaxSec('google_flow') ?? 8;
 
 const PROVIDER_ORDER = ['gemini', 'groq', 'openrouter', 'deepseek'];
 
@@ -37,6 +43,14 @@ function blokVideo(parsed) {
  * Mengembalikan pesan error (string) atau null bila lolos. Pemanggil memperlakukan
  * error sebagai kegagalan provider supaya fallback berantai mencoba provider lain —
  * sama seperti parseSceneJson() di ai-generate.js.
+ *
+ * BATAS KETAT vs LONGGAR (revisi setelah evaluasi):
+ * Yang FATAL hanya yang membuat hasilnya TIDAK BISA DIPAKAI — jumlah scene, objek
+ * prompt tiap blok video, dan dialogue.line. Metadata pelengkap (thumbnail, titles)
+ * SENGAJA ditoleransi: membuang storyboard 12 scene yang sempurna hanya karena blok
+ * thumbnail hilang berarti menukar satu mode kegagalan dengan mode kegagalan lain,
+ * dan keempat provider ikut terbakar percuma. Frontend sudah menangani keduanya
+ * secara opsional (result.thumbnail?.prompt, result.titles ?? []).
  */
 function validasiStoryboard(parsed, jumlahFoto) {
   if (!parsed || typeof parsed !== 'object') return 'respons bukan objek JSON';
@@ -44,11 +58,11 @@ function validasiStoryboard(parsed, jumlahFoto) {
   if (parsed.scenes.length !== jumlahFoto) {
     return `jumlah scene ${parsed.scenes.length}, seharusnya ${jumlahFoto} (respons kemungkinan terpotong)`;
   }
-  for (const key of ['opening', 'ending', 'thumbnail']) {
+  // Blok VIDEO = deliverable-nya. Tanpa ini videonya tidak bisa dirakit.
+  for (const key of ['opening', 'ending']) {
     if (!parsed[key] || typeof parsed[key] !== 'object') return `blok "${key}" tidak ada`;
     if (!parsed[key].prompt || typeof parsed[key].prompt !== 'object') return `blok "${key}" tanpa objek prompt`;
   }
-  if (!Array.isArray(parsed.titles) || parsed.titles.length === 0) return 'field "titles" kosong';
 
   const kurangPrompt = parsed.scenes.findIndex(s => !s?.prompt || typeof s.prompt !== 'object');
   if (kurangPrompt >= 0) return `scene ${kurangPrompt + 1} tanpa objek prompt`;
@@ -125,6 +139,7 @@ SYARAT WAJIB — AUDIO NATIVE (DIALOG TERUCAP): prompt ini dieksekusi di Veo 3.x
   • ${agent ? `"dialogue.speaker" = nama agen (host tampil di layar dan berbicara).` : `"dialogue.speaker" = "narrator (voiceover, off-screen)" karena tidak ada orang di layar.`}
   • Semua field lain di dalam "prompt" ditulis dalam BAHASA INGGRIS — HANYA "dialogue.line" yang memakai ${langName}.
   • Blok "thumbnail" TIDAK punya "dialogue" (gambar diam, bukan video).
+BATAS PANJANG KLIP: setiap blok video dihasilkan sebagai SATU klip berdurasi maksimal ${KLIP_MAKS} detik. Field "duration_sec" WAJIB bernilai ${KLIP_MAKS} atau kurang, dan deskripsi aksi tiap blok harus muat dalam durasi itu — jangan menuliskan rangkaian kejadian panjang yang mustahil selesai dalam ${KLIP_MAKS} detik. Video panjang dirakit dari banyak klip di tahap editing, bukan dari satu prompt.
 LARANGAN TEKS DI FRAME: Veo cenderung MEMBAKAR subtitle ke dalam gambar begitu ada dialog. Objek "prompt" blok VIDEO DILARANG meminta teks, caption, subtitle, atau tulisan muncul di dalam frame. (Pengecualian tunggal: blok "thumbnail" memang butuh "text_overlay" karena itu gambar sampul, bukan video.)
 SYARAT WAJIB — KONSISTENSI REFERENCE IMAGE: setiap prompt yang kamu tulis akan dieksekusi image-to-video/image dengan foto referensi terlampir. Setiap objek "prompt" WAJIB punya field "reference_image" (nama file referensinya) dan instruksi harus SETIA ke foto itu: jangan mengarang arsitektur, furnitur, warna, atau material yang tidak ada di foto. Gaya visual & kamera harus konsisten di semua blok agar terasa satu film.${agent ? `
 SYARAT WAJIB — KONSISTENSI AGEN: agen/host yang sama (dari reference image "agent.webp") hadir di thumbnail, opening, scene, dan ending. WAJIB tulis "exact same person as reference image agent.webp — identical face, hair, and outfit in every shot" di field subject/agent tiap prompt. Jangan pernah mengganti wajah, gaya rambut, atau pakaian antar blok.` : ''}`;
@@ -162,9 +177,9 @@ FORMAT JSON WAJIB (patuhi persis):
   "caption": "caption share singkat",
   "hashtag_sets": ["5 string, tiap string 5-8 hashtag campur lokasi+jenis+brand #salambumiproperty"],
   "thumbnail": { "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "text_overlay": "...", "text_style": "...", "color_grade": "...", "focal_point": "...", "composition": "...", "badge": "...", "style": "...", "aspect_ratio": "16:9" } },
-  "opening": { "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "...", "lighting": "...", "mood": "...", "style": "...", "dialogue": { "speaker": "...", "language": "${language}", "line": "SAMA PERSIS dengan narration_id blok ini", "voice": "...", "delivery": "..." }, "audio": "ambience/musik latar saja", "duration_sec": 8, "aspect_ratio": "16:9" }, "narration_id": "narasi ${langName}" },
-  "scenes": [ { "scene": 1, "photo_label": "<label>", "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "...", "lighting": "...", "mood": "...", "style": "...", "dialogue": { "speaker": "...", "language": "${language}", "line": "SAMA PERSIS dengan narration_id blok ini", "voice": "...", "delivery": "..." }, "audio": "ambience/musik latar saja", "duration_sec": 10, "aspect_ratio": "16:9" }, "narration_id": "narasi ${langName}" } ],
-  "ending": { "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "...", "cta": "...", "dialogue": { "speaker": "...", "language": "${language}", "line": "SAMA PERSIS dengan narration_id blok ini", "voice": "...", "delivery": "..." }, "audio": "ambience/musik latar saja", "duration_sec": 8, "aspect_ratio": "16:9" }, "narration_id": "narasi CTA ${langName}" }
+  "opening": { "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "...", "lighting": "...", "mood": "...", "style": "...", "dialogue": { "speaker": "...", "language": "${language}", "line": "SAMA PERSIS dengan narration_id blok ini", "voice": "...", "delivery": "..." }, "audio": "ambience/musik latar saja", "duration_sec": ${KLIP_MAKS}, "aspect_ratio": "16:9" }, "narration_id": "narasi ${langName}" },
+  "scenes": [ { "scene": 1, "photo_label": "<label>", "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "...", "lighting": "...", "mood": "...", "style": "...", "dialogue": { "speaker": "...", "language": "${language}", "line": "SAMA PERSIS dengan narration_id blok ini", "voice": "...", "delivery": "..." }, "audio": "ambience/musik latar saja", "duration_sec": ${KLIP_MAKS}, "aspect_ratio": "16:9" }, "narration_id": "narasi ${langName}" } ],
+  "ending": { "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "...", "cta": "...", "dialogue": { "speaker": "...", "language": "${language}", "line": "SAMA PERSIS dengan narration_id blok ini", "voice": "...", "delivery": "..." }, "audio": "ambience/musik latar saja", "duration_sec": ${KLIP_MAKS}, "aspect_ratio": "16:9" }, "narration_id": "narasi CTA ${langName}" }
 }
 "scenes" berisi TEPAT ${photos.length} item (urutan sama dengan daftar di atas). hashtag_sets TEPAT 5 string. titles/description/caption/hashtag tetap Bahasa Indonesia. Keluarkan HANYA objek JSON.`;
 
