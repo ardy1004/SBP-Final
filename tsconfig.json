@@ -44,7 +44,13 @@
     // "Cannot find module" palsu untuk setiap route.
     "rootDirs": [".", "./.react-router/types"],
 
-    "baseUrl": ".",
+    // SENGAJA TANPA "baseUrl". Sejak TypeScript 5.0 "paths" boleh berdiri sendiri
+    // dan pola relatifnya dihitung terhadap letak tsconfig.json ini, sehingga
+    // "./src/*" tetap menunjuk ke tempat yang sama seperti sebelumnya.
+    // "baseUrl" sudah deprecated dan berhenti berfungsi di TypeScript 7.0 —
+    // ekstensi TS bawaan VS Code (yang lebih baru dari tsc 5.9.3 milik project)
+    // menandainya sebagai error. Alias ini mencerminkan resolve.alias di
+    // vite.config.ts; keduanya harus tetap sinkron.
     "paths": {
       "@/*": ["./src/*"]
     }

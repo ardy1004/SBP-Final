@@ -32,6 +32,44 @@ export function getMaxWords(durasiDetik) {
   return getLipsync(durasiDetik).maxWords;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// AUDIO NATIVE & BATAS KLIP PER TOOL (Tahap 1 — perbaikan audit 2026-07-26)
+// ════════════════════════════════════════════════════════════════════════════
+
+// Tool yang menghasilkan AUDIO NATIVE (dialog terucap + lip-sync) dari teks prompt.
+// Untuk tool ini dialog WAJIB ditanam DI DALAM teks prompt video; menaruhnya di
+// field terpisah = audionya tidak pernah dibuat dan videonya jadi bisu.
+// Inilah temuan utama audit ViralFrame 2026-07-26: seluruh LIPSYNC_TABLE dihitung,
+// ditegakkan, dan divalidasi — lalu dibuang di langkah terakhir karena README ZIP
+// menyuruh user menempel field 'prompt' saja.
+export const NATIVE_AUDIO_TOOLS = ['google_flow', 'veo3'];
+
+export function isNativeAudioTool(toolId) {
+  return NATIVE_AUDIO_TOOLS.includes(toolId);
+}
+
+// Batas panjang SATU klip per generate, dalam detik. Veo 3.x (termasuk lewat
+// Google Flow) menghasilkan klip 8 detik — durasi lebih panjang harus disusun
+// dari beberapa klip/Extend, bukan diminta sekaligus. Tool yang tidak terdaftar
+// = tidak ada batas keras yang kita tegakkan (null).
+export const CLIP_MAX_SEC = {
+  google_flow: 8,
+  veo3: 8,
+};
+
+export function getClipMaxSec(toolId) {
+  return CLIP_MAX_SEC[toolId] ?? null;
+}
+
+// Negative prompt inti untuk video generator berbasis teks (Veo/Flow dan sejenis).
+// BEDA dari NEG_CORE di submit-video.js yang khusus image-to-video SiliconFlow
+// (fokus mencegah adegan berubah dari foto). Yang di sini fokus pada dua hal:
+//   1. 'subtitles/captions/burned-in text' — Veo punya kebiasaan MEMBAKAR subtitle
+//      ke frame begitu ada dialog di prompt. Tanpa ini, menanam dialog (perbaikan
+//      di atas) justru menghasilkan video berteks acak yang tidak bisa dihapus.
+//   2. artefak umum yang merusak kesan profesional.
+export const NEGATIVE_PROMPT_VIDEO = 'subtitles, captions, burned-in text, on-screen text, watermark, logo, distorted hands, extra fingers, morphing, warping, deformed face, flickering, blurry, low quality, extra people';
+
 // Deskripsi ekspresi singkat English untuk injeksi ke prompt karakter (PRD 3.13/3.14).
 export const EXPRESSION_EN = {
   auto:            'expression adapted to scene tone',

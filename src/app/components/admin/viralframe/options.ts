@@ -8,6 +8,9 @@ import {
   LIPSYNC_TABLE as SHARED_LIPSYNC_TABLE,
   getLipsync as sharedGetLipsync,
   EXPRESSION_EN as SHARED_EXPRESSION_EN,
+  isNativeAudioTool as sharedIsNativeAudioTool,
+  getClipMaxSec as sharedGetClipMaxSec,
+  NEGATIVE_PROMPT_VIDEO as SHARED_NEGATIVE_PROMPT_VIDEO,
 } from '../../../../../functions/_lib/viralframe-shared.js';
 
 export interface Opt { value: string; label: string }
@@ -317,6 +320,14 @@ export const STYLE_EN: Record<string, string> = {
 
 // Deskripsi ekspresi singkat English — sumber tunggal di viralframe-shared.js.
 export const EXPRESSION_EN: Record<string, string> = SHARED_EXPRESSION_EN;
+
+// Audio native, batas klip, & negative prompt — sumber tunggal di viralframe-shared.js
+// (dipakai backend ai-generate.js secara natif). Di sini hanya di-re-export bertipe.
+/** Tool dengan audio native + lip-sync (Veo family): dialog WAJIB ditanam di dalam prompt. */
+export const isNativeAudioTool: (toolId: string) => boolean = sharedIsNativeAudioTool;
+/** Batas panjang satu klip (detik) untuk tool ini, atau null bila tidak dibatasi. */
+export const getClipMaxSec: (toolId: string) => number | null = sharedGetClipMaxSec;
+export const NEGATIVE_PROMPT_VIDEO: string = SHARED_NEGATIVE_PROMPT_VIDEO;
 
 // ─── Penamaan file aset (dipakai Master Prompt + ZIP export Fase V4b) ─────────
 // PENTING (requirement Fase V4b): ZIP generation WAJIB memakai sceneFileName() &

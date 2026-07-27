@@ -15,7 +15,10 @@
 
 import { jsonError, handleOptions } from '../../_shared/response.js';
 // Konstanta lipsync & ekspresi = sumber tunggal bersama dengan frontend (Fase 4).
-import { getMaxWords, EXPRESSION_EN } from '../../../_lib/viralframe-shared.js';
+import {
+  getMaxWords, EXPRESSION_EN,
+  isNativeAudioTool, getClipMaxSec, NEGATIVE_PROMPT_VIDEO,
+} from '../../../_lib/viralframe-shared.js';
 import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
 
 const PLATFORM_DURASI = {
@@ -89,7 +92,7 @@ function isAutoValue(label) {
   return !label || label.trim().toLowerCase().startsWith('auto');
 }
 
-function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes }) {
+function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio }) {
   const registerLine = registerInstruction ? `\nGAYA BAHASA WAJIB: ${registerInstruction}\n` : '';
   // Mode voiceover/faceless: karakter = NARATOR yang terdengar tapi TIDAK tampil
   // di frame. Video prompt fokus pada visual properti POV/sinematik tanpa orang.
@@ -200,6 +203,32 @@ Versi lengkap (jumlah scene ≥ 4):
 
 `;
 
+  // Tool ber-audio native (Veo 3.x / Google Flow) mengucapkan HANYA teks yang ada
+  // DI DALAM field 'prompt'. Selama ini dialog cuma tinggal di 'dialog_karakter'
+  // (field tetangga) sehingga video keluar BISU — temuan utama audit 2026-07-26.
+  // Blok ini memaksa dialognya ditanam ulang ke dalam 'prompt' sebagai kutipan.
+  const nativeAudioBlock = nativeAudio
+    ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[4b] AUDIO NATIVE — DIALOG WAJIB DITANAM DI DALAM 'prompt'
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+AI video tujuan menghasilkan AUDIO NATIVE: kalimat yang ditulis DI DALAM field 'prompt' akan BENAR-BENAR DIUCAPKAN karakter dengan lip-sync. Kalimat yang hanya ada di 'dialog_karakter' TIDAK akan terdengar sama sekali.
+Karena itu, di SETIAP scene:
+  • Field 'prompt' WAJIB memuat bagian dialog (teks SETELAH "mengatakan:" pada 'dialog_karakter') secara UTUH di dalam TANDA KUTIP GANDA, didahului kata kerja ucap bahasa Inggris.
+    Pola: ... she says in ${bahasa}: "<dialog persis>" ...
+  • Teks dalam tanda kutip WAJIB IDENTIK dengan bagian dialog di 'dialog_karakter' — TETAP dalam ${bahasa}, JANGAN diterjemahkan ke Inggris, jangan diringkas, jangan diparafrase. Hanya kalimat di LUAR tanda kutip yang berbahasa Inggris.
+  • Sebutkan karakter suara singkat di luar kutipan (mis. 'warm confident female voice, natural conversational pace') agar timbre konsisten antar scene.
+  • Untuk mode voiceover/faceless: tetap tanam narasinya, pola '... voiceover in ${bahasa} says: "<dialog persis>" ...'.
+✗ SALAH: prompt tanpa kutipan sama sekali (video jadi bisu meski dialog_karakter terisi)
+✗ SALAH: '... she says: "Welcome to your dream home"' (dialog diterjemahkan, padahal bahasa dialog = ${bahasa})
+✓ BENAR: '... warm confident female voice, she says in ${bahasa}: "Selamat datang di hunian impian Anda." ...'
+
+LARANGAN TEKS DI FRAME: tool ini cenderung MEMBAKAR subtitle ke dalam gambar begitu ada dialog.
+  • Field 'prompt' DILARANG meminta teks, caption, subtitle, tulisan, atau papan nama muncul di dalam frame.
+  • Field 'on_screen_text' adalah untuk EDITOR (ditambahkan belakangan di CapCut), BUKAN untuk dibakar AI — JANGAN pernah menyebut isinya di dalam 'prompt'.
+
+`
+    : '';
+
   return `Kamu adalah direktur kreatif video properti profesional Indonesia dengan keahlian sinematografi, copywriting, dan digital marketing. Tugasmu: buat ${jumlahScene} video prompt terpisah untuk AI video generator.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -254,7 +283,7 @@ JIKA bahasa = Indonesia: gunakan Bahasa Indonesia formal yang hangat.
 JIKA bahasa = English: gunakan English professional (klausa delivery tetap wajib, diterjemahkan proporsional, mis. "[Name] speaks quickly, clear articulation, no pauses or stutters, saying:").
 JIKA bahasa = Jawa: gunakan Bahasa Jawa Krama yang sopan.
 
-${karakterBlock}
+${nativeAudioBlock}${karakterBlock}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [6] VARIASI ANTAR SCENE
@@ -298,7 +327,10 @@ Format yang diharapkan:
 Field WAJIB ada dan non-empty: scene (integer), kamera (string), prompt (string min 50 kata), dialog_karakter (string, format sesuai [4]). on_screen_text WAJIB ada di setiap object tapi BOLEH string kosong "" jika tidak relevan untuk gaya video ini.
 
 ATURAN TAMBAHAN FIELD 'prompt' — WAJIB, PELANGGARAN = OUTPUT DITOLAK:
-  • 'prompt' WAJIB 100% bahasa Inggris di SEMUA scene TERMASUK scene terakhir/CTA — jangan terbawa bahasa dialog_karakter (hanya 'dialog_karakter' yang memakai bahasa dialog).
+  ${nativeAudio
+    ? `• 'prompt' WAJIB bahasa Inggris di SEMUA scene TERMASUK scene terakhir/CTA, KECUALI teks di dalam TANDA KUTIP GANDA — kutipan dialog itu justru WAJIB tetap dalam ${bahasa} sesuai [4b]. Di luar tanda kutip: Inggris seluruhnya.`
+    : `• 'prompt' WAJIB 100% bahasa Inggris di SEMUA scene TERMASUK scene terakhir/CTA — jangan terbawa bahasa dialog_karakter (hanya 'dialog_karakter' yang memakai bahasa dialog).`}
+  ${nativeAudio ? `• 'prompt' WAJIB memuat tepat satu kutipan dialog dalam tanda kutip ganda (lihat [4b]). Prompt tanpa kutipan = video bisu = DITOLAK.` : ''}
   ${multiShotScene
     ? `• Untuk SEMUA scene${cutawayExcludedScenes?.length ? ` KECUALI Scene ${cutawayExcludedScenes.join(', ')} (lihat pengecualian di bawah)` : ''}: 'prompt' WAJIB mendeskripsikan TEPAT DUA shot berurutan dalam SATU scene ini (arketipe hybrid A-roll/B-roll — ikuti ARAHAN GAYA VIDEO di atas): Shot 1 = talking head presenter; HARD CUT (bukan gerakan kamera menerus, potongan visual tegas) ke Shot 2 = cutaway penuh area yang sama TANPA presenter, memakai koreografi kamera yang diberikan. Tulis KEDUA shot secara eksplisit dan berurutan di dalam SATU field 'prompt' (mis. 'Shot 1: [presenter talking head] ...; hard cut to; Shot 2: [full b-roll cutaway, no presenter] ...'). Pengecualian ini MENGGANTIKAN aturan "satu shot utuh" yang berlaku untuk arketipe lain.`
     : `• 'prompt' WAJIB mendeskripsikan SATU shot utuh yang bisa berdiri sendiri dari foto referensi. Jika koreografi kamera menyebut transisi (whip-pan, whip cut, dsb), tulis sebagai gabungan, mis. 'fast whip-pan settling into a steady selfie-stick shot of ...' — DILARANG menulis hanya nama transisinya tanpa shot stabil yang bisa ditahan sepanjang durasi.`}
@@ -435,14 +467,20 @@ function isValidScene(s) {
 // terbawa bahasa dialog_karakter, terutama di scene CTA/terakhir) — prompt non-Inggris
 // membuat AI video generator eksternal sering gagal. ≥3 stopword khas ID = ditolak.
 const ID_STOPWORDS = ['yang', 'dengan', 'dan', 'untuk', 'dari', 'berbicara', 'terlihat', 'menghadap', 'berdiri', 'rumah', 'pemirsa', 'sebuah'];
-function looksIndonesian(text) {
-  const t = ` ${String(text).toLowerCase()} `;
+// PENTING: pada tool ber-audio native, 'prompt' SENGAJA memuat kutipan dialog
+// berbahasa Indonesia (lihat [4b]) — tanpa membuang isi tanda kutip lebih dulu,
+// detektor ini akan menolak setiap output yang justru sudah benar.
+function stripKutipan(text) {
+  return String(text).replace(/"[^"]*"/g, ' ').replace(/“[^”]*”/g, ' ');
+}
+function looksIndonesian(text, abaikanKutipan = false) {
+  const t = ` ${(abaikanKutipan ? stripKutipan(text) : String(text)).toLowerCase()} `;
   let hits = 0;
   for (const w of ID_STOPWORDS) { if (t.includes(` ${w} `)) hits++; if (hits >= 3) return true; }
   return false;
 }
 
-function parseSceneJson(raw, expectedCount, requireRefAnchor = false) {
+function parseSceneJson(raw, expectedCount, requireRefAnchor = false, nativeAudio = false) {
   let text = raw.trim();
   text = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
   // Ekstraksi tahan-banting: '[' pertama sampai ']' terakhir (model kadang menambah teks).
@@ -462,9 +500,18 @@ function parseSceneJson(raw, expectedCount, requireRefAnchor = false) {
       error: `Output AI tidak valid. Dapat ${Array.isArray(parsed) ? parsed.length : 'non-array'} scene, butuh ${expectedCount}. Setiap scene wajib: scene (int), kamera (≥3 karakter), prompt (≥50 kata), dialog_karakter (≥10 karakter).`,
     };
   }
-  const idScene = parsed.find(s => looksIndonesian(s.prompt));
+  const idScene = parsed.find(s => looksIndonesian(s.prompt, nativeAudio));
   if (idScene) {
     return { ok: false, error: `Scene ${idScene.scene}: field prompt keluar dalam Bahasa Indonesia (wajib Inggris untuk AI video generator)` };
+  }
+  // Audio native: tanpa kutipan dialog di dalam 'prompt', Veo/Flow menghasilkan
+  // video BISU walau dialog_karakter terisi rapi. Perlakukan sebagai kegagalan
+  // provider agar fallback berantai mencoba provider lain, bukan diloloskan.
+  if (nativeAudio) {
+    const tanpaKutipan = parsed.find(s => !/"[^"]{4,}"|“[^”]{4,}”/.test(String(s.prompt)));
+    if (tanpaKutipan) {
+      return { ok: false, error: `Scene ${tanpaKutipan.scene}: prompt tidak memuat dialog dalam tanda kutip (video akan bisu di Veo/Flow)` };
+    }
   }
   if (requireRefAnchor) {
     const noAnchor = parsed.find(s => !/reference/i.test(s.prompt));
@@ -579,7 +626,13 @@ export async function onRequestPost(context) {
   const deskripsiKarakter = describeKarakter(karakter);
   const karakterDesc = describeKarakterUntukPrompt(karakter, expression);
 
-  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes });
+  // Tool ber-audio native (Veo 3.x / Google Flow): dialog harus tertanam di dalam
+  // field 'prompt', dan setiap scene diberi negative_prompt untuk menekan subtitle
+  // bakar. Lihat functions/_lib/viralframe-shared.js.
+  const nativeAudio = isNativeAudioTool(aiTool);
+  const clipMaxSec = getClipMaxSec(aiTool);
+
+  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio });
   const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes });
 
   // ── Panggil AI dengan fallback berantai, respons streaming NDJSON ──────────
@@ -628,7 +681,7 @@ export async function onRequestPost(context) {
         // Output tidak valid (JSON rusak / jumlah scene salah / prompt berbahasa
         // Indonesia / tanpa anchoring reference) = kegagalan provider juga →
         // coba provider berikutnya, jangan langsung menyerah dengan error ke user.
-        const parsed = parseSceneJson(result.content, expectedCount, supportsRefImage);
+        const parsed = parseSceneJson(result.content, expectedCount, supportsRefImage, nativeAudio);
         if (!parsed.ok) {
           attempts.push({ provider, error: parsed.error.slice(0, 140) });
           console.error(`[ai-generate] ${provider} output tidak valid:`, parsed.error.slice(0, 160));
@@ -670,6 +723,11 @@ export async function onRequestPost(context) {
           on_screen_text: typeof s.on_screen_text === 'string' ? s.on_screen_text.trim() : '',
           foto_label: assignment?.foto_label ?? null,
           foto_deskripsi: assignment ? (LABEL_MAP[assignment.foto_label] ?? LABEL_MAP.lainnya) : null,
+          // negative_prompt disuntik SERVER, bukan diminta ke AI — nilainya tetap dan
+          // deterministik, jadi tidak ada gunanya membakar token & risiko model lupa.
+          ...(nativeAudio
+            ? { negative_prompt: NEGATIVE_PROMPT_VIDEO, max_clip_sec: clipMaxSec }
+            : {}),
           ...(supportsRefImage ? { reference_image: `scene${s.scene}_foto.webp`, character_reference: karakterFile } : {}),
         };
       });

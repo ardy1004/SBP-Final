@@ -2,7 +2,7 @@
 // NON-BLOCKING: hanya JSON invalid (Step A) & field wajib hilang (Step B) = hard error.
 // Sisanya (jumlah scene, field scene kosong, word_count, char limit) = warning saja.
 
-import { AI_TOOLS, getLipsync } from './options';
+import { AI_TOOLS, getLipsync, isNativeAudioTool, getClipMaxSec } from './options';
 
 export interface ParsedScene {
   scene_number?: number;
@@ -12,6 +12,8 @@ export interface ParsedScene {
   script_narration?: string;
   word_count?: number;
   ai_ready_prompt?: string;
+  /** Hanya diminta untuk tool ber-audio native (Veo/Flow) — lihat BLOK 5 compiler. */
+  negative_prompt?: string;
   on_screen_text?: string;
   transition_to_next?: string;
 }
@@ -95,6 +97,8 @@ export function validateSceneJson(raw: string, expected: ValidateExpected): Vali
   }
 
   const charLimit = AI_TOOLS.find(t => t.value === expected.aiTool)?.charLimit ?? 1000;
+  const nativeAudio = isNativeAudioTool(expected.aiTool);
+  const clipMax = getClipMaxSec(expected.aiTool);
 
   scenes.forEach((sc, i) => {
     const n = i + 1;
@@ -113,9 +117,38 @@ export function validateSceneJson(raw: string, expected: ValidateExpected): Vali
     }
 
     // ── Step F — panjang ai_ready_prompt vs char limit (warning) ──
-    const promptLen = (sc.ai_ready_prompt ?? '').toString().length;
+    const prompt = (sc.ai_ready_prompt ?? '').toString();
+    const promptLen = prompt.length;
     if (promptLen > charLimit) {
       warnings.push(`Scene ${n}: ai_ready_prompt ${promptLen} karakter melebihi batas tool (±${charLimit}).`);
+    }
+
+    // ── Step G — audio native (Veo/Flow): dialog HARUS tertanam di dalam prompt ──
+    // Tanpa ini video keluar BISU walau script_narration terisi rapi, karena Veo
+    // hanya mengucapkan teks yang ada di dalam prompt. Ini temuan utama audit
+    // ViralFrame 2026-07-26.
+    if (nativeAudio && promptLen > 0) {
+      const narasi = (sc.script_narration ?? '').toString().trim();
+      const kutipan = prompt.match(/"([^"]{4,})"|“([^”]{4,})”/);
+      if (!kutipan) {
+        warnings.push(`Scene ${n}: ai_ready_prompt tidak memuat dialog dalam tanda kutip — video akan BISU di Veo/Flow (audio native hanya mengucapkan teks di dalam prompt).`);
+      } else if (narasi) {
+        // Bandingkan longgar: abaikan beda tanda baca/kapital/spasi, agar parafrase
+        // tipis tidak memicu alarm palsu tapi terjemahan/ringkasan tetap tertangkap.
+        const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        const isiKutipan = norm(kutipan[1] ?? kutipan[2] ?? '');
+        if (isiKutipan && !norm(narasi).includes(isiKutipan) && !isiKutipan.includes(norm(narasi))) {
+          warnings.push(`Scene ${n}: dialog di ai_ready_prompt tidak cocok dengan script_narration — yang terucap di video akan beda dari naskah.`);
+        }
+      }
+      if (!sc.negative_prompt?.toString().trim()) {
+        warnings.push(`Scene ${n}: negative_prompt kosong — Veo/Flow rawan membakar subtitle ke dalam frame.`);
+      }
+    }
+
+    // ── Step H — durasi melebihi batas satu klip tool ──
+    if (clipMax != null && durasi > clipMax) {
+      warnings.push(`Scene ${n}: durasi ${durasi}s melebihi batas ${clipMax}s per klip untuk tool ini — perlu disambung lewat fitur Extend.`);
     }
   });
 

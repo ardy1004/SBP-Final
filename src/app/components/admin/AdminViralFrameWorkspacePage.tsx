@@ -10,6 +10,7 @@ import {
   AI_TOOLS, RATIOS, LANGUAGES, HOOK_TYPES, CTA_TYPES, VISUAL_STYLES,
   TONES, PLATFORMS, PHOTO_LABELS, sceneRole, LANGUAGE_REGISTERS, REGISTER_INSTRUCTION,
   sceneFileName, characterFileName, AI_TOOL_FORMAT_SPEC,
+  isNativeAudioTool, getClipMaxSec,
 } from './viralframe/options';
 import CharacterStepBase, { type Step3State } from './viralframe/CharacterStep';
 import { readNdjsonFinal } from '../../../lib/ndjson';
@@ -763,7 +764,12 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
 // FOTO_LABEL_OPTIONS) diimport dari ../../lib/viralframe-constants — sumber
 // tunggal yang sama dipakai Step 1/2 agar value enum tidak divergen lagi.
 
-interface AIScene { scene: number; kamera: string; prompt: string; dialog_karakter: string; on_screen_text?: string; foto_label?: string; foto_deskripsi?: string }
+interface AIScene {
+  scene: number; kamera: string; prompt: string; dialog_karakter: string;
+  on_screen_text?: string; foto_label?: string; foto_deskripsi?: string;
+  /** Hanya untuk tool ber-audio native (Veo/Flow) — disuntik server, lihat ai-generate.js. */
+  negative_prompt?: string; max_clip_sec?: number | null;
+}
 interface AIKarakter { nama: string; deskripsi: string; foto_url: string }
 interface AIMetadata {
   platform: string; ai_tool: string; bahasa: string; musik_value: string;
@@ -1070,7 +1076,11 @@ function AIGenerateTab({
           karakter_file: `${karakter.nama.replace(/\s+/g, '_')}.webp`,
           kamera: scene.kamera,
           prompt: scene.prompt,
+          // Untuk Veo/Flow, dialog sudah TERTANAM di dalam 'prompt' (di dalam tanda
+          // kutip) — 'dialog_karakter' tinggal jadi rujukan naskah untuk editor.
           dialog_karakter: scene.dialog_karakter,
+          ...(scene.negative_prompt ? { negative_prompt: scene.negative_prompt } : {}),
+          ...(scene.max_clip_sec ? { max_clip_sec: scene.max_clip_sec } : {}),
           on_screen_text: scene.on_screen_text || null,
           catatan_musik: metadata.musik_value !== 'none'
             ? 'Deskripsi audio optimal untuk Veo3/Google Flow. Kling/Wan: efek suara saja, tambahkan musik via CapCut.'
@@ -1112,7 +1122,16 @@ function AIGenerateTab({
         `1. Buka ${metadata.ai_tool} (${metadata.ai_tool === 'google_flow' ? 'labs.google/fx/tools/flow' : 'misal: labs.google.com/video untuk Veo3'})`,
         '2. Upload foto: scene1_foto.webp',
         `3. Upload karakter: ${karakter.nama.replace(/\s+/g, '_')}.webp (sebagai reference/style)`,
-        '4. Copy-paste isi field "prompt" dari scene1.txt (file JSON — dialog karakter ada di field "dialog_karakter")',
+        ...(isNativeAudioTool(metadata.ai_tool)
+          ? [
+              '4. Copy-paste isi field "prompt" dari scene1.txt.',
+              '   PENTING: dialog sudah TERTANAM di dalam "prompt" (di dalam tanda kutip)',
+              '   — jangan dihapus, itulah yang membuat agen benar-benar BERSUARA.',
+              '   Field "dialog_karakter" cuma salinan naskah untuk editor.',
+              '4b. Tempel isi field "negative_prompt" ke kolom Negative Prompt di tool',
+              '    (menekan subtitle yang terbakar ke dalam gambar).',
+            ]
+          : ['4. Copy-paste isi field "prompt" dari scene1.txt (file JSON — dialog karakter ada di field "dialog_karakter")']),
         '5. Generate video → download',
         '6. Ulangi untuk scene 2, 3, dst',
         '7. Gabungkan semua scene di CapCut / DaVinci Resolve',
@@ -2926,6 +2945,29 @@ export default function AdminViralFrameWorkspacePage() {
               </table>
             </div>
           )}
+
+          {/* Peringatan batas klip tool (Veo/Flow = 8 detik per sekali generate).
+              Sebelumnya batas ini tidak pernah disebut di mana pun, sehingga user
+              bisa menyusun scene 20-30 detik yang mustahil dihasilkan sekali jalan. */}
+          {(() => {
+            const clipMax = getClipMaxSec(s1.aiTool);
+            if (clipMax == null) return null;
+            const lewat = durations
+              .map((d, i) => ({ d, n: i + 1 }))
+              .filter(x => x.d > clipMax);
+            if (lewat.length === 0) return null;
+            const toolLabel = AI_TOOLS.find(t => t.value === s1.aiTool)?.label ?? s1.aiTool;
+            return (
+              <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+                <span aria-hidden="true">⚠️</span>
+                <p>
+                  <strong>{toolLabel}</strong> hanya menghasilkan <strong>{clipMax} detik</strong> per sekali generate.
+                  {' '}Scene {lewat.map(x => x.n).join(', ')} melebihi itu, jadi harus disambung memakai fitur <em>Extend</em> di tool tersebut.
+                  {' '}Master Prompt sudah diberi tahu soal ini, tapi lebih mulus kalau durasinya diturunkan ke ≤{clipMax} detik.
+                </p>
+              </div>
+            );
+          })()}
 
           {/* (c) Platform */}
           <Field label="Platform Distribusi" hint="Centang pertama = platform primer">

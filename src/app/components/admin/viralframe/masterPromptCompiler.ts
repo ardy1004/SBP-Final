@@ -8,6 +8,7 @@ import {
   VISUAL_STYLES, TONES, LANGUAGES, RATIOS, EXPRESSIONS,
   ETHNIC_EN, STYLE_EN, EXPRESSION_EN, getLipsync, sceneRole,
   sceneFileName, characterFileName, REGISTER_INSTRUCTION,
+  isNativeAudioTool, getClipMaxSec, NEGATIVE_PROMPT_VIDEO,
 } from './options';
 import { findArchetype, compileCameraChoreography } from './archetypes';
 
@@ -204,6 +205,18 @@ export function compileMasterPrompt(
   L.push(`RASIO VIDEO       : ${labelOf(RATIOS, s1.ratio)}`);
   L.push(`TOTAL SCENE       : ${n}`);
   L.push(`TOTAL DURASI      : ${totalDuration(s1)} detik`);
+  // Batas panjang satu klip per generate (Veo/Flow = 8 detik). Scene yang melebihi
+  // batas tidak bisa dihasilkan sekali jalan — beri tahu AI agar prompt-nya tetap
+  // bisa dieksekusi, alih-alih membiarkan user menemukan sendiri setelah gagal.
+  const clipMax = getClipMaxSec(s1.aiTool);
+  if (clipMax != null) {
+    const terlaluPanjang: number[] = [];
+    for (let i = 0; i < n; i++) if (durationOf(s1, i) > clipMax) terlaluPanjang.push(i + 1);
+    L.push(`BATAS KLIP TOOL   : ${clipMax} detik per sekali generate.`);
+    if (terlaluPanjang.length > 0) {
+      L.push(`  PERHATIAN: Scene ${terlaluPanjang.join(', ')} melebihi ${clipMax} detik. Untuk scene tersebut, susun ai_ready_prompt sebagai SATU aksi berkelanjutan yang bisa DIPERPANJANG (fitur Extend/Scene Extension) — hindari mendeskripsikan rangkaian kejadian yang mustahil selesai dalam ${clipMax} detik pertama. Word count narasi TETAP mengikuti tabel lipsync durasi penuh scene.`);
+    }
+  }
   L.push('');
   L.push('STRUKTUR SCENE:');
   for (let i = 0; i < n; i++) {
@@ -244,6 +257,32 @@ export function compileMasterPrompt(
     L.push(`  Scene ${i + 1}: ${d}s → maksimal ${ls.maxWords} kata, pace "${ls.pace}". ${ls.instruksi}`);
   }
   L.push('');
+
+  // ── BLOK 3c: AUDIO NATIVE (Veo / Google Flow) ──
+  // Tool Veo menghasilkan dialog TERUCAP + lip-sync langsung dari teks prompt.
+  // Bila dialog hanya ditaruh di script_narration (field terpisah), audio itu
+  // tidak pernah dibuat: hasilnya orang bergerak tanpa bicara. Karena itu untuk
+  // tool ini dialog WAJIB ditanam ulang DI DALAM ai_ready_prompt.
+  const nativeAudio = isNativeAudioTool(s1.aiTool);
+  if (nativeAudio) {
+    L.push('═══════════════════════════════════════════════');
+    L.push('BLOK 3c — AUDIO NATIVE & DIALOG TERUCAP (WAJIB)');
+    L.push('═══════════════════════════════════════════════');
+    L.push(`Tool ${tool?.label ?? s1.aiTool} menghasilkan AUDIO NATIVE: dialog yang ditulis di dalam prompt akan BENAR-BENAR DIUCAPKAN dengan lip-sync.`);
+    L.push('Karena itu, untuk SETIAP scene yang menampilkan orang berbicara:');
+    L.push('  - ai_ready_prompt WAJIB memuat kalimat script_narration scene itu SECARA UTUH, ditulis di dalam TANDA KUTIP GANDA, didahului kata kerja ucap.');
+    L.push('    Pola: ... the presenter says: "<isi script_narration persis>" ...');
+    L.push('  - Teks di dalam tanda kutip WAJIB IDENTIK dengan script_narration scene tersebut — jangan diterjemahkan, diringkas, atau diparafrase. Bahasa narasi tetap sesuai BAHASA NARASI di BLOK 2.');
+    L.push('  - Sebutkan juga karakter suara secara singkat (mis. warm confident female voice, natural conversational pace) agar timbre konsisten antar scene.');
+    L.push('  - Tambahkan lapisan audio non-dialog yang diinginkan (ambience ruangan, musik latar) sebagai frasa terpisah — JANGAN masukkan ke dalam tanda kutip.');
+    L.push('  - Untuk scene TANPA orang di layar (b-roll/voiceover), tetap tulis narasinya sebagai voiceover: ... voiceover says: "<isi script_narration persis>" ...');
+    L.push('PERINGATAN SUBTITLE: tool ini cenderung MEMBAKAR subtitle ke dalam frame begitu ada dialog.');
+    L.push('  - DILARANG meminta teks, caption, subtitle, atau tulisan apa pun muncul di dalam frame video lewat ai_ready_prompt.');
+    L.push('  - Field on_screen_text adalah untuk EDITOR (ditambahkan belakangan di CapCut/Premiere), BUKAN untuk dibakar oleh AI video. Jangan pernah menyebut isinya di dalam ai_ready_prompt.');
+    L.push('  - Setiap scene WAJIB mengisi field negative_prompt (lihat BLOK 5) untuk menekan subtitle bakar.');
+    L.push('');
+  }
+
   L.push('KARAKTER:');
   if (s3.useCharacter && s3.character) {
     const desc = buildCharacterDescription(s3.character, s3.expression);
@@ -321,6 +360,10 @@ export function compileMasterPrompt(
   L.push('  - SETIAP ai_ready_prompt WAJIB ground pada foto referensi scene tersebut (lihat BLOK 3b) — gambarkan ruangan/area konkret, bukan generik.');
   L.push('  - DESKRIPSI KARAKTER: jika ada karakter, COPY EXACT STRING [CHARACTER_SPEC] dari BLOK 3 ke setiap scene yang menampilkannya — TIDAK ADA variasi kata sedikit pun.');
   L.push('  - TRANSISI: setiap transition_to_next harus EKSPLISIT (hard cut / zoom punch / whip pan / dissolve + audio cue) agar editor dapat menyambung scene menjadi satu video utuh tanpa miss.');
+  if (nativeAudio) {
+    L.push('  - DIALOG TERUCAP: setiap ai_ready_prompt WAJIB memuat script_narration scene tersebut di dalam tanda kutip ganda (lihat BLOK 3c). Scene yang ai_ready_prompt-nya tidak memuat kutipan = OUTPUT DITOLAK, karena videonya akan bisu.');
+    L.push('  - NEGATIVE PROMPT: setiap scene WAJIB mengisi field negative_prompt. Jangan dikosongkan.');
+  }
   L.push('');
 
   // ── BLOK 5: OUTPUT JSON SCHEMA ──
@@ -363,8 +406,14 @@ export function compileMasterPrompt(
   L.push('      "photo_reference_label": "label foto scene ini",');
   L.push('      "script_narration": "narasi (patuhi WORD COUNT lipsync ±10%)",');
   L.push('      "word_count": 0,');
-  L.push('      "ai_ready_prompt": "prompt video siap-pakai untuk tool, ground pada foto referensi",');
-  L.push('      "on_screen_text": "teks overlay singkat",');
+  if (nativeAudio) {
+    L.push('      "ai_ready_prompt": "prompt video siap-pakai, ground pada foto referensi, WAJIB memuat script_narration di dalam tanda kutip ganda sesuai BLOK 3c",');
+    L.push(`      "negative_prompt": "${NEGATIVE_PROMPT_VIDEO}",`);
+    L.push('      "on_screen_text": "teks overlay untuk EDITOR (jangan disebut di ai_ready_prompt)",');
+  } else {
+    L.push('      "ai_ready_prompt": "prompt video siap-pakai untuk tool, ground pada foto referensi",');
+    L.push('      "on_screen_text": "teks overlay singkat",');
+  }
   L.push('      "transition_to_next": "transisi eksplisit + audio cue"');
   L.push('    }');
   L.push(`    // ... ulangi untuk seluruh ${n} scene sesuai struktur & lipsync di BLOK 3`);
