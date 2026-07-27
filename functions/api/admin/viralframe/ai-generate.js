@@ -93,7 +93,7 @@ function isAutoValue(label) {
   return !label || label.trim().toLowerCase().startsWith('auto');
 }
 
-function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio, durasiSeragam }) {
+function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec }) {
   // Budget kata kini PER SCENE (audit 2026-07-26). Bila semua scene berdurasi
   // sama, sebut angkanya langsung supaya instruksinya sekonkret dulu; bila
   // berbeda-beda, arahkan ke kolom 'Maks kata' milik masing-masing scene.
@@ -201,6 +201,34 @@ penyebab hasil melenceng dari referensi.
 `
     : '';
 
+  // ── [7] KATA TERLARANG — SADAR PILIHAN USER ──
+  // Daftar lama melarang 'luxury/mewah', 'exclusive/eksklusif', dan 'dramatic'
+  // TANPA SYARAT. Padahal ketiganya adalah nilai yang bisa DIPILIH user di UI:
+  // Gaya Visual "Luxury / Premium" & "Moody / Dramatic", Tone "Mewah / Eksklusif".
+  // Akibatnya AI disuruh menerapkan kemewahan sekaligus dilarang menyebutnya, lalu
+  // berkelit ke frasa netral — terlihat pada uji 2026-07-28: gaya Luxury/Premium
+  // dipilih, tapi promptnya hanya "professional real estate videography".
+  // Sekarang larangan yang bentrok dengan pilihan user OTOMATIS dicabut.
+  const pilihanGaya = `${tone ?? ''} ${visualStyle ?? ''}`.toLowerCase();
+  const TERLARANG = [
+    { teks: "luxury/mewah berlebihan → 'dirancang dengan cermat' / 'berkualitas tinggi'", bentrok: /luxury|mewah|premium/ },
+    { teks: "exclusive/eksklusif → 'well-appointed' / 'terawat baik'",                      bentrok: /exclusive|eksklusif/ },
+    { teks: "dramatic/shocking → 'captivating' / 'menawan'",                                bentrok: /dramatic|dramatis|moody/ },
+    { teks: "berlari/melompat → 'berjalan dengan percaya diri' / 'melangkah elegan'" },
+    { teks: 'sexy/sensual → DILARANG MUTLAK' },
+    { teks: "terbaik/nomor 1 → 'berkualitas' / 'terpercaya'" },
+    { teks: 'nama orang nyata/brand nyata → DILARANG' },
+  ];
+  const dicabut = TERLARANG.filter(t => t.bentrok && t.bentrok.test(pilihanGaya));
+  const daftarTerlarang = [
+    ...TERLARANG.filter(t => !dicabut.includes(t)).map(t => `  ${t.teks}`),
+    ...(dicabut.length > 0
+      ? ['', `  CATATAN: larangan kata mewah/eksklusif/dramatis DICABUT untuk permintaan ini karena user`,
+            `  memang memilih gaya "${(visualStyle ?? '').trim()}" / tone "${(tone ?? '').trim()}".`,
+            '  Pakai kata itu bila memang tepat — tetap hindari hiperbola kosong tanpa dasar dari data properti.']
+      : []),
+  ].join('\n');
+
   // ── [6] VARIASI ANTAR SCENE ──
   // Versi lama TANPA SYARAT menyuruh "N scene → N suasana berbeda (golden hour,
   // natural daylight, warm ambient, dramatic sunset)". Itu BERTABRAKAN LANGSUNG
@@ -294,9 +322,30 @@ LARANGAN TEKS DI FRAME: tool ini cenderung MEMBAKAR subtitle ke dalam gambar beg
 `
     : '';
 
+  // ── [0] TARGET TEKNIS ──
+  // Rasio, perilaku platform, dan format spec tool SELAMA INI TIDAK PERNAH sampai
+  // ke prompt jalur ini (audit 2026-07-28) — user memilih 9:16 & TikTok, AI tidak
+  // pernah tahu. Master Prompt sudah menyertakan ketiganya sejak awal; jalur ini
+  // tertinggal. Baris hanya muncul bila nilainya benar-benar ada.
+  const targetBaris = [
+    ratio ? `RASIO VIDEO      : ${ratio}. Susun komposisi, framing, dan penempatan subjek untuk bingkai ini. Sebutkan rasio di akhir setiap field 'prompt'.` : '',
+    clipMaxSec ? `BATAS KLIP TOOL  : ${clipMaxSec} detik per sekali generate. Deskripsi aksi tiap scene harus muat dalam durasi itu.` : '',
+    toolFormatSpec ? `FORMAT PROMPT    : ${toolFormatSpec}` : '',
+    platformBehavior ? `PERILAKU PLATFORM: ${platformBehavior}` : '',
+  ].filter(Boolean);
+  const targetBlock = targetBaris.length > 0
+    ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[0] TARGET TEKNIS — WAJIB
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+AI VIDEO TOOL    : ${aiTool ?? '-'}
+${targetBaris.join('\n')}
+
+`
+    : '';
+
   return `Kamu adalah direktur kreatif video properti profesional Indonesia dengan keahlian sinematografi, copywriting, dan digital marketing. Tugasmu: buat ${jumlahScene} video prompt terpisah untuk AI video generator.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${targetBlock}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [1] ANTI-HALUSINASI — WAJIB DIPATUHI
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 HANYA gunakan informasi yang SECARA EKSPLISIT ada di data properti.
@@ -357,13 +406,7 @@ ${variasiBlock}${retensiBlock}━━━━━━━━━━━━━━━━�
 [7] KATA/FRASA TERLARANG
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DILARANG menggunakan kata/frasa ini (ganti dengan alternatif):
-  luxury/mewah berlebihan → 'dirancang dengan cermat' / 'berkualitas tinggi'
-  exclusive/eksklusif → 'well-appointed' / 'terawat baik'
-  dramatic/shocking → 'captivating' / 'menawan'
-  berlari/melompat → 'berjalan dengan percaya diri' / 'melangkah elegan'
-  sexy/sensual → DILARANG MUTLAK
-  terbaik/nomor 1 → 'berkualitas' / 'terpercaya'
-  nama orang nyata/brand nyata → DILARANG
+${daftarTerlarang}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [8] MUSIK
@@ -624,6 +667,11 @@ export async function onRequestPost(context) {
     ? [...new Set(body.cutaway_excluded_scenes.map(n => parseInt(n, 10)).filter(n => Number.isInteger(n) && n >= 1 && n <= jumlahScene))].sort((a, b) => a - b).slice(0, 12)
     : [];
   const registerInstruction = typeof body.register_instruction === 'string' ? body.register_instruction.slice(0, 400) : '';
+  // Tiga parameter Step 1 yang sebelumnya TIDAK PERNAH masuk prompt (audit 2026-07-28):
+  // rasio video, perilaku platform primer, dan format spec khas AI tool.
+  const ratio = typeof body.ratio === 'string' ? body.ratio.slice(0, 12) : '';
+  const platformBehavior = typeof body.platform_behavior === 'string' ? body.platform_behavior.slice(0, 300) : '';
+  const toolFormatSpec = typeof body.tool_format_spec === 'string' ? body.tool_format_spec.slice(0, 400) : '';
   // Provider AI + model (default gemini). Fallback otomatis ke provider lain bila kuota habis.
   const PROVIDER_ORDER = ['gemini', 'groq', 'openrouter', 'deepseek'];
   const chosenProvider = PROVIDER_ORDER.includes(body.provider) ? body.provider : 'gemini';
@@ -714,7 +762,7 @@ export async function onRequestPost(context) {
   const nativeAudio = isNativeAudioTool(aiTool);
   const clipMaxSec = getClipMaxSec(aiTool);
 
-  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio, durasiSeragam });
+  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec });
   const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneDurations, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes });
 
   // ── Panggil AI dengan fallback berantai, respons streaming NDJSON ──────────

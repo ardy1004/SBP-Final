@@ -10,7 +10,7 @@ import {
   AI_TOOLS, RATIOS, LANGUAGES, HOOK_TYPES, CTA_TYPES, VISUAL_STYLES,
   TONES, PLATFORMS, PHOTO_LABELS, sceneRole, LANGUAGE_REGISTERS, REGISTER_INSTRUCTION,
   sceneFileName, characterFileName, AI_TOOL_FORMAT_SPEC,
-  isNativeAudioTool, getClipMaxSec, namaFileKarakter,
+  isNativeAudioTool, getClipMaxSec, namaFileKarakter, PLATFORM_BEHAVIOR,
 } from './viralframe/options';
 import CharacterStepBase, { type Step3State } from './viralframe/CharacterStep';
 import { readNdjsonFinal } from '../../../lib/ndjson';
@@ -831,6 +831,7 @@ interface AIGenerateTabProps {
   platform: string;
   platforms: string[];
   aiTool: string;
+  ratio: string;
   bahasa: string;
   tone: string;
   visualStyle: string;
@@ -852,7 +853,7 @@ interface AIGenerateTabProps {
 
 function AIGenerateTab({
   propertyId, propertyTitle, kodeListingStr, jumlahScene, platform, platforms, aiTool, bahasa,
-  tone, visualStyle, hookType, ctaType, archetype, register, cutawayExcluded, sceneRoles,
+  ratio, tone, visualStyle, hookType, ctaType, archetype, register, cutawayExcluded, sceneRoles,
   sceneDurations, scenePhotos, selectedKarakter, onEditStep,
 }: AIGenerateTabProps) {
   const [musik, setMusik] = useState('corporate');
@@ -987,6 +988,12 @@ function AIGenerateTab({
       multi_shot_scene: arc?.allowMultiShotPerScene === true,
       cutaway_excluded_scenes: cutawayExcludedInRange,
       register_instruction: REGISTER_INSTRUCTION[register] ?? '',
+      // Tiga parameter Step 1 yang selama ini TIDAK PERNAH sampai ke prompt
+      // (audit 2026-07-28). Pola sama seperti archetype_note: client meresolve
+      // teksnya, backend tinggal menyisipkan — backend tidak perlu tabel sendiri.
+      ratio,
+      platform_behavior: PLATFORM_BEHAVIOR[platform] ?? '',
+      tool_format_spec: AI_TOOL_FORMAT_SPEC[aiTool]?.formatSpec ?? '',
       provider,
       model,
     };
@@ -1827,9 +1834,15 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
 const UploadAgentVideoMemo = memo(UploadAgentVideo);
 
 // ── YouTube Long — storyboard terpandu (pilih foto+label+style → blok JSON) ──
+// `risiko: true` = gerakan yang cenderung membawa kamera KELUAR bingkai foto
+// referensi (drone/aerial). Jalur YouTube Long selalu image-to-video, jadi
+// gerakan itu memaksa AI mengarang area yang tidak ada di foto — properti jadi
+// tidak konsisten dengan gambar yang diunggah (audit 2026-07-28).
+// Prompt sudah menahannya di sisi backend; penanda ini agar user tahu sebabnya
+// bila hasilnya tetap kurang setia.
 const YT_CAMERA = [
-  { value: 'drone_gimbal', label: 'Kombinasi drone aerial + gimbal interior yang mulus' },
-  { value: 'drone',        label: 'Drone / aerial dominan (reveal megah)' },
+  { value: 'drone_gimbal', label: 'Kombinasi drone aerial + gimbal interior yang mulus', risiko: true },
+  { value: 'drone',        label: 'Drone / aerial dominan (reveal megah)', risiko: true },
   { value: 'gimbal',       label: 'Gimbal cinematic super-mulus' },
   { value: 'handheld',     label: 'Handheld natural (terasa nyata)' },
   { value: 'static',       label: 'Static elegan (tripod, komposisi rapi)' },
@@ -2067,8 +2080,15 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
             <div>
               <div className="text-sm font-medium text-[#0F172A] mb-1.5">4. Gaya Kamera / Drone</div>
               <select value={cameraStyle} onChange={e => setCameraStyle(e.target.value)} className={selectCls}>
-                {YT_CAMERA.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                {YT_CAMERA.map(c => <option key={c.value} value={c.value}>{c.label}{c.risiko ? ' ⚠' : ''}</option>)}
               </select>
+              {YT_CAMERA.find(c => c.value === cameraStyle)?.risiko && (
+                <p className="mt-1 text-[11px] text-amber-700 leading-relaxed">
+                  ⚠️ Gerakan drone/aerial membawa kamera keluar bingkai foto, sehingga AI harus mengarang
+                  area yang tidak ada di gambar Anda. Prompt sudah menahannya, tapi <strong>Gimbal</strong> atau
+                  <strong> Static</strong> memberi hasil paling setia pada foto.
+                </p>
+              )}
             </div>
           </div>
 
@@ -3332,6 +3352,7 @@ export default function AdminViralFrameWorkspacePage() {
               platform={platformForAI}
               platforms={s1.platforms}
               aiTool={s1.aiTool}
+              ratio={s1.ratio}
               bahasa={mapLanguageToBahasa(s1.language)}
               tone={s1.tone}
               visualStyle={s1.visualStyle}

@@ -11,13 +11,22 @@
 import { jsonError, handleOptions } from '../../_shared/response.js';
 import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
 // Negative prompt video = sumber tunggal bersama Jalur A & C (audit 2026-07-26).
-import { NEGATIVE_PROMPT_VIDEO, getClipMaxSec } from '../../../_lib/viralframe-shared.js';
+import { NEGATIVE_PROMPT_VIDEO, getClipMaxSec, getMaxWords } from '../../../_lib/viralframe-shared.js';
 
 // Jalur ini diasumsikan untuk Veo/Google Flow (keputusan 2026-07-26), jadi batas
 // panjang satu klip mengikuti tool itu. Sebelumnya skema meminta 10 detik untuk
 // scene — melebihi kemampuan Veo sekali generate, padahal konstanta di
 // viralframe-shared.js sudah menyatakan batasnya 8.
 const KLIP_MAKS = getClipMaxSec('google_flow') ?? 8;
+// Budget kata narasi per blok. Jalur ini SAMA SEKALI tidak punya batas ini sebelum
+// 2026-07-28 — narration_id boleh sepanjang apa pun, padahal klipnya tetap
+// ${KLIP_MAKS} detik. Itu bug yang persis sama dengan 'suara terpotong' di AI
+// Generate: 41 kata untuk 10 detik = 246 kata/menit, mustahil diucapkan.
+// getMaxWords() sudah bermargin nafas — dipakai bersama Jalur A & C.
+const NARASI_MAKS = getMaxWords(KLIP_MAKS);
+// Ambang penolakan: bukan 100% agar selisih sepele tidak membakar keempat provider,
+// tapi cukup rapat untuk menangkap model yang mengabaikan aturan sepenuhnya.
+const NARASI_TOLERANSI = 1.4;
 
 const PROVIDER_ORDER = ['gemini', 'groq', 'openrouter', 'deepseek'];
 
@@ -71,6 +80,18 @@ function validasiStoryboard(parsed, jumlahFoto) {
   for (const b of blokVideo(parsed)) {
     const line = String(b.prompt?.dialogue?.line ?? '').trim();
     if (!line) return 'ada blok video tanpa dialogue.line (video akan bisu di Veo/Flow)';
+  }
+
+  // Budget kata. Ditolak hanya bila JAUH melewati batas — selisih sepele tidak
+  // sepadan dengan membakar keempat provider, tapi narasi 2× lipat berarti model
+  // mengabaikan aturan dan videonya pasti terpotong di tengah kalimat.
+  const batasKeras = Math.ceil(NARASI_MAKS * NARASI_TOLERANSI);
+  for (const b of blokVideo(parsed)) {
+    const line = String(b.prompt?.dialogue?.line ?? '').trim();
+    const kata = line ? line.split(/\s+/).length : 0;
+    if (kata > batasKeras) {
+      return `narasi ${kata} kata melebihi batas ${NARASI_MAKS} kata untuk klip ${KLIP_MAKS} detik (akan terpotong saat diucapkan)`;
+    }
   }
   return null;
 }
@@ -139,6 +160,25 @@ SYARAT WAJIB — AUDIO NATIVE (DIALOG TERUCAP): prompt ini dieksekusi di Veo 3.x
   • ${agent ? `"dialogue.speaker" = nama agen (host tampil di layar dan berbicara).` : `"dialogue.speaker" = "narrator (voiceover, off-screen)" karena tidak ada orang di layar.`}
   • Semua field lain di dalam "prompt" ditulis dalam BAHASA INGGRIS — HANYA "dialogue.line" yang memakai ${langName}.
   • Blok "thumbnail" TIDAK punya "dialogue" (gambar diam, bukan video).
+BATAS PANJANG NARASI — WAJIB: setiap "narration_id" (dan "dialogue.line" yang menyalinnya) MAKSIMAL ${NARASI_MAKS} KATA.
+Klipnya hanya ${KLIP_MAKS} detik. Narasi lebih panjang TIDAK muat diucapkan — Veo akan memotongnya di tengah kalimat, dan kalimat CTA-mu hilang.
+  • Hitung katanya. ${NARASI_MAKS} kata itu kira-kira 1-2 kalimat pendek, BUKAN paragraf.
+  • Lebih baik kurang dari batas daripada lebih. Buang kata pengisi, pertahankan angka & fakta yang menjual.
+  • Ini berlaku untuk SETIAP blok video: opening, tiap scene, dan ending.
+✗ SALAH (${NARASI_MAKS}+ kata): "Rumah megah ini punya empat kamar tidur luas, legalitasnya lengkap SHGB dan IMB, lokasinya sangat strategis dekat kampus, dan harganya masih sangat bisa dinegosiasikan"
+✓ BENAR: "Empat kamar tidur, legalitas lengkap. Lokasinya dekat kampus!"
+
+GERAKAN KAMERA WAJIB TETAP DI DALAM BINGKAI FOTO — WAJIB:
+Setiap blok dieksekusi image-to-video dengan foto referensi terlampir. Foto itu hanya memuat apa
+yang ada di dalam bingkainya. Gerakan yang membawa kamera KELUAR bingkai memaksa AI mengarang area
+yang tidak ada di foto — hasilnya properti berubah bentuk dan tidak lagi sesuai gambar user.
+  • AMAN: slow push-in, pull-back ringan, orbit sempit di sekitar subjek, tilt/pan kecil, gimbal glide pendek.
+  • DILARANG meski diminta GAYA KAMERA di atas: drone/aerial sweep, terbang mengelilingi bangunan,
+    crane naik tinggi, fly-through antar ruangan, lateral track melintasi properti.
+  • Bila GAYA KAMERA menyebut drone/aerial, TERJEMAHKAN jadi kesan setara yang tertahan di bingkai —
+    mis. "drone aerial reveal" → "slow pull-back that keeps the same view in frame, evoking an aerial reveal".
+  • Setiap "camera_movement" WAJIB diakhiri frasa: "camera stays within the framing of the reference image".
+
 BATAS PANJANG KLIP: setiap blok video dihasilkan sebagai SATU klip berdurasi maksimal ${KLIP_MAKS} detik. Field "duration_sec" WAJIB bernilai ${KLIP_MAKS} atau kurang, dan deskripsi aksi tiap blok harus muat dalam durasi itu — jangan menuliskan rangkaian kejadian panjang yang mustahil selesai dalam ${KLIP_MAKS} detik. Video panjang dirakit dari banyak klip di tahap editing, bukan dari satu prompt.
 LARANGAN TEKS DI FRAME: Veo cenderung MEMBAKAR subtitle ke dalam gambar begitu ada dialog. Objek "prompt" blok VIDEO DILARANG meminta teks, caption, subtitle, atau tulisan muncul di dalam frame. (Pengecualian tunggal: blok "thumbnail" memang butuh "text_overlay" karena itu gambar sampul, bukan video.)
 SYARAT WAJIB — KONSISTENSI REFERENCE IMAGE: setiap prompt yang kamu tulis akan dieksekusi image-to-video/image dengan foto referensi terlampir. Setiap objek "prompt" WAJIB punya field "reference_image" (nama file referensinya) dan instruksi harus SETIA ke foto itu: jangan mengarang arsitektur, furnitur, warna, atau material yang tidak ada di foto. Gaya visual & kamera harus konsisten di semua blok agar terasa satu film.${agent ? `
@@ -177,9 +217,9 @@ FORMAT JSON WAJIB (patuhi persis):
   "caption": "caption share singkat",
   "hashtag_sets": ["5 string, tiap string 5-8 hashtag campur lokasi+jenis+brand #salambumiproperty"],
   "thumbnail": { "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "text_overlay": "...", "text_style": "...", "color_grade": "...", "focal_point": "...", "composition": "...", "badge": "...", "style": "...", "aspect_ratio": "16:9" } },
-  "opening": { "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "...", "lighting": "...", "mood": "...", "style": "...", "dialogue": { "speaker": "...", "language": "${language}", "line": "SAMA PERSIS dengan narration_id blok ini", "voice": "...", "delivery": "..." }, "audio": "ambience/musik latar saja", "duration_sec": ${KLIP_MAKS}, "aspect_ratio": "16:9" }, "narration_id": "narasi ${langName}" },
-  "scenes": [ { "scene": 1, "photo_label": "<label>", "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "...", "lighting": "...", "mood": "...", "style": "...", "dialogue": { "speaker": "...", "language": "${language}", "line": "SAMA PERSIS dengan narration_id blok ini", "voice": "...", "delivery": "..." }, "audio": "ambience/musik latar saja", "duration_sec": ${KLIP_MAKS}, "aspect_ratio": "16:9" }, "narration_id": "narasi ${langName}" } ],
-  "ending": { "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "...", "cta": "...", "dialogue": { "speaker": "...", "language": "${language}", "line": "SAMA PERSIS dengan narration_id blok ini", "voice": "...", "delivery": "..." }, "audio": "ambience/musik latar saja", "duration_sec": ${KLIP_MAKS}, "aspect_ratio": "16:9" }, "narration_id": "narasi CTA ${langName}" }
+  "opening": { "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "... , camera stays within the framing of the reference image", "lighting": "...", "mood": "...", "style": "...", "dialogue": { "speaker": "...", "language": "${language}", "line": "SAMA PERSIS dengan narration_id blok ini", "voice": "...", "delivery": "..." }, "audio": "ambience/musik latar saja", "duration_sec": ${KLIP_MAKS}, "aspect_ratio": "16:9" }, "narration_id": "narasi ${langName}, MAKSIMAL ${NARASI_MAKS} kata" },
+  "scenes": [ { "scene": 1, "photo_label": "<label>", "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "... , camera stays within the framing of the reference image", "lighting": "...", "mood": "...", "style": "...", "dialogue": { "speaker": "...", "language": "${language}", "line": "SAMA PERSIS dengan narration_id blok ini", "voice": "...", "delivery": "..." }, "audio": "ambience/musik latar saja", "duration_sec": ${KLIP_MAKS}, "aspect_ratio": "16:9" }, "narration_id": "narasi ${langName}, MAKSIMAL ${NARASI_MAKS} kata" } ],
+  "ending": { "prompt": { "reference_image": "scene_1.webp", "shot": "...", "subject": "...", "camera_movement": "... , camera stays within the framing of the reference image", "cta": "...", "dialogue": { "speaker": "...", "language": "${language}", "line": "SAMA PERSIS dengan narration_id blok ini", "voice": "...", "delivery": "..." }, "audio": "ambience/musik latar saja", "duration_sec": ${KLIP_MAKS}, "aspect_ratio": "16:9" }, "narration_id": "narasi CTA ${langName}, MAKSIMAL ${NARASI_MAKS} kata" }
 }
 "scenes" berisi TEPAT ${photos.length} item (urutan sama dengan daftar di atas). hashtag_sets TEPAT 5 string. titles/description/caption/hashtag tetap Bahasa Indonesia. Keluarkan HANYA objek JSON.`;
 
