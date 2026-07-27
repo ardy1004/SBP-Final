@@ -70,6 +70,29 @@ export function getClipMaxSec(toolId) {
 //   2. artefak umum yang merusak kesan profesional.
 export const NEGATIVE_PROMPT_VIDEO = 'subtitles, captions, burned-in text, on-screen text, watermark, logo, distorted hands, extra fingers, morphing, warping, deformed face, flickering, blurry, low quality, extra people';
 
+/**
+ * Nama berkas foto karakter di dalam ZIP Jalur C (AI Generate).
+ *
+ * Dipakai backend (`reference_image`/`character_reference`), entri ZIP, dan README —
+ * ketiganya WAJIB memakai fungsi ini agar tidak pernah berbeda.
+ *
+ * Sebelumnya tiap tempat menulis `nama.replace(/\s+/g,'_')` sendiri, yang meloloskan
+ * karakter apa pun selain spasi. Nama seperti "Ayu / Vina" menghasilkan
+ * "Ayu_/_Vina.webp" — garis miring itu ditafsirkan JSZip sebagai pemisah folder,
+ * sehingga fotonya mendarat di subfolder tak terduga dan tidak cocok lagi dengan
+ * nama yang disebut di prompt. Nama normal tetap menghasilkan keluaran yang sama
+ * persis seperti dulu, jadi ZIP lama tidak berubah bentuk.
+ */
+export function namaFileKarakter(nama) {
+  const bersih = String(nama ?? '')
+    .trim()
+    .replace(/[^\w\s-]/g, '')  // buang '/', '\', ':', dsb yang merusak path ZIP
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[_-]+|[_-]+$/g, '');
+  return `${bersih || 'karakter'}.webp`;
+}
+
 // Deskripsi ekspresi singkat English untuk injeksi ke prompt karakter (PRD 3.13/3.14).
 export const EXPRESSION_EN = {
   auto:            'expression adapted to scene tone',

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Copy, Check, FileImage } from 'lucide-react';
 import { sceneFileName, getLipsync } from './options';
-import type { ParsedJSON } from './jsonValidator';
+import { promptToText, asVeoPrompt, type ParsedJSON } from './jsonValidator';
 
 interface SceneAssignLite { photoId: number | null; label: string }
 
@@ -43,7 +43,12 @@ export default function SceneCards({ data, scenes, durations }: {
         const wcOk = wc <= Math.ceil(maxWords * 1.1);
         const label = scenes[i]?.label || sc.photo_reference_label || '(belum dilabeli)';
         const fileName = sceneFileName(i, label);
-        const prompt = sc.ai_ready_prompt ?? '';
+        // Prompt bisa berbentuk string (tool biasa) atau OBJEK terstruktur (Veo/Flow).
+        // promptToText() menyerialisasi objek apa adanya — itulah yang ditempel user
+        // ke Flow, karena Veo menerima prompt berformat JSON sebagai teks.
+        const prompt = promptToText(sc.ai_ready_prompt);
+        const veo = asVeoPrompt(sc.ai_ready_prompt);
+        const dialogLine = veo?.dialogue?.line?.trim() ?? '';
 
         return (
           <div key={i} className="border border-gray-200 rounded-2xl p-4 space-y-3 bg-white">
@@ -57,6 +62,17 @@ export default function SceneCards({ data, scenes, durations }: {
                 <span className={`text-xs flex items-center gap-1 ${wcOk ? 'text-emerald-600' : 'text-amber-600'}`}>
                   {wcOk ? '✅' : '⚠️'} {wc}/{maxWords} kata
                 </span>
+                {/* Penanda audio native: sekali lihat ketahuan videonya akan bersuara
+                    atau bisu — inti temuan audit ViralFrame 2026-07-26. */}
+                {veo && (
+                  <span
+                    className={`text-xs flex items-center gap-1 ${dialogLine ? 'text-emerald-600' : 'text-red-600'}`}
+                    title={dialogLine
+                      ? 'Dialog tertanam di prompt — Veo/Flow akan mengucapkannya'
+                      : 'dialogue.line kosong — video akan BISU di Veo/Flow'}>
+                    {dialogLine ? '🔊 dialog tertanam' : '🔇 tanpa dialog'}
+                  </span>
+                )}
               </div>
               <span className="flex items-center gap-1 text-[11px] text-[#94A3B8] font-mono">
                 <FileImage size={12} /> File: {fileName}

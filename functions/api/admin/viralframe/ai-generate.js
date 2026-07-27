@@ -18,6 +18,7 @@ import { jsonError, handleOptions } from '../../_shared/response.js';
 import {
   getMaxWords, EXPRESSION_EN,
   isNativeAudioTool, getClipMaxSec, NEGATIVE_PROMPT_VIDEO,
+  namaFileKarakter,
 } from '../../../_lib/viralframe-shared.js';
 import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
 
@@ -92,7 +93,11 @@ function isAutoValue(label) {
   return !label || label.trim().toLowerCase().startsWith('auto');
 }
 
-function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio }) {
+function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio, durasiSeragam }) {
+  // Budget kata kini PER SCENE (audit 2026-07-26). Bila semua scene berdurasi
+  // sama, sebut angkanya langsung supaya instruksinya sekonkret dulu; bila
+  // berbeda-beda, arahkan ke kolom 'Maks kata' milik masing-masing scene.
+  const batasKata = durasiSeragam ? `${maxWords} kata` : `batas "Maks kata" scene tersebut`;
   const registerLine = registerInstruction ? `\nGAYA BAHASA WAJIB: ${registerInstruction}\n` : '';
   // Mode voiceover/faceless: karakter = NARATOR yang terdengar tapi TIDAK tampil
   // di frame. Video prompt fokus pada visual properti POV/sinematik tanpa orang.
@@ -103,7 +108,7 @@ function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone,
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Karakter berperan sebagai NARATOR VOICEOVER: suaranya terdengar, tetapi WAJIB TIDAK PERNAH tampil di frame video.
   • Field 'prompt' (video) DILARANG menampilkan orang/talent/manusia manapun — subjek visual adalah RUANG & elemen properti dari sudut POV/sinematik (gerakan kamera + ruangan + pencahayaan + mood), BUKAN karakter.
-  • Field 'dialog_karakter' = TEKS VOICEOVER narator (tetap ikut pola delivery [4] & batas ${maxWords} kata) — nada bicara konsisten dengan ekspresi '${expressionLabel}'.
+  • Field 'dialog_karakter' = TEKS VOICEOVER narator (tetap ikut pola delivery [4] & batas ${batasKata}) — nada bicara konsisten dengan ekspresi '${expressionLabel}'.
   • Konsistensi: satu persona suara narator di semua scene (bukan konsistensi visual karakter, karena tidak ada karakter di layar).
 Abaikan instruksi "SUBJEK: karakter" di [3] — untuk mode ini SUBJEK visual = properti/ruang, orang tidak boleh muncul.`
     : `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -271,14 +276,17 @@ ${supportsRefImage
 [4] BAHASA & TEMPO DIALOG KARAKTER — WAJIB
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Field 'dialog_karakter' WAJIB dalam ${bahasa}.${registerLine}
-Bagian dialog (setelah klausa delivery di bawah) WAJIB MAKSIMAL ${maxWords} kata — ini BATAS KETAT, bukan saran. Klip video pendek; dialog kepanjangan akan terlihat dipercepat/tidak sinkron dengan gerak bibir.
+Bagian dialog (setelah klausa delivery di bawah) WAJIB MAKSIMAL sebanyak "Maks kata" yang tertera pada instruksi scene tersebut di user prompt — ini BATAS KETAT, bukan saran, dan BERBEDA-BEDA per scene mengikuti durasinya. Klip video pendek; dialog kepanjangan akan terlihat dipercepat/tidak sinkron dengan gerak bibir.
+${durasiSeragam
+    ? `Semua scene di permintaan ini berdurasi sama, jadi batasnya ${maxWords} kata untuk setiap scene.`
+    : `PERHATIAN: durasi scene BERBEDA-BEDA di permintaan ini. Baca "Maks kata" pada tiap scene satu per satu — JANGAN memakai satu angka yang sama untuk semua scene. Batas terbesar yang muncul adalah ${maxWords} kata.`}
 Field 'dialog_karakter' WAJIB berupa SATU KESATUAN TEKS (klausa delivery + dialog digabung, BUKAN dialog polos saja) dengan pola persis:
   "[Nama karakter] berbicara cepat, artikulasi jelas, tanpa jeda atau gagap, mengatakan: [dialog]"
-Klausa delivery ("[Nama karakter] berbicara cepat...") WAJIB selalu ada di depan — hanya bagian [dialog] setelah "mengatakan:" yang dihitung ke batas ${maxWords} kata.
-✗ SALAH: 'Selamat datang di hunian impian Anda, rumah nyaman dengan tiga kamar tidur yang luas dan taman yang asri di belakang.' (dialog polos tanpa klausa delivery, tidak ada instruksi tempo, melebihi ${maxWords} kata)
+Klausa delivery ("[Nama karakter] berbicara cepat...") WAJIB selalu ada di depan — hanya bagian [dialog] setelah "mengatakan:" yang dihitung ke batas ${batasKata}.
+✗ SALAH: 'Selamat datang di hunian impian Anda, rumah nyaman dengan tiga kamar tidur yang luas dan taman yang asri di belakang.' (dialog polos tanpa klausa delivery, tidak ada instruksi tempo, melebihi batas kata scene itu)
 ✗ SALAH (jika bahasa = Indonesia): 'Welcome to our property'
 ✓ BENAR: 'Ayu berbicara cepat, artikulasi jelas, tanpa jeda atau gagap, mengatakan: Selamat datang di hunian impian Anda.'
-Dialog harus: natural diucapkan, menyebut 1 fitur properti nyata, maksimal ${maxWords} kata.
+Dialog harus: natural diucapkan, menyebut 1 fitur properti nyata, maksimal ${batasKata}.
 JIKA bahasa = Indonesia: gunakan Bahasa Indonesia formal yang hangat.
 JIKA bahasa = English: gunakan English professional (klausa delivery tetap wajib, diterjemahkan proporsional, mis. "[Name] speaks quickly, clear articulation, no pauses or stutters, saying:").
 JIKA bahasa = Jawa: gunakan Bahasa Jawa Krama yang sopan.
@@ -320,7 +328,7 @@ Format yang diharapkan:
     "scene": 1,
     "kamera": "nama singkat gerakan kamera dalam 3-5 kata",
     "prompt": "teks prompt lengkap bahasa Inggris minimum 50 kata",
-    "dialog_karakter": "klausa delivery + dialog karakter dalam ${bahasa}, sesuai pola wajib di [4], maksimal ${maxWords} kata untuk bagian dialog",
+    "dialog_karakter": "klausa delivery + dialog karakter dalam ${bahasa}, sesuai pola wajib di [4], maksimal ${batasKata} untuk bagian dialog",
     "on_screen_text": "teks overlay singkat untuk scene ini — kosongkan string \\"\\" jika arketipe/gaya tidak menekankan teks on-screen"
   }
 ]
@@ -339,7 +347,8 @@ ATURAN TAMBAHAN FIELD 'prompt' — WAJIB, PELANGGARAN = OUTPUT DITOLAK:
     : ''}`;
 }
 
-function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes }) {
+function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneDurations, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes }) {
+  const durasiByScene = new Map((sceneDurations ?? []).map(d => [Number(d.scene), Number(d.durasi)]));
   const fasilitas = 'tidak disebutkan';
   const deskripsi = (property.deskripsi ?? '').slice(0, 200);
   const hargaLabel = `${formatRupiah(property.harga)}${property.nego ? ' (nego)' : property.nett ? ' (nett)' : ''}`;
@@ -357,7 +366,11 @@ function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments,
       // (lebih koheren dgn gaya video). Kalau tidak, fallback ke hint per-label.
       const kameraHint = cameraByScene.get(a.scene) || KAMERA_PER_LABEL[a.foto_label] || KAMERA_PER_LABEL.lainnya;
       const role = roleByScene.get(a.scene) ?? 'Body';
-      return `Scene ${a.scene}:\n  Foto    : ${fotoDeskripsi} (${a.foto_label})\n  Kamera  : ${kameraHint}\n  Durasi  : ${durasiDetik} detik\n  Role    : ${role}`;
+      // Durasi & budget kata PER SCENE. Sebelum audit 2026-07-26 keduanya dipaku
+      // ke satu angka per platform, sehingga pengaturan durasi di Step 1 tidak
+      // pernah berpengaruh apa pun di jalur ini.
+      const d = durasiByScene.get(a.scene) ?? durasiDetik;
+      return `Scene ${a.scene}:\n  Foto      : ${fotoDeskripsi} (${a.foto_label})\n  Kamera    : ${kameraHint}\n  Durasi    : ${d} detik\n  Maks kata : ${getMaxWords(d)} kata untuk bagian dialog\n  Role      : ${role}`;
     })
     .join('\n\n');
 
@@ -621,7 +634,23 @@ export async function onRequestPost(context) {
   if (!karakter) return jsonError('Karakter tidak ditemukan', 404);
 
   const durasiDetik = PLATFORM_DURASI[platform] ?? 8;
-  const maxWords = getMaxWords(durasiDetik);
+  // Durasi PER SCENE dari Step 1. Sebelum audit 2026-07-26 jalur ini memaku durasi
+  // ke PLATFORM_DURASI, sehingga pengaturan durasi Step 1 tidak berpengaruh apa pun:
+  // budget kata selalu dihitung dari 8 detik walau user menyetel 20 detik.
+  // Tetap toleran bila client lama tidak mengirimnya → jatuh ke perilaku lama.
+  const sceneDurations = Array.isArray(body.scene_durations)
+    ? body.scene_durations
+        .map(d => ({ scene: parseInt(d?.scene, 10), durasi: parseInt(d?.durasi, 10) }))
+        .filter(d => Number.isInteger(d.scene) && d.scene >= 1 && d.scene <= jumlahScene
+                  && Number.isInteger(d.durasi) && d.durasi >= 2 && d.durasi <= 30)
+    : [];
+  const daftarDurasi = sceneDurations.length > 0
+    ? sceneDurations.map(d => d.durasi)
+    : [durasiDetik];
+  const durasiSeragam = new Set(daftarDurasi).size <= 1;
+  // Batas kata yang disebut di system prompt = yang TERBESAR, supaya angka global
+  // tidak pernah lebih ketat dari budget scene mana pun (per-scene tetap mengikat).
+  const maxWords = Math.max(...daftarDurasi.map(getMaxWords));
   const expressionLabel = EXPRESSION_EN[expression] ?? EXPRESSION_EN.auto;
   const deskripsiKarakter = describeKarakter(karakter);
   const karakterDesc = describeKarakterUntukPrompt(karakter, expression);
@@ -632,8 +661,8 @@ export async function onRequestPost(context) {
   const nativeAudio = isNativeAudioTool(aiTool);
   const clipMaxSec = getClipMaxSec(aiTool);
 
-  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio });
-  const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes });
+  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio, durasiSeragam });
+  const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneDurations, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes });
 
   // ── Panggil AI dengan fallback berantai, respons streaming NDJSON ──────────
   // Urutan: provider pilihan user dulu, lalu sisanya (yang punya key). Heartbeat
@@ -713,7 +742,7 @@ export async function onRequestPost(context) {
       // Nama file referensi mengikuti isi ZIP (handleDownloadZip di frontend):
       // foto scene = sceneN_foto.webp, foto karakter = <Nama_Karakter>.webp —
       // supaya user/tool tahu persis gambar mana milik scene mana.
-      const karakterFile = `${String(karakter.nama).replace(/\s+/g, '_')}.webp`;
+      const karakterFile = namaFileKarakter(karakter.nama);
       const enrichedScenes = sceneData.map(s => {
         const assignment = fotoByScene.get(s.scene);
         return {

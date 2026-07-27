@@ -10,7 +10,7 @@ import {
   AI_TOOLS, RATIOS, LANGUAGES, HOOK_TYPES, CTA_TYPES, VISUAL_STYLES,
   TONES, PLATFORMS, PHOTO_LABELS, sceneRole, LANGUAGE_REGISTERS, REGISTER_INSTRUCTION,
   sceneFileName, characterFileName, AI_TOOL_FORMAT_SPEC,
-  isNativeAudioTool, getClipMaxSec,
+  isNativeAudioTool, getClipMaxSec, namaFileKarakter,
 } from './viralframe/options';
 import CharacterStepBase, { type Step3State } from './viralframe/CharacterStep';
 import { readNdjsonFinal } from '../../../lib/ndjson';
@@ -838,6 +838,8 @@ interface AIGenerateTabProps {
   register: string;
   cutawayExcluded: number[];
   sceneRoles: Record<number, 'Hook' | 'Body' | 'CTA'>;
+  /** Durasi per scene (detik) dari Step 1, index 0 = scene 1. */
+  sceneDurations: number[];
   // Data dari Step 2
   scenePhotos: Record<number, ScenePhoto>;
   // Data dari Step 3
@@ -849,7 +851,7 @@ interface AIGenerateTabProps {
 function AIGenerateTab({
   propertyId, propertyTitle, kodeListingStr, jumlahScene, platform, platforms, aiTool, bahasa,
   tone, visualStyle, hookType, ctaType, archetype, register, cutawayExcluded, sceneRoles,
-  scenePhotos, selectedKarakter, onEditStep,
+  sceneDurations, scenePhotos, selectedKarakter, onEditStep,
 }: AIGenerateTabProps) {
   const [musik, setMusik] = useState('corporate');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -866,6 +868,10 @@ function AIGenerateTab({
   const [aiStatus, setAiStatus] = useState<Record<string, AiStatusInfo> | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
+  // Pembatal generate. readNdjsonFinal() sudah menerima AbortSignal sejak awal,
+  // hanya belum pernah diberi — sehingga generate 12 scene tidak bisa dihentikan
+  // dan guard beforeunload di bawah justru mengurung user (audit 2026-07-26).
+  const abortRef = useRef<AbortController | null>(null);
 
   // Status kuota semua provider (sekali saat mount)
   useEffect(() => { getAiStatus().then(r => { if (r.success && r.data) setAiStatus(r.data); }); }, []);
@@ -923,7 +929,15 @@ function AIGenerateTab({
     // Arketipe (opsional) — client hitung koreografi kamera per scene + arahan sutradara,
     // kirim sebagai string siap-pakai supaya backend tidak perlu menduplikasi data arketipe.
     const arc = findArchetype(archetype);
-    const dur = PLATFORM_DURASI_VF[platform] ?? 8;
+    // Durasi PER SCENE dari Step 1 (audit 2026-07-26). Sebelumnya jalur ini memakai
+    // PLATFORM_DURASI_VF sehingga pengaturan durasi Step 1 tidak berpengaruh: budget
+    // kata selalu dari 8 detik, dan beatCountForDuration(8) selalu 2 beat sehingga
+    // cabang koreografi 3-beat tidak pernah tereksekusi.
+    const durasiScene = (n: number) => sceneDurations[n - 1] ?? PLATFORM_DURASI_VF[platform] ?? 8;
+    const scene_durations = Array.from({ length: jumlahScene }, (_, i) => ({
+      scene: i + 1,
+      durasi: durasiScene(i + 1),
+    }));
     const archetype_note = arc
       ? `${arc.label} — ${arc.shotGrammarNote} (mode presenter: ${arc.presenterMode}, pacing: ${arc.pacing})`
       : '';
@@ -942,7 +956,7 @@ function AIGenerateTab({
             scene: sceneNum,
             camera: isExcluded
               ? 'steady handheld shot, presenter stays in frame throughout, no cutaway'
-              : compileCameraChoreography(arc.cameraGrammar, sceneRoles[sceneNum] ?? 'Body', dur, i, aiTool),
+              : compileCameraChoreography(arc.cameraGrammar, sceneRoles[sceneNum] ?? 'Body', durasiScene(sceneNum), i, aiTool),
           };
         })
       : [];
@@ -958,6 +972,7 @@ function AIGenerateTab({
       hook_type: hookTypeLabel,
       cta_type: ctaTypeLabel,
       scene_roles,
+      scene_durations,
       musik_value: musik,
       musik_prompt: musikOpt.prompt,
       karakter_id: selectedKarakter.id,
@@ -983,6 +998,8 @@ function AIGenerateTab({
     setProgress(6);
     setProgressLabel(`Menghubungi ${AI_PROVIDER_LIST.find(p => p.id === provider)?.label ?? provider}…`);
     const progTimer = setInterval(() => setProgress(p => (p < 90 ? p + Math.max(1, (90 - p) * 0.08) : p)), 600);
+    const ac = new AbortController();
+    abortRef.current = ac;
     try {
       const payload = buildGeneratePayload();
       if (!payload) throw new Error('Konfigurasi belum lengkap');
@@ -991,9 +1008,10 @@ function AIGenerateTab({
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(payload),
+        signal: ac.signal,
       });
       // Sukses = stream NDJSON (anti wall-clock 30s); error validasi = JSON biasa.
-      const data = await readNdjsonFinal<AIGeneratedResult>(res);
+      const data = await readNdjsonFinal<AIGeneratedResult>(res, { signal: ac.signal });
       setProgress(100);
       setProgressLabel(data.metadata?.fell_back
         ? `Selesai (fallback ke ${data.metadata.provider_used})`
@@ -1002,11 +1020,22 @@ function AIGenerateTab({
       // Refresh status kuota setelah generate (mungkin berubah)
       getAiStatus().then(r => { if (r.success && r.data) setAiStatus(r.data); });
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Terjadi kesalahan');
+      // Pembatalan oleh user bukan kegagalan — jangan tampilkan sebagai error merah.
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        setProgressLabel('Dibatalkan');
+      } else {
+        setError(e instanceof Error ? e.message : 'Terjadi kesalahan');
+      }
     } finally {
       clearInterval(progTimer);
       setIsGenerating(false);
+      abortRef.current = null;
     }
+  };
+
+  const handleCancelGenerate = () => {
+    abortRef.current?.abort();
+    setProgress(0);
   };
 
   // Regenerate SATU scene: kirim konfigurasi yang sama + regenerate_scene + konteks
@@ -1073,7 +1102,7 @@ function AIGenerateTab({
           foto_file: `scene${scene.scene}_foto.webp`,
           foto_label: scene.foto_label ?? null,
           foto_deskripsi: scene.foto_deskripsi ?? null,
-          karakter_file: `${karakter.nama.replace(/\s+/g, '_')}.webp`,
+          karakter_file: namaFileKarakter(karakter.nama),
           kamera: scene.kamera,
           prompt: scene.prompt,
           // Untuk Veo/Flow, dialog sudah TERTANAM di dalam 'prompt' (di dalam tanda
@@ -1101,7 +1130,7 @@ function AIGenerateTab({
       if (karakter.foto_url) {
         try {
           const res = await fetch(`/api/admin/media?key=${encodeURIComponent(karakter.foto_url)}`, { credentials: 'include' });
-          if (res.ok) zip.file(`${karakter.nama.replace(/\s+/g, '_')}.webp`, await res.blob());
+          if (res.ok) zip.file(namaFileKarakter(karakter.nama), await res.blob());
         } catch { /* skip */ }
       }
 
@@ -1121,7 +1150,7 @@ function AIGenerateTab({
         'CARA PAKAI:',
         `1. Buka ${metadata.ai_tool} (${metadata.ai_tool === 'google_flow' ? 'labs.google/fx/tools/flow' : 'misal: labs.google.com/video untuk Veo3'})`,
         '2. Upload foto: scene1_foto.webp',
-        `3. Upload karakter: ${karakter.nama.replace(/\s+/g, '_')}.webp (sebagai reference/style)`,
+        `3. Upload karakter: ${namaFileKarakter(karakter.nama)} (sebagai reference/style)`,
         ...(isNativeAudioTool(metadata.ai_tool)
           ? [
               '4. Copy-paste isi field "prompt" dari scene1.txt.',
@@ -1140,7 +1169,7 @@ function AIGenerateTab({
         'ISI FILE ZIP:',
         ...scenes.map(s => `  scene${s.scene}.txt  — Prompt + metadata scene ${s.scene}`),
         ...scenes.map((_, i) => `  scene${i + 1}_foto.webp — Foto properti untuk scene ${i + 1}`),
-        `  ${karakter.nama.replace(/\s+/g, '_')}.webp — Foto karakter`,
+        `  ${namaFileKarakter(karakter.nama)} — Foto karakter`,
         '  README_cara_pakai.txt — File ini',
         '',
         '───────────────────────────────────────────',
@@ -1315,9 +1344,15 @@ function AIGenerateTab({
                 <div className="h-full rounded-full transition-all duration-500"
                   style={{ width: `${Math.round(progress)}%`, background: 'linear-gradient(90deg, #1565C0, #29B6F6)' }} />
               </div>
-              <p className="text-xs text-[#64748B] flex items-center gap-1.5">
-                <Loader2 size={12} className="animate-spin" /> {progressLabel || 'Memproses…'} ({Math.round(progress)}%)
-              </p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-[#64748B] flex items-center gap-1.5">
+                  <Loader2 size={12} className="animate-spin" /> {progressLabel || 'Memproses…'} ({Math.round(progress)}%)
+                </p>
+                <button type="button" onClick={handleCancelGenerate}
+                  className="shrink-0 px-2.5 py-1 rounded-lg border border-gray-200 text-xs font-semibold text-[#64748B] hover:bg-gray-50 transition-colors">
+                  Batalkan
+                </button>
+              </div>
             </div>
           )}
 
@@ -2440,11 +2475,14 @@ export default function AdminViralFrameWorkspacePage() {
     const e: string[] = [];
     if (s1.sceneCount < 2 || s1.sceneCount > 12) e.push('Jumlah scene harus 2–12.');
     if (s1.platforms.length === 0) e.push('Pilih minimal 1 platform distribusi.');
+    // Rentang 2–30 detik = rentang yang benar-benar didukung getLipsync().
+    // Di luar itu nilainya di-clamp diam-diam, jadi lebih baik ditolak terang-terangan.
+    const durasiSah = (d: number) => Number.isFinite(d) && d >= 2 && d <= 30;
     if (s1.durationMode === 'uniform') {
-      if (!(s1.uniformDuration > 0)) e.push('Durasi per scene harus lebih dari 0.');
+      if (!durasiSah(s1.uniformDuration)) e.push('Durasi per scene harus antara 2–30 detik.');
     } else {
-      const bad = s1.manualDurations.slice(0, s1.sceneCount).some(d => !(d > 0));
-      if (bad) e.push('Setiap durasi scene harus lebih dari 0.');
+      const bad = s1.manualDurations.slice(0, s1.sceneCount).some(d => !durasiSah(d));
+      if (bad) e.push('Setiap durasi scene harus antara 2–30 detik.');
     }
     if (s1.ctaType === 'comment_keyword' && !s1.ctaKeyword.trim()) {
       e.push('Keyword komentar wajib diisi untuk CTA "Komen [KEYWORD]".');
@@ -2935,7 +2973,10 @@ export default function AdminViralFrameWorkspacePage() {
                     <tr key={i}>
                       <td className="px-3 py-1.5 text-[#0F172A]">Scene {i + 1} <span className="text-[#94A3B8] text-xs">({sceneRole(i, s1.sceneCount)})</span></td>
                       <td className="px-3 py-1.5">
-                        <input type="number" min={1} max={60} value={s1.manualDurations[i] ?? 0}
+                        {/* 2–30 detik, SAMA dengan mode seragam. Dulu 1–60 padahal
+                            getLipsync() meng-clamp ke 2–30, jadi durasi 45 detik
+                            diam-diam diperlakukan sebagai 30 detik tanpa peringatan. */}
+                        <input type="number" min={2} max={30} value={s1.manualDurations[i] ?? 0}
                           onChange={e => setManualDuration(i, parseInt(e.target.value, 10) || 0)}
                           className="w-24 px-2 py-1 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0]" />
                       </td>
@@ -3263,6 +3304,7 @@ export default function AdminViralFrameWorkspacePage() {
               cutawayExcluded={s1.cutawayExcluded}
               sceneRoles={sceneRolesForAI}
               scenePhotos={scenePhotosForAI}
+              sceneDurations={durations}
               selectedKarakter={selectedKarakterForAI}
               onEditStep={setStep}
             />

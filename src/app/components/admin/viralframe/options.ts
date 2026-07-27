@@ -11,6 +11,7 @@ import {
   isNativeAudioTool as sharedIsNativeAudioTool,
   getClipMaxSec as sharedGetClipMaxSec,
   NEGATIVE_PROMPT_VIDEO as SHARED_NEGATIVE_PROMPT_VIDEO,
+  namaFileKarakter as sharedNamaFileKarakter,
 } from '../../../../../functions/_lib/viralframe-shared.js';
 
 export interface Opt { value: string; label: string }
@@ -328,6 +329,8 @@ export const isNativeAudioTool: (toolId: string) => boolean = sharedIsNativeAudi
 /** Batas panjang satu klip (detik) untuk tool ini, atau null bila tidak dibatasi. */
 export const getClipMaxSec: (toolId: string) => number | null = sharedGetClipMaxSec;
 export const NEGATIVE_PROMPT_VIDEO: string = SHARED_NEGATIVE_PROMPT_VIDEO;
+/** Nama berkas foto karakter di ZIP Jalur C — sinkron dengan ai-generate.js. */
+export const namaFileKarakter: (nama: string) => string = sharedNamaFileKarakter;
 
 // ─── Penamaan file aset (dipakai Master Prompt + ZIP export Fase V4b) ─────────
 // PENTING (requirement Fase V4b): ZIP generation WAJIB memakai sceneFileName() &

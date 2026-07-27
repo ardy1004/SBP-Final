@@ -76,3 +76,14 @@ bullet
 (a
 Environment
 tujuan
+# Gelombang berikutnya (sesi audit ViralFrame 2026-07-26). Pola glob menutup
+# seluruh kelasnya, bukan cuma nama yang kebetulan sudah muncul.
+*)
+*(
+*{
+*}
+send*
+`*
+[0-9].[0-9]*.[0-9]*
+string
+charLimit*

@@ -15,12 +15,12 @@ Tidak ada yang rusak secara build — seluruh temuan bersifat **desain & kualita
 |---|---|---|---|
 | 1 | Narasi/dialog tidak pernah sampai ke Veo → video bisu | **Kritis** | ✅ diperbaiki (Tahap 1) |
 | 2 | Tidak ada `negative_prompt` untuk Veo/Flow | Tinggi | ✅ diperbaiki (Tahap 1) |
-| 3 | Durasi per scene Step 1 diabaikan total oleh Jalur C | Tinggi | ⬜ Tahap 3 |
+| 3 | Durasi per scene Step 1 diabaikan total oleh Jalur C | Tinggi | ✅ diperbaiki (Tahap 3) |
 | 4 | Batas 8 detik per klip Veo tidak pernah disebut | Tinggi | ✅ diperbaiki (Tahap 1) |
-| 5 | Batas input durasi tidak konsisten (2–30 vs 1–60 vs clamp 2–30) | Sedang | ⬜ Tahap 3 |
-| 6 | `ai_ready_prompt` tetap satu string, bukan objek JSON native Veo | Sedang | ⬜ Tahap 2 |
-| 7 | Tidak ada `AbortController` — generate tak bisa dibatalkan | Sedang | ⬜ Tahap 4 |
-| 8 | Dua konvensi penamaan file antar jalur | Rendah | ⬜ Tahap 4 |
+| 5 | Batas input durasi tidak konsisten (2–30 vs 1–60 vs clamp 2–30) | Sedang | ✅ diperbaiki (Tahap 3) |
+| 6 | `ai_ready_prompt` tetap satu string, bukan objek JSON native Veo | Sedang | ✅ diperbaiki (Tahap 2) |
+| 7 | Tidak ada `AbortController` — generate tak bisa dibatalkan | Sedang | ✅ diperbaiki (Tahap 4) |
+| 8 | Nama berkas karakter dirakit inline di 5 tempat | Rendah | ✅ diperbaiki (Tahap 4) |
 | 9 | `PHOTO_LABEL_TO_FOTO_LABEL` gagal diam-diam ke `lainnya` | Rendah | ⬜ |
 
 ---
@@ -74,7 +74,7 @@ wajib berpasangan.
 `NEGATIVE_PROMPT_VIDEO` ditambahkan di `functions/_lib/viralframe-shared.js`, disuntik **server-side**
 (deterministik — tidak ada gunanya membakar token dan menanggung risiko model lupa).
 
-### 3. Durasi per scene diabaikan Jalur C — Tinggi (belum diperbaiki)
+### 3. Durasi per scene diabaikan Jalur C — Tinggi
 
 [AdminViralFrameWorkspacePage.tsx:920](src/app/components/admin/AdminViralFrameWorkspacePage.tsx#L920) —
 `PLATFORM_DURASI_VF[platform] ?? 8` mengunci durasi ke angka per-platform. Akibatnya:
@@ -84,17 +84,64 @@ wajib berpasangan.
 
 Kontrol durasi Step 1 praktis dekoratif untuk jalur ini. Jalur A menghormatinya dengan benar.
 
+**Perbaikan (Tahap 3).** Frontend mengirim `scene_durations` per scene; backend memakainya untuk
+budget kata per scene (kolom `Maks kata` di instruksi tiap scene) dan koreografi kamera. Bila durasi
+seragam, system prompt tetap menyebut satu angka konkret; bila berbeda-beda, ia mengarahkan model
+membaca kolom per scene. Client lama yang tidak mengirim field ini jatuh ke perilaku lama.
+
+Terverifikasi cabang 3-beat kini benar-benar tercapai:
+
+```
+durasi  8s (lama, dipaku) → beat: 2
+durasi 12s (kini terpakai) → beat: 3
+```
+
+### 5. Batas input durasi — Sedang
+
+Manual dulu `min=1 max=60` sementara mode seragam `min=2 max=30` dan `getLipsync()` meng-clamp 2–30 —
+durasi 45 detik diam-diam diperlakukan sebagai 30 detik. Kini keduanya 2–30 dan validasi Step 1
+menolak di luar rentang itu, bukan sekadar `> 0`.
+
+### 7. AbortController — Sedang
+
+`readNdjsonFinal()` **sudah** menerima `AbortSignal` sejak awal, hanya tidak pernah diberi. Generate
+12 scene tidak bisa dihentikan, dan guard `beforeunload` justru mengurung user. Kini ada
+`AbortController` + tombol **Batalkan** di bar progres; pembatalan tidak ditampilkan sebagai error merah.
+
 ### 4. Batas 8 detik Veo — Tinggi
 
 UI mengizinkan 2–30 detik (uniform) dan 1–60 detik (manual); Veo 3.x menghasilkan 8 detik per generate.
 Tidak ada peringatan di mana pun. Kini: banner di Step 1 + catatan `BATAS KLIP TOOL` di Master Prompt
 + warning validator.
 
-### 6. Struktur JSON untuk Veo — Sedang (Tahap 2)
+### 6. Struktur JSON untuk Veo — Sedang
 
 Struktur terbaik yang ada justru bukan yang dipakai untuk Veo. `youtube-long.js` sudah mengeluarkan
-objek per shot (`reference_image`, `shot`, `subject`, `camera_movement`, `lighting`, `mood`, `style`,
-`duration_sec`, `aspect_ratio`). Jalur A & C masih satu string natural language.
+objek per shot; Jalur A & C masih satu string natural language.
+
+**Perbaikan (Tahap 2).** Untuk `google_flow`/`veo3`, `ai_ready_prompt` di Jalur A kini berupa
+**objek terstruktur**: `shot`, `subject`, `action`, `scene`, `camera_movement`, `lighting`, `mood`,
+`style`, `dialogue{speaker,language,line,voice,delivery}`, `audio`, `negative_prompt`,
+`duration_sec`, `aspect_ratio`.
+
+Keuntungan di luar strukturnya: pemeriksaan dialog tidak lagi menebak lewat tanda kutip, melainkan
+membaca `dialogue.line` — jauh lebih andal. Bentuk string tetap diterima agar riwayat generation lama
+di `viralframe_generations` tidak rusak, dan tool non-Veo tidak berubah sama sekali.
+
+**Jalur C sengaja TIDAK diubah ke objek.** Field `prompt`-nya dikonsumsi ZIP dan UI sebagai string;
+mengubahnya berarti churn besar untuk jalur yang masalah utamanya (video bisu) sudah tuntas di Tahap 1.
+
+### 8. Nama berkas karakter — Rendah
+
+Lima tempat merakit sendiri `nama.replace(/\s+/g,'_')`. Nama seperti `Ayu / Vina` menghasilkan
+`Ayu_/_Vina.webp` — garis miring ditafsirkan JSZip sebagai pemisah folder, sehingga foto mendarat di
+subfolder tak terduga dan tidak cocok lagi dengan nama yang disebut di prompt. Kini satu fungsi
+`namaFileKarakter()` di `viralframe-shared.js`; nama normal menghasilkan keluaran identik seperti dulu.
+
+**Yang TIDAK dilakukan:** menyeragamkan penamaan *scene* antar jalur (`scene01_fasad.webp` vs
+`scene1_foto.webp`). Kedua ZIP itu artefak terpisah dan masing-masing konsisten dengan README-nya
+sendiri; menyatukannya menuntut backend mereplikasi slugify label Title Case dan berisiko memecah
+Jalur C yang sudah bekerja, demi keuntungan kosmetik. Dicatat sebagai utang teknis, bukan cacat.
 
 ---
 
@@ -114,7 +161,7 @@ objek per shot (`reference_image`, `shot`, `subject`, `camera_movement`, `lighti
 
 ---
 
-## Verifikasi Tahap 1
+## Verifikasi
 
 | Uji | Hasil |
 |---|---|
@@ -125,11 +172,22 @@ objek per shot (`reference_image`, `shot`, `subject`, `camera_movement`, `lighti
 | Validator: prompt benar → 0 warning | ✅ |
 | Validator: prompt bisu → 2 warning tepat sasaran | ✅ |
 | Detektor bahasa: tidak lagi false-positive pada kutipan ID | ✅ |
+| Tahap 2: skema objek Veo (dialogue/negative/duration/ratio) | 3/3 ✅ |
+| Tahap 2: Kling tetap bentuk string (tanpa regresi) | ✅ |
+| Tahap 2: validator objek — line kosong / beda naskah / durasi >8s | 3/3 ✅ |
+| Tahap 2: riwayat lama bentuk string tetap lolos | ✅ |
+| Tahap 3: cabang koreografi 3-beat kini tercapai (12s → 3 beat) | ✅ |
+| Tahap 4: `namaFileKarakter` — nama normal identik, `Ayu / Vina` tidak lagi bikin subfolder | ✅ |
 
-## Sisa roadmap
+Semua verifikasi di atas dijalankan lewat probe esbuild sekali-pakai terhadap kode nyata, bukan
+pembacaan manual. Tidak ada tes otomatis permanen — itu tetap utang yang lebih besar (lihat
+`AUDIT_2026-07-26.md`).
 
-| Tahap | Isi |
-|---|---|
-| 2 | Skema JSON native Veo untuk `google_flow`/`veo3` (temuan 6) |
-| 3 | Sambungkan durasi Step 1 ke Jalur C + samakan batas input (temuan 3, 5) |
-| 4 | `AbortController` + samakan konvensi nama file (temuan 7, 8) |
+## Sisa
+
+| # | Butir | Alasan ditunda |
+|---|---|---|
+| 9 | `PHOTO_LABEL_TO_FOTO_LABEL` jatuh diam-diam ke `lainnya` bila `PHOTO_LABELS` bertambah tanpa peta diperbarui | Rendah; kedua daftar saat ini sinkron (24 entri) |
+| — | Penyeragaman nama berkas *scene* antar jalur | Kosmetik, berisiko memecah Jalur C (lihat temuan 8) |
+| — | Skema objek untuk Jalur C | Masalah utamanya sudah tuntas di Tahap 1 |
+| — | **Uji nyata di Google Flow** | Butuh akun & eksekusi manual — hanya user yang bisa |
