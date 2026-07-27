@@ -183,6 +183,39 @@ Semua verifikasi di atas dijalankan lewat probe esbuild sekali-pakai terhadap ko
 pembacaan manual. Tidak ada tes otomatis permanen — itu tetap utang yang lebih besar (lihat
 `AUDIT_2026-07-26.md`).
 
+## Audit lanjutan — AI Generate & YouTube Long
+
+Diminta terpisah setelah perbaikan Tahap 1–4 di atas. Temuan utamanya: **perbaikan video-bisu
+hanya menutup 2 dari 3 jalur** — YouTube Long terlewat.
+
+| # | Temuan | Tingkat | Status |
+|---|---|---|---|
+| Y1 | YouTube Long masih bisu — `narration_id` di luar objek prompt | **Kritis** | ✅ |
+| Y2 | Batch melapor "berhasil" tanpa membaca hasil (`res.ok` true seketika di NDJSON) | Tinggi | ✅ |
+| Y3 | Batch memakai label palsu `Foto 1`…`Foto 12` | Tinggi | ✅ |
+| Y4 | Jumlah scene tidak divalidasi — respons terpotong diterima & disimpan | Tinggi | ✅ |
+| Y5 | Tidak ada `negative_prompt` di YouTube Long | Sedang | ✅ |
+| Y6 | Reader NDJSON disalin manual dan sudah menyimpang | Sedang | ✅ |
+| Y7 | Batch menjalankan generate serentak, padahal terlihat sekuensial | Sedang | ✅ |
+| C1 | ZIP Jalur C menulis `durasi_detik` dari default platform | Sedang | ✅ |
+| C2 | `AI_TOOL_OPTIONS` mati & nilainya menyimpang (`'Veo3'` vs `'veo3'`) | Rendah | ✅ |
+| C3 | Karakter wajib walau arketipe faceless — terbaca seperti bug | Rendah | ✅ |
+
+**Y2 adalah yang paling berbahaya** bukan karena kerusakannya, tapi karena ia membuat laporan
+berbohong: Anda melihat "12 berhasil" padahal isinya bisa gagal semua. Terbukti lewat probe —
+`res.ok` bernilai `true` pada stream yang baris terakhirnya `{done:true,error:...}`.
+
+**Y3 tidak bisa diperbaiki tanpa data.** `property_images` tidak punya kolom label ruangan sama
+sekali; label hanya dipilih ulang tiap sesi. Karena itu migrasi `0026` menambahkan `label_ruangan`,
+dengan UI pelabelan di kartu foto properti. Batch kini melewati properti yang belum berlabel dan
+menyebut alasannya, bukan mengarang.
+
+`BAHASA_OPTIONS` juga tidak terpakai, tapi **sengaja dibiarkan**: nilainya (`Indonesia`/`English`/
+`Jawa`) memang nilai yang dipakai `bahasa`, jadi ia hanya mati — bukan ranjau seperti
+`AI_TOOL_OPTIONS` yang nilainya menyimpang.
+
+---
+
 ## Sisa
 
 | # | Butir | Alasan ditunda |

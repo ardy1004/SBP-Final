@@ -14,12 +14,10 @@ export const PLATFORM_OPTIONS: PlatformOption[] = [
   { value: 'fb_reels', label: '👥 Facebook Reels', rasio: '9:16', durasi: 8 },
 ];
 
-export interface AiToolOption { value: string; label: string }
-export const AI_TOOL_OPTIONS: AiToolOption[] = [
-  { value: 'Veo3', label: '🎬 Veo 3 (Google)' },
-  { value: 'Kling', label: '🎥 Kling AI' },
-  { value: 'Wan', label: '🌊 Wan (SiliconFlow)' },
-];
+// AI_TOOL_OPTIONS DIHAPUS (audit 2026-07-26): tidak pernah dipakai, dan nilainya
+// menyimpang dari AI_TOOLS di viralframe/options.ts ('Veo3' vs 'veo3',
+// tanpa 'google_flow'). Kalau sempat tersambung, isNativeAudioTool() akan gagal
+// diam-diam dan video kembali bisu. Pakai AI_TOOLS dari options.ts.
 
 export interface BahasaOption { value: string; label: string }
 export const BAHASA_OPTIONS: BahasaOption[] = [

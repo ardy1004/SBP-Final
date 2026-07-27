@@ -32,7 +32,7 @@ const AI_STATUS_COLOR: Record<'green' | 'yellow' | 'red', string> = { green: '#1
 // hanya untuk menghitung jumlah beat koreografi kamera Jalur C.
 const PLATFORM_DURASI_VF: Record<string, number> = { tiktok: 8, ig_reels: 8, yt_shorts: 10, fb_reels: 8 };
 import {
-  PLATFORM_OPTIONS, AI_TOOL_OPTIONS, MUSIK_OPTIONS, FOTO_LABEL_OPTIONS,
+  PLATFORM_OPTIONS, MUSIK_OPTIONS, FOTO_LABEL_OPTIONS,
 } from '../../lib/viralframe-constants';
 import { compileMasterPrompt, estimateTokens } from './viralframe/masterPromptCompiler';
 import { validateSceneJson, type ParsedJSON, type ValidateResult } from './viralframe/jsonValidator';
@@ -762,7 +762,7 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
 }
 
 // ─── Jalur C: AI Generate component ─────────────────────────────────────────
-// Konstanta (PLATFORM_OPTIONS, AI_TOOL_OPTIONS, BAHASA_OPTIONS, MUSIK_OPTIONS,
+// Konstanta (PLATFORM_OPTIONS, MUSIK_OPTIONS,
 // FOTO_LABEL_OPTIONS) diimport dari ../../lib/viralframe-constants — sumber
 // tunggal yang sama dipakai Step 1/2 agar value enum tidak divergen lagi.
 
@@ -1097,7 +1097,10 @@ function AIGenerateTab({
           kode_listing: metadata.kode_listing,
           platform: platform?.label ?? metadata.platform,
           rasio: platform?.rasio ?? null,
-          durasi_detik: platform?.durasi ?? null,
+          // Durasi scene INI, bukan default platform. Sejak durasi per scene
+          // dihormati backend, memakai platform?.durasi membuat ZIP menyebut
+          // "8 detik" untuk prompt yang disusun untuk 15 detik.
+          durasi_detik: sceneDurations[scene.scene - 1] ?? platform?.durasi ?? null,
           ai_tool: metadata.ai_tool,
           bahasa: metadata.bahasa,
           musik: musikLabel,
@@ -1274,6 +1277,21 @@ function AIGenerateTab({
                   <span className="text-sm font-medium text-amber-600">⚠️ Belum pilih</span>
                 )}
               </div>
+              {/* Arketipe faceless/voiceover tetap menuntut karakter — ia dipakai
+                  sebagai persona SUARA narator, bukan sosok di layar. Tanpa
+                  keterangan ini kewajiban tersebut terbaca seperti bug. */}
+              {(() => {
+                const arc = findArchetype(archetype);
+                if (!arc || arc.presenterMode === 'on_camera') return null;
+                return (
+                  <div className="px-4 pb-2.5 -mt-1">
+                    <p className="text-[11px] text-[#94A3B8] leading-relaxed">
+                      Arketipe <strong>{arc.label}</strong> tidak menampilkan orang di layar, tapi karakter tetap wajib dipilih —
+                      dipakai sebagai <strong>persona suara narator</strong> (nada bicara &amp; ekspresi), bukan sosok yang tampil.
+                    </p>
+                  </div>
+                );
+              })()}
               <div className="px-4 py-2.5">
                 <span className="text-xs text-[#64748B] block mb-1.5">Foto per Scene</span>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
