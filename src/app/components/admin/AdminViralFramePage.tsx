@@ -1,5 +1,6 @@
 import { bacaJson } from '../../../lib/api';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { readNdjsonFinal } from '../../../lib/ndjson';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router';
 import {
   Search, Filter, ImageOff, Video, X, Sparkles, PenLine, Clapperboard,
@@ -194,7 +195,8 @@ export default function AdminViralFramePage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [batchRunning, setBatchRunning] = useState(false);
   const [batchDone, setBatchDone] = useState(0);
-  const [batchResult, setBatchResult] = useState<{ ok: number; failed: { id: number; title: string; reason: string }[] } | null>(null);
+  const [batchResult, setBatchResult] = useState<{ ok: number; failed: { id: number; title: string; reason: string }[]; dihentikan?: boolean } | null>(null);
+  const batchAbortRef = useRef<AbortController | null>(null);
   const toggleSelect = (id: number) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const refreshStatus = () => fetch('/api/admin/viralframe/status', { credentials: 'include' }).then(r => bacaJson(r))
     .then(j => {
@@ -221,11 +223,14 @@ export default function AdminViralFramePage() {
     setBatchRunning(true); setBatchDone(0); setBatchResult(null);
     const failed: { id: number; title: string; reason: string }[] = [];
     let ok = 0;
+    let dihentikan = false;
+    const ac = new AbortController();
+    batchAbortRef.current = ac;
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
       const title = properties.find(p => p.id === id)?.title ?? `Properti #${id}`;
       try {
-        const detailRes = await fetch(`/api/admin/properties/${id}`, { credentials: 'include' });
+        const detailRes = await fetch(`/api/admin/properties/${id}`, { credentials: 'include', signal: ac.signal });
         if (!detailRes.ok) throw new Error(`Gagal ambil detail properti (HTTP ${detailRes.status})`);
         const detailJson = await bacaJson(detailRes);
         const images: { url_webp: string }[] = detailJson.data?.images ?? [];
@@ -234,19 +239,28 @@ export default function AdminViralFramePage() {
         const res = await fetch('/api/admin/viralframe/youtube-long', {
           method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ property_id: id, photos, visual_style: '', camera_style: '' }),
+          signal: ac.signal,
         });
-        if (!res.ok) {
-          const errJson = await bacaJson(res).catch(() => null);
-          throw new Error(errJson?.error || `HTTP ${res.status}`);
-        }
+        // WAJIB menunggu baris {done,...}. Endpoint ini mengalirkan NDJSON, jadi
+        // res.ok bernilai true SEKETIKA (begitu header tiba) — jauh sebelum AI
+        // menjawab. Versi lama menghitung ok++ di titik itu, sehingga generate
+        // yang gagal tetap dilaporkan berhasil, DAN loop melepas N permintaan
+        // serentak walau terlihat sekuensial (audit 2026-07-26).
+        await readNdjsonFinal(res, { signal: ac.signal });
         ok++;
       } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') { dihentikan = true; break; }
         failed.push({ id, title, reason: err instanceof Error ? err.message : 'Gagal' });
       }
       setBatchDone(i + 1);
     }
-    setBatchRunning(false); setSelected(new Set()); setBatchResult({ ok, failed }); refreshStatus();
+    batchAbortRef.current = null;
+    setBatchRunning(false); setSelected(new Set());
+    setBatchResult({ ok, failed, dihentikan });
+    refreshStatus();
   };
+
+  const stopBatch = () => batchAbortRef.current?.abort();
 
   const openModeModal = (id: number, judul: string) => setSelectedProperty({ id, judul });
   const closeModal = () => setSelectedProperty(null);
@@ -506,7 +520,7 @@ export default function AdminViralFramePage() {
       {batchResult && (
         <div className={`rounded-2xl p-4 text-sm ${batchResult.failed.length === 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-amber-50 text-amber-800 border border-amber-100'}`}>
           <div className="font-semibold mb-1">
-            Batch selesai: {batchResult.ok} berhasil{batchResult.failed.length > 0 ? `, ${batchResult.failed.length} gagal` : ''}.
+            {batchResult.dihentikan ? 'Batch dihentikan' : 'Batch selesai'}: {batchResult.ok} berhasil{batchResult.failed.length > 0 ? `, ${batchResult.failed.length} gagal` : ''}.
           </div>
           {batchResult.failed.length > 0 && (
             <ul className="list-disc pl-5 space-y-0.5">
@@ -525,7 +539,14 @@ export default function AdminViralFramePage() {
           <span className="text-sm font-medium">{selected.size} properti dipilih</span>
           <div className="flex items-center gap-2">
             {batchRunning
-              ? <span className="text-xs">Memproses {batchDone}/{selected.size}…</span>
+              ? (
+                <>
+                  <span className="text-xs">Memproses {batchDone}/{selected.size}…</span>
+                  <button onClick={stopBatch} className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-white/30 text-white/90 hover:bg-white/10">
+                    Hentikan
+                  </button>
+                </>
+              )
               : <button onClick={() => setSelected(new Set())} className="text-xs text-white/70 hover:text-white">Batal</button>}
             <button onClick={runBatch} disabled={batchRunning}
               className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-500 hover:bg-red-600 disabled:opacity-50">

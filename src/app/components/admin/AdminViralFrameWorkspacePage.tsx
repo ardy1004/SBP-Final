@@ -1828,6 +1828,7 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
   const [error, setError] = useState('');
   const [result, setResult] = useState<YtResult | null>(null);
   const [copied, setCopied] = useState('');
+  const abortRef = useRef<AbortController | null>(null);
   const copy = (text: string, key: string) => { navigator.clipboard?.writeText(text).then(() => { setCopied(key); setTimeout(() => setCopied(c => (c === key ? '' : c)), 1500); }).catch(() => {}); };
 
   const togglePhoto = (im: { id: number; url_webp: string }) => setSelected(prev => {
@@ -1853,9 +1854,11 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
     if (useAgent && agentId == null) { setError('Pilih agen yang tampil dalam video, atau matikan opsi agen.'); return; }
     setLoading(true); setError(''); setProgress(8);
     const timer = setInterval(() => setProgress(p => (p < 90 ? p + Math.max(1, (90 - p) * 0.06) : p)), 700);
+    const ac = new AbortController();
+    abortRef.current = ac;
     try {
       const r = await fetch('/api/admin/viralframe/youtube-long', {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, signal: ac.signal,
         body: JSON.stringify({
           property_id: propertyId,
           photos: selected.map(s => ({ label: s.label, url_webp: s.url_webp })),
@@ -1866,38 +1869,22 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
           agent_id: useAgent ? agentId : undefined,
         }),
       });
-      // Error validasi (4xx/5xx) tetap JSON biasa; sukses = stream NDJSON
-      // (heartbeat tiap 2s + baris terakhir {done, data|error}) agar lolos
-      // wall-clock 30s Worker saat panggilan AI lambat.
-      const ct = r.headers.get('content-type') ?? '';
-      if (ct.includes('application/json')) {
-        const j = await bacaJson(r);
-        throw new Error(j.error ?? 'Gagal generate');
-      }
-      if (!r.ok || !r.body) throw new Error('Gagal generate (koneksi)');
-      const reader = r.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      let final: { done?: boolean; data?: YtResult; error?: string } | null = null;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (value) buf += dec.decode(value, { stream: true });
-        let nl;
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
-          if (!line) continue;
-          try {
-            const o = JSON.parse(line);
-            if (o.done) final = o;
-          } catch { /* abaikan baris rusak */ }
-        }
-        if (done) break;
-      }
-      if (!final) throw new Error('Koneksi terputus saat generate. Coba lagi.');
-      if (final.error || !final.data) throw new Error(final.error ?? 'Gagal generate');
-      setResult(final.data); setProgress(100);
-    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Gagal'); } finally { clearInterval(timer); setLoading(false); }
+      // Sukses = stream NDJSON (heartbeat tiap 2s + baris terakhir {done,data|error})
+      // agar lolos wall-clock 30s Worker; error validasi tetap JSON biasa.
+      // Dulu reader-nya disalin manual di sini dan sudah menyimpang dari
+      // src/lib/ndjson.ts: tidak mengenali halaman HTML error (gejala 1102),
+      // tanpa penanganan 502/504, tanpa AbortSignal. Sekarang memakai helper
+      // bersama yang dipakai lima pemanggil lain.
+      const data = await readNdjsonFinal<YtResult>(r, { signal: ac.signal });
+      setResult(data); setProgress(100);
+    } catch (e: unknown) {
+      // Pembatalan oleh user bukan kegagalan — jangan tampilkan sebagai error merah.
+      if (e instanceof DOMException && e.name === 'AbortError') setProgress(0);
+      else setError(e instanceof Error ? e.message : 'Gagal');
+    } finally { clearInterval(timer); setLoading(false); abortRef.current = null; }
   };
+
+  const cancelGenerate = () => { abortRef.current?.abort(); setProgress(0); };
 
   // ZIP lengkap: prompt JSON per blok + naskah + foto referensi (nama file = field
   // reference_image di prompt) + foto agen — siap dilampirkan ke AI generator.
@@ -1948,8 +1935,13 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
         '1. Buka AI video/image generator (Veo3/Kling/dsb).',
         '2. Tiap blok: lampirkan file dari folder referensi/ sesuai field "reference_image" di prompt-nya.',
         result.agent ? '3. Mode agen: lampirkan JUGA referensi/agent.webp di tiap blok.' : '',
-        `${result.agent ? '4' : '3'}. Tempel isi prompts/*.json sebagai prompt.`,
-        `${result.agent ? '5' : '4'}. Narasi/dialog per blok ada di narasi.txt; judul/deskripsi/hashtag di judul_deskripsi.txt.`,
+        `${result.agent ? '4' : '3'}. Tempel isi prompts/*.json sebagai prompt — UTUH, jangan dipotong.`,
+        '   PENTING: dialog sudah TERTANAM di field "dialogue.line" tiap prompt.',
+        '   Itulah yang membuat narator/agen benar-benar BERSUARA di Veo/Flow —',
+        '   jangan dihapus. Field "negative_prompt" menekan subtitle yang terbakar',
+        '   ke dalam gambar; tempel juga ke kolom Negative Prompt bila tool punya.',
+        `${result.agent ? '5' : '4'}. narasi.txt hanya SALINAN naskah untuk editor/subtitle manual —`,
+        '   bukan sesuatu yang perlu ditempel lagi ke AI. Judul/deskripsi/hashtag di judul_deskripsi.txt.',
         '',
         'Generator: ViralFrame AI · salambumi.xyz',
       ].filter(Boolean).join('\n'));
@@ -2101,8 +2093,19 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
             {loading ? <><Loader2 size={16} className="animate-spin" /> Menyusun storyboard…</> : <>✨ Generate Storyboard ({selected.length} scene)</>}
           </button>
           {loading && (
-            <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-              <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.round(progress)}%`, background: 'linear-gradient(90deg,#EF4444,#F97316)' }} />
+            <div className="space-y-1.5">
+              <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.round(progress)}%`, background: 'linear-gradient(90deg,#EF4444,#F97316)' }} />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-[#64748B] flex items-center gap-1.5">
+                  <Loader2 size={12} className="animate-spin" /> Menyusun storyboard… ({Math.round(progress)}%)
+                </p>
+                <button type="button" onClick={cancelGenerate}
+                  className="shrink-0 px-2.5 py-1 rounded-lg border border-gray-200 text-xs font-semibold text-[#64748B] hover:bg-gray-50 transition-colors">
+                  Batalkan
+                </button>
+              </div>
             </div>
           )}
         </div>
