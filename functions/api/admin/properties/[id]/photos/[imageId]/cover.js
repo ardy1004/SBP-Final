@@ -31,7 +31,7 @@ export async function onRequestPatch(context) {
     ).bind(imageId).run();
 
     const photos = await env.DB.prepare(
-      'SELECT id, url_webp, alt_text, urutan, is_cover FROM property_images WHERE property_id = ? ORDER BY urutan ASC, id ASC'
+      'SELECT id, url_webp, alt_text, urutan, is_cover, label_ruangan FROM property_images WHERE property_id = ? ORDER BY urutan ASC, id ASC'
     ).bind(propertyId).all();
 
     return jsonOk({ pesan: 'Cover foto berhasil diubah', images: photos.results ?? [] });

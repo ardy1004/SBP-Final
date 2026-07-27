@@ -50,7 +50,9 @@ function useDebouncedValue<T>(value: T, delay: number): T {
 }
 
 // ─── Tipe data ────────────────────────────────────────────────────────────
-interface PropertyImage { id: number; url_webp: string; alt_text: string | null; urutan: number; is_cover: number }
+interface PropertyImage { id: number; url_webp: string; alt_text: string | null; urutan: number; is_cover: number;
+  /** Label ruangan tersimpan (migrasi 0026) — dipakai sebagai nilai awal Step 2 & YouTube Long. */
+  label_ruangan?: string | null }
 interface PropertyDetail {
   id: number; kode_listing: string; title: string;
   jenis_properti: string; tujuan: string; harga: number;
@@ -1814,7 +1816,7 @@ interface YtResult {
   thumbnail?: YtBlock; opening?: YtBlock; scenes?: YtScene[]; ending?: YtBlock; provider_used?: string;
   kode_listing?: string; language?: string; agent?: YtAgent | null;
 }
-function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: number; propertyTitle: string; photos: { id: number; url_webp: string }[] }) {
+function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: number; propertyTitle: string; photos: PropertyImage[] }) {
   const [selected, setSelected] = useState<{ id: number; url_webp: string; label: string }[]>([]);
   const [visualStyle, setVisualStyle] = useState('cinematic_film');
   const [cameraStyle, setCameraStyle] = useState('drone_gimbal');
@@ -1831,10 +1833,10 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
   const abortRef = useRef<AbortController | null>(null);
   const copy = (text: string, key: string) => { navigator.clipboard?.writeText(text).then(() => { setCopied(key); setTimeout(() => setCopied(c => (c === key ? '' : c)), 1500); }).catch(() => {}); };
 
-  const togglePhoto = (im: { id: number; url_webp: string }) => setSelected(prev => {
+  const togglePhoto = (im: PropertyImage) => setSelected(prev => {
     const i = prev.findIndex(s => s.id === im.id);
     if (i >= 0) return prev.filter(s => s.id !== im.id);
-    return [...prev, { id: im.id, url_webp: im.url_webp, label: '' }];
+    return [...prev, { id: im.id, url_webp: im.url_webp, label: im.label_ruangan?.trim() || '' }];
   });
   const setLabel = (id: number, label: string) => setSelected(prev => prev.map(s => (s.id === id ? { ...s, label } : s)));
   const orderOf = (id: number) => { const i = selected.findIndex(s => s.id === id); return i >= 0 ? i + 1 : null; };
@@ -3126,8 +3128,15 @@ export default function AdminViralFrameWorkspacePage() {
                         {prop.images.map(im => {
                           const selected = sc?.photoId === im.id;
                           const src = thumbSrc(im.url_webp, 160);
+                          // Memilih foto ikut mengisi labelnya dari label_ruangan
+                          // tersimpan (migrasi 0026) — kecuali scene ini sudah
+                          // dilabeli manual, yang tidak boleh ditimpa diam-diam.
                           return (
-                            <button key={im.id} type="button" onClick={() => setScene(i, { photoId: im.id })}
+                            <button key={im.id} type="button"
+                              onClick={() => setScene(i, {
+                                photoId: im.id,
+                                ...(sc?.label ? {} : { label: im.label_ruangan?.trim() || '' }),
+                              })}
                               style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 80px' }}
                               className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${
                                 selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-transparent hover:border-gray-300'

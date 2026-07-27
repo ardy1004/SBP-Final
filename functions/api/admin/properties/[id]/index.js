@@ -60,7 +60,7 @@ export async function onRequestGet(context) {
     if (!property) return jsonError('Properti tidak ditemukan', 404);
 
     const photosRes = await env.DB.prepare(`
-      SELECT id, url_webp, alt_text, urutan, is_cover
+      SELECT id, url_webp, alt_text, urutan, is_cover, label_ruangan
       FROM property_images
       WHERE property_id = ?
       ORDER BY urutan ASC, id ASC

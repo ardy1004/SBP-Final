@@ -233,9 +233,20 @@ export default function AdminViralFramePage() {
         const detailRes = await fetch(`/api/admin/properties/${id}`, { credentials: 'include', signal: ac.signal });
         if (!detailRes.ok) throw new Error(`Gagal ambil detail properti (HTTP ${detailRes.status})`);
         const detailJson = await bacaJson(detailRes);
-        const images: { url_webp: string }[] = detailJson.data?.images ?? [];
+        const images: { url_webp: string; label_ruangan?: string | null }[] = detailJson.data?.images ?? [];
         if (images.length < 2) throw new Error('Foto kurang dari 2 — lewati');
-        const photos = images.slice(0, 12).map((img, idx) => ({ label: `Foto ${idx + 1}`, url_webp: img.url_webp }));
+        // Hanya foto yang SUDAH dilabeli. Versi lama mengirim label palsu
+        // "Foto 1".."Foto 12" sehingga AI tidak tahu ruangan mana yang mana dan
+        // mengarang isinya — persis yang dilarang blok anti-halusinasi
+        // (audit 2026-07-26, temuan Y3).
+        const berlabel = images.filter(img => (img.label_ruangan ?? '').trim());
+        if (berlabel.length < 2) {
+          throw new Error(`Baru ${berlabel.length} dari ${images.length} foto yang dilabeli — beri label ruangan dulu di Detail Properti`);
+        }
+        const photos = berlabel.slice(0, 12).map(img => ({
+          label: (img.label_ruangan ?? '').trim(),
+          url_webp: img.url_webp,
+        }));
         const res = await fetch('/api/admin/viralframe/youtube-long', {
           method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ property_id: id, photos, visual_style: '', camera_style: '' }),

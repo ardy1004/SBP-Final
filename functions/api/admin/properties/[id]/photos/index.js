@@ -77,7 +77,7 @@ export async function onRequestPost(context) {
 
     const imageId = result.meta?.last_row_id;
     const image = await env.DB.prepare(
-      'SELECT id, url_webp, alt_text, urutan, is_cover FROM property_images WHERE id = ?'
+      'SELECT id, url_webp, alt_text, urutan, is_cover, label_ruangan FROM property_images WHERE id = ?'
     ).bind(imageId).first();
 
     return jsonOk({ image });

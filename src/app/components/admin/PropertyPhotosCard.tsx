@@ -1,6 +1,7 @@
 import { bacaJson } from '../../../lib/api';
 import { useState, useRef } from 'react';
 import { Star, Trash2, ImageOff, ChevronDown, ChevronUp, Upload } from 'lucide-react';
+import { PHOTO_LABELS } from './viralframe/options';
 
 interface PropertyImage {
   id: number;
@@ -8,6 +9,8 @@ interface PropertyImage {
   alt_text: string | null;
   urutan: number;
   is_cover: number;
+  /** Label ruangan untuk grounding prompt ViralFrame (migrasi 0026). */
+  label_ruangan?: string | null;
 }
 
 interface Props {
@@ -56,6 +59,38 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [coveringId, setCoveringId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [labelingId, setLabelingId] = useState<number | null>(null);
+
+  /**
+   * Simpan label ruangan foto. Optimistic: UI berubah dulu, dikembalikan bila
+   * server menolak — dropdown ini akan sering dipakai berturut-turut, jadi
+   * menunggu roundtrip tiap kali terasa berat.
+   *
+   * Label ini yang membuat prompt ViralFrame ter-ground ke ruangan yang benar,
+   * dan satu-satunya sumber label bagi mode "Storyboard massal".
+   */
+  const handleSetLabel = async (imageId: number, label: string) => {
+    if (isNew) return;
+    const sebelumnya = photos.find(p => p.id === imageId)?.label_ruangan ?? null;
+    const nilai = label || null;
+    setPhotos(prev => prev.map(p => (p.id === imageId ? { ...p, label_ruangan: nilai } : p)));
+    setLabelingId(imageId);
+    try {
+      const res = await fetch(`/api/admin/properties/${propertyId}/photos/${imageId}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label_ruangan: nilai }),
+      });
+      const json = await bacaJson(res);
+      if (!json.success) throw new Error(json.error ?? 'Gagal menyimpan label');
+    } catch (err) {
+      setPhotos(prev => prev.map(p => (p.id === imageId ? { ...p, label_ruangan: sebelumnya } : p)));
+      setPhotoError(err instanceof Error ? err.message : 'Gagal menyimpan label foto');
+    } finally {
+      setLabelingId(null);
+    }
+  };
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -266,6 +301,25 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
                       </button>
                     )}
                   </div>
+                )}
+
+                {/* Label ruangan — sumber grounding prompt ViralFrame, dan
+                    satu-satunya sumber label bagi mode Storyboard massal.
+                    Sengaja DI LUAR overlay hover agar terlihat & terisi tanpa
+                    harus menemukannya lebih dulu. */}
+                {!isNew && (
+                  <select
+                    value={photo.label_ruangan ?? ''}
+                    disabled={labelingId === photo.id}
+                    onChange={e => handleSetLabel(photo.id, e.target.value)}
+                    title="Label ruangan — dipakai ViralFrame untuk menyusun prompt yang sesuai foto"
+                    className={`w-full text-[11px] px-1.5 py-1 border-t outline-none bg-white disabled:opacity-50 ${
+                      photo.label_ruangan ? 'border-gray-100 text-[#0F172A]' : 'border-amber-200 bg-amber-50 text-amber-700'
+                    }`}
+                  >
+                    <option value="">— Belum dilabeli —</option>
+                    {PHOTO_LABELS.map(l => <option key={l} value={l}>{l}</option>)}
+                  </select>
                 )}
               </div>
             );
