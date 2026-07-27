@@ -66,24 +66,12 @@ scripts/_maps_check.json
 !migrations/*.sql
 backup-*.sql
 
-# Artefak dari redireksi shell yang salah kutip saat sesi debug (nama berkas
-# seperti "0)" atau "p.col"). Bukan source code — jangan pernah ikut ter-commit.
-[0-9])
-0
-p.col
-rows.length
-bullet
-(a
-Environment
-tujuan
-# Gelombang berikutnya (sesi audit ViralFrame 2026-07-26). Pola glob menutup
-# seluruh kelasnya, bukan cuma nama yang kebetulan sudah muncul.
-*)
-*(
-*{
-*}
-send*
-`*
-[0-9].[0-9]*.[0-9]*
-string
-charLimit*
+# CATATAN — JANGAN tambahkan pola penyembunyi "artefak shell" di sini.
+# .gitignore ikut dibaca pemindai @source Tailwind v4 (src/styles/tailwind.css).
+# Pada 2026-07-27 pola bermetakarakter brace tak berpasangan (`*{`, `*}`) di berkas
+# ini membuat scanner tidak menemukan satu pun kelas: CSS produksi runtuh dari
+# 128 KB menjadi 13 KB — situs tampil tanpa gaya — sementara `npm run build`,
+# `check:bundle`, dan `smoke` SEMUANYA hijau. Terbukti lewat bisect: brace merusak,
+# kurung biasa `*(`/`*)` tidak. Artefak shell cukup dihapus manual; menyembunyikannya
+# tidak sepadan dengan risiko mengosongkan seluruh CSS.
+# Penjaga: scripts/check-bundle-budget.mjs memeriksa lantai ukuran CSS.

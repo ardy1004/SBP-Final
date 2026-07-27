@@ -91,6 +91,15 @@ const SSR_INDEX = 'dist/server/index.js';
 const SSR_ASSETS = 'dist/server/assets';
 const FN_OUTDIR = '.bundle-check';
 
+const CLIENT_ASSETS = 'dist/client/assets';
+// Lantai ukuran CSS utama. Baseline sehat 2026-07-27 = 128.158 B; ambang ini
+// sengaja jauh di bawahnya supaya tidak rewel saat CSS menyusut wajar, tapi
+// tetap menangkap keruntuhan besar seperti 128 KB → 13 KB.
+const CSS_MIN_BYTES = 80_000;
+// Utility yang MUSTAHIL tidak ada di situs ini. Ukuran saja bisa menipu — Tailwind
+// bisa menghasilkan belasan KB variabel tema tanpa satu pun kelas utility.
+const CSS_PENANDA = ['.flex', '.grid', '.rounded'];
+
 const problems = [];
 const notes = [];
 
@@ -159,6 +168,55 @@ function assertSsrChunk() {
 }
 
 // ── Asersi C & D — bundle Functions (mentah + gzip) ──────────────────────────
+/**
+ * Penjaga CSS — memastikan Tailwind benar-benar menemukan sumbernya.
+ *
+ * KENAPA ADA. Pada 2026-07-27 pola brace tak berpasangan (`*{`, `*}`) di .gitignore
+ * membuat pemindai @source Tailwind v4 tidak menemukan satu pun kelas. CSS produksi
+ * runtuh dari 128.021 B → 13.018 B dan situs tampil TANPA GAYA — sementara
+ * `npm run build` exit 0, `check:bundle` LULUS, dan `smoke` 0/320 gagal. Tidak satu
+ * pun gate melihat CSS: build hanya melihat exit code, penjaga ini dulu hanya
+ * mengukur JS, dan smoke hanya melihat status HTTP.
+ *
+ * Dua pemeriksaan, karena masing-masing bisa ditipu sendirian:
+ *   - ukuran di bawah lantai  → sumber tidak terpindai
+ *   - tanpa utility inti      → terpindai tapi hasilnya bukan CSS yang dipakai situs
+ */
+function assertCssTerbangun() {
+  if (!existsSync(CLIENT_ASSETS)) {
+    problems.push(`Direktori ${CLIENT_ASSETS} tidak ada — jalankan \`npm run build\` lebih dulu.`);
+    return;
+  }
+  const kandidat = readdirSync(CLIENT_ASSETS).filter(f => /^root-.*\.css$/.test(f));
+  if (kandidat.length === 0) {
+    problems.push(`Tidak ada ${CLIENT_ASSETS}/root-*.css — CSS utama tidak dihasilkan sama sekali.`);
+    return;
+  }
+
+  for (const nama of kandidat) {
+    const jalur = join(CLIENT_ASSETS, nama);
+    const ukuran = statSync(jalur).size;
+    const isi = readFileSync(jalur, 'utf8');
+    const hilang = CSS_PENANDA.filter(k => !isi.includes(k));
+
+    console.log(`\nCSS utama  : ${nama} — ${ukuran.toLocaleString('en-US')} B (lantai ${CSS_MIN_BYTES.toLocaleString('en-US')} B)`);
+
+    if (ukuran < CSS_MIN_BYTES) {
+      problems.push(
+        `${nama} hanya ${ukuran.toLocaleString('en-US')} B, di bawah lantai ${CSS_MIN_BYTES.toLocaleString('en-US')} B. ` +
+        'Tailwind kemungkinan besar tidak menemukan sumbernya — periksa .gitignore ' +
+        '(pola brace seperti `*{` merusak pemindai @source) dan @source di src/styles/tailwind.css.'
+      );
+    }
+    if (hilang.length > 0) {
+      problems.push(
+        `${nama} tidak memuat utility inti: ${hilang.join(', ')}. ` +
+        'CSS terbangun tapi tanpa kelas yang dipakai situs — situs akan tampil tanpa gaya.'
+      );
+    }
+  }
+}
+
 function assertFunctionsBundle() {
   try {
     rmSync(FN_OUTDIR, { recursive: true, force: true });
@@ -204,6 +262,7 @@ console.log('='.repeat(74));
 
 assertSsrImports();
 assertSsrChunk();
+assertCssTerbangun();
 assertFunctionsBundle();
 
 console.log(`\n${'='.repeat(74)}`);
