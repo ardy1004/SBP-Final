@@ -60,8 +60,18 @@ export async function onRequestGet(context) {
   const id = parseInt(params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return jsonError('ID tidak valid', 400);
 
-  const agr = await fetchAgreementById(env.DB, id);
-  if (!agr) return jsonError('Agreement tidak ditemukan', 404);
+  let agr, photosRes;
+  try {
+    agr = await fetchAgreementById(env.DB, id);
+    if (!agr) return jsonError('Agreement tidak ditemukan', 404);
+
+    photosRes = await env.DB.prepare(
+      'SELECT id, url_webp, alt_text, urutan, is_cover FROM property_images WHERE property_id = ? ORDER BY urutan ASC'
+    ).bind(agr.property_id).all();
+  } catch (err) {
+    console.error('[admin agreement GET] Query error:', err.message);
+    return jsonError('Gagal memuat data agreement', 500);
+  }
 
   // Admin authorized to see NIK
   let nik = null;
@@ -69,10 +79,6 @@ export async function onRequestGet(context) {
     try { nik = await decryptNIK(agr.nik_encrypted, env.NIK_ENC_KEY); }
     catch (err) { console.error('[admin agreement GET] Dekripsi NIK gagal:', err.message); }
   }
-
-  const photosRes = await env.DB.prepare(
-    'SELECT id, url_webp, alt_text, urutan, is_cover FROM property_images WHERE property_id = ? ORDER BY urutan ASC'
-  ).bind(agr.property_id).all();
 
   return jsonOk({
     id: agr.id,
@@ -152,9 +158,15 @@ export async function onRequestPatch(context) {
   try { body = await request.json(); }
   catch { return jsonError('Body JSON tidak valid', 400); }
 
-  const agr = await env.DB.prepare(
-    'SELECT id, status, owner_id, property_id FROM agreements WHERE id = ?'
-  ).bind(id).first();
+  let agr;
+  try {
+    agr = await env.DB.prepare(
+      'SELECT id, status, owner_id, property_id FROM agreements WHERE id = ?'
+    ).bind(id).first();
+  } catch (err) {
+    console.error('[admin patch] SELECT error:', err.message);
+    return jsonError('Gagal memuat data agreement', 500);
+  }
 
   if (!agr) return jsonError('Agreement tidak ditemukan', 404);
   if (!['draft', 'menunggu_ttd'].includes(agr.status)) {

@@ -3,7 +3,7 @@ import { useLocation } from 'react-router';
 import { MessageCircle, Sparkles, X, Send, CheckCircle } from 'lucide-react';
 import ChatPropertyCard, { type ChatPropItem } from './ChatPropertyCard';
 import Turnstile from './Turnstile';
-import { formatRupiah } from '../../lib/api';
+import { formatRupiah, bacaJson } from '../../lib/api';
 import { trackWaClick } from '../../lib/waTrack';
 
 // suppress unused import warning — formatRupiah not used here but exported from api
@@ -87,7 +87,7 @@ export default function ChatWidget() {
           chat_pass: chatPassRef.current || undefined,
         }),
       });
-      const json = await res.json() as { success: boolean; data?: { reply: string; properties: ChatPropItem[]; leadSubmitted?: boolean; waUrl?: string | null; chat_pass?: string | null }; error?: string };
+      const json = await bacaJson<{ reply: string; properties: ChatPropItem[]; leadSubmitted?: boolean; waUrl?: string | null; chat_pass?: string | null }>(res);
       if (json.success && json.data) {
         // Server hanya menerbitkan tiket pada giliran yang lolos CAPTCHA.
         // Disimpan di ref, bukan state: nilainya tidak memengaruhi render dan

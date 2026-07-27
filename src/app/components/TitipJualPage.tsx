@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router';
 import { Check, ChevronRight, Upload, X, AlertCircle } from 'lucide-react';
-import { getLocations, type ApiLocation } from '../../lib/api';
+import { getLocations, bacaJson, type ApiLocation } from '../../lib/api';
 import { PROPERTY_TYPES } from '../../lib/propertyTypes';
 import Turnstile from './Turnstile';
 import { pageMeta } from '../../lib/pageMeta';
@@ -603,7 +603,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const json = await res.json() as { success: boolean; data?: ApiResult; error?: string; details?: Record<string, string> };
+      const json = await bacaJson<ApiResult>(res);
 
       if (!res.ok) {
         if (res.status === 422 && json.details) {
