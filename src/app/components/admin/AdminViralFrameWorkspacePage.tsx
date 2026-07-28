@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router';
 import {
   ArrowLeft, ArrowRight, ImageOff, Check, Film, AlertCircle,
-  Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles, History, Trash2, RefreshCw, Upload,
+  Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles, History, Trash2, RefreshCw, Upload, Music,
 } from 'lucide-react';
 // JSZip di-dynamic-import di handler (bukan static) agar tidak masuk chunk awal workspace.
 import {
@@ -15,6 +15,7 @@ import {
   RULEBOOK_VERSION,
 } from './viralframe/options';
 import CharacterStepBase, { type Step3State } from './viralframe/CharacterStep';
+import BacksoundPicker, { backsoundMediaUrl, type BacksoundItem } from './viralframe/BacksoundPicker';
 import { readNdjsonFinal } from '../../../lib/ndjson';
 // #2: memoize komponen anak agar tak re-render saat parent re-render tanpa perubahan prop.
 const CharacterStep = memo(CharacterStepBase);
@@ -1759,6 +1760,70 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
   const [success, setSuccess] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // ── Backsound (opsional) — diterapkan ke `file` SEBELUM upload ke Cloudinary,
+  // jadi video yang mendarat di Konten Agent sudah "matang" dengan musik latar.
+  // Volume "ingat nilai terakhir" via localStorage — bukan preset bernama, sesuai
+  // permintaan user (2026-07-28): cukup supaya tidak perlu geser ulang tiap kali.
+  const [backsoundId, setBacksoundId] = useState<number | null>(null);
+  const [backsoundItem, setBacksoundItem] = useState<BacksoundItem | null>(null);
+  const [volumePct, setVolumePct] = useState(() => {
+    const saved = typeof window !== 'undefined' ? parseInt(localStorage.getItem('vf_backsound_volume') ?? '', 10) : NaN;
+    return Number.isFinite(saved) && saved >= 0 && saved <= 100 ? saved : 25;
+  });
+  useEffect(() => { localStorage.setItem('vf_backsound_volume', String(volumePct)); }, [volumePct]);
+  const [merging, setMerging] = useState(false);
+  const [mergeProgress, setMergeProgress] = useState('');
+  const [mergeError, setMergeError] = useState('');
+  const [mergedBlob, setMergedBlob] = useState<Blob | null>(null);
+  const [mergedUrl, setMergedUrl] = useState<string | null>(null);
+  const [showBacksound, setShowBacksound] = useState(false);
+
+  // File/backsound/volume berubah setelah merge → preview lama jadi tidak valid,
+  // wajib klik "Terapkan Backsound" lagi supaya tidak pernah upload hasil stale.
+  const invalidateMerged = () => {
+    setMergedBlob(null);
+    setMergedUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
+  };
+
+  const applyBacksound = async () => {
+    if (!file || !backsoundItem || merging) return;
+    setMerging(true); setMergeError(''); setMergeProgress('Menyiapkan…');
+    invalidateMerged();
+    try {
+      setMergeProgress('Mengambil backsound…');
+      const backsoundBlob = await fetch(backsoundMediaUrl(backsoundItem.r2_key)).then(r => r.blob());
+
+      setMergeProgress('Memuat FFmpeg…');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { FFmpeg } = await import('@ffmpeg/ffmpeg') as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { fetchFile } = await import('@ffmpeg/util') as any;
+      const ffmpeg = new FFmpeg();
+      ffmpeg.on('log', ({ message }: { message: string }) => setMergeProgress(message));
+      await ffmpeg.load();
+
+      await ffmpeg.writeFile('video.mp4', await fetchFile(file));
+      await ffmpeg.writeFile('backsound.mp3', await fetchFile(backsoundBlob));
+      // -stream_loop -1: backsound otomatis mengulang kalau lebih pendek dari video.
+      // -c:v copy: video stream TIDAK di-re-encode, cuma audio diproses — ringan & cepat.
+      // amix melapiskan backsound (volume diturunkan) DI BAWAH audio asli (dialog).
+      await ffmpeg.exec([
+        '-i', 'video.mp4', '-stream_loop', '-1', '-i', 'backsound.mp3',
+        '-filter_complex', `[1:a]volume=${(volumePct / 100).toFixed(2)}[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[a]`,
+        '-map', '0:v:0', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-shortest', 'output.mp4',
+      ]);
+      const data = await ffmpeg.readFile('output.mp4');
+      const blob = new Blob([data.buffer], { type: 'video/mp4' });
+      setMergedBlob(blob);
+      setMergedUrl(URL.createObjectURL(blob));
+      setMergeProgress('✅ Selesai!');
+    } catch (err: unknown) {
+      setMergeError(err instanceof Error ? err.message : 'Gagal menerapkan backsound');
+    } finally {
+      setMerging(false);
+    }
+  };
+
   useEffect(() => {
     fetch('/api/admin/viralframe/characters', { credentials: 'include' })
       .then(r => bacaJson(r))
@@ -1786,6 +1851,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
 
   const reset = () => {
     setFile(null); setCaption(''); setHashtags(''); setCapVariasi([]); setProgress(0); setError(''); setSuccess(false);
+    setBacksoundId(null); setBacksoundItem(null); setMergeError(''); invalidateMerged();
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -1802,8 +1868,11 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
       if (!signJson.success) throw new Error(signJson.error ?? 'Gagal menyiapkan upload');
       const { cloudName, apiKey, timestamp, folder, signature } = signJson.data;
 
+      // Backsound (opsional) sudah "dipanggang" jadi mergedBlob SEBELUM upload ini —
+      // Cloudinary/Konten Agent menerima file final, tidak pernah tahu prosesnya.
+      const uploadFile = mergedBlob ? new File([mergedBlob], file.name, { type: 'video/mp4' }) : file;
       const form = new FormData();
-      form.append('file', file);
+      form.append('file', uploadFile);
       form.append('api_key', apiKey);
       form.append('timestamp', String(timestamp));
       form.append('folder', folder);
@@ -1857,10 +1926,49 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
 
       <div>
         <label className="block text-xs font-semibold text-[#0F172A] mb-1">File Video</label>
-        <input ref={fileRef} type="file" accept="video/*" onChange={e => setFile(e.target.files?.[0] ?? null)}
+        <input ref={fileRef} type="file" accept="video/*"
+          onChange={e => { setFile(e.target.files?.[0] ?? null); invalidateMerged(); }}
           className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#1565C0]" />
         {file && <p className="text-[11px] text-[#94A3B8] mt-1">{file.name} · {(file.size / 1024 / 1024).toFixed(1)}MB</p>}
       </div>
+
+      {/* Backsound (opsional) — dilipat default agar tidak mengintimidasi user yang
+          cuma mau upload biasa. Hanya aktif kalau file video sudah dipilih. */}
+      {file && (
+        <div className="border border-gray-100 rounded-xl">
+          <button type="button" onClick={() => setShowBacksound(s => !s)}
+            className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-[#0F172A]">
+            <span>🎵 Tambah Backsound (opsional){backsoundItem && !showBacksound ? ` — ${backsoundItem.label}` : ''}</span>
+            <span className="text-[#94A3B8]">{showBacksound ? '▲' : '▼'}</span>
+          </button>
+          {showBacksound && (
+            <div className="px-3 pb-3 space-y-3 border-t border-gray-100 pt-3">
+              <BacksoundPicker
+                selectedId={backsoundId}
+                onSelect={(id, item) => { setBacksoundId(id); setBacksoundItem(item); invalidateMerged(); }}
+                volumePct={volumePct}
+                onVolumeChange={v => { setVolumePct(v); invalidateMerged(); }}
+              />
+              {backsoundId != null && (
+                <button type="button" onClick={applyBacksound} disabled={merging}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-white disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+                  {merging ? <Loader2 size={13} className="animate-spin" /> : <Music size={13} />}
+                  {merging ? 'Memproses…' : '🎵 Terapkan Backsound'}
+                </button>
+              )}
+              {mergeProgress && merging && <p className="text-[11px] font-mono text-[#64748B] bg-gray-50 rounded-lg px-2.5 py-1.5 break-all">{mergeProgress}</p>}
+              {mergeError && <p className="text-xs text-red-600">{mergeError}</p>}
+              {mergedUrl && (
+                <div className="space-y-1.5">
+                  <p className="text-xs text-emerald-600 flex items-center gap-1"><Check size={13} /> Backsound diterapkan — preview di bawah, akan ikut ter-upload.</p>
+                  <video controls src={mergedUrl} className="w-full rounded-xl border border-gray-100 bg-black max-h-64" />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div>
         <label className="block text-xs font-semibold text-[#0F172A] mb-1">Karakter / Agent</label>

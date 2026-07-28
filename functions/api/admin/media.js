@@ -7,7 +7,7 @@ import { jsonError, handleOptions } from '../_shared/response.js';
 // 'testimonials/' sempat terlewat di sini — tertutupi karena AdminTestimoniPage
 // memakai endpoint publik /api/media. Disamakan supaya jalur admin tidak pincang
 // kalau nanti halaman itu diseragamkan ke proxy admin.
-const ALLOWED_PREFIXES = ['property-photos/', 'testimonials/', 'signatures/', 'agreements/', 'viralframe-characters/', 'viralframe-videos/'];
+const ALLOWED_PREFIXES = ['property-photos/', 'testimonials/', 'signatures/', 'agreements/', 'viralframe-characters/', 'viralframe-videos/', 'viralframe-backsound/'];
 
 export async function onRequestGet(context) {
   const { request, env } = context;
