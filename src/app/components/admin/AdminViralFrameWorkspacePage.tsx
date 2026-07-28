@@ -2705,6 +2705,28 @@ export default function AdminViralFrameWorkspacePage() {
   const setScene = (idx: number, patch: Partial<SceneAssign>) =>
     setScenes(prev => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
 
+  // Simpan label ruangan foto langsung dari Step 1 — persist ke property_images.label_ruangan
+  // (sama endpoint yang dipakai kartu foto di Detail Properti, lihat PropertyPhotosCard.tsx)
+  // supaya user tidak perlu bolak-balik halaman lain, DAN AI Rancang Storyboard (yang membaca
+  // label_ruangan langsung dari DB) langsung bisa dipakai tanpa langkah tambahan. Optimistic:
+  // prop.images diperbarui dulu, dikembalikan bila server menolak.
+  const savePhotoLabel = (photoId: number, label: string) => {
+    if (!prop) return;
+    const sebelumnya = prop.images.find(im => im.id === photoId)?.label_ruangan ?? null;
+    const nilai = label || null;
+    setProp(p => (p ? { ...p, images: p.images.map(im => (im.id === photoId ? { ...im, label_ruangan: nilai } : im)) } : p));
+    fetch(`/api/admin/properties/${prop.id}/photos/${photoId}`, {
+      method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label_ruangan: nilai }),
+    })
+      .then(bacaJson)
+      .then(j => { if (!j.success) throw new Error(j.error ?? 'Gagal menyimpan label'); })
+      .catch(() => {
+        setProp(p => (p ? { ...p, images: p.images.map(im => (im.id === photoId ? { ...im, label_ruangan: sebelumnya } : im)) } : p));
+        setSuggestError('Gagal menyimpan label foto ke database. Coba lagi.');
+      });
+  };
+
   // ─── Validasi ───────────────────────────────────────────────────────────
   // Urutan wizard: 1 Foto per Scene → 2 Karakter → 3 Parameter Video → 4 Generate.
   const fotoErrors = useMemo(() => {
@@ -3460,10 +3482,18 @@ export default function AdminViralFrameWorkspacePage() {
                         })}
                       </div>
 
-                      {/* Label foto */}
+                      {/* Label foto — ikut tersimpan ke database (property_images.label_ruangan)
+                          begitu foto sudah dipilih, supaya tidak perlu label ulang di Detail
+                          Properti dan AI Rancang Storyboard langsung bisa dipakai. */}
                       <div className="sm:w-64">
                         <label className="block text-xs font-medium text-[#64748B] mb-1">Label Foto</label>
-                        <LabelSelect value={sc?.label ?? ''} onChange={v => setScene(i, { label: v })} options={PHOTO_LABELS} />
+                        <LabelSelect value={sc?.label ?? ''} onChange={v => {
+                          setScene(i, { label: v });
+                          if (sc?.photoId != null) savePhotoLabel(sc.photoId, v);
+                        }} options={PHOTO_LABELS} />
+                        {sc?.photoId != null && (
+                          <p className="text-[10px] text-[#94A3B8] mt-1">Tersimpan otomatis ke data foto properti.</p>
+                        )}
                       </div>
 
                       <button type="button"

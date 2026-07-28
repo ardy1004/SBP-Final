@@ -57,7 +57,7 @@ export async function onRequestPost(context) {
 
   if (uniqueLabels.length < sceneCount) {
     return jsonError(
-      `Baru ${uniqueLabels.length} foto berlabel, butuh minimal ${sceneCount} foto berlabel untuk ${sceneCount} scene. Label foto dulu di Detail Properti.`,
+      `Baru ${uniqueLabels.length} foto berlabel, butuh minimal ${sceneCount} foto berlabel untuk ${sceneCount} scene. Pilih foto + Label Foto dulu di daftar scene di atas (tersimpan otomatis), atau di Detail Properti.`,
       422
     );
   }
