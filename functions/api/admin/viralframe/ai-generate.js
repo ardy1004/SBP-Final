@@ -18,7 +18,7 @@ import { jsonError, handleOptions } from '../../_shared/response.js';
 import {
   getMaxWords, EXPRESSION_EN,
   isNativeAudioTool, getClipMaxSec, NEGATIVE_PROMPT_VIDEO,
-  REALISM_QUALITY_CUES, REALISM_BANNED_QUALITY_PHRASES,
+  REALISM_QUALITY_CUES, REALISM_BANNED_QUALITY_PHRASES, RULEBOOK_VERSION,
   namaFileKarakter,
 } from '../../../_lib/viralframe-shared.js';
 import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
@@ -906,6 +906,9 @@ export async function onRequestPost(context) {
             judul_properti: property.title,
             kode_listing: property.kode_listing,
             generated_at: new Date().toISOString(),
+            // rulebook_version (Stage 3) — traceability aturan realisme/anti-halusinasi
+            // yang berlaku saat generate ini dibuat, lihat viralframe-shared.js.
+            rulebook_version: RULEBOOK_VERSION,
             regenerated_scene: regenerateScene,
             // Info provider yang benar-benar dipakai (untuk indikator fallback di UI)
             provider_used: usedProvider,

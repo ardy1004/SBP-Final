@@ -16,7 +16,7 @@ import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiP
 // lain — sebelumnya jalur ini tidak mengimpor sama sekali (audit 2026-07-28).
 import {
   NEGATIVE_PROMPT_VIDEO, getClipMaxSec, getMaxWords,
-  REALISM_QUALITY_CUES, REALISM_BANNED_QUALITY_PHRASES,
+  REALISM_QUALITY_CUES, REALISM_BANNED_QUALITY_PHRASES, RULEBOOK_VERSION,
 } from '../../../_lib/viralframe-shared.js';
 
 // Jalur ini diasumsikan untuk Veo/Google Flow. Batas panjang satu klip mengikuti
@@ -309,7 +309,7 @@ FORMAT JSON WAJIB (patuhi persis):
       try {
         await env.DB.prepare(`INSERT INTO viralframe_generations (property_id, params_json, master_prompt, result_json)
                               VALUES (?,?,?,?)`)
-          .bind(propertyId, JSON.stringify({ mode: 'youtube_long', photos, visualStyle, cameraStyle, language, agent_id: agent?.id ?? null }), null, JSON.stringify(parsed)).run();
+          .bind(propertyId, JSON.stringify({ mode: 'youtube_long', photos, visualStyle, cameraStyle, language, agent_id: agent?.id ?? null, rulebook_version: RULEBOOK_VERSION }), null, JSON.stringify(parsed)).run();
       } catch { /* non-fatal */ }
 
       send({

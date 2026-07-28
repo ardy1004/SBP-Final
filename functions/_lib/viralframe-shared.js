@@ -9,6 +9,18 @@
 //   - backend Functions mengimpornya secara natif (../../../_lib/...)
 //   - frontend Vite mengimpornya lintas-direktori (di-bundle dari root)
 // File ini WAJIB plain JS tanpa React / API browser agar aman di Workers runtime.
+//
+// ⚠️ SATU SUMBER KEBENARAN untuk aturan kualitas video ("Prompt Rulebook") yang
+// dipakai KETIGA jalur prompt-engine: masterPromptCompiler.ts (Jalur A),
+// ai-generate.js buildSystemPrompt() (Jalur C), youtube-long.js. Ketiganya punya
+// bentuk skema output BERBEDA (objek terstruktur vs string tertanam) sehingga
+// PROSA instruksi sengaja TIDAK dipaksa jadi satu fungsi (nuansa per-konteks
+// hilang kalau dipaksakan) — tapi VOKABULARI/KONSTANTA di file ini WAJIB jadi
+// satu-satunya sumber yang diimpor ketiganya. Bug nyata 2026-07-28: youtube-long.js
+// sama sekali tidak mengimpor REALISM_* saat itu ditambahkan ke 2 jalur lain —
+// dicegah terulang lewat scripts/check-viralframe-rulebook.mjs (jalankan sebelum
+// deploy, sama seperti check-bundle-budget.mjs).
+export const RULEBOOK_VERSION = '2026-07-28.1';
 
 // Tabel lipsync (PRD 3.8) — sinkronisasi durasi klip ↔ jumlah kata narasi.
 //

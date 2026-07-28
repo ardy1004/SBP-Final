@@ -13,6 +13,7 @@ import {
   NEGATIVE_PROMPT_VIDEO as SHARED_NEGATIVE_PROMPT_VIDEO,
   REALISM_QUALITY_CUES as SHARED_REALISM_QUALITY_CUES,
   REALISM_BANNED_QUALITY_PHRASES as SHARED_REALISM_BANNED_QUALITY_PHRASES,
+  RULEBOOK_VERSION as SHARED_RULEBOOK_VERSION,
   namaFileKarakter as sharedNamaFileKarakter,
 } from '../../../../../functions/_lib/viralframe-shared.js';
 
@@ -378,6 +379,9 @@ export const NEGATIVE_PROMPT_VIDEO: string = SHARED_NEGATIVE_PROMPT_VIDEO;
 export const REALISM_QUALITY_CUES: string[] = SHARED_REALISM_QUALITY_CUES;
 /** Frasa penutup kualitas yang DILARANG (terbukti mendorong hasil CGI-like). */
 export const REALISM_BANNED_QUALITY_PHRASES: string[] = SHARED_REALISM_BANNED_QUALITY_PHRASES;
+/** Versi "Prompt Rulebook" — stempel ke params_json riwayat generate untuk traceability
+ * (generate lama bisa dibandingkan dengan aturan yang berlaku saat itu dibuat). */
+export const RULEBOOK_VERSION: string = SHARED_RULEBOOK_VERSION;
 /** Nama berkas foto karakter di ZIP Jalur C — sinkron dengan ai-generate.js. */
 export const namaFileKarakter: (nama: string) => string = sharedNamaFileKarakter;
 

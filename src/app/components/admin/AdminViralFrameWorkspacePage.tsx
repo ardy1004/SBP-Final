@@ -12,6 +12,7 @@ import {
   sceneFileName, characterFileName, AI_TOOL_FORMAT_SPEC,
   isNativeAudioTool, getClipMaxSec, namaFileKarakter, PLATFORM_BEHAVIOR,
   sceneRoleFromParts, partIndexForScene, partsValidForTotal, type PartDef,
+  RULEBOOK_VERSION,
 } from './viralframe/options';
 import CharacterStepBase, { type Step3State } from './viralframe/CharacterStep';
 import { readNdjsonFinal } from '../../../lib/ndjson';
@@ -2726,7 +2727,10 @@ export default function AdminViralFrameWorkspacePage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         property_id: prop.id,
-        params_json: JSON.stringify({ s1, scenes, s3 }),
+        // rulebook_version (Stage 3) — stempel aditif, tidak dibaca applyConfig(),
+        // murni untuk traceability: generate lama bisa dibandingkan ke aturan yang
+        // berlaku saat itu dibuat kalau REALISM_*/dsb berubah lagi di masa depan.
+        params_json: JSON.stringify({ s1, scenes, s3, rulebook_version: RULEBOOK_VERSION }),
         master_prompt: masterPrompt,
       }),
     })
