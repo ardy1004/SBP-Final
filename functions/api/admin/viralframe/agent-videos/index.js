@@ -67,6 +67,26 @@ export async function onRequestGet(context) {
   const offset = parseInt(url.searchParams.get('offset') ?? '', 10) || 0;
   const view = url.searchParams.get('view') === 'trash' ? 'trash' : 'active';
 
+  // ?counts_by=character_id — agregat GROUP BY di database, dipakai badge angka
+  // sidebar (AdminViralFrameAgentVideosPage.tsx). Sebelumnya sidebar mengambil
+  // SAMPAI 200 ROW MENTAH lalu menghitung sendiri di client — kalau video aktif
+  // di seluruh karakter lebih dari 200, karakter yang datanya kepotong dapat
+  // angka salah/kurang tanpa indikasi apa pun (audit 2026-07-28). Query agregat
+  // tidak kena batas LIMIT sama sekali karena tidak mengambil baris individual.
+  if (url.searchParams.get('counts_by') === 'character_id') {
+    try {
+      const res = await env.DB.prepare(
+        `SELECT character_id, COUNT(*) AS count FROM viralframe_agent_videos
+         WHERE ${view === 'trash' ? 'trashed_at IS NOT NULL' : 'trashed_at IS NULL'}
+         GROUP BY character_id`
+      ).all();
+      return jsonOk({ counts: res.results ?? [] });
+    } catch (err) {
+      console.error('[vf agent-videos] GET counts_by', err.message);
+      return jsonError('Gagal mengambil hitungan video per karakter', 500);
+    }
+  }
+
   const conds = [view === 'trash' ? 'v.trashed_at IS NOT NULL' : 'v.trashed_at IS NULL'];
   const binds = [];
   if (Number.isInteger(characterId) && characterId > 0) { conds.push('v.character_id = ?'); binds.push(characterId); }

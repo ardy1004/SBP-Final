@@ -543,7 +543,10 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
       }
       const blob = new Blob([await res.arrayBuffer()], { type: res.headers.get('Content-Type') || 'audio/mpeg' });
       setVoiceoverBlob(blob);
-      setVoiceoverUrl(URL.createObjectURL(blob));
+      // Revoke URL lama sebelum ganti — dulu tidak pernah di-revoke sama sekali
+      // (audit 2026-07-28), regenerate VO berkali-kali membocorkan 1 blob URL
+      // per percobaan sepanjang sesi tab terbuka.
+      setVoiceoverUrl(prev => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(blob); });
     } catch (err: unknown) {
       alert(err instanceof Error ? err.message : 'Gagal generate voiceover');
     } finally {
@@ -574,8 +577,11 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
       await ffmpeg.exec(['-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-c', 'copy', 'combined.mp4']);
       await ffmpeg.exec(['-i', 'combined.mp4', '-i', 'voiceover.mp3', '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-shortest', 'final.mp4']);
       const data = await ffmpeg.readFile('final.mp4');
-      const url = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
-      setFinalVideoUrl(url);
+      // Revoke URL lama sebelum ganti — sama seperti voiceoverUrl di atas.
+      setFinalVideoUrl(prev => {
+        if (prev) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+      });
       setMergeProgress('✅ Selesai!');
     } catch (err: unknown) {
       setMergeProgress(`Error: ${err instanceof Error ? err.message : 'Gagal merge'}`);
@@ -1530,21 +1536,35 @@ function CaptionStudio({ propertyId, platform, registerInstruction }: {
   const [error, setError] = useState('');
   const [result, setResult] = useState<{ caption: string; hashtags: string }[]>([]);
   const [copied, setCopied] = useState('');
+  // Dulu tidak ada AbortController sama sekali (audit 2026-07-28) — klik Generate
+  // berkali-kali dengan cepat memicu race condition (hasil variasi lama bisa
+  // "menang" dan menimpa hasil yang lebih baru kalau responsnya datang belakangan).
+  // Membatalkan request sebelumnya saat request baru mulai menghilangkan race ini
+  // sekaligus (request lama tidak akan pernah sempat setResult).
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const copy = async (text: string, key: string) => {
     try { await navigator.clipboard.writeText(text); setCopied(key); setTimeout(() => setCopied(c => (c === key ? '' : c)), 1500); } catch { /* noop */ }
   };
   const generate = async () => {
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
     setLoading(true); setError('');
     try {
       const r = await fetch('/api/admin/viralframe/captions', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ property_id: propertyId, variasi, platform, register_instruction: registerInstruction }),
+        signal: ac.signal,
       });
       // Sukses = stream NDJSON (anti wall-clock 30s); error validasi = JSON biasa.
-      const data = await readNdjsonFinal<{ captions: { caption: string; hashtags: string }[] }>(r);
+      const data = await readNdjsonFinal<{ captions: { caption: string; hashtags: string }[] }>(r, { signal: ac.signal });
       setResult(data.captions ?? []);
-    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Gagal'); } finally { setLoading(false); }
+    } catch (e: unknown) {
+      if (e instanceof DOMException && e.name === 'AbortError') { /* dibatalkan oleh generate berikutnya / unmount, bukan error */ }
+      else setError(e instanceof Error ? e.message : 'Gagal');
+    } finally { setLoading(false); }
   };
 
   return (
@@ -1591,12 +1611,14 @@ interface AnalyticsRow { gaya: string; jumlah: number; avg_views: number; avg_li
 function VideoLibrary({ propertyId }: { propertyId: number }) {
   const [items, setItems] = useState<VideoItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [analytics, setAnalytics] = useState<AnalyticsRow[]>([]);
   const [edits, setEdits] = useState<Record<number, { post_url: string; views: string; likes: string }>>({});
   const [savingId, setSavingId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const r = await fetch(`/api/admin/viralframe/videos?property_id=${propertyId}`, { credentials: 'include' });
       const j = await bacaJson(r);
@@ -1604,15 +1626,25 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
         const list: VideoItem[] = j.data?.items ?? [];
         setItems(list);
         setEdits(Object.fromEntries(list.map(v => [v.id, { post_url: v.post_url ?? '', views: v.views != null ? String(v.views) : '', likes: v.likes != null ? String(v.likes) : '' }])));
+      } else {
+        // Dulu kegagalan di sini ditelan (audit 2026-07-28) — error network/server
+        // membuat state "items" tetap [] dari render sebelumnya, jadi tampil
+        // sebagai "Belum ada video" yang tidak bisa dibedakan dari benar-benar kosong.
+        setLoadError(j.error ?? 'Gagal memuat library video');
       }
-    } catch { /* noop */ } finally { setLoading(false); }
-    try { const a = await fetch('/api/admin/viralframe/analytics', { credentials: 'include' }); const aj = await bacaJson(a); if (aj.success) setAnalytics(aj.data?.items ?? []); } catch { /* noop */ }
+    } catch (err: unknown) {
+      setLoadError(err instanceof Error ? err.message : 'Gagal memuat library video');
+    } finally { setLoading(false); }
+    try { const a = await fetch('/api/admin/viralframe/analytics', { credentials: 'include' }); const aj = await bacaJson(a); if (aj.success) setAnalytics(aj.data?.items ?? []); } catch { /* noop — analitik best-effort, tidak wajib untuk library berfungsi */ }
   }, [propertyId]);
   useEffect(() => { load(); }, [load]);
 
   const del = async (id: number) => {
     if (!window.confirm('Hapus video ini dari Library?')) return;
-    try { await fetch(`/api/admin/viralframe/videos/${id}`, { method: 'DELETE', credentials: 'include' }); } catch { /* noop */ }
+    try {
+      const r = await fetch(`/api/admin/viralframe/videos/${id}`, { method: 'DELETE', credentials: 'include' });
+      if (!r.ok) { const j = await bacaJson(r); alert(`Gagal menghapus: ${j.error ?? `HTTP ${r.status}`}`); }
+    } catch (err: unknown) { alert(`Gagal menghapus: ${err instanceof Error ? err.message : 'Error'}`); }
     load();
   };
   const saveMetrics = async (id: number) => {
@@ -1630,6 +1662,12 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
   const mediaUrl = (key: string) => `/api/admin/media?key=${encodeURIComponent(key)}`;
 
   if (loading) return <div className="py-8 text-center text-sm text-[#94A3B8]"><Loader2 size={18} className="animate-spin mx-auto mb-1" /> Memuat library…</div>;
+  if (loadError) return (
+    <div className="text-center py-10 border border-dashed border-red-200 rounded-2xl">
+      <p className="text-sm text-red-600 mb-2">{loadError}</p>
+      <button onClick={load} className="text-xs font-semibold text-[#1565C0] underline">Coba lagi</button>
+    </div>
+  );
   if (items.length === 0) return (
     <div className="text-center py-10 border border-dashed border-gray-200 rounded-2xl">
       <Film size={26} className="text-gray-300 mx-auto mb-2" />
@@ -2044,11 +2082,19 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
         'Generator: ViralFrame AI · salambumi.xyz',
       ].filter(Boolean).join('\n'));
       const blob = await zip.generateAsync({ type: 'blob' });
+      // Anchor WAJIB di-append ke DOM sebelum click() (Firefox mengabaikan click()
+      // pada elemen yang tidak ter-attach) — dan revoke SETELAH remove(), bukan
+      // langsung setelah click(), supaya browser sempat mulai membaca blob URL-nya
+      // sebelum di-invalidate (audit 2026-07-28; dua path unduh ZIP lain di file
+      // ini sudah memakai pola yang benar).
+      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
+      a.href = url;
       a.download = `${kode}.zip`;
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(a.href);
+      a.remove();
+      URL.revokeObjectURL(url);
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Gagal membuat ZIP'); }
     finally { setZipBusy(false); }
   };
@@ -2778,10 +2824,16 @@ export default function AdminViralFrameWorkspacePage() {
     [s1.durationMode, s1.sceneCount, s1.uniformDuration, s1.manualDurations],
   );
 
-  // Reset hasil validasi bila prompt (param) berubah agar tidak stale.
+  // Reset hasil validasi bila PARAMETER (s1/scenes/s3) benar-benar berubah agar
+  // tidak stale — sengaja pakai `debouncedSrc`, BUKAN `masterPrompt`. `masterPrompt`
+  // sengaja di-set '' setiap kali step !== 4 (optimasi performa, lihat komentar di
+  // deklarasinya), jadi dulu dependency ini membuat navigasi Step 4→3→4 TANPA
+  // edit apa pun ikut menghapus JSON yang sudah dipaste+divalidasi + scene cards
+  // (audit 2026-07-28). `debouncedSrc` hanya berubah referensi kalau s1/scenes/s3
+  // benar-benar berubah, tidak terpengaruh navigasi step.
   useEffect(() => {
     setValResult(null); setValidData(null); setWarningsDismissed(false); setZipError('');
-  }, [masterPrompt]);
+  }, [debouncedSrc]);
 
   const handleValidate = () => {
     setZipError('');

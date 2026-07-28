@@ -135,13 +135,17 @@ export default function AdminViralFrameAgentVideosPage() {
     } catch { /* noop */ } finally { setLoadingChars(false); }
 
     try {
-      // view=active eksplisit — badge angka di sidebar cuma menghitung video aktif, bukan yang di Sampah.
-      const r = await fetch('/api/admin/viralframe/agent-videos?limit=200&view=active', { credentials: 'include' });
+      // counts_by=character_id — agregat GROUP BY di database (tidak kena batas
+      // limit/200 sama sekali). Dulu endpoint list biasa dipanggil dengan
+      // limit=200 lalu dihitung manual di client — kalau video aktif di semua
+      // karakter gabungan lebih dari 200, sebagian karakter dapat angka salah
+      // tanpa indikasi apa pun (audit 2026-07-28).
+      const r = await fetch('/api/admin/viralframe/agent-videos?counts_by=character_id&view=active', { credentials: 'include' });
       const j = await bacaJson(r);
       if (j.success) {
-        const items: AgentVideo[] = j.data?.items ?? [];
+        const rows: { character_id: number; count: number }[] = j.data?.counts ?? [];
         const c: Record<number, number> = {};
-        items.forEach(v => { c[v.character_id] = (c[v.character_id] ?? 0) + 1; });
+        rows.forEach(row => { c[row.character_id] = row.count; });
         setCounts(c);
       }
     } catch { /* noop */ }
