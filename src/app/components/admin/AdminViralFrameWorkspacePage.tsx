@@ -347,6 +347,11 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
   const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
   const [genError, setGenError] = useState('');
   const [rasio, setRasio] = useState<RasioValue>('1280x720');
+  // Polling status video (sampai 120s per scene) tidak punya guard sama sekali
+  // sebelumnya — dulu terus jalan di background walau user pindah tab/step
+  // (audit 2026-07-28). Dicek di setiap iterasi loop di bawah.
+  const cancelledRef = useRef(false);
+  useEffect(() => () => { cancelledRef.current = true; }, []);
 
   const wordCount = naskah.trim() ? naskah.trim().split(/\s+/).length : 0;
   const targetWords = Math.floor(voScenes.length * 8 * 1.9);
@@ -444,6 +449,7 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
     setVideoResults(voScenes.map((_, i) => ({ scene_index: i, request_id: null, status: 'idle', video_url: null, blob: null })));
     try {
       for (let i = 0; i < voScenes.length; i++) {
+        if (cancelledRef.current) break;
         const scene = voScenes[i];
         if (!scene.foto_url || !scene.gaya_kamera) continue;
         const image_base64 = await photoToBase64WithRatio(scene.foto_url, rasio);
@@ -471,17 +477,30 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
           throw new Error(`Scene ${i + 1}: server tidak return request_id: ${JSON.stringify(sfJson).slice(0, 200)}`);
         }
         setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, request_id, status: 'pending' } : r));
-        // Poll until done (max 40 × 3s = 120s)
+        // Poll until done (max 40 × 3s = 120s). statusRes.ok/videoRes.ok TIDAK
+        // pernah dicek sebelumnya (audit 2026-07-28) — 502/504 dari Worker bikin
+        // .json() melempar SyntaxError mentah yang membunuh SELURUH batch (scene
+        // lain yang belum diproses ikut gagal), atau halaman error tersimpan
+        // sebagai "video" yang diupload ke library. Sekarang: gagal transient di
+        // satu scene tidak menghentikan scene lain — loop lanjut ke scene berikutnya.
         let done = false;
         for (let p = 0; p < 40 && !done; p++) {
+          if (cancelledRef.current) { done = true; break; }
           await new Promise(r => setTimeout(r, 3000));
           const statusRes = await fetch(`/api/admin/viralframe/video-status/${request_id}`, { credentials: 'include' });
+          if (!statusRes.ok) continue; // transient — coba lagi di iterasi berikutnya
           // Sama seperti submit: proxy status meneruskan bentuk SiliconFlow apa adanya.
           const statusJson = await statusRes.json() as Record<string, any>;
           const status: VideoResult['status'] = statusJson.status ?? 'pending';
           setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, status, video_url: statusJson.video_url ?? null } : r));
           if (status === 'succeed' && statusJson.video_url) {
             const videoRes = await fetch(statusJson.video_url);
+            if (!videoRes.ok) {
+              done = true;
+              setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, status: 'failed' } : r));
+              setGenError(prev => `${prev ? prev + ' | ' : ''}Scene ${i + 1}: gagal mengambil file video hasil (HTTP ${videoRes.status}).`);
+              break;
+            }
             const videoBlob = await videoRes.blob();
             setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, blob: videoBlob } : r));
             done = true;
@@ -494,13 +513,14 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
             } catch { /* noop */ }
           } else if (status === 'failed') {
             done = true;
-            throw new Error(`Scene ${i + 1}: SiliconFlow gagal — ${JSON.stringify(statusJson._raw ?? statusJson.reason ?? 'no detail').slice(0, 400)}`);
+            setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, status: 'failed' } : r));
+            setGenError(prev => `${prev ? prev + ' | ' : ''}Scene ${i + 1}: SiliconFlow gagal — ${JSON.stringify(statusJson._raw ?? statusJson.reason ?? 'no detail').slice(0, 200)}`);
           }
         }
         if (!done) setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, status: 'failed' } : r));
       }
     } catch (err: unknown) {
-      setGenError(err instanceof Error ? err.message : 'Gagal generate video');
+      setGenError(prev => `${prev ? prev + ' | ' : ''}${err instanceof Error ? err.message : 'Gagal generate video'}`);
     } finally {
       setIsGeneratingVideos(false);
     }
@@ -881,6 +901,14 @@ function AIGenerateTab({
   // hanya belum pernah diberi — sehingga generate 12 scene tidak bisa dihentikan
   // dan guard beforeunload di bawah justru mengurung user (audit 2026-07-26).
   const abortRef = useRef<AbortController | null>(null);
+  // Pembatal regenerate-per-scene TERPISAH dari abortRef generate-penuh (audit
+  // 2026-07-28) — sebelumnya berbagi satu ref, jadi kalau regenerate dimulai
+  // sementara generate-penuh masih jalan, tombol Cancel generate-penuh diam-diam
+  // membatalkan regenerate yang salah alih-alih request yang dimaksud.
+  const regenAbortRef = useRef<AbortController | null>(null);
+  // Batalkan request yang masih menggantung saat komponen unmount (pindah tab/step)
+  // — dulu fetch/NDJSON-read terus jalan di background tanpa guard sama sekali.
+  useEffect(() => () => { abortRef.current?.abort(); regenAbortRef.current?.abort(); }, []);
 
   // Status kuota semua provider (sekali saat mount)
   useEffect(() => { getAiStatus().then(r => { if (r.success && r.data) setAiStatus(r.data); }); }, []);
@@ -1060,10 +1088,11 @@ function AIGenerateTab({
     if (!generatedResult || regenScene != null) return;
     setRegenScene(sceneNum);
     setError(null);
-    // Ikut dibatalkan lewat abortRef yang sama seperti generate penuh — kalau tidak,
-    // regenerate satu scene jadi satu-satunya panggilan AI yang tak bisa dihentikan.
+    // Pembatal SENDIRI (regenAbortRef, bukan abortRef generate-penuh) — supaya
+    // Cancel generate-penuh tidak salah membatalkan request regenerate ini, dan
+    // sebaliknya (lihat catatan di deklarasi regenAbortRef).
     const ac = new AbortController();
-    abortRef.current = ac;
+    regenAbortRef.current = ac;
     try {
       const payload = buildGeneratePayload();
       if (!payload) throw new Error('Konfigurasi belum lengkap');
@@ -1099,7 +1128,7 @@ function AIGenerateTab({
       else setError(e instanceof Error ? e.message : `Gagal regenerate scene ${sceneNum}`);
     } finally {
       setRegenScene(null);
-      abortRef.current = null;
+      regenAbortRef.current = null;
     }
   };
 

@@ -148,7 +148,12 @@ export function validateSceneJson(raw: string, expected: ValidateExpected): Vali
   const clipMax = getClipMaxSec(expected.aiTool);
 
   scenes.forEach((sc, i) => {
-    const n = i + 1;
+    // Pakai scene_number kalau ada & valid (1..sceneCount) untuk mengambil durasi yang
+    // BENAR — sebelumnya selalu dari posisi array (i+1), jadi scene yang di-skip/reorder
+    // AI (lihat warning Step C bila jumlah scene tak sesuai) membuat SEMUA cek word-count
+    // & lipsync sesudahnya salah sasaran (audit 2026-07-28).
+    const declared = Number(sc.scene_number);
+    const n = Number.isInteger(declared) && declared >= 1 && declared <= expected.sceneCount ? declared : i + 1;
     // ── Step D — field scene tidak kosong (warning) ──
     if (!sc.script_narration?.toString().trim()) warnings.push(`Scene ${n}: script_narration kosong.`);
     if (!promptToText(sc.ai_ready_prompt).trim()) warnings.push(`Scene ${n}: ai_ready_prompt kosong.`);
@@ -156,7 +161,7 @@ export function validateSceneJson(raw: string, expected: ValidateExpected): Vali
     if (!sc.transition_to_next?.toString().trim()) warnings.push(`Scene ${n}: transition_to_next kosong.`);
 
     // ── Step E — word_count vs lipsync (toleransi +10%) ──
-    const durasi = expected.durations[i] ?? expected.durations[0] ?? 6;
+    const durasi = expected.durations[n - 1] ?? expected.durations[0] ?? 6;
     const maxWords = getLipsync(durasi).maxWords;
     const wc = Number(sc.word_count) || (sc.script_narration ? sc.script_narration.trim().split(/\s+/).length : 0);
     if (wc > Math.ceil(maxWords * 1.1)) {

@@ -59,6 +59,13 @@ export default function SceneCards({ data, scenes, durations }: {
                   Scene {sc.scene_number ?? i + 1} · {role || '—'}
                 </span>
                 <span className="text-xs text-[#64748B]">{durasi}s</span>
+                {/* duration_sec dari ai_ready_prompt (tool audio-native) — dulu tidak
+                    pernah dirender walau bisa beda dari durasi Step 1 (mis. clip_max_sec). */}
+                {veo?.duration_sec != null && Number(veo.duration_sec) !== durasi && (
+                  <span className="text-xs text-amber-600" title="duration_sec di ai_ready_prompt berbeda dari durasi Step 1">
+                    ⏱ prompt: {veo.duration_sec}s
+                  </span>
+                )}
                 <span className={`text-xs flex items-center gap-1 ${wcOk ? 'text-emerald-600' : 'text-amber-600'}`}>
                   {wcOk ? '✅' : '⚠️'} {wc}/{maxWords} kata
                 </span>
@@ -99,6 +106,38 @@ export default function SceneCards({ data, scenes, durations }: {
               </div>
               <pre className="w-full p-3 border border-gray-200 rounded-xl text-xs font-mono text-[#0F172A] bg-[#F8FAFC] whitespace-pre-wrap break-words leading-relaxed">{prompt || '(kosong)'}</pre>
             </div>
+
+            {/* sequences[] (Fase 6) — beat bertimecode, dulu tidak pernah dirender sama
+                sekali walau validator (Step G1) sudah mewarning kalau kosong/rusak. */}
+            {Array.isArray(veo?.sequences) && veo.sequences.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wide">Sequences (beat bertimecode)</div>
+                  <button onClick={() => copyPrompt(1000 + i, JSON.stringify(veo.sequences, null, 2))}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold transition-colors"
+                    style={{ color: copiedIdx === 1000 + i ? '#10B981' : '#1565C0' }}>
+                    {copiedIdx === 1000 + i ? <><Check size={12} /> Copied!</> : <><Copy size={12} /> Copy JSON</>}
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  {veo.sequences.map((sq, si) => (
+                    <div key={si} className="flex gap-2 text-xs p-2 border border-gray-100 rounded-lg bg-[#F8FAFC]">
+                      <span className="font-mono text-[#1565C0] shrink-0">{sq.timestamp ?? `#${sq.sequence ?? si + 1}`}</span>
+                      <span className="text-[#0F172A]">{sq.action || <span className="text-red-500">(action kosong)</span>}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* negative_prompt bentuk string (legacy top-level, tool bukan audio-native) —
+                dulu tidak pernah dirender walau ada di data & disebut validator. */}
+            {!veo && sc.negative_prompt && (
+              <div>
+                <div className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wide mb-1">Negative Prompt</div>
+                <p className="text-xs text-[#0F172A] font-mono bg-[#F8FAFC] border border-gray-100 rounded-lg p-2">{sc.negative_prompt}</p>
+              </div>
+            )}
 
             {/* On-screen text + transisi */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">

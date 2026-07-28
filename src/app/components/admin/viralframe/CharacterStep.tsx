@@ -33,21 +33,37 @@ function charSrc(url: string | null) {
   return url;
 }
 
-// Konversi file gambar → WebP base64 (pola sama PropertyPhotosCard)
+// Konversi file gambar → WebP base64 (pola sama PropertyPhotosCard). Dua perbaikan
+// (audit 2026-07-28):
+//  1. Downscale ke maksimal MAX_DIMENSI sisi terpanjang sebelum encode — tanpa ini
+//     foto 12MP+ jadi payload JSON multi-MB ke endpoint characters (POST/PATCH).
+//  2. Verifikasi blob.type benar-benar 'image/webp'. Sebagian browser diam-diam
+//     fallback ke PNG saat canvas.toBlob diminta 'image/webp' tapi encoder-nya
+//     tidak tersedia — tanpa deteksi ini, guard di submitUpload
+//     (startsWith('data:image/webp;base64,')) menolaknya SENYAP dan karakter
+//     tersimpan tanpa foto sama sekali, tanpa pesan error apa pun ke user.
+const MAX_DIMENSI = 1024;
 function convertToWebP(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
       URL.revokeObjectURL(url);
+      const scale = Math.min(1, MAX_DIMENSI / Math.max(img.naturalWidth, img.naturalHeight));
+      const w = Math.max(1, Math.round(img.naturalWidth * scale));
+      const h = Math.max(1, Math.round(img.naturalHeight * scale));
       const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
+      canvas.width = w;
+      canvas.height = h;
       const ctx = canvas.getContext('2d');
       if (!ctx) { reject(new Error('Canvas tidak tersedia')); return; }
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, w, h);
       canvas.toBlob(blob => {
         if (!blob) { reject(new Error('Konversi WebP gagal')); return; }
+        if (blob.type !== 'image/webp') {
+          reject(new Error('Browser ini tidak mendukung encode WebP — coba browser lain (Chrome/Edge/Firefox terbaru).'));
+          return;
+        }
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result as string);
         reader.onerror = () => reject(new Error('FileReader error'));
