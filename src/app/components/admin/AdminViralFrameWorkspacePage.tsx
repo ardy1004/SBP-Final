@@ -1776,7 +1776,17 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
   const [mergeError, setMergeError] = useState('');
   const [mergedBlob, setMergedBlob] = useState<Blob | null>(null);
   const [mergedUrl, setMergedUrl] = useState<string | null>(null);
-  const [showBacksound, setShowBacksound] = useState(false);
+
+  // Preview panel permanen (kanan) — tampil begitu file dipilih, ganti ke hasil
+  // merge begitu "Terapkan Backsound" selesai. Sebelumnya panel ini baru muncul
+  // SETELAH proses selesai (user bingung "tidak ada tampilan visual" — 2026-07-28).
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!file) { setLocalPreviewUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; }); return; }
+    const url = URL.createObjectURL(file);
+    setLocalPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
 
   // File/backsound/volume berubah setelah merge → preview lama jadi tidak valid,
   // wajib klik "Terapkan Backsound" lagi supaya tidak pernah upload hasil stale.
@@ -1914,7 +1924,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4 max-w-2xl">
+    <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4 max-w-3xl">
       <div>
         <h3 className="font-display font-bold text-[#0F172A] text-sm mb-1">📤 Upload Hasil Video</h3>
         <p className="text-xs text-[#64748B]">
@@ -1932,41 +1942,41 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
         {file && <p className="text-[11px] text-[#94A3B8] mt-1">{file.name} · {(file.size / 1024 / 1024).toFixed(1)}MB</p>}
       </div>
 
-      {/* Backsound (opsional) — dilipat default agar tidak mengintimidasi user yang
-          cuma mau upload biasa. Hanya aktif kalau file video sudah dipilih. */}
+      {/* Backsound (opsional) — 2 kolom: kiri kontrol, kanan preview PERMANEN
+          (tampil begitu file dipilih, bukan cuma muncul setelah diproses — ini
+          yang bikin user bingung "tidak ada tampilan visual" sebelumnya). */}
       {file && (
-        <div className="border border-gray-100 rounded-xl">
-          <button type="button" onClick={() => setShowBacksound(s => !s)}
-            className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-[#0F172A]">
-            <span>🎵 Tambah Backsound (opsional){backsoundItem && !showBacksound ? ` — ${backsoundItem.label}` : ''}</span>
-            <span className="text-[#94A3B8]">{showBacksound ? '▲' : '▼'}</span>
-          </button>
-          {showBacksound && (
-            <div className="px-3 pb-3 space-y-3 border-t border-gray-100 pt-3">
-              <BacksoundPicker
-                selectedId={backsoundId}
-                onSelect={(id, item) => { setBacksoundId(id); setBacksoundItem(item); invalidateMerged(); }}
-                volumePct={volumePct}
-                onVolumeChange={v => { setVolumePct(v); invalidateMerged(); }}
-              />
-              {backsoundId != null && (
-                <button type="button" onClick={applyBacksound} disabled={merging}
-                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-white disabled:opacity-50"
-                  style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
-                  {merging ? <Loader2 size={13} className="animate-spin" /> : <Music size={13} />}
-                  {merging ? 'Memproses…' : '🎵 Terapkan Backsound'}
-                </button>
-              )}
-              {mergeProgress && merging && <p className="text-[11px] font-mono text-[#64748B] bg-gray-50 rounded-lg px-2.5 py-1.5 break-all">{mergeProgress}</p>}
-              {mergeError && <p className="text-xs text-red-600">{mergeError}</p>}
-              {mergedUrl && (
-                <div className="space-y-1.5">
-                  <p className="text-xs text-emerald-600 flex items-center gap-1"><Check size={13} /> Backsound diterapkan — preview di bawah, akan ikut ter-upload.</p>
-                  <video controls src={mergedUrl} className="w-full rounded-xl border border-gray-100 bg-black max-h-64" />
-                </div>
-              )}
-            </div>
-          )}
+        <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_1fr] gap-4">
+          <div className="border border-gray-100 rounded-xl p-3.5 space-y-3">
+            <BacksoundPicker
+              selectedId={backsoundId}
+              onSelect={(id, item) => { setBacksoundId(id); setBacksoundItem(item); invalidateMerged(); }}
+              volumePct={volumePct}
+              onVolumeChange={v => { setVolumePct(v); invalidateMerged(); }}
+            />
+            {backsoundId != null && (
+              <button type="button" onClick={applyBacksound} disabled={merging}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-white disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+                {merging ? <Loader2 size={13} className="animate-spin" /> : <Music size={13} />}
+                {merging ? 'Memproses…' : '🎵 Terapkan & Perbarui Preview'}
+              </button>
+            )}
+            {mergeProgress && merging && <p className="text-[11px] font-mono text-[#64748B] bg-gray-50 rounded-lg px-2.5 py-1.5 break-all">{mergeProgress}</p>}
+            {mergeError && <p className="text-xs text-red-600">{mergeError}</p>}
+          </div>
+
+          <div className="border border-gray-100 rounded-xl p-3.5 space-y-2 lg:sticky lg:top-3 self-start">
+            <label className="block text-xs font-semibold text-[#0F172A]">Preview</label>
+            {(mergedUrl ?? localPreviewUrl) && (
+              <video controls src={mergedUrl ?? localPreviewUrl ?? undefined} className="w-full rounded-xl border border-gray-100 bg-black max-h-80" />
+            )}
+            {mergedUrl ? (
+              <p className="text-xs text-emerald-600 flex items-center gap-1"><Check size={13} /> Backsound diterapkan — versi ini yang akan ter-upload.</p>
+            ) : (
+              <p className="text-xs text-[#94A3B8]">Video asli (belum ada backsound diterapkan).</p>
+            )}
+          </div>
         </div>
       )}
 
