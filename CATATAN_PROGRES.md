@@ -5,6 +5,35 @@
 
 ---
 
+## SESI 28-29 JULI 2026 — ViralFrame: Studio Backsound (fix) + Auto Caption (baru, LIVE)
+
+Semua di bawah live production, commit berurutan di `master`.
+
+### Fix bug nyata: volume backsound tidak berpengaruh (`fb17660`)
+Root cause: filter `amix` FFmpeg default `normalize=1` menyeimbangkan ulang volume kedua track, menimpa scaling `volume=` yang sudah diterapkan ke backsound sebelum mixing — makanya slider terasa tidak berfungsi. Fix: `normalize=0` + `alimiter=limit=0.95` di akhir chain. Diverifikasi empiris: video sintetis H.264/AAC (dibuat via `MediaRecorder`, bukan dummy bytes) diproses di volume 10% vs 90%, rasio RMS hasil decode = 9.00x — presisi sesuai rasio yang diharapkan.
+
+### Studio Backsound — polish visual (`a0dee59`)
+Kartu "🎬 Studio Backsound" dengan canvas preview gelap rasio 9:16 + pill badge status, terinspirasi CapCut (tampilan saja, bukan timeline editor).
+
+### Fitur baru: Auto Caption MVP (`9c5c630`, `9221ae3`, `8070102`)
+Transkripsi kata-per-kata dari suara asli video (bukan estimasi) via **Groq Whisper** (word-level timestamp), dibakar ke video via `ffmpeg.wasm` `drawtext` (satu filter per kata, `enable=between(t,start,end)`) — di alur "Upload Hasil", setelah backsound (kalau dipakai keduanya, caption dibakar PALING TERAKHIR supaya tidak re-encode dua kali). Backend baru: `functions/api/admin/viralframe/transcribe.js` (proxy Groq, API key tidak keluar ke browser).
+
+**3 bug ffmpeg nyata ditemukan & diperbaiki lewat testing LIVE** (video sintetis H.264/AAC, bukan cuma baca kode):
+1. Response endpoint tidak pakai amplop `{success,data,error}` standar (`bacaJson()` butuh itu) — HTTP 200 tapi dibaca sebagai gagal.
+2. `ffmpeg.exec()` tanpa `-c:v` eksplisit → video hasil tidak bisa diputar browser (`MEDIA_ERR_SRC_NOT_SUPPORTED`) — fix `-c:v libx264 -pix_fmt yuv420p`.
+3. `drawtext` opsi `borderw` tidak mendukung ekspresi matematis (beda dari `fontsize`) — `borderw=h/220` bikin ffmpeg `Abort()`, diganti nilai integer tetap.
+4. Font WOFF2 situs (dipakai UI web) tidak bisa dibaca freetype build ffmpeg.wasm ini — ditambah font TTF terpisah khusus caption (`public/fonts/*-caption.ttf`, dari google/fonts, izin user eksplisit tiap unduh).
+
+**Performa**: video 40 detik/77 kata awalnya ~8 menit untuk di-render (`speed=0.08x`, WASM single-thread tanpa GPU + puluhan filter dirangkai) — ditambah `-preset ultrafast` di `ffmpeg.exec()`, trade-off ukuran file lebih besar demi kecepatan jauh lebih tinggi.
+
+**Font + edit teks** (`8070102`): riset pola CapCut dulu atas permintaan user — edit transkrip CapCut memang per-kata (bukan free-text), variasi font CapCut cuma file TTF statis dibundel sebagai aset (applicable di SBP tanpa hambatan, font statis di luar anggaran CPU/bundle Cloudflare). Diterapkan: 3 pilihan font (Inter/Poppins Bold/Montserrat), tiap kata hasil Whisper jadi `<input>` kecil yang bisa dikoreksi user — timing `start`/`end` TIDAK ikut berubah saat teks diedit, sinkron ke suara asli tetap presisi.
+
+**Anggaran bundle**: `BUDGET_FUNCTIONS_RAW` di `scripts/check-bundle-budget.mjs` dinaikkan 5.850.000 → 5.900.000 untuk endpoint `transcribe.js` baru — sah karena Asersi A (penyebab asli insiden Error 1102, daftar import top-level SSR) tetap 8 paket, tidak berubah.
+
+**Belum dikerjakan** (scope MVP, disepakati ditunda): drag posisi caption, resize ukuran, dan pengujian dengan suara manusia asli (baru diuji dengan nada sintetis + 1 video real user 40 detik).
+
+---
+
 ## SESI 11 JULI 2026 (lanjutan) — ViralFrame 2.0 (roadmap 6 tahap, semua LIVE)
 
 Dari "generator sekali-pakai yang amnesia" → sistem produksi konten (memori, library, status, feedback).
@@ -19,7 +48,7 @@ Semua tahap: build 0 error + Functions bundle OK + deploy + verifikasi health. E
 
 ---
 
-## STATUS SAAT INI: Domain `salambumi.xyz` LIVE di produksi. Pasca go-live: security hardening + Turnstile anti-bot + sitemap dinamis LIVE; ViralFrame naik kelas (arketipe gaya video, koreografi kamera per-tool, Style Pair A/B, multi-provider AI Gemini/Groq/OpenRouter/DeepSeek dengan fallback), fix konsistensi image-to-video. `master` = produksi. — Terakhir diupdate 11 Juli 2026
+## STATUS SAAT INI: Domain `salambumi.xyz` LIVE di produksi. ViralFrame terus berkembang — backsound (musik latar) & Auto Caption (transkripsi kata-per-kata + burn-in, pilihan font, edit teks) di alur Upload Hasil, keduanya LIVE. `master` = produksi. — Terakhir diupdate 29 Juli 2026
 
 ---
 
