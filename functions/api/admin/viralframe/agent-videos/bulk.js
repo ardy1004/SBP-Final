@@ -6,6 +6,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { destroyCloudinaryAsset } from '../../../../_lib/cloudinary.js';
+import { logServerError } from '../../../../_lib/logError.js';
 
 const VALID_ACTIONS = ['trash', 'restore', 'delete'];
 const MAX_IDS = 100;
@@ -35,15 +36,42 @@ export async function onRequestPost(context) {
       return jsonOk({ affected: ids.length });
     }
 
-    // delete: hapus file Cloudinary tiap row dulu, baru hapus barisnya sekali di akhir
-    const rows = await env.DB.prepare(`SELECT id, cloudinary_public_id, resource_type FROM viralframe_agent_videos WHERE id IN (${placeholders})`).bind(...ids).all();
-    await Promise.all((rows.results ?? []).map(row =>
-      destroyCloudinaryAsset(env, row.cloudinary_public_id, row.resource_type).catch(err =>
-        console.error('[vf agent-videos bulk] cloudinary destroy', row.id, err.message)
-      )
-    ));
-    await env.DB.prepare(`DELETE FROM viralframe_agent_videos WHERE id IN (${placeholders})`).bind(...ids).run();
-    return jsonOk({ affected: ids.length });
+    // delete: HANYA video yang sudah di Sampah (trashed_at IS NOT NULL) — dulu
+    // action 'delete' bisa menghapus permanen video AKTIF tanpa lewat Sampah dulu
+    // (audit 2026-07-28), melewati safety net "trash dulu baru purge".
+    const rows = await env.DB.prepare(
+      `SELECT id, cloudinary_public_id, resource_type FROM viralframe_agent_videos WHERE id IN (${placeholders}) AND trashed_at IS NOT NULL`
+    ).bind(...ids).all();
+    const candidates = rows.results ?? [];
+    const skippedNotTrashed = ids.length - candidates.length;
+
+    // Hapus file Cloudinary tiap row dulu — HANYA row yang destroy-nya sukses (atau
+    // tidak punya file untuk dihapus) yang lanjut dihapus dari D1. Sebelumnya
+    // kegagalan Cloudinary ditelan lalu row D1 tetap dihapus tanpa syarat = asset
+    // Cloudinary orphan permanen tanpa jejak untuk retry (audit 2026-07-28).
+    const deletable = [];
+    const failed = [];
+    await Promise.all(candidates.map(async row => {
+      if (!row.cloudinary_public_id) { deletable.push(row.id); return; }
+      try {
+        await destroyCloudinaryAsset(env, row.cloudinary_public_id, row.resource_type);
+        deletable.push(row.id);
+      } catch (err) {
+        console.error('[vf agent-videos bulk] cloudinary destroy', row.id, err.message);
+        failed.push(row.id);
+        await logServerError(env, {
+          message: `Gagal destroy Cloudinary asset saat bulk delete agent-video #${row.id}: ${err.message}`,
+          source: 'server',
+          context: { endpoint: 'agent-videos/bulk', id: row.id, cloudinary_public_id: row.cloudinary_public_id },
+        });
+      }
+    }));
+
+    if (deletable.length > 0) {
+      const delPlaceholders = deletable.map(() => '?').join(',');
+      await env.DB.prepare(`DELETE FROM viralframe_agent_videos WHERE id IN (${delPlaceholders})`).bind(...deletable).run();
+    }
+    return jsonOk({ affected: deletable.length, failed, skipped_not_trashed: skippedNotTrashed });
   } catch (err) {
     console.error('[vf agent-videos bulk]', action, err.message);
     return jsonError('Gagal menjalankan aksi massal', 500);

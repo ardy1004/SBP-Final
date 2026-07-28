@@ -52,6 +52,13 @@ export async function onRequestPost(context) {
   const widthPct = Number.isFinite(Number(body.width_pct)) ? Math.min(Math.max(Number(body.width_pct), 0.02), 1) : 0.18;
 
   try {
+    // Verifikasi FK character_id ADA sebelum insert/update — sebelumnya tidak
+    // dicek sama sekali (audit 2026-07-28, kontras dengan agent-videos/index.js
+    // yang sudah menegakkan ini), jadi badge bisa nyangkut ke karakter yang
+    // sudah dihapus/tidak pernah ada.
+    const karakter = await env.DB.prepare('SELECT id FROM viralframe_characters WHERE id = ?').bind(characterId).first();
+    if (!karakter) return jsonError('Karakter tidak ditemukan', 404);
+
     const existing = await env.DB.prepare('SELECT id FROM viralframe_badge_assets WHERE character_id = ? AND type = ?')
       .bind(characterId, type).first();
     if (existing) {

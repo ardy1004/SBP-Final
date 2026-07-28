@@ -20,7 +20,10 @@ export async function onRequestPatch(context) {
   sets.push("updated_at = datetime('now')");
 
   try {
-    await env.DB.prepare(`UPDATE viralframe_badge_assets SET ${sets.join(', ')} WHERE id = ?`).bind(...binds, id).run();
+    const res = await env.DB.prepare(`UPDATE viralframe_badge_assets SET ${sets.join(', ')} WHERE id = ?`).bind(...binds, id).run();
+    // meta.changes = 0 berarti id tidak ada — dulu tetap dibalas {updated:true}
+    // seolah sukses (audit 2026-07-28), padahal tidak ada baris yang diubah.
+    if (!res.meta?.changes) return jsonError('Badge tidak ditemukan', 404);
     return jsonOk({ updated: true });
   } catch (err) {
     console.error('[vf badges] PATCH', err.message);
@@ -34,7 +37,8 @@ export async function onRequestDelete(context) {
   if (!Number.isInteger(id) || id <= 0) return jsonError('id tidak valid', 400);
 
   try {
-    await env.DB.prepare('DELETE FROM viralframe_badge_assets WHERE id = ?').bind(id).run();
+    const res = await env.DB.prepare('DELETE FROM viralframe_badge_assets WHERE id = ?').bind(id).run();
+    if (!res.meta?.changes) return jsonError('Badge tidak ditemukan', 404);
     return jsonOk({ deleted: true });
   } catch (err) {
     console.error('[vf badges] DELETE', err.message);

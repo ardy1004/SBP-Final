@@ -6,12 +6,32 @@
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 
 const MAX_BYTES = 60 * 1024 * 1024; // 60MB
+// Content-Type diterima dari browser (VideoVOTab selalu kirim 'video/mp4', lihat
+// AdminViralFrameWorkspacePage.tsx) — dulu TIDAK divalidasi sama sekali (audit
+// 2026-07-28), bytes apa pun (HTML, EXE) diterima dan dipaksa disimpan sebagai
+// 'video/mp4'. Whitelist longgar (bukan cuma mp4 persis) karena browser/proxy
+// beda-beda menuliskan charset/codec di header.
+const ALLOWED_CONTENT_TYPES = ['video/mp4', 'video/webm', 'video/quicktime'];
 
 export async function onRequestPost(context) {
   const { request, env } = context;
   const url = new URL(request.url);
   const propertyId = parseInt(url.searchParams.get('property_id') ?? '', 10);
   if (!Number.isInteger(propertyId) || propertyId <= 0) return jsonError('property_id wajib', 422);
+
+  const contentType = (request.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+  if (!ALLOWED_CONTENT_TYPES.includes(contentType)) {
+    return jsonError(`Content-Type harus salah satu: ${ALLOWED_CONTENT_TYPES.join(', ')}`, 415);
+  }
+
+  // Tolak berdasar Content-Length SEBELUM membaca body penuh ke memori kalau
+  // klien sudah menyebutkannya — dulu cek ukuran baru terjadi SETELAH
+  // arrayBuffer() selesai membuffer semuanya (audit 2026-07-28). Content-Length
+  // bisa absen/salah (chunked encoding) jadi cek ukuran final di bawah tetap ada.
+  const declaredLen = parseInt(request.headers.get('content-length') ?? '', 10);
+  if (Number.isInteger(declaredLen) && declaredLen > MAX_BYTES) {
+    return jsonError('Video terlalu besar (maks 60MB)', 413);
+  }
 
   const label    = (url.searchParams.get('label') ?? '').slice(0, 120) || null;
   const gaya     = (url.searchParams.get('gaya') ?? '').slice(0, 60) || null;
@@ -40,8 +60,10 @@ export async function onRequestPost(context) {
     return jsonOk({ id: res.meta?.last_row_id, r2_key: r2Key }, 201);
   } catch (err) {
     console.error('[vf videos] insert', err.message);
-    // R2 sudah terisi; catat error tapi jangan gagal total upload
-    return jsonError('Video tersimpan di storage tapi gagal dicatat DB', 500);
+    // Rollback R2 — dulu dibiarkan orphan permanen kalau insert D1 gagal (audit
+    // 2026-07-28), kontras dengan characters/index.js yang sudah benar.
+    await env.MEDIA.delete(r2Key).catch(() => {});
+    return jsonError('Gagal mencatat video ke database', 500);
   }
 }
 

@@ -8,6 +8,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { destroyCloudinaryAsset } from '../../../_lib/cloudinary.js';
+import { logServerError } from '../../../_lib/logError.js';
 
 // Batas D1 = 100 bound parameter per query, dan DELETE di bawah memakai
 // `IN (?, ?, ...)` sebanyak jumlah baris. Nilai 200 yang lama membuat cron GAGAL
@@ -32,17 +33,34 @@ export async function onRequestPost(context) {
     const rows = res.results ?? [];
     if (rows.length === 0) return jsonOk({ purged: 0 });
 
-    await Promise.all(rows.map(row =>
-      destroyCloudinaryAsset(env, row.cloudinary_public_id, row.resource_type).catch(err =>
-        console.error('[purge-trash] cloudinary destroy', row.id, err.message)
-      )
-    ));
+    // HANYA row yang destroy Cloudinary-nya sukses (atau tidak punya file untuk
+    // dihapus) yang lanjut dihapus dari D1. Sebelumnya kegagalan Cloudinary
+    // ditelan lalu row D1 tetap dihapus tanpa syarat — asset Cloudinary jadi
+    // orphan PERMANEN tanpa jejak untuk retry, karena baris D1 (satu-satunya
+    // penanda "video ini ada") sudah lenyap (audit 2026-07-28). Row yang gagal
+    // dibiarkan di Sampah — cron run berikutnya akan mencobanya lagi.
+    const deletable = [];
+    await Promise.all(rows.map(async row => {
+      if (!row.cloudinary_public_id) { deletable.push(row.id); return; }
+      try {
+        await destroyCloudinaryAsset(env, row.cloudinary_public_id, row.resource_type);
+        deletable.push(row.id);
+      } catch (err) {
+        console.error('[purge-trash] cloudinary destroy', row.id, err.message);
+        await logServerError(env, {
+          message: `Gagal destroy Cloudinary asset saat cron purge-trash agent-video #${row.id}: ${err.message}`,
+          source: 'server',
+          context: { endpoint: 'internal/viralframe/purge-trash', id: row.id, cloudinary_public_id: row.cloudinary_public_id },
+        });
+      }
+    }));
 
-    const ids = rows.map(r => r.id);
-    const placeholders = ids.map(() => '?').join(',');
-    await env.DB.prepare(`DELETE FROM viralframe_agent_videos WHERE id IN (${placeholders})`).bind(...ids).run();
+    if (deletable.length > 0) {
+      const placeholders = deletable.map(() => '?').join(',');
+      await env.DB.prepare(`DELETE FROM viralframe_agent_videos WHERE id IN (${placeholders})`).bind(...deletable).run();
+    }
 
-    return jsonOk({ purged: ids.length });
+    return jsonOk({ purged: deletable.length, failed: rows.length - deletable.length });
   } catch (err) {
     console.error('[purge-trash]', err.message);
     return jsonError('Gagal purge sampah', 500);

@@ -41,7 +41,9 @@ export async function onRequestPatch(context) {
   if (sets.length === 0) return jsonError('Tidak ada field diupdate', 400);
 
   try {
-    await env.DB.prepare(`UPDATE viralframe_videos SET ${sets.join(', ')} WHERE id = ?`).bind(...binds, id).run();
+    const res = await env.DB.prepare(`UPDATE viralframe_videos SET ${sets.join(', ')} WHERE id = ?`).bind(...binds, id).run();
+    // meta.changes = 0 = id tidak ada — dulu tetap dibalas {updated:true} (audit 2026-07-28).
+    if (!res.meta?.changes) return jsonError('Video tidak ditemukan', 404);
     return jsonOk({ updated: true });
   } catch (err) {
     console.error('[vf videos] PATCH', err.message);

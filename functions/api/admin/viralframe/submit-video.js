@@ -1,6 +1,13 @@
 // POST /api/admin/viralframe/submit-video
 // Auth via functions/api/admin/_middleware.js
 
+// image_base64: JPEG q0.8 hasil crop client (photoToBase64WithRatio, maks
+// 1280x720) — biasanya jauh di bawah ini, cap murni jaring pengaman (audit
+// 2026-07-28, sebelumnya tidak ada batas sama sekali).
+const MAX_IMAGE_BASE64_LEN = 8_000_000;
+const MAX_PROMPT_LEN = 2000;
+const FETCH_TIMEOUT_MS = 10000;
+
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
@@ -17,8 +24,14 @@ export async function onRequestPost(context) {
     if (!image_base64 || !image_base64.startsWith('data:image/')) {
       return Response.json({ error: 'image_base64 tidak valid' }, { status: 400 });
     }
+    if (image_base64.length > MAX_IMAGE_BASE64_LEN) {
+      return Response.json({ error: 'image_base64 terlalu besar' }, { status: 413 });
+    }
     if (!prompt || !String(prompt).trim()) {
       return Response.json({ error: 'prompt tidak boleh kosong' }, { status: 400 });
+    }
+    if (String(prompt).length > MAX_PROMPT_LEN) {
+      return Response.json({ error: `prompt terlalu panjang (maks ${MAX_PROMPT_LEN} karakter)` }, { status: 413 });
     }
 
     // Whitelist model & image_size — jangan percaya nilai bebas dari client
@@ -55,6 +68,7 @@ export async function onRequestPost(context) {
           image_size: sizeFinal,
           seed: Math.floor(Math.random() * 999999),
         }),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
     } catch (err) {
       return Response.json({ error: `Gagal menghubungi SiliconFlow: ${err.message}` }, { status: 502 });

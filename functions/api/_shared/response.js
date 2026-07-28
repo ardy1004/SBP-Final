@@ -1,6 +1,9 @@
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  // PATCH ditambahkan (audit 2026-07-28) — videos/[id].js, agent-videos/[id].js,
+  // badges/[id].js, characters/[id].js semua memakai PATCH tapi header CORS ini
+  // sebelumnya tidak mengizinkannya (permintaan preflight cross-origin akan ditolak).
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 

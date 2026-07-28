@@ -9,13 +9,25 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
+// Voice OpenAI-audio standar yang didukung Pollinations (model=openai-audio).
+// Sebelumnya `voice` diinterpolasi mentah ke query string tanpa whitelist/encode
+// (audit 2026-07-28) — input sembarang bisa menyisipkan parameter query lain
+// (mis. "alloy&model=x"). Whitelist + encodeURIComponent menutup keduanya.
+const ALLOWED_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
+// Naskah TIDAK punya batas panjang sebelumnya — payload/URL bisa multi-MB
+// (audit 2026-07-28). Voiceover realistis untuk beberapa scene pendek jauh
+// di bawah ini; cap murni jaring pengaman.
+const MAX_NASKAH_LEN = 3000;
+const FETCH_TIMEOUT_MS = 8000;
+
 function buildUrls(naskah, voice) {
   const withInstruction = encodeURIComponent(`Please read this naturally: ${naskah}`);
   const plain = encodeURIComponent(naskah);
+  const v = encodeURIComponent(voice);
   return [
-    `https://text.pollinations.ai/${withInstruction}?model=openai-audio&voice=${voice}`,
-    `https://text.pollinations.ai/${plain}?model=openai-audio&voice=${voice}`,
-    `https://text.pollinations.ai/${plain}?voice=${voice}`,
+    `https://text.pollinations.ai/${withInstruction}?model=openai-audio&voice=${v}`,
+    `https://text.pollinations.ai/${plain}?model=openai-audio&voice=${v}`,
+    `https://text.pollinations.ai/${plain}?voice=${v}`,
   ];
 }
 
@@ -34,14 +46,17 @@ export async function onRequestPost(context) {
     if (!naskah || !String(naskah).trim()) {
       return jsonError('naskah tidak boleh kosong', 400);
     }
+    if (String(naskah).length > MAX_NASKAH_LEN) {
+      return jsonError(`naskah terlalu panjang (maks ${MAX_NASKAH_LEN} karakter)`, 413);
+    }
 
-    const voiceParam = voice || 'alloy';
+    const voiceParam = ALLOWED_VOICES.includes(voice) ? voice : 'alloy';
     const urls = buildUrls(String(naskah).trim(), voiceParam);
 
     for (const url of urls) {
       let ttsRes;
       try {
-        ttsRes = await fetch(url);
+        ttsRes = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
       } catch {
         continue;
       }

@@ -10,6 +10,13 @@
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 
 const WEBP_PREFIX = 'data:image/webp;base64,';
+// Sama dengan characters/index.js — lihat catatan di sana untuk rasional lengkap.
+const MAX_BASE64_LEN = 3_000_000;
+function isValidWebpMagic(bytes) {
+  if (bytes.length < 12) return false;
+  const s = i => String.fromCharCode(bytes[i]);
+  return s(0) + s(1) + s(2) + s(3) === 'RIFF' && s(8) + s(9) + s(10) + s(11) === 'WEBP';
+}
 
 function sanitize(val, maxLen = 200) {
   if (typeof val !== 'string') return '';
@@ -49,11 +56,16 @@ export async function onRequestPatch(context) {
   let newR2Key = null;
   if (typeof body.foto === 'string' && body.foto) {
     if (!body.foto.startsWith(WEBP_PREFIX)) return jsonError('Foto harus berformat WebP (data:image/webp;base64,...)', 422);
-    let uploadBuf;
+    if (body.foto.length - WEBP_PREFIX.length > MAX_BASE64_LEN) {
+      return jsonError('Ukuran foto terlalu besar (maks ~2MB setelah decode)', 413);
+    }
+    let uploadBuf, uploadBytes;
     try {
       const binaryStr = atob(body.foto.slice(WEBP_PREFIX.length));
-      uploadBuf = Uint8Array.from(binaryStr, c => c.charCodeAt(0)).buffer;
+      uploadBytes = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
+      uploadBuf = uploadBytes.buffer;
     } catch { return jsonError('Gagal decode base64 foto', 400); }
+    if (!isValidWebpMagic(uploadBytes)) return jsonError('Isi foto bukan file WebP yang valid', 422);
 
     newR2Key = `viralframe-characters/${crypto.randomUUID()}.webp`;
     try {
