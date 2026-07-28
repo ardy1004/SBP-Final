@@ -53,7 +53,7 @@ function useDebouncedValue<T>(value: T, delay: number): T {
 
 // ─── Tipe data ────────────────────────────────────────────────────────────
 interface PropertyImage { id: number; url_webp: string; alt_text: string | null; urutan: number; is_cover: number;
-  /** Label ruangan tersimpan (migrasi 0026) — dipakai sebagai nilai awal Step 2 & YouTube Long. */
+  /** Label ruangan tersimpan (migrasi 0026) — dipakai sebagai nilai awal step Foto per Scene & YouTube Long. */
   label_ruangan?: string | null }
 interface PropertyDetail {
   id: number; kode_listing: string; title: string;
@@ -245,10 +245,10 @@ function Select({ value, onChange, opts }: {
 
 function StepIndicator({ current }: { current: number }) {
   const steps = [
-    { n: 1, label: 'Parameter Video', enabled: true },
-    { n: 2, label: 'Pilih Foto per Scene', enabled: true },
-    { n: 3, label: 'Pilih Karakter', enabled: true },
-    { n: 4, label: 'Generate Prompt', enabled: false },
+    { n: 1, label: 'Pilih Foto per Scene', enabled: true },
+    { n: 2, label: 'Pilih Karakter', enabled: true },
+    { n: 3, label: 'Parameter Video', enabled: true },
+    { n: 4, label: 'Generate Prompt', enabled: true },
   ];
   return (
     <div className="flex items-center">
@@ -795,7 +795,7 @@ function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }
 // ─── Jalur C: AI Generate component ─────────────────────────────────────────
 // Konstanta (PLATFORM_OPTIONS, MUSIK_OPTIONS,
 // FOTO_LABEL_OPTIONS) diimport dari ../../lib/viralframe-constants — sumber
-// tunggal yang sama dipakai Step 1/2 agar value enum tidak divergen lagi.
+// tunggal yang sama dipakai step Foto & Parameter agar value enum tidak divergen lagi.
 
 interface AIScene {
   scene: number; kamera: string; prompt: string; dialog_karakter: string;
@@ -813,8 +813,8 @@ interface AIMetadata {
 }
 interface AIGeneratedResult { scenes: AIScene[]; foto_urls: string[]; karakter: AIKarakter; metadata: AIMetadata }
 
-// Bridge Step 2 (PHOTO_LABELS, Title Case) → FOTO_LABEL_OPTIONS (snake_case)
-// agar Step 2 tidak perlu diubah tapi tetap bisa dipakai AIGenerateTab.
+// Bridge step Foto (PHOTO_LABELS, Title Case) → FOTO_LABEL_OPTIONS (snake_case)
+// agar step Foto tidak perlu diubah tapi tetap bisa dipakai AIGenerateTab.
 const PHOTO_LABEL_TO_FOTO_LABEL: Record<string, string> = {
   'Fasad': 'fasad',
   'Foyer/Lobby': 'foyer',
@@ -842,8 +842,8 @@ const PHOTO_LABEL_TO_FOTO_LABEL: Record<string, string> = {
   'Lainnya': 'lainnya',
 };
 
-// Bridge Step 1 (s1.language: id/en/id_en/en_id/jw) → bahasa dialog_karakter DeepSeek
-// (Indonesia/English/Jawa) — satu sumber (Step 1), bukan input terpisah di AIGenerateTab.
+// Bridge Parameter Video (s1.language: id/en/id_en/en_id/jw) → bahasa dialog_karakter DeepSeek
+// (Indonesia/English/Jawa) — satu sumber (Step 3 Parameter), bukan input terpisah di AIGenerateTab.
 // Bilingual (id_en/en_id) di-map ke Indonesia karena field dialog DeepSeek cuma menerima 1 bahasa.
 function mapLanguageToBahasa(lang: string): string {
   switch (lang) {
@@ -859,7 +859,7 @@ interface AIGenerateTabProps {
   propertyId: number;
   propertyTitle: string;
   kodeListingStr: string;
-  // Data dari Step 1
+  // Data dari Step 1 (Foto: jumlah scene + struktur Part) & Step 3 (Parameter Video)
   jumlahScene: number;
   platform: string;
   platforms: string[];
@@ -874,11 +874,11 @@ interface AIGenerateTabProps {
   register: string;
   cutawayExcluded: number[];
   sceneRoles: Record<number, 'Hook' | 'Body' | 'CTA'>;
-  /** Durasi per scene (detik) dari Step 1, index 0 = scene 1. */
+  /** Durasi per scene (detik) dari Step 3 (Parameter Video), index 0 = scene 1. */
   sceneDurations: number[];
-  // Data dari Step 2
+  // Data dari Step 1 (Pilih Foto per Scene)
   scenePhotos: Record<number, ScenePhoto>;
-  // Data dari Step 3
+  // Data dari Step 2 (Pilih Karakter)
   selectedKarakter: AISelectedKarakter | null;
   // Navigasi balik ke step yang belum lengkap
   onEditStep: (step: number) => void;
@@ -973,8 +973,8 @@ function AIGenerateTab({
     // Arketipe (opsional) — client hitung koreografi kamera per scene + arahan sutradara,
     // kirim sebagai string siap-pakai supaya backend tidak perlu menduplikasi data arketipe.
     const arc = findArchetype(archetype);
-    // Durasi PER SCENE dari Step 1 (audit 2026-07-26). Sebelumnya jalur ini memakai
-    // PLATFORM_DURASI_VF sehingga pengaturan durasi Step 1 tidak berpengaruh: budget
+    // Durasi PER SCENE dari Parameter Video (audit 2026-07-26). Sebelumnya jalur ini memakai
+    // PLATFORM_DURASI_VF sehingga pengaturan durasi Parameter Video tidak berpengaruh: budget
     // kata selalu dari 8 detik, dan beatCountForDuration(8) selalu 2 beat sehingga
     // cabang koreografi 3-beat tidak pernah tereksekusi.
     const durasiScene = (n: number) => sceneDurations[n - 1] ?? PLATFORM_DURASI_VF[platform] ?? 8;
@@ -1029,7 +1029,7 @@ function AIGenerateTab({
       multi_shot_scene: arc?.allowMultiShotPerScene === true,
       cutaway_excluded_scenes: cutawayExcludedInRange,
       register_instruction: REGISTER_INSTRUCTION[register] ?? '',
-      // Tiga parameter Step 1 yang selama ini TIDAK PERNAH sampai ke prompt
+      // Tiga parameter dari Parameter Video yang selama ini TIDAK PERNAH sampai ke prompt
       // (audit 2026-07-28). Pola sama seperti archetype_note: client meresolve
       // teksnya, backend tinggal menyisipkan — backend tidak perlu tabel sendiri.
       ratio,
@@ -1386,9 +1386,9 @@ function AIGenerateTab({
               </div>
             </div>
             <div className="flex gap-2 mt-2">
-              <button type="button" onClick={() => onEditStep(1)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Step 1</button>
-              <button type="button" onClick={() => onEditStep(2)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Step 2</button>
-              <button type="button" onClick={() => onEditStep(3)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Step 3</button>
+              <button type="button" onClick={() => onEditStep(1)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Step 1 (Foto)</button>
+              <button type="button" onClick={() => onEditStep(2)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Step 2 (Karakter)</button>
+              <button type="button" onClick={() => onEditStep(3)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Step 3 (Parameter)</button>
             </div>
           </div>
 
@@ -1431,7 +1431,7 @@ function AIGenerateTab({
 
           {!canGenerate && (
             <p className="text-xs text-amber-600 bg-amber-50 rounded-xl px-3 py-2">
-              ⚠️ Lengkapi {!selectedKarakter && 'karakter (Step 3)'}{!selectedKarakter && !allScenesHavePhoto && ' dan '}{!allScenesHavePhoto && `foto (Step 2 — scene ${missingScenes.join(', ')})`} terlebih dahulu.
+              ⚠️ Lengkapi {!selectedKarakter && 'karakter (Step 2)'}{!selectedKarakter && !allScenesHavePhoto && ' dan '}{!allScenesHavePhoto && `foto (Step 1 — scene ${missingScenes.join(', ')})`} terlebih dahulu.
             </p>
           )}
           {error && <p className="text-sm text-red-600">{error}</p>}
@@ -1869,7 +1869,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
           <option value="">— Pilih karakter —</option>
           {characters.map(c => <option key={c.id} value={c.id}>{c.nama}</option>)}
         </select>
-        {characters.length === 0 && <p className="text-[11px] text-[#94A3B8] mt-1">Belum ada karakter. Buat dulu di Step 3 — Pilih Karakter.</p>}
+        {characters.length === 0 && <p className="text-[11px] text-[#94A3B8] mt-1">Belum ada karakter. Buat dulu di Step 2 — Pilih Karakter.</p>}
       </div>
 
       <div className="space-y-2">
@@ -2219,7 +2219,7 @@ function YouTubeLongView({ propertyId, propertyTitle, photos }: { propertyId: nu
               {agents === null ? (
                 <p className="text-sm text-[#64748B]">Memuat daftar agen…</p>
               ) : agents.length === 0 ? (
-                <p className="text-sm text-[#64748B]">Belum ada agen tersimpan. Tambahkan lewat workspace ViralFrame → Step 3 (Karakter).</p>
+                <p className="text-sm text-[#64748B]">Belum ada agen tersimpan. Tambahkan lewat workspace ViralFrame → Step 2 (Karakter).</p>
               ) : (
                 <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
                   {agents.map(a => (
@@ -2334,7 +2334,7 @@ export default function AdminViralFrameWorkspacePage() {
   const [error, setError] = useState('');
   const [step, setStep] = useState(1);
   const [showErrors, setShowErrors] = useState(false);
-  const [activeStep2Scene, setActiveStep2Scene] = useState(1);
+  const [activePhotoScene, setActivePhotoScene] = useState(1);
 
   const [s1, setS1] = useState<Step1State>({
     sceneCount: 4,
@@ -2362,7 +2362,10 @@ export default function AdminViralFrameWorkspacePage() {
     useCharacter: false,
     characterId: null,
     visualAnchor: '',
-    expression: 'auto',
+    // Default eksplisit pilihan user (2026-07-28), bukan 'auto' — arketipe juga
+    // sudah tidak menimpanya lagi (lihat applyArchetype). Draft/riwayat lama yang
+    // menyimpan 'auto' tetap dihormati saat rehydrate.
+    expression: 'excited_joyful',
   });
   const update3 = useCallback((patch: Partial<Step3State>) =>
     setS3(prev => ({ ...prev, ...patch })), []);
@@ -2450,7 +2453,11 @@ export default function AdminViralFrameWorkspacePage() {
     setDeletingHistoryId(null);
   };
 
-  // R11: Preset tim (parameter Step 1)
+  // R11: Preset tim (parameter Step 3). Preset = parameter visual SAJA — sceneCount
+  // dan parts SENGAJA tidak ikut: sejak reorder wizard keduanya milik Step 1 (Foto),
+  // dan menerapkan preset ber-sceneCount berbeda dari Step 3 akan me-resize scenes[]
+  // alias menghapus foto yang sudah dipilih user. Preset lama yang terlanjur
+  // menyimpan field struktur tetap bisa dimuat — fieldnya diabaikan saat apply.
   interface PresetItem { name: string; params: Partial<Step1State>; updated_at?: string }
   const [presets, setPresets] = useState<PresetItem[]>([]);
   const loadPresets = useCallback(async () => {
@@ -2463,11 +2470,9 @@ export default function AdminViralFrameWorkspacePage() {
     const params = {
       archetype: s1.archetype, register: s1.register, tone: s1.tone, visualStyle: s1.visualStyle,
       hookType: s1.hookType, ctaType: s1.ctaType, ctaKeyword: s1.ctaKeyword, platforms: s1.platforms,
-      aiTool: s1.aiTool, ratio: s1.ratio, language: s1.language, sceneCount: s1.sceneCount,
+      aiTool: s1.aiTool, ratio: s1.ratio, language: s1.language,
       durationMode: s1.durationMode, uniformDuration: s1.uniformDuration,
       cutawayExcluded: s1.cutawayExcluded,
-      // parts (Fase 6) — backend whitelist sudah menerima field ini (lihat presets.js ALLOW).
-      ...(s1.parts ? { parts: s1.parts } : {}),
     };
     try { await fetch('/api/admin/viralframe/presets', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), params }) }); } catch { /* noop */ }
     loadPresets();
@@ -2475,22 +2480,10 @@ export default function AdminViralFrameWorkspacePage() {
   const applyPreset = (name: string) => {
     const p = presets.find(x => x.name === name);
     if (!p) return;
-    // Preset boleh membawa sceneCount berbeda dari yang sedang aktif — dulu applyPreset
-    // cuma spread s1 tanpa resize scenes[]/manualDurations, jadi Step 2 menampilkan
-    // scene card ekstra yang klik-fotonya no-op senyap (setScene menulis ke index yang
-    // tidak ada). Samakan dengan pola setSceneCount: resize dulu, baru terapkan s1.
-    const nextCount = typeof p.params.sceneCount === 'number' ? p.params.sceneCount : undefined;
-    if (nextCount != null) {
-      setScenes(prev => resize(prev, nextCount, () => ({ photoId: null, label: '' })));
-    }
-    setS1(prev => {
-      const merged = { ...prev, ...p.params };
-      const n = nextCount ?? prev.sceneCount;
-      return {
-        ...merged,
-        manualDurations: resize(merged.manualDurations, n, () => merged.uniformDuration || 6),
-      };
-    });
+    // Buang field struktur dari preset (lama maupun baru) — jangan sentuh scenes[],
+    // sceneCount, parts, atau manualDurations milik Step 1.
+    const { sceneCount: _sc, parts: _pt, manualDurations: _md, ...visualParams } = p.params;
+    setS1(prev => ({ ...prev, ...visualParams }));
   };
 
   // ─── Jalur C: derivasi props AIGenerateTab dari state Step 1–3 (bukan form independen lagi) ──
@@ -2663,8 +2656,12 @@ export default function AdminViralFrameWorkspacePage() {
     }
   }, [prop, s1.sceneCount, s1.archetype, s1.register]);
 
-  // Pilih arketipe → prefill visualStyle/tone (Step 1) + expression & useCharacter (Step 3).
+  // Pilih arketipe → prefill visualStyle/tone/register/cutaway (parameter Step 3 saja).
   // Nilai tetap bisa di-override manual setelahnya (memilih 'custom' tidak mereset).
+  // SENGAJA tidak menyentuh s3: sejak reorder wizard, karakter & ekspresi dipilih di
+  // Step 2 SEBELUM arketipe — menimpanya di sini berarti membuang pilihan user tanpa
+  // peringatan. Varian B di Style Pair A/B tetap memakai default arketipe (itu
+  // derivasi compile s3B, bukan state user).
   // Arketipe hybrid (allowMultiShotPerScene): default scene terakhir (CTA) DIKECUALIKAN
   // dari cutaway — jadi talking-head/selfie murni sebagai penutup. User bisa override
   // per scene lewat toggle "Per-Scene: Cutaway B-Roll" di bawah picker arketipe.
@@ -2679,7 +2676,6 @@ export default function AdminViralFrameWorkspacePage() {
       register: arc.defaults.register ?? prev.register,
       cutawayExcluded: arc.allowMultiShotPerScene ? [prev.sceneCount] : [],
     }));
-    setS3(prev => ({ ...prev, useCharacter: arc.defaults.useCharacter, expression: arc.defaults.expression }));
   };
 
   // Toggle satu scene masuk/keluar dari daftar pengecualian cutaway.
@@ -2710,9 +2706,27 @@ export default function AdminViralFrameWorkspacePage() {
     setScenes(prev => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
 
   // ─── Validasi ───────────────────────────────────────────────────────────
-  const step1Errors = useMemo(() => {
+  // Urutan wizard: 1 Foto per Scene → 2 Karakter → 3 Parameter Video → 4 Generate.
+  const fotoErrors = useMemo(() => {
     const e: string[] = [];
     if (s1.sceneCount < 2 || s1.sceneCount > 12) e.push('Jumlah scene harus 2–12.');
+    scenes.slice(0, s1.sceneCount).forEach((sc, i) => {
+      if (sc.photoId == null) e.push(`Scene ${i + 1}: belum memilih foto.`);
+      if (!sc.label) e.push(`Scene ${i + 1}: belum memilih label foto.`);
+    });
+    return e;
+  }, [scenes, s1.sceneCount]);
+
+  const karakterErrors = useMemo(() => {
+    const e: string[] = [];
+    if (s3.useCharacter && s3.characterId == null) {
+      e.push('Pilih atau upload karakter terlebih dahulu.');
+    }
+    return e;
+  }, [s3]);
+
+  const paramErrors = useMemo(() => {
+    const e: string[] = [];
     if (s1.platforms.length === 0) e.push('Pilih minimal 1 platform distribusi.');
     // Rentang 2–30 detik = rentang yang benar-benar didukung getLipsync().
     // Di luar itu nilainya di-clamp diam-diam, jadi lebih baik ditolak terang-terangan.
@@ -2729,24 +2743,7 @@ export default function AdminViralFrameWorkspacePage() {
     return e;
   }, [s1]);
 
-  const step2Errors = useMemo(() => {
-    const e: string[] = [];
-    scenes.slice(0, s1.sceneCount).forEach((sc, i) => {
-      if (sc.photoId == null) e.push(`Scene ${i + 1}: belum memilih foto.`);
-      if (!sc.label) e.push(`Scene ${i + 1}: belum memilih label foto.`);
-    });
-    return e;
-  }, [scenes, s1.sceneCount]);
-
-  const step3Errors = useMemo(() => {
-    const e: string[] = [];
-    if (s3.useCharacter && s3.characterId == null) {
-      e.push('Pilih atau upload karakter terlebih dahulu.');
-    }
-    return e;
-  }, [s3]);
-
-  const errorsFor = (st: number) => (st === 1 ? step1Errors : st === 2 ? step2Errors : st === 3 ? step3Errors : []);
+  const errorsFor = (st: number) => (st === 1 ? fotoErrors : st === 2 ? karakterErrors : st === 3 ? paramErrors : []);
 
   const goNext = () => {
     const errs = errorsFor(step);
@@ -3092,11 +3089,11 @@ export default function AdminViralFrameWorkspacePage() {
         </div>
       )}
 
-      {/* ─── STEP 1 ─── */}
-      {step === 1 && (
+      {/* ─── STEP 3 — Parameter Video ─── */}
+      {step === 3 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-5">
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <h2 className="font-display font-bold text-[#0F172A]">Step 1 — Parameter Video</h2>
+            <h2 className="font-display font-bold text-[#0F172A]">Step 3 — Parameter Video</h2>
             {/* R11: Preset tim */}
             <div className="flex items-center gap-2">
               {presets.length > 0 && (
@@ -3172,66 +3169,10 @@ export default function AdminViralFrameWorkspacePage() {
             );
           })()}
 
-          {/* Rancang Part (Fase 6, opsional) — pengelompokan naratif di atas Scene.
-              Part TIDAK mengubah mekanisme Scene (tetap 1 foto = 1 generate call);
-              hanya membawa role di level lebih tinggi + label naratif. Kosong = fallback
-              role otomatis berdasar posisi (Hook scene pertama, CTA scene terakhir). */}
-          <Field label="Rancang Part (opsional)" hint="Kelompokkan scene jadi babak naratif (Hook/Body/CTA) — kosongkan untuk perilaku otomatis berdasar posisi seperti biasa.">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={suggestStoryboard} disabled={suggestLoading}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-[#1565C0]/30 text-[#1565C0] hover:bg-[#F0F7FF] disabled:opacity-50 disabled:cursor-not-allowed">
-                  {suggestLoading ? 'Merancang…' : '🤖 AI Rancang Storyboard'}
-                </button>
-                <span className="text-[11px] text-[#94A3B8]">Isi Part + foto per scene otomatis dari label ruangan yang sudah tersimpan — tetap bisa diedit manual.</span>
-              </div>
-              {suggestError && <p className="text-xs text-red-500">{suggestError}</p>}
-              {(s1.parts ?? []).map((p, idx) => (
-                <div key={idx} className="flex items-center gap-2 px-3 py-2 border border-gray-100 rounded-xl">
-                  <span className="text-xs font-semibold text-[#94A3B8] w-14 shrink-0">Part {idx + 1}</span>
-                  <select value={p.role} onChange={e => updatePart(idx, { role: e.target.value as PartDef['role'] })}
-                    className="text-sm border border-gray-200 rounded-lg px-2 py-1">
-                    <option value="Hook">Hook</option>
-                    <option value="Body">Body</option>
-                    <option value="CTA">CTA</option>
-                  </select>
-                  <input type="number" min={1} max={s1.sceneCount} value={p.sceneCount}
-                    onChange={e => updatePart(idx, { sceneCount: Math.max(1, parseInt(e.target.value, 10) || 1) })}
-                    className="w-16 text-sm border border-gray-200 rounded-lg px-2 py-1" title="Jumlah scene" />
-                  <span className="text-xs text-[#94A3B8]">scene</span>
-                  <input type="text" value={p.label ?? ''} placeholder="Label (opsional)"
-                    onChange={e => updatePart(idx, { label: e.target.value })}
-                    className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1 min-w-0" />
-                  <button type="button" onClick={() => removePart(idx)}
-                    className="text-xs text-red-500 hover:text-red-700 shrink-0">Hapus</button>
-                </div>
-              ))}
-              <div className="flex items-center justify-between">
-                <button type="button" onClick={addPart}
-                  className="text-xs font-semibold text-[#1565C0] hover:text-[#0F4C9E]">+ Tambah Part</button>
-                {(s1.parts ?? []).length > 0 && (() => {
-                  const sum = s1.parts!.reduce((s, p) => s + p.sceneCount, 0);
-                  return sum !== s1.sceneCount ? (
-                    <span className="text-xs text-amber-600">
-                      Jumlah scene di Part ({sum}) belum sama dengan Jumlah Scene total ({s1.sceneCount}) — role fallback ke otomatis sampai cocok.
-                    </span>
-                  ) : (
-                    <span className="text-xs text-emerald-600">✓ Sum cocok, Part aktif</span>
-                  );
-                })()}
-              </div>
-            </div>
-          </Field>
-
+          {/* Jumlah Scene, Rancang Part, dan AI Rancang Storyboard pindah ke
+              Step 1 (Pilih Foto per Scene) — struktur scene dirancang bersama foto. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* (a) Jumlah Scene */}
-            <Field label="Jumlah Scene" hint="Antara 2–12 scene">
-              <input type="number" min={2} max={12} value={s1.sceneCount}
-                onChange={e => setSceneCount(parseInt(e.target.value, 10))}
-                className={selectCls} />
-            </Field>
-
-            {/* (b) Mode Durasi */}
+            {/* Mode Durasi */}
             <Field label="Mode Durasi">
               <div className="flex gap-2">
                 {(['uniform', 'manual'] as const).map(m => (
@@ -3379,13 +3320,72 @@ export default function AdminViralFrameWorkspacePage() {
         </div>
       )}
 
-      {/* ─── STEP 2 ─── */}
-      {step === 2 && (
+      {/* ─── STEP 1 — Pilih Foto per Scene ───
+          Termasuk Jumlah Scene + Rancang Part + AI Rancang Storyboard (pindahan dari
+          blok parameter): struktur scene dan pengisian fotonya dirancang di satu layar. */}
+      {step === 1 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-5">
-          <h2 className="font-display font-bold text-[#0F172A]">Step 2 — Pilih Foto per Scene</h2>
+          <h2 className="font-display font-bold text-[#0F172A]">Step 1 — Pilih Foto per Scene</h2>
           <p className="text-sm text-[#64748B] -mt-3">
-            Pilih 1 foto untuk tiap scene. Foto yang sama boleh dipakai di beberapa scene.
+            Tentukan jumlah scene, lalu pilih 1 foto untuk tiap scene. Foto yang sama boleh dipakai di beberapa scene.
           </p>
+
+          <Field label="Jumlah Scene" hint="Antara 2–12 scene">
+            <input type="number" min={2} max={12} value={s1.sceneCount}
+              onChange={e => setSceneCount(parseInt(e.target.value, 10))}
+              className={`${selectCls} sm:w-40`} />
+          </Field>
+
+          {/* Rancang Part (Fase 6, opsional) — pengelompokan naratif di atas Scene.
+              Part TIDAK mengubah mekanisme Scene (tetap 1 foto = 1 generate call);
+              hanya membawa role di level lebih tinggi + label naratif. Kosong = fallback
+              role otomatis berdasar posisi (Hook scene pertama, CTA scene terakhir). */}
+          <Field label="Rancang Part (opsional)" hint="Kelompokkan scene jadi babak naratif (Hook/Body/CTA) — kosongkan untuk perilaku otomatis berdasar posisi seperti biasa.">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={suggestStoryboard} disabled={suggestLoading}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-[#1565C0]/30 text-[#1565C0] hover:bg-[#F0F7FF] disabled:opacity-50 disabled:cursor-not-allowed">
+                  {suggestLoading ? 'Merancang…' : '🤖 AI Rancang Storyboard'}
+                </button>
+                <span className="text-[11px] text-[#94A3B8]">Isi Part + foto per scene otomatis dari label ruangan yang sudah tersimpan — tetap bisa diedit manual.</span>
+              </div>
+              {suggestError && <p className="text-xs text-red-500">{suggestError}</p>}
+              {(s1.parts ?? []).map((p, idx) => (
+                <div key={idx} className="flex items-center gap-2 px-3 py-2 border border-gray-100 rounded-xl">
+                  <span className="text-xs font-semibold text-[#94A3B8] w-14 shrink-0">Part {idx + 1}</span>
+                  <select value={p.role} onChange={e => updatePart(idx, { role: e.target.value as PartDef['role'] })}
+                    className="text-sm border border-gray-200 rounded-lg px-2 py-1">
+                    <option value="Hook">Hook</option>
+                    <option value="Body">Body</option>
+                    <option value="CTA">CTA</option>
+                  </select>
+                  <input type="number" min={1} max={s1.sceneCount} value={p.sceneCount}
+                    onChange={e => updatePart(idx, { sceneCount: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+                    className="w-16 text-sm border border-gray-200 rounded-lg px-2 py-1" title="Jumlah scene" />
+                  <span className="text-xs text-[#94A3B8]">scene</span>
+                  <input type="text" value={p.label ?? ''} placeholder="Label (opsional)"
+                    onChange={e => updatePart(idx, { label: e.target.value })}
+                    className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1 min-w-0" />
+                  <button type="button" onClick={() => removePart(idx)}
+                    className="text-xs text-red-500 hover:text-red-700 shrink-0">Hapus</button>
+                </div>
+              ))}
+              <div className="flex items-center justify-between">
+                <button type="button" onClick={addPart}
+                  className="text-xs font-semibold text-[#1565C0] hover:text-[#0F4C9E]">+ Tambah Part</button>
+                {(s1.parts ?? []).length > 0 && (() => {
+                  const sum = s1.parts!.reduce((s, p) => s + p.sceneCount, 0);
+                  return sum !== s1.sceneCount ? (
+                    <span className="text-xs text-amber-600">
+                      Jumlah scene di Part ({sum}) belum sama dengan Jumlah Scene total ({s1.sceneCount}) — role fallback ke otomatis sampai cocok.
+                    </span>
+                  ) : (
+                    <span className="text-xs text-emerald-600">✓ Sum cocok, Part aktif</span>
+                  );
+                })()}
+              </div>
+            </div>
+          </Field>
 
           {prop.images.length === 0 ? (
             <div className="text-center py-10">
@@ -3396,7 +3396,7 @@ export default function AdminViralFrameWorkspacePage() {
             Array.from({ length: s1.sceneCount }).map((_, i) => {
               const sc = scenes[i];
               const role = sceneRoleFromParts(i, s1.sceneCount, s1.parts);
-              const isOpen = activeStep2Scene === i + 1;
+              const isOpen = activePhotoScene === i + 1;
               const selectedImg = sc?.photoId != null ? prop.images.find(im => im.id === sc.photoId) : null;
               const usesParts = partsValidForTotal(s1.parts, s1.sceneCount);
               const partIdx = usesParts ? partIndexForScene(i, s1.parts, s1.sceneCount) : -1;
@@ -3411,7 +3411,7 @@ export default function AdminViralFrameWorkspacePage() {
                   )}
                 <div className="border border-gray-100 rounded-xl">
                   <button type="button"
-                    onClick={() => setActiveStep2Scene(isOpen ? 0 : i + 1)}
+                    onClick={() => setActivePhotoScene(isOpen ? 0 : i + 1)}
                     className={`w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors ${isOpen ? 'rounded-t-xl' : 'rounded-xl'}`}>
                     <span className="font-semibold text-[#0F172A] text-sm flex items-center gap-2">
                       Scene {i + 1} <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[#EFF6FF] text-[#1565C0]">{role}</span>
@@ -3467,7 +3467,7 @@ export default function AdminViralFrameWorkspacePage() {
                       </div>
 
                       <button type="button"
-                        onClick={() => setActiveStep2Scene(i + 1 < s1.sceneCount ? i + 2 : 0)}
+                        onClick={() => setActivePhotoScene(i + 1 < s1.sceneCount ? i + 2 : 0)}
                         className="w-full text-xs text-[#1565C0] hover:text-[#0F4C9E] py-1 font-medium">
                         {i + 1 < s1.sceneCount ? `Lanjut ke Scene ${i + 2} →` : '✓ Semua scene selesai'}
                       </button>
@@ -3481,8 +3481,8 @@ export default function AdminViralFrameWorkspacePage() {
         </div>
       )}
 
-      {/* ─── STEP 3 — Pilih Karakter ─── */}
-      {step === 3 && <CharacterStep value={s3} onChange={update3} />}
+      {/* ─── STEP 2 — Pilih Karakter ─── */}
+      {step === 2 && <CharacterStep value={s3} onChange={update3} />}
 
       {/* ─── STEP 4 — Generate & Validate ─── */}
       {step === 4 && (

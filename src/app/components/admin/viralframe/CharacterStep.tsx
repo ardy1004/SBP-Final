@@ -211,7 +211,7 @@ export default function CharacterStep({ value, onChange }: {
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-5">
-      <h2 className="font-display font-bold text-[#0F172A]">Step 3 — Pilih Karakter</h2>
+      <h2 className="font-display font-bold text-[#0F172A]">Step 2 — Pilih Karakter</h2>
 
       {/* Radio pilihan */}
       <div className="flex flex-col sm:flex-row gap-3">
