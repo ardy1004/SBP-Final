@@ -122,6 +122,16 @@ function resize<T>(arr: T[], len: number, fill: () => T): T[] {
   return next;
 }
 
+// Font untuk Auto Caption (drawtext ffmpeg) — TTF statis di public/fonts/,
+// TERPISAH dari WOFF2 yang dipakai UI web biasa (freetype build ffmpeg.wasm
+// ini tidak bisa decode WOFF2, reproduced live 2026-07-28). Pola sama CapCut:
+// tiap pilihan gaya cuma file font statis, tidak menyentuh anggaran CPU/bundle.
+const CAPTION_FONTS = {
+  inter: { label: 'Inter', file: '/fonts/inter-caption.ttf' },
+  poppins: { label: 'Poppins Bold', file: '/fonts/poppins-caption.ttf' },
+  montserrat: { label: 'Montserrat', file: '/fonts/montserrat-caption.ttf' },
+} as const;
+
 // R8: bangun subtitle .SRT dari narasi per scene + durasi (timing kumulatif).
 function srtTime(sec: number): string {
   const ms = Math.max(0, Math.round(sec * 1000));
@@ -1843,12 +1853,16 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
   // (bukan mergedBlob) supaya Whisper tidak terganggu musik latar backsound.
   // Burn-in (drawtext per kata) jalan di atas `mergedBlob ?? file` dan PALING
   // TERAKHIR dalam pipeline, supaya tidak re-encode video dua kali kalau user
-  // pakai backsound + caption sekaligus. Belum ada editing kata/timing manual
-  // ataupun drag posisi/pilihan font — itu ditunda ke iterasi berikutnya
-  // (disepakati eksplisit dengan user 2026-07-29); posisi/font MVP ini fixed.
+  // pakai backsound + caption sekaligus. Belum ada drag posisi caption — itu
+  // ditunda ke iterasi berikutnya (disepakati eksplisit dengan user
+  // 2026-07-29); posisi/ukuran MVP ini fixed, tapi font & teks kata sudah
+  // bisa dipilih/diedit (ditambahkan 2026-07-29 setelah riset pola CapCut:
+  // font cuma file TTF statis, tidak ada hambatan arsitektur; edit teks per
+  // kata — bukan free-text — supaya timing hasil Whisper tidak pernah rusak).
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeError, setTranscribeError] = useState('');
   const [words, setWords] = useState<{ word: string; start: number; end: number }[] | null>(null);
+  const [captionFont, setCaptionFont] = useState<keyof typeof CAPTION_FONTS>('inter');
   const [captioning, setCaptioning] = useState(false);
   const [captionProgress, setCaptionProgress] = useState('');
   const [captionError, setCaptionError] = useState('');
@@ -1909,11 +1923,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
       await ffmpeg.load();
 
       setCaptionProgress('Menyiapkan font…');
-      // TTF, BUKAN woff2 yang sudah ada untuk UI web — freetype di build ffmpeg.wasm
-      // ini tidak bisa decode WOFF2 ("unimplemented feature", reproduced live
-      // 2026-07-29). inter-caption.ttf (Inter variable, dari google/fonts) khusus
-      // dipakai drawtext, terpisah dari font UI biasa.
-      const fontBlob = await fetch('/fonts/inter-caption.ttf').then(r => r.blob());
+      const fontBlob = await fetch(CAPTION_FONTS[captionFont].file).then(r => r.blob());
       await ffmpeg.writeFile('font.ttf', await fetchFile(fontBlob));
       await ffmpeg.writeFile('video.mp4', await fetchFile(sourceBlob));
 
@@ -2124,15 +2134,16 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
 
       {/* Auto Caption (Beta, MVP) — transkripsi kata-per-kata dari suara asli
           (bukan estimasi), dibakar ke video PALING TERAKHIR (di atas backsound
-          kalau ada). Belum ada drag posisi/pilihan font/edit teks manual —
-          ditunda ke iterasi berikutnya (disepakati dengan user 2026-07-29). */}
+          kalau ada). Edit teks PER KATA (bukan free-text) — pola sama CapCut,
+          supaya timing hasil Whisper tidak pernah rusak saat dikoreksi. Drag
+          posisi/ukuran masih ditunda ke iterasi berikutnya. */}
       {file && (
         <div className="rounded-2xl border border-[#E2E8F0] overflow-hidden" style={{ background: 'linear-gradient(180deg, #FFF9F0 0%, #FFFFFF 140px)' }}>
           <div className="px-4 pt-3.5 pb-1">
             <h4 className="text-sm font-display font-bold text-[#0F172A] flex items-center gap-1.5">
               <Captions size={15} className="text-[#B45309]" /> Auto Caption <span className="text-[10px] font-semibold text-[#B45309] bg-[#FEF3C7] rounded-full px-1.5 py-0.5">Beta</span>
             </h4>
-            <p className="text-[11px] text-[#94A3B8] mt-0.5">Teks otomatis muncul per kata, tersinkron ke suara asli — posisi &amp; font tetap (belum bisa diatur di versi ini).</p>
+            <p className="text-[11px] text-[#94A3B8] mt-0.5">Teks otomatis muncul per kata, tersinkron ke suara asli — klik kata untuk koreksi, timing tidak berubah.</p>
           </div>
           <div className="p-4 pt-3 space-y-3">
             {!words && (
@@ -2147,13 +2158,43 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
 
             {words && words.length > 0 && (
               <>
-                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3 space-y-1.5">
-                  <span className="text-[11px] font-semibold text-[#0F172A]">{words.length} kata terdeteksi</span>
-                  <p className="text-xs text-[#64748B] leading-relaxed line-clamp-3">{words.map(w => w.word).join(' ')}</p>
-                  <button type="button" onClick={transcribeAudio} disabled={transcribing} className="text-[11px] text-[#B45309] font-semibold underline disabled:opacity-50">
-                    Transkripsi ulang
-                  </button>
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-[#0F172A]">{words.length} kata terdeteksi — klik untuk edit</span>
+                    <button type="button" onClick={transcribeAudio} disabled={transcribing} className="text-[11px] text-[#B45309] font-semibold underline disabled:opacity-50">
+                      Transkripsi ulang
+                    </button>
+                  </div>
+                  {/* Satu <input> per kata — cuma teksnya yang bisa diubah, timing
+                      [start,end] tiap kata TIDAK ikut berubah, jadi sinkron ke
+                      suara asli tetap presisi walau user koreksi salah dengar. */}
+                  <div className="flex flex-wrap gap-1 max-h-40 overflow-y-auto pr-1 -mr-1">
+                    {words.map((w, i) => (
+                      <input key={i} type="text" value={w.word}
+                        onChange={e => {
+                          const next = [...words]; next[i] = { ...next[i], word: e.target.value };
+                          setWords(next); invalidateCaptioned();
+                        }}
+                        style={{ width: `${Math.max(2, w.word.length) + 1.5}ch` }}
+                        className="text-xs text-[#0F172A] bg-white border border-gray-200 rounded-md px-1.5 py-1 outline-none focus:border-[#B45309] focus:bg-[#FFFBEB]" />
+                    ))}
+                  </div>
                 </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#0F172A] mb-1">Font Caption</label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(Object.keys(CAPTION_FONTS) as (keyof typeof CAPTION_FONTS)[]).map(id => (
+                      <button key={id} type="button" onClick={() => { setCaptionFont(id); invalidateCaptioned(); }}
+                        className={`text-[11px] font-semibold py-1.5 rounded-lg border transition-colors ${
+                          captionFont === id ? 'border-[#B45309] bg-[#FEF3C7] text-[#92400E]' : 'border-gray-200 text-[#64748B] hover:border-gray-300'
+                        }`}>
+                        {CAPTION_FONTS[id].label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <button type="button" onClick={applyCaptions} disabled={captioning}
                   className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-white disabled:opacity-50"
                   style={{ background: 'linear-gradient(135deg, #B45309 0%, #F59E0B 100%)' }}>
