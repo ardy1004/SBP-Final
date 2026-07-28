@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 /**
- * Penjaga kelengkapan "Prompt Rulebook" ViralFrame — mencegah drift terulang.
+ * Penjaga kelengkapan "Prompt Rulebook" + field Scene ViralFrame — mencegah
+ * drift terulang. 2 bagian: (1) impor kosakata/aturan wajib per jalur prompt-
+ * engine, (2) field Scene penting yang harus tersambung ke exporter/renderer
+ * jalur yang sama (lihat komentar BAGIAN 2 di bawah untuk rasional lengkap).
  *
  * LATAR BELAKANG (2026-07-28): ViralFrame punya 3 jalur prompt-engine paralel
  * (masterPromptCompiler.ts, ai-generate.js buildSystemPrompt(), youtube-long.js)
@@ -79,7 +82,55 @@ for (const [file, names] of Object.entries(REQUIRED_IMPORTS)) {
   }
 }
 
-console.log('Penjaga kelengkapan Prompt Rulebook ViralFrame');
+// ════════════════════════════════════════════════════════════════════════════
+// BAGIAN 2 — Kelengkapan field Scene lintas exporter/renderer (Stage 4, 2026-07-28)
+// ════════════════════════════════════════════════════════════════════════════
+// ViralFrame TIDAK punya 1 skema Scene kanonik — Jalur A (masterPromptCompiler.ts
+// + jsonValidator.ts + SceneCards.tsx) dan Jalur C (ai-generate.js + AIScene
+// interface + ZIP di AdminViralFrameWorkspacePage.tsx) punya bentuk BERBEDA
+// (objek terstruktur vs flat string) untuk tujuan yang genuinely berbeda
+// kompleksitasnya — SceneCards.tsx menangani validasi Veo-object/lipsync, render
+// inline Jalur C sengaja sederhana. Memaksa keduanya jadi 1 komponen/exporter
+// dinilai BERISIKO (regresi UI tak kelihatan tanpa uji browser langsung) untuk
+// manfaat yang tidak jelas, jadi TIDAK dilakukan.
+//
+// Sebagai gantinya: field penting yang bisa "hilang senyap" (ada di skema tapi
+// lupa disambungkan ke exporter/renderer JALUR YANG SAMA — persis kasus
+// `sequences` hilang dari ZIP Jalur C sebelum diperbaiki Stage 1) dijaga di
+// sini. Field baru yang ditambahkan ke SATU sisi (mis. field baru di AIScene)
+// WAJIB juga ditambahkan ke daftar SCENE_FIELD_PARITY kalau field itu perlu
+// terlihat user di exporter/renderer terkait.
+const SCENE_FIELD_PARITY = [
+  {
+    field: 'sequences',
+    note: 'beat bertimecode Fase 6 — wajib tersambung ke ZIP & tampilan, bukan cuma diminta ke AI',
+    files: [
+      'src/app/components/admin/AdminViralFrameWorkspacePage.tsx',
+      'src/app/components/admin/viralframe/SceneCards.tsx',
+      'src/app/components/admin/viralframe/jsonValidator.ts',
+    ],
+  },
+  {
+    field: 'negative_prompt',
+    note: 'wajib terlihat/tervalidasi, bukan cuma disuntik server lalu diam-diam diabaikan UI',
+    files: [
+      'src/app/components/admin/AdminViralFrameWorkspacePage.tsx',
+      'src/app/components/admin/viralframe/SceneCards.tsx',
+    ],
+  },
+];
+
+for (const { field, note, files } of SCENE_FIELD_PARITY) {
+  for (const file of files) {
+    let src;
+    try { src = readFileSync(file, 'utf8'); } catch { continue; } // sudah tertangani Bagian 1 kalau relevan di sana
+    if (!new RegExp(`\\b${field}\\b`).test(src)) {
+      problems.push(`${file}: field "${field}" tidak disebut sama sekali (${note}) — kalau field ini memang tidak relevan lagi di file ini, hapus dari SCENE_FIELD_PARITY; kalau masih relevan, sambungkan.`);
+    }
+  }
+}
+
+console.log('Penjaga kelengkapan Prompt Rulebook & field Scene ViralFrame');
 console.log('='.repeat(60));
 
 if (problems.length > 0) {
