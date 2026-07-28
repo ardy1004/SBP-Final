@@ -1942,40 +1942,58 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
         {file && <p className="text-[11px] text-[#94A3B8] mt-1">{file.name} · {(file.size / 1024 / 1024).toFixed(1)}MB</p>}
       </div>
 
-      {/* Backsound (opsional) — 2 kolom: kiri kontrol, kanan preview PERMANEN
-          (tampil begitu file dipilih, bukan cuma muncul setelah diproses — ini
-          yang bikin user bingung "tidak ada tampilan visual" sebelumnya). */}
+      {/* Backsound (opsional) — dibingkai sebagai "studio" tersendiri (header +
+          latar sedikit beda) supaya terasa seperti ruang kerja, bukan sisipan form
+          biasa. 2 kolom: kiri kontrol, kanan preview PERMANEN (tampil begitu file
+          dipilih, bukan cuma muncul setelah diproses). */}
       {file && (
-        <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_1fr] gap-4">
-          <div className="border border-gray-100 rounded-xl p-3.5 space-y-3">
-            <BacksoundPicker
-              selectedId={backsoundId}
-              onSelect={(id, item) => { setBacksoundId(id); setBacksoundItem(item); invalidateMerged(); }}
-              volumePct={volumePct}
-              onVolumeChange={v => { setVolumePct(v); invalidateMerged(); }}
-            />
-            {backsoundId != null && (
-              <button type="button" onClick={applyBacksound} disabled={merging}
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-white disabled:opacity-50"
-                style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
-                {merging ? <Loader2 size={13} className="animate-spin" /> : <Music size={13} />}
-                {merging ? 'Memproses…' : '🎵 Terapkan & Perbarui Preview'}
-              </button>
-            )}
-            {mergeProgress && merging && <p className="text-[11px] font-mono text-[#64748B] bg-gray-50 rounded-lg px-2.5 py-1.5 break-all">{mergeProgress}</p>}
-            {mergeError && <p className="text-xs text-red-600">{mergeError}</p>}
+        <div className="rounded-2xl border border-[#E2E8F0] overflow-hidden" style={{ background: 'linear-gradient(180deg, #F7FAFF 0%, #FFFFFF 140px)' }}>
+          <div className="px-4 pt-3.5 pb-1">
+            <h4 className="text-sm font-display font-bold text-[#0F172A] flex items-center gap-1.5">🎬 Studio Backsound</h4>
+            <p className="text-[11px] text-[#94A3B8] mt-0.5">Musik latar ditambahkan sebelum upload — Konten Agent langsung menerima video yang sudah jadi.</p>
           </div>
+          <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_1fr] gap-4 p-4 pt-3">
+            <div className="bg-white border border-gray-100 rounded-xl p-3.5 space-y-3">
+              <BacksoundPicker
+                selectedId={backsoundId}
+                onSelect={(id, item) => { setBacksoundId(id); setBacksoundItem(item); invalidateMerged(); }}
+                volumePct={volumePct}
+                onVolumeChange={v => { setVolumePct(v); invalidateMerged(); }}
+              />
+              {backsoundId != null && (
+                <button type="button" onClick={applyBacksound} disabled={merging}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-white disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+                  {merging ? <Loader2 size={13} className="animate-spin" /> : <Music size={13} />}
+                  {merging ? 'Memproses…' : '🎵 Terapkan & Perbarui Preview'}
+                </button>
+              )}
+              {mergeProgress && merging && <p className="text-[11px] font-mono text-[#64748B] bg-gray-50 rounded-lg px-2.5 py-1.5 break-all">{mergeProgress}</p>}
+              {mergeError && <p className="text-xs text-red-600">{mergeError}</p>}
+            </div>
 
-          <div className="border border-gray-100 rounded-xl p-3.5 space-y-2 lg:sticky lg:top-3 self-start">
-            <label className="block text-xs font-semibold text-[#0F172A]">Preview</label>
-            {(mergedUrl ?? localPreviewUrl) && (
-              <video controls src={mergedUrl ?? localPreviewUrl ?? undefined} className="w-full rounded-xl border border-gray-100 bg-black max-h-80" />
-            )}
-            {mergedUrl ? (
-              <p className="text-xs text-emerald-600 flex items-center gap-1"><Check size={13} /> Backsound diterapkan — versi ini yang akan ter-upload.</p>
-            ) : (
-              <p className="text-xs text-[#94A3B8]">Video asli (belum ada backsound diterapkan).</p>
-            )}
+            <div className="bg-white border border-gray-100 rounded-xl p-3.5 space-y-2.5 lg:sticky lg:top-3 self-start">
+              <span className="text-xs font-bold uppercase tracking-wide text-[#94A3B8]">Preview</span>
+              <div className="relative rounded-xl overflow-hidden bg-[#0B1220] mx-auto" style={{ aspectRatio: '9/16', maxWidth: 220 }}>
+                {(mergedUrl ?? localPreviewUrl) ? (
+                  <video controls src={mergedUrl ?? localPreviewUrl ?? undefined} className="absolute inset-0 w-full h-full object-contain" />
+                ) : (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-[#475569] gap-1.5">
+                    <Film size={22} />
+                    <span className="text-[10px]">Preview video</span>
+                  </div>
+                )}
+              </div>
+              {mergedUrl ? (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">
+                  <Check size={10} /> Backsound diterapkan — versi ini yang akan ter-upload
+                </span>
+              ) : (
+                <span className="inline-flex items-center text-[10px] font-medium text-[#94A3B8] bg-gray-50 rounded-full px-2 py-0.5">
+                  Video asli (belum ada backsound)
+                </span>
+              )}
+            </div>
           </div>
         </div>
       )}
