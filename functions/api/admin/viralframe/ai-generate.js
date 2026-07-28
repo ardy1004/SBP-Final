@@ -620,6 +620,22 @@ function parseSceneJson(raw, expectedCount, requireRefAnchor = false, nativeAudi
       error: `Output AI tidak valid. Dapat ${Array.isArray(parsed) ? parsed.length : 'non-array'} scene, butuh ${expectedCount}. Setiap scene wajib: scene (int), kamera (≥3 karakter), prompt (≥50 kata), dialog_karakter (≥10 karakter).`,
     };
   }
+  // Cegah nomor scene duplikat/di luar rentang — sebelumnya lolos validasi lalu membuat
+  // referensi foto & nama file ZIP salah sasaran (audit 2026-07-28). Rentang 1..expectedCount
+  // HANYA ditegakkan untuk generate penuh (expectedCount>1) — mode regenerate (expectedCount=1)
+  // sengaja dilewati karena nomor scene DIPAKSA ulang ke nilai yang diminta setelah fungsi ini
+  // return (lihat `sceneData[0].scene = regenerateScene` di pemanggil), jadi validasi rentang
+  // di sini justru bisa menolak output yang benar.
+  const sceneNums = parsed.map(s => s.scene);
+  if (new Set(sceneNums).size !== sceneNums.length) {
+    return { ok: false, error: `Output AI memuat nomor scene duplikat: ${sceneNums.join(', ')}.` };
+  }
+  if (expectedCount > 1) {
+    const outOfRange = sceneNums.filter(n => n < 1 || n > expectedCount);
+    if (outOfRange.length > 0) {
+      return { ok: false, error: `Output AI memuat nomor scene di luar rentang 1-${expectedCount}: ${outOfRange.join(', ')}.` };
+    }
+  }
   const idScene = parsed.find(s => looksIndonesian(s.prompt, nativeAudio));
   if (idScene) {
     return { ok: false, error: `Scene ${idScene.scene}: field prompt keluar dalam Bahasa Indonesia (wajib Inggris untuk AI video generator)` };

@@ -775,6 +775,8 @@ interface AIScene {
   on_screen_text?: string; foto_label?: string; foto_deskripsi?: string;
   /** Hanya untuk tool ber-audio native (Veo/Flow) — disuntik server, lihat ai-generate.js. */
   negative_prompt?: string; max_clip_sec?: number | null;
+  /** Beat bertimecode opsional (Fase 6) — hanya untuk scene >6s pada tool audio-native. */
+  sequences?: { sequence?: number; timestamp?: string; action?: string; audio?: string }[];
 }
 interface AIKarakter { nama: string; deskripsi: string; foto_url: string }
 interface AIMetadata {
@@ -1081,6 +1083,12 @@ function AIGenerateTab({
       const data = await readNdjsonFinal<AIGeneratedResult>(res, { signal: ac.signal });
       const newScene = data.scenes?.[0];
       if (!newScene) throw new Error('AI tidak mengembalikan scene baru');
+      // Backend sudah memaksa scene = regenerateScene di mode ini (lihat ai-generate.js
+      // "Mode regenerate: paksa nomor scene"), tapi tetap divalidasi ulang di sini —
+      // kalau backend berubah/gagal, JANGAN menimpa scene yang salah secara diam-diam.
+      if (newScene.scene !== sceneNum) {
+        throw new Error(`AI mengembalikan scene ${newScene.scene}, bukan scene ${sceneNum} yang diminta — tidak disimpan.`);
+      }
       setGeneratedResult(prev => prev
         ? { ...prev, scenes: prev.scenes.map(s => (s.scene === sceneNum ? newScene : s)) }
         : prev);
@@ -1134,6 +1142,9 @@ function AIGenerateTab({
           dialog_karakter: scene.dialog_karakter,
           ...(scene.negative_prompt ? { negative_prompt: scene.negative_prompt } : {}),
           ...(scene.max_clip_sec ? { max_clip_sec: scene.max_clip_sec } : {}),
+          // sequences[] (Fase 6) — beat bertimecode untuk scene >6s pada tool audio-native.
+          // Sebelumnya dibuang total dari ZIP walau diminta ke AI (audit 2026-07-28).
+          ...(Array.isArray(scene.sequences) && scene.sequences.length > 0 ? { sequences: scene.sequences } : {}),
           on_screen_text: scene.on_screen_text || null,
           catatan_musik: metadata.musik_value !== 'none'
             ? 'Deskripsi audio optimal untuk Veo3/Google Flow. Kling/Wan: efek suara saja, tambahkan musik via CapCut.'
@@ -1144,11 +1155,23 @@ function AIGenerateTab({
         zip.file(`scene${scene.scene}.txt`, JSON.stringify(sceneData, null, 2));
       }
 
-      for (let i = 0; i < foto_urls.length; i++) {
-        try {
-          const res = await fetch(`/api/admin/media?key=${encodeURIComponent(foto_urls[i])}`, { credentials: 'include' });
-          if (res.ok) zip.file(`scene${i + 1}_foto.webp`, await res.blob());
-        } catch { /* skip foto jika gagal */ }
+      // Foto per scene diambil lewat foto_urls[scene.scene - 1] (BUKAN index loop
+      // terpisah) — foto_urls[] backend selalu terurut scene 1..N (ai-generate.js
+      // men-sort fotoAssignments by scene sebelum kirim), jadi ini satu-satunya
+      // sumber kebenaran yang taut ke nama file `scene${scene.scene}_foto.webp`
+      // yang sama persis dengan yang ditulis ke sceneN.txt di atas. Gagal fetch
+      // TIDAK lagi ditelan diam-diam — dulu ZIP bisa "sukses" tanpa foto padahal
+      // sceneN.txt tetap menyebut nama filenya (audit 2026-07-28).
+      const missingFoto: number[] = [];
+      for (const scene of scenes) {
+        const url = foto_urls[scene.scene - 1];
+        if (!url) { missingFoto.push(scene.scene); continue; }
+        const res = await fetch(`/api/admin/media?key=${encodeURIComponent(url)}`, { credentials: 'include' });
+        if (!res.ok) { missingFoto.push(scene.scene); continue; }
+        zip.file(`scene${scene.scene}_foto.webp`, await res.blob());
+      }
+      if (missingFoto.length > 0) {
+        throw new Error(`Gagal mengambil foto untuk scene ${missingFoto.join(', ')} — ZIP dibatalkan agar tidak mengunduh paket yang tidak lengkap.`);
       }
 
       if (karakter.foto_url) {
@@ -2367,13 +2390,31 @@ export default function AdminViralFrameWorkspacePage() {
       aiTool: s1.aiTool, ratio: s1.ratio, language: s1.language, sceneCount: s1.sceneCount,
       durationMode: s1.durationMode, uniformDuration: s1.uniformDuration,
       cutawayExcluded: s1.cutawayExcluded,
+      // parts (Fase 6) — backend whitelist sudah menerima field ini (lihat presets.js ALLOW).
+      ...(s1.parts ? { parts: s1.parts } : {}),
     };
     try { await fetch('/api/admin/viralframe/presets', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), params }) }); } catch { /* noop */ }
     loadPresets();
   };
   const applyPreset = (name: string) => {
     const p = presets.find(x => x.name === name);
-    if (p) setS1(prev => ({ ...prev, ...p.params }));
+    if (!p) return;
+    // Preset boleh membawa sceneCount berbeda dari yang sedang aktif — dulu applyPreset
+    // cuma spread s1 tanpa resize scenes[]/manualDurations, jadi Step 2 menampilkan
+    // scene card ekstra yang klik-fotonya no-op senyap (setScene menulis ke index yang
+    // tidak ada). Samakan dengan pola setSceneCount: resize dulu, baru terapkan s1.
+    const nextCount = typeof p.params.sceneCount === 'number' ? p.params.sceneCount : undefined;
+    if (nextCount != null) {
+      setScenes(prev => resize(prev, nextCount, () => ({ photoId: null, label: '' })));
+    }
+    setS1(prev => {
+      const merged = { ...prev, ...p.params };
+      const n = nextCount ?? prev.sceneCount;
+      return {
+        ...merged,
+        manualDurations: resize(merged.manualDurations, n, () => merged.uniformDuration || 6),
+      };
+    });
   };
 
   // ─── Jalur C: derivasi props AIGenerateTab dari state Step 1–3 (bukan form independen lagi) ──

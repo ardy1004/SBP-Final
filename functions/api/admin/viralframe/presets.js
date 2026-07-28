@@ -32,9 +32,14 @@ export async function onRequestPost({ env, request }) {
 
   const arr = await readPresets(env);
   const params = {};
-  // Whitelist field yang boleh disimpan (subset Step 1) — hindari menyimpan foto/scene.
+  // Whitelist field yang boleh disimpan (subset Step 1) — hindari menyimpan foto/scene
+  // (identitas properti, bukan gaya). `cutawayExcluded`/`parts` MEMANG boleh disimpan —
+  // keduanya parameter gaya/struktur Step 1, bukan data foto/scene — sebelumnya lupa
+  // ditambahkan di sini sehingga preset diam-diam kehilangan rancangan Part & cutaway
+  // saat disimpan lalu dipakai lagi (audit 2026-07-28).
   const ALLOW = ['archetype', 'register', 'tone', 'visualStyle', 'hookType', 'ctaType', 'ctaKeyword',
-    'platforms', 'aiTool', 'ratio', 'language', 'sceneCount', 'durationMode', 'uniformDuration'];
+    'platforms', 'aiTool', 'ratio', 'language', 'sceneCount', 'durationMode', 'uniformDuration',
+    'cutawayExcluded', 'parts'];
   for (const k of ALLOW) if (k in body.params) params[k] = body.params[k];
 
   const idx = arr.findIndex(p => p.name === name);

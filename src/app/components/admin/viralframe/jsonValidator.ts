@@ -200,6 +200,19 @@ export function validateSceneJson(raw: string, expected: ValidateExpected): Vali
         if (clipMax != null && Number(veo.duration_sec) > clipMax) {
           warnings.push(`Scene ${n}: ai_ready_prompt.duration_sec ${veo.duration_sec}s melebihi batas ${clipMax}s per klip.`);
         }
+        // ── Step G1 — sequences[] (Fase 6): wajib untuk scene >6s, sebelumnya TIDAK
+        // pernah dicek sama sekali walau BLOK 3e masterPromptCompiler.ts mewajibkannya
+        // (audit 2026-07-28). Non-blocking (warning), sama seperti field lain di sini.
+        if (durasi > 6) {
+          if (!Array.isArray(veo.sequences) || veo.sequences.length === 0) {
+            warnings.push(`Scene ${n}: ai_ready_prompt.sequences kosong padahal durasi ${durasi}s (>6s) — BLOK 3e mewajibkan beat bertimecode untuk scene sepanjang ini.`);
+          } else {
+            const rusak = veo.sequences.some(sq => !sq.timestamp?.toString().trim() || !sq.action?.toString().trim());
+            if (rusak) warnings.push(`Scene ${n}: ada elemen sequences tanpa "timestamp" atau "action" terisi.`);
+          }
+        } else if (Array.isArray(veo.sequences) && veo.sequences.some(sq => !sq.timestamp?.toString().trim() || !sq.action?.toString().trim())) {
+          warnings.push(`Scene ${n}: ada elemen sequences tanpa "timestamp" atau "action" terisi.`);
+        }
       } else {
         // Bentuk string — riwayat lama atau AI yang mengabaikan skema objek.
         const kutipan = prompt.match(/"([^"]{4,})"|“([^”]{4,})”/);

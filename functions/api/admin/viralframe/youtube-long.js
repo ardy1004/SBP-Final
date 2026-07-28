@@ -10,14 +10,20 @@
 
 import { jsonError, handleOptions } from '../../_shared/response.js';
 import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
-// Negative prompt video = sumber tunggal bersama Jalur A & C (audit 2026-07-26).
-import { NEGATIVE_PROMPT_VIDEO, getClipMaxSec, getMaxWords } from '../../../_lib/viralframe-shared.js';
+// Negative prompt video + kosakata realisme = sumber tunggal bersama Jalur A & C
+// (audit 2026-07-26 & 2026-07-28). REALISM_* dipakai supaya jalur ini tidak lagi
+// tertinggal dari perbaikan "kelihatan AI banget" yang sudah diterapkan ke 2 jalur
+// lain — sebelumnya jalur ini tidak mengimpor sama sekali (audit 2026-07-28).
+import {
+  NEGATIVE_PROMPT_VIDEO, getClipMaxSec, getMaxWords,
+  REALISM_QUALITY_CUES, REALISM_BANNED_QUALITY_PHRASES,
+} from '../../../_lib/viralframe-shared.js';
 
-// Jalur ini diasumsikan untuk Veo/Google Flow (keputusan 2026-07-26), jadi batas
-// panjang satu klip mengikuti tool itu. Sebelumnya skema meminta 10 detik untuk
-// scene — melebihi kemampuan Veo sekali generate, padahal konstanta di
-// viralframe-shared.js sudah menyatakan batasnya 8.
-const KLIP_MAKS = getClipMaxSec('google_flow') ?? 8;
+// Jalur ini diasumsikan untuk Veo/Google Flow. Batas panjang satu klip mengikuti
+// tool itu — ambil dari konstanta bersama (10 detik, dikonfirmasi pemilik akun
+// 2026-07-28), JANGAN hardcode angka sendiri di sini lagi (dulu pernah salah
+// mengira batasnya 8 padahal viralframe-shared.js sudah benar 10).
+const KLIP_MAKS = getClipMaxSec('google_flow') ?? 10;
 // Budget kata narasi per blok. Jalur ini SAMA SEKALI tidak punya batas ini sebelum
 // 2026-07-28 — narration_id boleh sepanjang apa pun, padahal klipnya tetap
 // ${KLIP_MAKS} detik. Itu bug yang persis sama dengan 'suara terpotong' di AI
@@ -178,6 +184,10 @@ yang tidak ada di foto — hasilnya properti berubah bentuk dan tidak lagi sesua
   • Bila GAYA KAMERA menyebut drone/aerial, TERJEMAHKAN jadi kesan setara yang tertahan di bingkai —
     mis. "drone aerial reveal" → "slow pull-back that keeps the same view in frame, evoking an aerial reveal".
   • Setiap "camera_movement" WAJIB diakhiri frasa: "camera stays within the framing of the reference image".
+
+REALISME TEKNIS — WAJIB (blok VIDEO saja, thumbnail statis dikecualikan): field "style"/"lighting"/"mood" WAJIB memakai kosakata fisik kamera nyata, BUKAN kata sifat generik. Pilih yang relevan (boleh diparafrase, jaga maknanya):
+${REALISM_QUALITY_CUES.map(c => `  - ${c}`).join('\n')}
+DILARANG menutup deskripsi visual blok VIDEO dengan frasa generik seperti: ${REALISM_BANNED_QUALITY_PHRASES.join(', ')}. Frasa ini terbukti mendorong hasil video terlihat CGI/render 3D, bukan rekaman kamera sungguhan ("kelihatan AI banget").
 
 BATAS PANJANG KLIP: setiap blok video dihasilkan sebagai SATU klip berdurasi maksimal ${KLIP_MAKS} detik. Field "duration_sec" WAJIB bernilai ${KLIP_MAKS} atau kurang, dan deskripsi aksi tiap blok harus muat dalam durasi itu — jangan menuliskan rangkaian kejadian panjang yang mustahil selesai dalam ${KLIP_MAKS} detik. Video panjang dirakit dari banyak klip di tahap editing, bukan dari satu prompt.
 LARANGAN TEKS DI FRAME: Veo cenderung MEMBAKAR subtitle ke dalam gambar begitu ada dialog. Objek "prompt" blok VIDEO DILARANG meminta teks, caption, subtitle, atau tulisan muncul di dalam frame. (Pengecualian tunggal: blok "thumbnail" memang butuh "text_overlay" karena itu gambar sampul, bukan video.)
