@@ -60,9 +60,20 @@ import { join } from 'node:path';
 //             Catatan: byte Functions turun sedikit saja karena kode admin tetap
 //             ADA di bundle, hanya pindah ke chunk malas. Yang penting bukan byte
 //             total melainkan porsi yang dievaluasi saat isolate lahir.
+//
+// 2026-07-29  NAIKKAN setelah endpoint baru `viralframe/transcribe.js` (proxy
+//             Groq Whisper untuk fitur Auto Caption): Functions mentah 5.861.345 B
+//             (+11.345 B dari batas lama). Endpoint ini adalah Pages Function route
+//             handler — TERBUKTI lazy dengan sendirinya (lihat catatan `_lib/pdf.js`
+//             di atas), dan Asersi A (import top-level SSR, penyebab ASLI insiden
+//             1102) TETAP 8 paket, TIDAK berubah — dicek manual sebelum menaikkan
+//             angka ini. Gzip juga masih jauh di bawah anggaran (15,1%), jauh di
+//             bawah batas skrip Cloudflare sungguhan (10 MB). Byte mentah cuma
+//             proksi kasar (lihat catatan di atas) — menaikkannya di sini sah
+//             karena metrik yang benar-benar berbahaya tidak bergerak.
 // ─────────────────────────────────────────────────────────────────────────────
 const BUDGET_SSR_MAIN_CHUNK = 560_000;    // 503.003 +11% — headroom nyata, bukan tepi jurang
-const BUDGET_FUNCTIONS_RAW  = 5_850_000;  // 5.709.994 +2,5%
+const BUDGET_FUNCTIONS_RAW  = 5_900_000;  // 5.861.345 +0,7% (naik dari 5.850.000, lihat catatan 2026-07-29)
 const BUDGET_FUNCTIONS_GZIP = 8_000_000;  // jauh di bawah batas 10 MB; alarm jaring pengaman saja
 
 /**

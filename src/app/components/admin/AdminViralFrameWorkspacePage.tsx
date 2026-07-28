@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router';
 import {
   ArrowLeft, ArrowRight, ImageOff, Check, Film, AlertCircle,
-  Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles, History, Trash2, RefreshCw, Upload, Music,
+  Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles, History, Trash2, RefreshCw, Upload, Music, Captions,
 } from 'lucide-react';
 // JSZip di-dynamic-import di handler (bukan static) agar tidak masuk chunk awal workspace.
 import {
@@ -1799,6 +1799,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
     if (!file || !backsoundItem || merging) return;
     setMerging(true); setMergeError(''); setMergeProgress('Menyiapkan…');
     invalidateMerged();
+    invalidateCaptioned(); // video sumber caption (mergedBlob) akan berubah — caption lama basi
     try {
       setMergeProgress('Mengambil backsound…');
       const backsoundBlob = await fetch(backsoundMediaUrl(backsoundItem.r2_key)).then(r => r.blob());
@@ -1838,6 +1839,112 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
     }
   };
 
+  // ── Auto Caption (opsional, MVP) — transkripsi SELALU dari `file` mentah
+  // (bukan mergedBlob) supaya Whisper tidak terganggu musik latar backsound.
+  // Burn-in (drawtext per kata) jalan di atas `mergedBlob ?? file` dan PALING
+  // TERAKHIR dalam pipeline, supaya tidak re-encode video dua kali kalau user
+  // pakai backsound + caption sekaligus. Belum ada editing kata/timing manual
+  // ataupun drag posisi/pilihan font — itu ditunda ke iterasi berikutnya
+  // (disepakati eksplisit dengan user 2026-07-29); posisi/font MVP ini fixed.
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcribeError, setTranscribeError] = useState('');
+  const [words, setWords] = useState<{ word: string; start: number; end: number }[] | null>(null);
+  const [captioning, setCaptioning] = useState(false);
+  const [captionProgress, setCaptionProgress] = useState('');
+  const [captionError, setCaptionError] = useState('');
+  const [captionedBlob, setCaptionedBlob] = useState<Blob | null>(null);
+  const [captionedUrl, setCaptionedUrl] = useState<string | null>(null);
+
+  const invalidateCaptioned = () => {
+    setCaptionedBlob(null);
+    setCaptionedUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
+  };
+
+  const transcribeAudio = async () => {
+    if (!file || transcribing) return;
+    setTranscribing(true); setTranscribeError(''); setWords(null);
+    invalidateCaptioned();
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { FFmpeg } = await import('@ffmpeg/ffmpeg') as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { fetchFile } = await import('@ffmpeg/util') as any;
+      const ffmpeg = new FFmpeg();
+      await ffmpeg.load();
+      await ffmpeg.writeFile('video.mp4', await fetchFile(file));
+      // Audio saja, mono, 16kHz WAV — payload kecil ke Groq, tidak butuh video
+      // sama sekali. WAV (pcm_s16le) dipakai daripada mp3 supaya tidak bergantung
+      // pada encoder eksternal (libmp3lame) — cukup codec inti libavcodec.
+      await ffmpeg.exec(['-i', 'video.mp4', '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', 'audio.wav']);
+      const audioData = await ffmpeg.readFile('audio.wav');
+      const audioBlob = new Blob([audioData.buffer], { type: 'audio/wav' });
+
+      const res = await fetch('/api/admin/viralframe/transcribe', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'audio/wav' },
+        body: audioBlob,
+      });
+      const json = await bacaJson<{ words: { word: string; start: number; end: number }[] }>(res);
+      if (!json.success) throw new Error(json.error ?? 'Gagal transkripsi');
+      setWords(json.data?.words ?? []);
+    } catch (err: unknown) {
+      setTranscribeError(err instanceof Error ? err.message : 'Gagal transkripsi audio');
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
+  const applyCaptions = async () => {
+    const sourceBlob = mergedBlob ?? file;
+    if (!sourceBlob || !words || words.length === 0 || captioning) return;
+    setCaptioning(true); setCaptionError(''); setCaptionProgress('Menyiapkan…');
+    invalidateCaptioned();
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { FFmpeg } = await import('@ffmpeg/ffmpeg') as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { fetchFile } = await import('@ffmpeg/util') as any;
+      const ffmpeg = new FFmpeg();
+      ffmpeg.on('log', ({ message }: { message: string }) => setCaptionProgress(message));
+      await ffmpeg.load();
+
+      setCaptionProgress('Menyiapkan font…');
+      // TTF, BUKAN woff2 yang sudah ada untuk UI web — freetype di build ffmpeg.wasm
+      // ini tidak bisa decode WOFF2 ("unimplemented feature", reproduced live
+      // 2026-07-29). inter-caption.ttf (Inter variable, dari google/fonts) khusus
+      // dipakai drawtext, terpisah dari font UI biasa.
+      const fontBlob = await fetch('/fonts/inter-caption.ttf').then(r => r.blob());
+      await ffmpeg.writeFile('font.ttf', await fetchFile(fontBlob));
+      await ffmpeg.writeFile('video.mp4', await fetchFile(sourceBlob));
+
+      // Satu drawtext per kata — muncul/hilang persis di jendela [start,end] hasil
+      // transkripsi Whisper. Escape karakter yang bentrok dengan sintaks filter
+      // ffmpeg (: ' \) — drawtext lain gampang rusak kalau teks mengandung itu.
+      const escapeDrawtext = (s: string) => s.replace(/\\/g, '\\\\\\\\').replace(/:/g, '\\:').replace(/'/g, "\\\\\\'");
+      // borderw TIDAK mendukung ekspresi seperti fontsize/x/y (butuh integer
+      // literal) — "borderw=h/220" bikin drawtext gagal init & ffmpeg Abort()
+      // (reproduced live 2026-07-29). Angka tetap sudah cukup untuk MVP (posisi/
+      // ukuran belum bisa diatur user di iterasi ini).
+      const vf = words
+        .map(w => `drawtext=fontfile=font.ttf:text='${escapeDrawtext(w.word)}':fontcolor=white:fontsize=h/18:borderw=3:bordercolor=black:x=(w-text_w)/2:y=h*0.78:enable='between(t\\,${w.start.toFixed(2)}\\,${w.end.toFixed(2)})'`)
+        .join(',');
+
+      // -c:v libx264 + -pix_fmt yuv420p WAJIB eksplisit — tanpa itu ffmpeg
+      // memilih codec/pixel-format default yang TIDAK selalu bisa diputar browser
+      // (reproduced live 2026-07-29: video.error MEDIA_ERR_SRC_NOT_SUPPORTED).
+      await ffmpeg.exec(['-i', 'video.mp4', '-vf', vf, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'copy', 'output.mp4']);
+      const data = await ffmpeg.readFile('output.mp4');
+      const blob = new Blob([data.buffer], { type: 'video/mp4' });
+      setCaptionedBlob(blob);
+      setCaptionedUrl(URL.createObjectURL(blob));
+      setCaptionProgress('✅ Selesai!');
+    } catch (err: unknown) {
+      setCaptionError(err instanceof Error ? err.message : 'Gagal menerapkan caption');
+    } finally {
+      setCaptioning(false);
+    }
+  };
+
   useEffect(() => {
     fetch('/api/admin/viralframe/characters', { credentials: 'include' })
       .then(r => bacaJson(r))
@@ -1866,6 +1973,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
   const reset = () => {
     setFile(null); setCaption(''); setHashtags(''); setCapVariasi([]); setProgress(0); setError(''); setSuccess(false);
     setBacksoundId(null); setBacksoundItem(null); setMergeError(''); invalidateMerged();
+    setWords(null); setTranscribeError(''); setCaptionError(''); invalidateCaptioned();
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -1882,9 +1990,11 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
       if (!signJson.success) throw new Error(signJson.error ?? 'Gagal menyiapkan upload');
       const { cloudName, apiKey, timestamp, folder, signature } = signJson.data;
 
-      // Backsound (opsional) sudah "dipanggang" jadi mergedBlob SEBELUM upload ini —
+      // Backsound & caption (opsional) sudah "dipanggang" SEBELUM upload ini —
       // Cloudinary/Konten Agent menerima file final, tidak pernah tahu prosesnya.
-      const uploadFile = mergedBlob ? new File([mergedBlob], file.name, { type: 'video/mp4' }) : file;
+      // Caption dibakar PALING TERAKHIR (di atas mergedBlob), jadi diprioritaskan.
+      const finalBlob = captionedBlob ?? mergedBlob;
+      const uploadFile = finalBlob ? new File([finalBlob], file.name, { type: 'video/mp4' }) : file;
       const form = new FormData();
       form.append('file', uploadFile);
       form.append('api_key', apiKey);
@@ -1941,7 +2051,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
       <div>
         <label className="block text-xs font-semibold text-[#0F172A] mb-1">File Video</label>
         <input ref={fileRef} type="file" accept="video/*"
-          onChange={e => { setFile(e.target.files?.[0] ?? null); invalidateMerged(); }}
+          onChange={e => { setFile(e.target.files?.[0] ?? null); invalidateMerged(); invalidateCaptioned(); setWords(null); setTranscribeError(''); setCaptionError(''); }}
           className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#1565C0]" />
         {file && <p className="text-[11px] text-[#94A3B8] mt-1">{file.name} · {(file.size / 1024 / 1024).toFixed(1)}MB</p>}
       </div>
@@ -1960,9 +2070,9 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
             <div className="bg-white border border-gray-100 rounded-xl p-3.5 space-y-3">
               <BacksoundPicker
                 selectedId={backsoundId}
-                onSelect={(id, item) => { setBacksoundId(id); setBacksoundItem(item); invalidateMerged(); }}
+                onSelect={(id, item) => { setBacksoundId(id); setBacksoundItem(item); invalidateMerged(); invalidateCaptioned(); }}
                 volumePct={volumePct}
-                onVolumeChange={v => { setVolumePct(v); invalidateMerged(); }}
+                onVolumeChange={v => { setVolumePct(v); invalidateMerged(); invalidateCaptioned(); }}
               />
               {backsoundId != null && (
                 <button type="button" onClick={applyBacksound} disabled={merging}
@@ -1979,8 +2089,8 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
             <div className="bg-white border border-gray-100 rounded-xl p-3.5 space-y-2.5 lg:sticky lg:top-3 self-start">
               <span className="text-xs font-bold uppercase tracking-wide text-[#94A3B8]">Preview</span>
               <div className="relative rounded-xl overflow-hidden bg-[#0B1220] mx-auto" style={{ aspectRatio: '9/16', maxWidth: 220 }}>
-                {(mergedUrl ?? localPreviewUrl) ? (
-                  <video controls src={mergedUrl ?? localPreviewUrl ?? undefined} className="absolute inset-0 w-full h-full object-contain" />
+                {(captionedUrl ?? mergedUrl ?? localPreviewUrl) ? (
+                  <video controls src={captionedUrl ?? mergedUrl ?? localPreviewUrl ?? undefined} className="absolute inset-0 w-full h-full object-contain" />
                 ) : (
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-[#475569] gap-1.5">
                     <Film size={22} />
@@ -1988,16 +2098,66 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
                   </div>
                 )}
               </div>
-              {mergedUrl ? (
+              {captionedUrl ? (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">
+                  <Check size={10} /> Caption diterapkan — versi ini yang akan ter-upload
+                </span>
+              ) : mergedUrl ? (
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">
                   <Check size={10} /> Backsound diterapkan — versi ini yang akan ter-upload
                 </span>
               ) : (
                 <span className="inline-flex items-center text-[10px] font-medium text-[#94A3B8] bg-gray-50 rounded-full px-2 py-0.5">
-                  Video asli (belum ada backsound)
+                  Video asli (belum ada backsound/caption)
                 </span>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auto Caption (Beta, MVP) — transkripsi kata-per-kata dari suara asli
+          (bukan estimasi), dibakar ke video PALING TERAKHIR (di atas backsound
+          kalau ada). Belum ada drag posisi/pilihan font/edit teks manual —
+          ditunda ke iterasi berikutnya (disepakati dengan user 2026-07-29). */}
+      {file && (
+        <div className="rounded-2xl border border-[#E2E8F0] overflow-hidden" style={{ background: 'linear-gradient(180deg, #FFF9F0 0%, #FFFFFF 140px)' }}>
+          <div className="px-4 pt-3.5 pb-1">
+            <h4 className="text-sm font-display font-bold text-[#0F172A] flex items-center gap-1.5">
+              <Captions size={15} className="text-[#B45309]" /> Auto Caption <span className="text-[10px] font-semibold text-[#B45309] bg-[#FEF3C7] rounded-full px-1.5 py-0.5">Beta</span>
+            </h4>
+            <p className="text-[11px] text-[#94A3B8] mt-0.5">Teks otomatis muncul per kata, tersinkron ke suara asli — posisi &amp; font tetap (belum bisa diatur di versi ini).</p>
+          </div>
+          <div className="p-4 pt-3 space-y-3">
+            {!words && (
+              <button type="button" onClick={transcribeAudio} disabled={transcribing}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-white disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, #B45309 0%, #F59E0B 100%)' }}>
+                {transcribing ? <Loader2 size={13} className="animate-spin" /> : <Captions size={13} />}
+                {transcribing ? 'Mentranskripsi…' : 'Transkripsi Otomatis'}
+              </button>
+            )}
+            {transcribeError && <p className="text-xs text-red-600">{transcribeError} — <button type="button" onClick={transcribeAudio} className="underline">Coba lagi</button></p>}
+
+            {words && words.length > 0 && (
+              <>
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-3 space-y-1.5">
+                  <span className="text-[11px] font-semibold text-[#0F172A]">{words.length} kata terdeteksi</span>
+                  <p className="text-xs text-[#64748B] leading-relaxed line-clamp-3">{words.map(w => w.word).join(' ')}</p>
+                  <button type="button" onClick={transcribeAudio} disabled={transcribing} className="text-[11px] text-[#B45309] font-semibold underline disabled:opacity-50">
+                    Transkripsi ulang
+                  </button>
+                </div>
+                <button type="button" onClick={applyCaptions} disabled={captioning}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-white disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg, #B45309 0%, #F59E0B 100%)' }}>
+                  {captioning ? <Loader2 size={13} className="animate-spin" /> : <Captions size={13} />}
+                  {captioning ? 'Memproses…' : '✨ Terapkan Caption & Perbarui Preview'}
+                </button>
+                {captionProgress && captioning && <p className="text-[11px] font-mono text-[#64748B] bg-gray-50 rounded-lg px-2.5 py-1.5 break-all">{captionProgress}</p>}
+                {captionError && <p className="text-xs text-red-600">{captionError}</p>}
+              </>
+            )}
           </div>
         </div>
       )}
