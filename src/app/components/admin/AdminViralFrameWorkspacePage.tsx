@@ -1932,7 +1932,13 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
       // -c:v libx264 + -pix_fmt yuv420p WAJIB eksplisit — tanpa itu ffmpeg
       // memilih codec/pixel-format default yang TIDAK selalu bisa diputar browser
       // (reproduced live 2026-07-29: video.error MEDIA_ERR_SRC_NOT_SUPPORTED).
-      await ffmpeg.exec(['-i', 'video.mp4', '-vf', vf, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'copy', 'output.mp4']);
+      // -preset ultrafast: re-encode penuh + puluhan drawtext dirangkai (1 per
+      // kata) di ffmpeg.wasm (WASM single-thread, tanpa GPU) sangat lambat di
+      // preset default (speed=0.08x diukur live — video 40 detik/77 kata ~8
+      // menit). ultrafast bertukar ukuran file lebih besar demi kecepatan render
+      // jauh lebih tinggi — sepadan untuk video short-form yang toh dikompres
+      // ulang oleh TikTok/Reels/dsb saat diunggah.
+      await ffmpeg.exec(['-i', 'video.mp4', '-vf', vf, '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'copy', 'output.mp4']);
       const data = await ffmpeg.readFile('output.mp4');
       const blob = new Blob([data.buffer], { type: 'video/mp4' });
       setCaptionedBlob(blob);
