@@ -1817,9 +1817,13 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
       // -stream_loop -1: backsound otomatis mengulang kalau lebih pendek dari video.
       // -c:v copy: video stream TIDAK di-re-encode, cuma audio diproses — ringan & cepat.
       // amix melapiskan backsound (volume diturunkan) DI BAWAH audio asli (dialog).
+      // normalize=0 WAJIB: default amix (normalize=1) otomatis menyeimbangkan ulang
+      // volume kedua track supaya tidak clipping — itu MENIMPA scaling `volume=` di
+      // atas, sehingga slider volume terasa "tidak berfungsi". alimiter di akhir
+      // tetap menahan clipping tanpa menghapus rasio volume yang sudah diatur user.
       await ffmpeg.exec([
         '-i', 'video.mp4', '-stream_loop', '-1', '-i', 'backsound.mp3',
-        '-filter_complex', `[1:a]volume=${(volumePct / 100).toFixed(2)}[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[a]`,
+        '-filter_complex', `[1:a]volume=${(volumePct / 100).toFixed(2)}[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[mixed];[mixed]alimiter=limit=0.95[a]`,
         '-map', '0:v:0', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-shortest', 'output.mp4',
       ]);
       const data = await ffmpeg.readFile('output.mp4');
