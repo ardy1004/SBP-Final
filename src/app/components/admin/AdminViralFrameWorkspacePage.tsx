@@ -2636,6 +2636,33 @@ export default function AdminViralFrameWorkspacePage() {
     }));
   }, []);
 
+  // ─── AI Rancang Storyboard ──────────────────────────────────────────────────
+  // Sekali klik: AI bernalar dari label_ruangan yang sudah tersimpan (TANPA vision
+  // AI, murni teks) untuk mengisi s1.parts DAN scenes[] sekaligus — meniru pola
+  // applyArchetype() (AI mengisi default, user tetap bisa timpa manual sesudahnya).
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestError, setSuggestError] = useState('');
+  const suggestStoryboard = useCallback(async () => {
+    if (!prop) return;
+    setSuggestLoading(true); setSuggestError('');
+    try {
+      const r = await fetch('/api/admin/viralframe/suggest-storyboard', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ property_id: prop.id, scene_count: s1.sceneCount, archetype: s1.archetype, register: s1.register }),
+      });
+      const data = await readNdjsonFinal<{
+        parts: PartDef[];
+        scene_photo_order: { scene: number; label: string; photo_id: number; url_webp: string }[];
+      }>(r);
+      setS1(prev => ({ ...prev, parts: data.parts }));
+      setScenes(data.scene_photo_order.map(x => ({ photoId: x.photo_id, label: x.label })));
+    } catch (e: unknown) {
+      setSuggestError(e instanceof Error ? e.message : 'Gagal rancang storyboard');
+    } finally {
+      setSuggestLoading(false);
+    }
+  }, [prop, s1.sceneCount, s1.archetype, s1.register]);
+
   // Pilih arketipe → prefill visualStyle/tone (Step 1) + expression & useCharacter (Step 3).
   // Nilai tetap bisa di-override manual setelahnya (memilih 'custom' tidak mereset).
   // Arketipe hybrid (allowMultiShotPerScene): default scene terakhir (CTA) DIKECUALIKAN
@@ -3151,6 +3178,14 @@ export default function AdminViralFrameWorkspacePage() {
               role otomatis berdasar posisi (Hook scene pertama, CTA scene terakhir). */}
           <Field label="Rancang Part (opsional)" hint="Kelompokkan scene jadi babak naratif (Hook/Body/CTA) — kosongkan untuk perilaku otomatis berdasar posisi seperti biasa.">
             <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={suggestStoryboard} disabled={suggestLoading}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-[#1565C0]/30 text-[#1565C0] hover:bg-[#F0F7FF] disabled:opacity-50 disabled:cursor-not-allowed">
+                  {suggestLoading ? 'Merancang…' : '🤖 AI Rancang Storyboard'}
+                </button>
+                <span className="text-[11px] text-[#94A3B8]">Isi Part + foto per scene otomatis dari label ruangan yang sudah tersimpan — tetap bisa diedit manual.</span>
+              </div>
+              {suggestError && <p className="text-xs text-red-500">{suggestError}</p>}
               {(s1.parts ?? []).map((p, idx) => (
                 <div key={idx} className="flex items-center gap-2 px-3 py-2 border border-gray-100 rounded-xl">
                   <span className="text-xs font-semibold text-[#94A3B8] w-14 shrink-0">Part {idx + 1}</span>
