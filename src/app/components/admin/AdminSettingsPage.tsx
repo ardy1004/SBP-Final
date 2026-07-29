@@ -187,6 +187,35 @@ export default function AdminSettingsPage() {
     else setSchedulerConfigMsg({ type: 'error', text: r.error ?? 'Gagal memuat daftar akun' });
   };
 
+  const bufferServiceKey = (service: string | null): keyof typeof channelIds | null => {
+    if (service === 'youtube') return 'buffer_channel_id_youtube';
+    if (service === 'tiktok') return 'buffer_channel_id_tiktok';
+    if (service === 'threads') return 'buffer_channel_id_threads';
+    return null;
+  };
+  const zernioPlatformKey = (platform: string | null): keyof typeof channelIds | null => {
+    if (platform === 'facebook') return 'zernio_account_id_facebook';
+    if (platform === 'instagram') return 'zernio_account_id_instagram';
+    return null;
+  };
+  const applyId = (key: keyof typeof channelIds, id: string) => setChannelIds(c => ({ ...c, [key]: id }));
+  const autoFillAllIds = () => {
+    if (!schedulerAccounts) return;
+    setChannelIds(c => {
+      const next = { ...c };
+      for (const ch of schedulerAccounts.buffer.channels ?? []) {
+        const key = bufferServiceKey(ch.service);
+        if (key && ch.id) next[key] = ch.id;
+      }
+      for (const ac of schedulerAccounts.zernio.accounts ?? []) {
+        const key = zernioPlatformKey(ac.platform);
+        if (key && ac.id) next[key] = ac.id;
+      }
+      return next;
+    });
+    setSchedulerConfigMsg({ type: 'success', text: 'ID terisi otomatis — cek lalu klik "Simpan Konfigurasi Scheduler".' });
+  };
+
   const loadScheduler = () => {
     getSchedulerKeys().then(r => { if (r.success && r.data) setSchedulerKeys(r.data); });
     getSchedulerConfig().then(r => {
@@ -643,32 +672,56 @@ export default function AdminSettingsPage() {
 
             {schedulerAccounts && (
               <div className="mb-3 space-y-2 text-xs">
+                <button onClick={autoFillAllIds}
+                  className="w-full py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700">
+                  ⚡ Isi Otomatis Semua Field ID
+                </button>
                 <div className="rounded-xl border border-gray-100 p-2.5">
                   <div className="font-semibold text-[#0F172A] mb-1">Channel Buffer</div>
                   {!schedulerAccounts.buffer.ok && <p className="text-red-600">{schedulerAccounts.buffer.error}</p>}
                   {schedulerAccounts.buffer.ok && (schedulerAccounts.buffer.channels?.length ?? 0) === 0 && <p className="text-[#94A3B8]">Tidak ada channel tertaut.</p>}
-                  {schedulerAccounts.buffer.channels?.map(ch => (
-                    <div key={ch.id} className="flex items-center justify-between gap-2 py-0.5">
-                      <span className="text-[#374151]">{ch.name} <span className="text-[#94A3B8]">({ch.service})</span></span>
-                      <code className="bg-gray-50 px-1.5 py-0.5 rounded select-all">{ch.id}</code>
-                    </div>
-                  ))}
+                  {schedulerAccounts.buffer.channels?.map(ch => {
+                    const key = bufferServiceKey(ch.service);
+                    return (
+                      <div key={ch.id} className="flex items-center justify-between gap-2 py-0.5">
+                        <span className="text-[#374151]">{ch.name} <span className="text-[#94A3B8]">({ch.service})</span></span>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <code className="bg-gray-50 px-1.5 py-0.5 rounded select-all">{ch.id}</code>
+                          {key ? (
+                            <button onClick={() => applyId(key, ch.id)} className="text-[#1565C0] font-semibold hover:underline">Pakai →</button>
+                          ) : (
+                            <span className="text-[#94A3B8]" title="Service tidak dikenali, isi manual">?</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
                 <div className="rounded-xl border border-gray-100 p-2.5">
                   <div className="font-semibold text-[#0F172A] mb-1">Akun Zernio</div>
                   {!schedulerAccounts.zernio.ok && <p className="text-red-600">{schedulerAccounts.zernio.error}</p>}
                   {schedulerAccounts.zernio.ok && (schedulerAccounts.zernio.accounts?.length ?? 0) === 0 && <p className="text-[#94A3B8]">Tidak ada akun tertaut.</p>}
-                  {schedulerAccounts.zernio.accounts?.map((ac, i) => (
-                    <div key={ac.id ?? i} className="py-0.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[#374151]">{ac.name ?? '(nama tidak terbaca)'} <span className="text-[#94A3B8]">({ac.platform ?? '?'})</span></span>
-                        <code className="bg-gray-50 px-1.5 py-0.5 rounded select-all">{ac.id ?? '(id tidak terbaca)'}</code>
+                  {schedulerAccounts.zernio.accounts?.map((ac, i) => {
+                    const key = zernioPlatformKey(ac.platform);
+                    return (
+                      <div key={ac.id ?? i} className="py-0.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[#374151]">{ac.name ?? '(nama tidak terbaca)'} <span className="text-[#94A3B8]">({ac.platform ?? '?'})</span></span>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <code className="bg-gray-50 px-1.5 py-0.5 rounded select-all">{ac.id ?? '(id tidak terbaca)'}</code>
+                            {key && ac.id ? (
+                              <button onClick={() => applyId(key, ac.id!)} className="text-[#1565C0] font-semibold hover:underline">Pakai →</button>
+                            ) : (
+                              <span className="text-[#94A3B8]" title="Platform/ID tidak dikenali, isi manual">?</span>
+                            )}
+                          </div>
+                        </div>
+                        {ac.raw !== undefined && (
+                          <pre className="mt-1 text-[9px] bg-amber-50 border border-amber-200 rounded p-1.5 overflow-x-auto select-all whitespace-pre-wrap">{JSON.stringify(ac.raw, null, 1)}</pre>
+                        )}
                       </div>
-                      {ac.raw !== undefined && (
-                        <pre className="mt-1 text-[9px] bg-amber-50 border border-amber-200 rounded p-1.5 overflow-x-auto select-all whitespace-pre-wrap">{JSON.stringify(ac.raw, null, 1)}</pre>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
