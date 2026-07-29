@@ -65,6 +65,82 @@ export function buildSlotTimes(dateWib, presetRow) {
   };
 }
 
+// Fan-out inti dipakai oleh Content Library (viralframe_videos) DAN Konten
+// Agent (viralframe_agent_videos) — satu-satunya beda antar keduanya adalah
+// dari mana assetUrl datang (browser upload ke Zernio vs cloudinary_url yang
+// sudah publik). Slot harian dihitung LINTAS kedua sumber (tabel yang sama),
+// jadi "5 slot/hari" berlaku total, bukan per modul.
+export async function scheduleFanOut(env, { assetUrl, caption }) {
+  const [bufferKey, zernioKey, ytChannel, tiktokChannel, threadsChannel, fbAccount, igAccount] = await Promise.all([
+    getSetting(env, 'buffer_api_key'),
+    getSetting(env, 'zernio_api_key'),
+    getSetting(env, 'buffer_channel_id_youtube'),
+    getSetting(env, 'buffer_channel_id_tiktok'),
+    getSetting(env, 'buffer_channel_id_threads'),
+    getSetting(env, 'zernio_account_id_facebook'),
+    getSetting(env, 'zernio_account_id_instagram'),
+  ]);
+
+  const preset = await getSchedulePreset(env);
+  const { slotIndex, dateWib } = await pickNextSlot(env);
+  const presetRow = preset.find(p => p.slot === slotIndex) ?? preset[0];
+  const times = buildSlotTimes(dateWib, presetRow);
+
+  const zernioPlatforms = [];
+  if (fbAccount) zernioPlatforms.push({ platform: 'facebook', accountId: fbAccount });
+  if (igAccount) zernioPlatforms.push({ platform: 'instagram', accountId: igAccount });
+
+  const zernioJob = zernioPlatforms.length > 0
+    ? () => callZernioCreatePost({
+        apiKey: zernioKey, content: caption, scheduledFor: times.fbIgThreads,
+        timezone: 'Asia/Jakarta', platforms: zernioPlatforms, mediaUrl: assetUrl,
+      })
+    : () => Promise.resolve({ ok: false, error: 'Akun Facebook/Instagram belum dikonfigurasi' });
+
+  const [ytRes, tiktokRes, threadsRes, zernioRes] = await Promise.all([
+    callBufferCreatePost({ apiKey: bufferKey, channelId: ytChannel, assetUrl, dueAt: times.youtube, caption }),
+    callBufferCreatePost({ apiKey: bufferKey, channelId: tiktokChannel, assetUrl, dueAt: times.tiktok, caption }),
+    callBufferCreatePost({ apiKey: bufferKey, channelId: threadsChannel, assetUrl, dueAt: times.fbIgThreads, caption }),
+    zernioJob(),
+  ]);
+
+  const rows = [
+    { platform: 'youtube', provider: 'buffer', scheduledAt: times.youtube, result: ytRes },
+    { platform: 'tiktok', provider: 'buffer', scheduledAt: times.tiktok, result: tiktokRes },
+    { platform: 'threads', provider: 'buffer', scheduledAt: times.fbIgThreads, result: threadsRes },
+    // Satu panggilan Zernio menjadwalkan FB+IG sekaligus (jam sama) — sukses/gagalnya
+    // atomik untuk keduanya, respons Zernio tidak memisahkan status per-platform.
+    ...(zernioPlatforms.some(p => p.platform === 'facebook')
+      ? [{ platform: 'facebook', provider: 'zernio', scheduledAt: times.fbIgThreads, result: zernioRes }] : []),
+    ...(zernioPlatforms.some(p => p.platform === 'instagram')
+      ? [{ platform: 'instagram', provider: 'zernio', scheduledAt: times.fbIgThreads, result: zernioRes }] : []),
+  ];
+
+  return { slotIndex, rows };
+}
+
+// Simpan hasil fan-out ke viralframe_scheduled_posts + trash video sumber
+// (tabel & videoType berbeda antara Library dan Konten Agent).
+export async function persistScheduleResult(env, { videoId, videoType, trashTable, slotIndex, rows }) {
+  await Promise.all(rows.map(r => env.DB.prepare(
+    `INSERT INTO viralframe_scheduled_posts (video_id, video_type, provider, platform, slot_index, scheduled_at, status, remote_post_id, error_message)
+     VALUES (?,?,?,?,?,?,?,?,?)`
+  ).bind(
+    videoId, videoType, r.provider, r.platform, slotIndex, r.scheduledAt,
+    r.result.ok ? 'scheduled' : 'failed',
+    r.result.ok ? (r.result.remoteId ?? null) : null,
+    r.result.ok ? null : (r.result.error ?? 'Gagal tanpa keterangan').slice(0, 500),
+  ).run()));
+
+  const anySuccess = rows.some(r => r.result.ok);
+  if (anySuccess) {
+    await env.DB.prepare(`UPDATE ${trashTable} SET trashed_at = datetime('now') WHERE id = ?`).bind(videoId).run().catch(err => {
+      console.error('[scheduleFanOut] trash video', err.message);
+    });
+  }
+  return anySuccess;
+}
+
 export async function callBufferCreatePost({ apiKey, channelId, assetUrl, dueAt, caption }) {
   if (!apiKey) return { ok: false, error: 'Buffer API key belum diatur' };
   if (!channelId) return { ok: false, error: 'Buffer channel ID belum diatur' };

@@ -1,8 +1,8 @@
-// POST /api/admin/viralframe/schedule/commit — { video_id, public_url, caption? }
-// Fan-out jadwal Content Library (viralframe_videos, R2) ke 5 akun sosmed
-// sekaligus, pakai slot primetime berikutnya yang masih kosong hari ini (WIB).
-// Video otomatis pindah ke Sampah begitu MINIMAL 1 platform sukses — supaya
-// tidak ke-post dobel kalau tombol "Jadwalkan" diklik ulang.
+// POST /api/admin/viralframe/schedule/commit-agent — { video_id, caption? }
+// Fan-out jadwal Konten Agent (viralframe_agent_videos, Cloudinary) ke 5 akun
+// sosmed sekaligus. Beda dari commit.js: TIDAK butuh presign/upload dari
+// browser sama sekali — video Konten Agent sudah punya cloudinary_url publik
+// begitu diupload, jadi satu panggilan server saja cukup.
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
@@ -15,22 +15,21 @@ export async function onRequestPost(context) {
 
   const videoId = parseInt(body.video_id, 10);
   if (!Number.isInteger(videoId) || videoId <= 0) return jsonError('video_id wajib', 422);
-  const publicUrl = typeof body.public_url === 'string' ? body.public_url.trim() : '';
-  if (!publicUrl) return jsonError('public_url wajib (hasil upload ke Zernio)', 422);
   const caption = typeof body.caption === 'string' ? body.caption.slice(0, 2000) : '';
 
-  const video = await env.DB.prepare('SELECT id, trashed_at FROM viralframe_videos WHERE id = ?')
+  const video = await env.DB.prepare('SELECT id, cloudinary_url, trashed_at FROM viralframe_agent_videos WHERE id = ?')
     .bind(videoId).first().catch(() => null);
   if (!video) return jsonError('Video tidak ditemukan', 404);
   if (video.trashed_at) return jsonError('Video sudah ada di Sampah', 409);
+  if (!video.cloudinary_url) return jsonError('Video belum punya URL Cloudinary', 422);
 
-  const { slotIndex, rows } = await scheduleFanOut(env, { assetUrl: publicUrl, caption });
+  const { slotIndex, rows } = await scheduleFanOut(env, { assetUrl: video.cloudinary_url, caption });
 
   let trashed;
   try {
-    trashed = await persistScheduleResult(env, { videoId, videoType: 'library', trashTable: 'viralframe_videos', slotIndex, rows });
+    trashed = await persistScheduleResult(env, { videoId, videoType: 'agent', trashTable: 'viralframe_agent_videos', slotIndex, rows });
   } catch (err) {
-    console.error('[vf schedule/commit] persist', err.message);
+    console.error('[vf schedule/commit-agent] persist', err.message);
     return jsonError('Gagal mencatat hasil scheduling', 500);
   }
 

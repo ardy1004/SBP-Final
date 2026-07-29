@@ -2,8 +2,8 @@ import { bacaJson } from '../../../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router';
 import {
-  Users, Loader2, Download, Trash2, Pencil, Check, X, Clock, Copy, Layers, ChevronDown, ChevronUp,
-  Archive, RotateCcw, CheckCircle2, Circle,
+  Users, Loader2, Download, Trash2, Pencil, Check, X, Copy, Layers, ChevronDown, ChevronUp,
+  Archive, RotateCcw, CheckCircle2, Circle, Send,
 } from 'lucide-react';
 import { buildOverlayVideoUrl, composeOverlaysForProperty, pickStatusBadgeType, toAttachmentUrl, toImageThumbnailUrl, type BadgeAsset, type BadgeType } from '../../lib/cloudinaryOverlay';
 import BadgeLogoSettings from './viralframe/BadgeLogoSettings';
@@ -103,6 +103,7 @@ export default function AdminViralFrameAgentVideosPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [scheduleTarget, setScheduleTarget] = useState<AgentVideo | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem(CARD_SIZE_STORAGE_KEY) as CardSize | null;
@@ -510,10 +511,12 @@ export default function AdminViralFrameAgentVideosPage() {
                         </div>
                       )}
 
-                      <button disabled title="Segera hadir"
-                        className="mt-auto flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#94A3B8] bg-gray-50 cursor-not-allowed">
-                        <Clock size={12} /> Jadwalkan ke Medsos
-                      </button>
+                      {view === 'active' && (
+                        <button onClick={() => setScheduleTarget(v)}
+                          className="mt-auto flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700">
+                          <Send size={12} /> Jadwalkan ke Sosmed
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -549,6 +552,89 @@ export default function AdminViralFrameAgentVideosPage() {
           )}
         </div>
       )}
+
+      {scheduleTarget && (
+        <AgentScheduleModal video={scheduleTarget} onClose={() => setScheduleTarget(null)}
+          onScheduled={() => { setScheduleTarget(null); if (selectedCharId != null) loadVideos(selectedCharId, view); }} />
+      )}
+    </div>
+  );
+}
+
+// ── Modal "Jadwalkan ke Sosmed" untuk Konten Agent — TIDAK butuh upload
+// presign seperti Content Library, karena cloudinary_url sudah publik begitu
+// video ini diupload. Satu panggilan server saja cukup. ──
+function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo; onClose: () => void; onScheduled: () => void }) {
+  const [caption, setCaption] = useState(video.caption ?? '');
+  const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [results, setResults] = useState<{ platform: string; status: 'scheduled' | 'failed'; error: string | null }[]>([]);
+
+  const submit = async () => {
+    setErrorMsg('');
+    setPhase('submitting');
+    try {
+      const res = await fetch('/api/admin/viralframe/schedule/commit-agent', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_id: video.id, caption }),
+      });
+      const json = await bacaJson<{ results: typeof results; trashed: boolean }>(res);
+      if (!json.success || !json.data) throw new Error(json.error ?? 'Gagal menjadwalkan post');
+      setResults(json.data.results);
+      setPhase('done');
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Gagal menjadwalkan');
+      setPhase('error');
+    }
+  };
+
+  const platformLabel: Record<string, string> = { youtube: 'YouTube Shorts', tiktok: 'TikTok', threads: 'Threads', facebook: 'Facebook Pages', instagram: 'Instagram' };
+
+  return (
+    <div className="fixed inset-0 z-[9998] bg-black/40 flex items-center justify-center p-4" onClick={phase === 'form' || phase === 'error' ? onClose : undefined}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold text-[#0F172A]">Jadwalkan ke Sosmed</h3>
+          {phase !== 'submitting' && (
+            <button onClick={phase === 'done' ? onScheduled : onClose} className="p-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
+          )}
+        </div>
+
+        {(phase === 'form' || phase === 'error') && (
+          <>
+            <p className="text-xs text-[#64748B] mb-3">Video akan dijadwalkan otomatis ke 5 akun (YT Shorts, TikTok, Threads, FB Pages, Instagram) pada slot jam primetime berikutnya yang masih kosong hari ini.</p>
+            <textarea value={caption} onChange={e => setCaption(e.target.value)} rows={3} placeholder="Caption / deskripsi post…"
+              className="w-full text-sm px-3 py-2 border border-gray-200 rounded-xl outline-none focus:border-[#1565C0] mb-3" />
+            {errorMsg && <p className="text-xs text-red-600 mb-3">{errorMsg}</p>}
+            <button onClick={submit} className="w-full py-2.5 rounded-xl text-sm font-semibold text-white bg-[#1565C0] hover:bg-[#1565C0]/90">
+              Jadwalkan Sekarang
+            </button>
+          </>
+        )}
+
+        {phase === 'submitting' && (
+          <div className="py-6 text-center text-sm text-[#64748B]">
+            <Loader2 size={20} className="animate-spin mx-auto mb-2" /> Menjadwalkan ke 5 akun…
+          </div>
+        )}
+
+        {phase === 'done' && (
+          <div className="space-y-1.5">
+            {results.map(r => (
+              <div key={r.platform} className="flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg bg-gray-50">
+                <span className="font-medium text-[#0F172A]">{platformLabel[r.platform] ?? r.platform}</span>
+                {r.status === 'scheduled'
+                  ? <span className="text-emerald-600 font-semibold">✅ Terjadwal</span>
+                  : <span className="text-red-500 font-semibold" title={r.error ?? ''}>❌ Gagal</span>}
+              </div>
+            ))}
+            {results.some(r => r.status === 'failed') && (
+              <p className="text-[11px] text-[#94A3B8] pt-1">Platform yang gagal bisa dicoba ulang manual nanti. Video sudah pindah ke Sampah karena minimal 1 platform sukses.</p>
+            )}
+            <button onClick={onScheduled} className="w-full mt-2 py-2 rounded-xl text-sm font-semibold text-white bg-[#1565C0] hover:bg-[#1565C0]/90">Selesai</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
