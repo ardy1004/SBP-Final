@@ -63,7 +63,10 @@ export async function onRequestGet({ env }) {
         status = 'available';
       }
 
-      slots.push({ slot, time_wib: presetRow.time, scheduled_at: scheduledAt, status, used_by: usedBy });
+      // time_wib WAJIB dari scheduledAt (sudah termasuk drift rotasi harian),
+      // BUKAN presetRow.time mentah -- dulu salah pakai jam dasar, bikin
+      // indikator nampilin "09:00" padahal jam aktual yang dipakai "09:20".
+      slots.push({ slot, time_wib: scheduledAt.slice(11, 16), base_time: presetRow.time, scheduled_at: scheduledAt, status, used_by: usedBy });
     }
 
     return jsonOk({ slots, drift_minutes: driftMinutes });

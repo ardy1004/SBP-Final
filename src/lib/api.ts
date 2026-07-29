@@ -586,6 +586,7 @@ export interface ScheduleSlotUsedBy {
 export interface ScheduleSlot {
   slot: number;
   time_wib: string;
+  base_time: string;
   scheduled_at: string;
   status: ScheduleSlotStatus;
   used_by: ScheduleSlotUsedBy | null;

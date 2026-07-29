@@ -19,11 +19,12 @@ const PLATFORM_LABEL: Record<string, string> = { youtube: 'YouTube Shorts', tikt
 // kali scheduling selesai) memicu refetch langsung tanpa nunggu interval.
 export default function SlotIndicatorStrip({ refreshKey }: { refreshKey?: number }) {
   const [slots, setSlots] = useState<ScheduleSlot[] | null>(null);
+  const [driftMinutes, setDriftMinutes] = useState(0);
   const [openSlot, setOpenSlot] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     const r = await getScheduleSlotsStatus();
-    if (r.success && r.data) setSlots(r.data.slots);
+    if (r.success && r.data) { setSlots(r.data.slots); setDriftMinutes(r.data.drift_minutes); }
   }, []);
 
   useEffect(() => { load(); }, [load, refreshKey]);
@@ -36,10 +37,16 @@ export default function SlotIndicatorStrip({ refreshKey }: { refreshKey?: number
 
   return (
     <div className="relative bg-white rounded-2xl border border-gray-100 p-3">
-      <div className="text-[11px] font-semibold text-[#94A3B8] mb-2">SLOT PRIMETIME HARI INI</div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[11px] font-semibold text-[#94A3B8]">SLOT PRIMETIME HARI INI</div>
+        {driftMinutes > 0 && (
+          <div className="text-[10px] text-[#94A3B8]">Jam sudah termasuk geser rotasi hari ini: <span className="font-semibold text-[#1565C0]">+{driftMinutes} menit</span> dari jam dasar</div>
+        )}
+      </div>
       <div className="flex flex-wrap gap-2">
         {slots.map(s => (
           <button key={s.slot} onClick={() => s.status === 'used' && setOpenSlot(openSlot === s.slot ? null : s.slot)}
+            title={driftMinutes > 0 ? `Jam dasar (Pengaturan): ${s.base_time}` : undefined}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium ${STATUS_STYLE[s.status]} ${s.status === 'used' ? 'cursor-pointer' : 'cursor-default'}`}>
             <span className={`w-2 h-2 rounded-full ${STATUS_DOT[s.status]}`} />
             Slot {s.slot} · {s.time_wib}
