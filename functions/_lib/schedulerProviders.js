@@ -39,18 +39,30 @@ export async function getSchedulePreset(env) {
   return DEFAULT_SCHEDULE_PRESET;
 }
 
-// Slot 1-5 pertama yang belum dipakai hari ini (WIB); kalau penuh, slot 1 besok.
+// Slot 1-5 pertama hari ini yang belum dipakai DAN semua jamnya masih di masa
+// depan (Buffer/Zernio menolak dueAt/scheduledFor yang sudah lewat — kalau
+// sekarang sudah lewat jam 09:00 WIB, slot 1 dilewati meski belum dipakai).
+// Kalau tidak ada slot hari ini yang lolos, pakai slot 1 besok (pasti future).
 // scheduled_at WAJIB offset '+07:00' eksplisit (lihat buildSlotTimes) supaya
 // substr(scheduled_at,1,10) langsung jadi tanggal WIB (DATE('now') D1 = UTC).
-export async function pickNextSlot(env) {
+const MIN_LEAD_MS = 5 * 60 * 1000; // minimal 5 menit ke depan, hindari mepet detik terakhir
+
+export async function pickNextSlot(env, preset) {
   const todayWib = tanggalWib();
   const res = await env.DB.prepare(
     `SELECT DISTINCT slot_index FROM viralframe_scheduled_posts WHERE substr(scheduled_at,1,10) = ?`
   ).bind(todayWib).all();
   const used = new Set((res.results ?? []).map(r => r.slot_index));
+  const now = Date.now();
 
   for (let slot = 1; slot <= 5; slot++) {
-    if (!used.has(slot)) return { slotIndex: slot, dateWib: todayWib };
+    if (used.has(slot)) continue;
+    const row = preset.find(p => p.slot === slot);
+    if (!row) continue;
+    const times = buildSlotTimes(todayWib, row);
+    const allFuture = [times.fbIgThreads, times.tiktok, times.youtube]
+      .every(t => new Date(t).getTime() > now + MIN_LEAD_MS);
+    if (allFuture) return { slotIndex: slot, dateWib: todayWib };
   }
   return { slotIndex: 1, dateWib: tanggalWib(new Date(), 1) };
 }
@@ -82,7 +94,7 @@ export async function scheduleFanOut(env, { assetUrl, caption }) {
   ]);
 
   const preset = await getSchedulePreset(env);
-  const { slotIndex, dateWib } = await pickNextSlot(env);
+  const { slotIndex, dateWib } = await pickNextSlot(env, preset);
   const presetRow = preset.find(p => p.slot === slotIndex) ?? preset[0];
   const times = buildSlotTimes(dateWib, presetRow);
 
@@ -98,9 +110,9 @@ export async function scheduleFanOut(env, { assetUrl, caption }) {
     : () => Promise.resolve({ ok: false, error: 'Akun Facebook/Instagram belum dikonfigurasi' });
 
   const [ytRes, tiktokRes, threadsRes, zernioRes] = await Promise.all([
-    callBufferCreatePost({ apiKey: bufferKey, channelId: ytChannel, assetUrl, dueAt: times.youtube, caption }),
-    callBufferCreatePost({ apiKey: bufferKey, channelId: tiktokChannel, assetUrl, dueAt: times.tiktok, caption }),
-    callBufferCreatePost({ apiKey: bufferKey, channelId: threadsChannel, assetUrl, dueAt: times.fbIgThreads, caption }),
+    callBufferCreatePost({ apiKey: bufferKey, channelId: ytChannel, assetUrl, dueAt: times.youtube, caption, platform: 'youtube' }),
+    callBufferCreatePost({ apiKey: bufferKey, channelId: tiktokChannel, assetUrl, dueAt: times.tiktok, caption, platform: 'tiktok' }),
+    callBufferCreatePost({ apiKey: bufferKey, channelId: threadsChannel, assetUrl, dueAt: times.fbIgThreads, caption, platform: 'threads' }),
     zernioJob(),
   ]);
 
@@ -141,7 +153,11 @@ export async function persistScheduleResult(env, { videoId, videoType, trashTabl
   return anySuccess;
 }
 
-export async function callBufferCreatePost({ apiKey, channelId, assetUrl, dueAt, caption }) {
+// Kategori "People & Blogs" — default aman generik untuk video promosi properti,
+// YouTube mewajibkan categoryId untuk tiap post (lihat YoutubePostMetadataInput).
+const YOUTUBE_DEFAULT_CATEGORY_ID = '22';
+
+export async function callBufferCreatePost({ apiKey, channelId, assetUrl, dueAt, caption, platform }) {
   if (!apiKey) return { ok: false, error: 'Buffer API key belum diatur' };
   if (!channelId) return { ok: false, error: 'Buffer channel ID belum diatur' };
 
@@ -162,6 +178,10 @@ export async function callBufferCreatePost({ apiKey, channelId, assetUrl, dueAt,
       dueAt,
       schedulingType: 'automatic',
       mode: 'customScheduled',
+      // YouTube wajib title + categoryId (YoutubePostMetadataInput) — platform lain tidak butuh ini.
+      ...(platform === 'youtube' ? {
+        metadata: { youtube: { title: (caption || 'Video Properti').slice(0, 95), categoryId: YOUTUBE_DEFAULT_CATEGORY_ID } },
+      } : {}),
     },
   };
 
@@ -316,8 +336,15 @@ export async function callZernioCreatePost({ apiKey, content, scheduledFor, time
     return { ok: false, error: `Gagal menghubungi Zernio: ${err.message}` };
   }
 
-  const json = await res.json().catch(() => null);
-  if (!res.ok || !json) return { ok: false, error: `Zernio HTTP ${res.status}: ${(json?.message ?? '').slice(0, 200)}`.trim() };
+  const raw = await res.text();
+  let json = null;
+  try { json = JSON.parse(raw); } catch { /* body bukan JSON, pakai raw text di bawah */ }
+  if (!res.ok || !json) {
+    // Field pesan error Zernio belum terverifikasi persis (message/error/detail/errors[]) —
+    // coba semua kandidat umum, fallback ke potongan body mentah supaya tidak pernah kosong.
+    const detail = json?.message ?? json?.error ?? json?.detail ?? json?.errors?.[0]?.message ?? raw.slice(0, 300);
+    return { ok: false, error: `Zernio HTTP ${res.status}: ${detail}`.trim() };
+  }
   const id = json.id ?? json.data?.id ?? json.postId;
   return { ok: true, remoteId: id ? String(id) : null };
 }
