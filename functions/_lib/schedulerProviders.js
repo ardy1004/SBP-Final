@@ -170,13 +170,27 @@ export async function listZernioAccounts(apiKey) {
   const json = await res.json().catch(() => null);
   if (!res.ok || !json) return { ok: false, error: `Zernio HTTP ${res.status}` };
   const list = json.accounts ?? json.data?.accounts ?? json.data ?? [];
-  // Nama field persis (accountId/id, name/username/displayName) belum terverifikasi
-  // ke response nyata — kalau tebakan field di bawah meleset, sertakan objek
-  // mentahnya supaya bisa didiagnosis dari UI tanpa perlu re-tebak lewat kode.
+
+  // Nama field persis belum terverifikasi ke response nyata — beberapa field
+  // (mis. 'name') ternyata objek bersarang {_id,name}, bukan string langsung.
+  // pickString() WAJIB dipakai di sini: nilai apa pun yang bukan string primitif
+  // tidak boleh sampai ke UI mentah-mentah (React #31 — objek tidak valid sbg child).
+  const pickString = (...candidates) => {
+    for (const c of candidates) {
+      if (typeof c === 'string' && c) return c;
+      if (c && typeof c === 'object') {
+        if (typeof c.name === 'string' && c.name) return c.name;
+        if (typeof c.id === 'string' && c.id) return c.id;
+      }
+    }
+    return null;
+  };
+
   const accounts = (Array.isArray(list) ? list : []).map(a => {
-    const id = a.accountId ?? a.id ?? a.account_id ?? a.profileId ?? null;
-    const name = a.name ?? a.username ?? a.displayName ?? a.display_name ?? a.pageName ?? null;
-    return { id, platform: a.platform ?? a.type ?? null, name, raw: (id && name) ? undefined : a };
+    const id = pickString(a.accountId, a.id, a._id, a.account_id, a.profileId);
+    const name = pickString(a.name, a.username, a.displayName, a.display_name, a.pageName);
+    const platform = pickString(a.platform, a.type);
+    return { id, platform, name, raw: (id && name) ? undefined : a };
   });
   return { ok: true, accounts };
 }
