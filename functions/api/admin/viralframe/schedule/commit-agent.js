@@ -16,6 +16,11 @@ export async function onRequestPost(context) {
   const videoId = parseInt(body.video_id, 10);
   if (!Number.isInteger(videoId) || videoId <= 0) return jsonError('video_id wajib', 422);
   const caption = typeof body.caption === 'string' ? body.caption.slice(0, 2000) : '';
+  // asset_url (opsional): URL "versi siap-post" dari browser (buildOverlayVideoUrl,
+  // sudah ada badge SOLD/Hot/Featured) -- WAJIB dipakai kalau ada, supaya video yang
+  // terpost ke sosmed konsisten dengan yang dipreview admin. Fallback ke
+  // cloudinary_url mentah (tanpa badge) kalau browser tidak mengirimkannya.
+  const assetUrlOverride = typeof body.asset_url === 'string' ? body.asset_url.trim() : '';
 
   const video = await env.DB.prepare('SELECT id, cloudinary_url, trashed_at FROM viralframe_agent_videos WHERE id = ?')
     .bind(videoId).first().catch(() => null);
@@ -23,7 +28,7 @@ export async function onRequestPost(context) {
   if (video.trashed_at) return jsonError('Video sudah ada di Sampah', 409);
   if (!video.cloudinary_url) return jsonError('Video belum punya URL Cloudinary', 422);
 
-  const { slotIndex, rows } = await scheduleFanOut(env, { assetUrl: video.cloudinary_url, caption });
+  const { slotIndex, rows } = await scheduleFanOut(env, { assetUrl: assetUrlOverride || video.cloudinary_url, caption });
 
   let trashed;
   try {

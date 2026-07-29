@@ -104,7 +104,7 @@ export default function AdminViralFrameAgentVideosPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [scheduleTarget, setScheduleTarget] = useState<AgentVideo | null>(null);
+  const [scheduleTarget, setScheduleTarget] = useState<{ video: AgentVideo; displayUrl: string } | null>(null);
   const [slotRefreshTick, setSlotRefreshTick] = useState(0);
 
   useEffect(() => {
@@ -515,7 +515,7 @@ export default function AdminViralFrameAgentVideosPage() {
                       )}
 
                       {view === 'active' && (
-                        <button onClick={() => setScheduleTarget(v)}
+                        <button onClick={() => setScheduleTarget({ video: v, displayUrl })}
                           className="mt-auto flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700">
                           <Send size={12} /> Jadwalkan ke Sosmed
                         </button>
@@ -557,7 +557,7 @@ export default function AdminViralFrameAgentVideosPage() {
       )}
 
       {scheduleTarget && (
-        <AgentScheduleModal video={scheduleTarget} onClose={() => setScheduleTarget(null)}
+        <AgentScheduleModal video={scheduleTarget.video} assetUrl={scheduleTarget.displayUrl} onClose={() => setScheduleTarget(null)}
           onScheduled={() => { setScheduleTarget(null); setSlotRefreshTick(t => t + 1); if (selectedCharId != null) loadVideos(selectedCharId, view); }} />
       )}
     </div>
@@ -566,8 +566,12 @@ export default function AdminViralFrameAgentVideosPage() {
 
 // ── Modal "Jadwalkan ke Sosmed" untuk Konten Agent — TIDAK butuh upload
 // presign seperti Content Library, karena cloudinary_url sudah publik begitu
-// video ini diupload. Satu panggilan server saja cukup. ──
-function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo; onClose: () => void; onScheduled: () => void }) {
+// video ini diupload. Satu panggilan server saja cukup. `assetUrl` dikirim dari
+// parent (bukan cloudinary_url mentah dari DB) — itu URL versi "siap-post" YANG
+// SUDAH ADA overlay badge (SOLD/Hot/Featured) dari buildOverlayVideoUrl(), sama
+// persis dengan yang dipreview & di-download admin. cloudinary_url mentah TIDAK
+// PERNAH punya badge, cuma jadi bahan baku overlay.
+function AgentScheduleModal({ video, assetUrl, onClose, onScheduled }: { video: AgentVideo; assetUrl: string; onClose: () => void; onScheduled: () => void }) {
   const [caption, setCaption] = useState(video.caption ?? '');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
   const [errorMsg, setErrorMsg] = useState('');
@@ -579,7 +583,7 @@ function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo
     try {
       const res = await fetch('/api/admin/viralframe/schedule/commit-agent', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_id: video.id, caption }),
+        body: JSON.stringify({ video_id: video.id, caption, asset_url: assetUrl }),
       });
       const json = await bacaJson<{ results: typeof results; trashed: boolean }>(res);
       if (!json.success || !json.data) throw new Error(json.error ?? 'Gagal menjadwalkan post');
