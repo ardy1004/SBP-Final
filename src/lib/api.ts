@@ -568,7 +568,7 @@ export async function saveSchedulerConfig(body: Partial<SchedulerConfig>) {
 
 export interface SchedulerAccountsResult {
   buffer: { ok: boolean; error?: string; channels?: { id: string; name: string; service: string }[] };
-  zernio: { ok: boolean; error?: string; accounts?: { id: string; platform: string; name: string }[] };
+  zernio: { ok: boolean; error?: string; accounts?: { id: string | null; platform: string | null; name: string | null; raw?: unknown }[] };
 }
 
 /** GET /api/admin/settings/scheduler-accounts — daftar channel Buffer & akun Zernio tertaut (untuk cari ID) */

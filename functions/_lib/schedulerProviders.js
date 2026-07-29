@@ -169,7 +169,15 @@ export async function listZernioAccounts(apiKey) {
   }
   const json = await res.json().catch(() => null);
   if (!res.ok || !json) return { ok: false, error: `Zernio HTTP ${res.status}` };
-  const accounts = (json.accounts ?? []).map(a => ({ id: a.accountId, platform: a.platform, name: a.name }));
+  const list = json.accounts ?? json.data?.accounts ?? json.data ?? [];
+  // Nama field persis (accountId/id, name/username/displayName) belum terverifikasi
+  // ke response nyata — kalau tebakan field di bawah meleset, sertakan objek
+  // mentahnya supaya bisa didiagnosis dari UI tanpa perlu re-tebak lewat kode.
+  const accounts = (Array.isArray(list) ? list : []).map(a => {
+    const id = a.accountId ?? a.id ?? a.account_id ?? a.profileId ?? null;
+    const name = a.name ?? a.username ?? a.displayName ?? a.display_name ?? a.pageName ?? null;
+    return { id, platform: a.platform ?? a.type ?? null, name, raw: (id && name) ? undefined : a };
+  });
   return { ok: true, accounts };
 }
 

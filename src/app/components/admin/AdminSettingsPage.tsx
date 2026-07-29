@@ -658,10 +658,15 @@ export default function AdminSettingsPage() {
                   <div className="font-semibold text-[#0F172A] mb-1">Akun Zernio</div>
                   {!schedulerAccounts.zernio.ok && <p className="text-red-600">{schedulerAccounts.zernio.error}</p>}
                   {schedulerAccounts.zernio.ok && (schedulerAccounts.zernio.accounts?.length ?? 0) === 0 && <p className="text-[#94A3B8]">Tidak ada akun tertaut.</p>}
-                  {schedulerAccounts.zernio.accounts?.map(ac => (
-                    <div key={ac.id} className="flex items-center justify-between gap-2 py-0.5">
-                      <span className="text-[#374151]">{ac.name} <span className="text-[#94A3B8]">({ac.platform})</span></span>
-                      <code className="bg-gray-50 px-1.5 py-0.5 rounded select-all">{ac.id}</code>
+                  {schedulerAccounts.zernio.accounts?.map((ac, i) => (
+                    <div key={ac.id ?? i} className="py-0.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[#374151]">{ac.name ?? '(nama tidak terbaca)'} <span className="text-[#94A3B8]">({ac.platform ?? '?'})</span></span>
+                        <code className="bg-gray-50 px-1.5 py-0.5 rounded select-all">{ac.id ?? '(id tidak terbaca)'}</code>
+                      </div>
+                      {ac.raw !== undefined && (
+                        <pre className="mt-1 text-[9px] bg-amber-50 border border-amber-200 rounded p-1.5 overflow-x-auto select-all whitespace-pre-wrap">{JSON.stringify(ac.raw, null, 1)}</pre>
+                      )}
                     </div>
                   ))}
                 </div>
