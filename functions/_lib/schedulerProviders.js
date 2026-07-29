@@ -6,15 +6,44 @@
 
 import { tanggalWib } from './waktu.js';
 
-// Fallback kalau setting 'viralframe_schedule_preset' kosong/rusak. FB/IG/Threads
-// condong pagi-siang, TikTok/YouTube Shorts condong siang-malam (riset primetime 2026).
+// Fallback kalau setting 'viralframe_schedule_preset' kosong/rusak. Satu jam
+// dipakai untuk kelima platform sekaligus (bukan beda per grup platform lagi
+// — lihat diskusi 2026-07-29: drift harian bikin diferensiasi primetime per
+// platform jadi kurang berarti, disederhanakan jadi 1 jam + rotasi).
 export const DEFAULT_SCHEDULE_PRESET = [
-  { slot: 1, fb_ig_threads: '09:00', tiktok: '12:30', youtube: '12:30' },
-  { slot: 2, fb_ig_threads: '11:00', tiktok: '18:00', youtube: '17:30' },
-  { slot: 3, fb_ig_threads: '13:00', tiktok: '19:30', youtube: '19:00' },
-  { slot: 4, fb_ig_threads: '19:00', tiktok: '20:30', youtube: '20:00' },
-  { slot: 5, fb_ig_threads: '20:00', tiktok: '21:00', youtube: '13:30' },
+  { slot: 1, time: '06:00' },
+  { slot: 2, time: '09:00' },
+  { slot: 3, time: '12:00' },
+  { slot: 4, time: '17:00' },
+  { slot: 5, time: '19:00' },
 ];
+
+// Rotasi harian: jam dasar preset digeser +5 menit tiap hari, maksimal +120
+// menit (slot terakhir 19:00 -> 21:00), lalu reset ke jam dasar (siklus 24
+// hari). Titik jangkar (anchor) sembarang tanggal tetap — cuma dipakai untuk
+// menghitung posisi siklus, bukan tanggal bermakna khusus.
+const ROTATION_ANCHOR_MS = Date.UTC(2026, 6, 1); // 2026-07-01
+const ROTATION_CYCLE_DAYS = 24;
+const ROTATION_STEP_MINUTES = 5;
+
+export function getDriftMinutes(dateWib) {
+  const [y, m, d] = dateWib.split('-').map(Number);
+  const dayMs = Date.UTC(y, m - 1, d);
+  const daysSinceAnchor = Math.round((dayMs - ROTATION_ANCHOR_MS) / 86400000);
+  const cyclePos = ((daysSinceAnchor % ROTATION_CYCLE_DAYS) + ROTATION_CYCLE_DAYS) % ROTATION_CYCLE_DAYS;
+  return cyclePos * ROTATION_STEP_MINUTES;
+}
+
+// Gabungkan tanggal WIB + jam preset + drift jadi SATU datetime ISO ber-offset
+// +07:00, dipakai sama untuk kelima platform. Offset +07:00 eksplisit WAJIB
+// supaya substr(scheduled_at,1,10) langsung jadi tanggal WIB (DATE('now') D1 = UTC).
+export function buildSlotTime(dateWib, presetRow, driftMinutes) {
+  const [h, m] = presetRow.time.split(':').map(Number);
+  const total = h * 60 + m + driftMinutes;
+  const hh = String(Math.floor(total / 60)).padStart(2, '0');
+  const mm = String(total % 60).padStart(2, '0');
+  return `${dateWib}T${hh}:${mm}:00+07:00`;
+}
 
 export async function getSetting(env, key) {
   try {
@@ -39,18 +68,17 @@ export async function getSchedulePreset(env) {
   return DEFAULT_SCHEDULE_PRESET;
 }
 
-// Slot 1-5 pertama hari ini yang belum dipakai DAN semua jamnya masih di masa
-// depan (Buffer/Zernio menolak dueAt/scheduledFor yang sudah lewat — kalau
-// sekarang sudah lewat jam 09:00 WIB, slot 1 dilewati meski belum dipakai).
+// Slot 1-5 pertama hari ini yang (a) belum punya baris SUKSES ('scheduled') —
+// gagal total TIDAK menutup slot, bisa dicoba ulang — DAN (b) jamnya masih di
+// masa depan (Buffer/Zernio menolak dueAt/scheduledFor yang sudah lewat).
 // Kalau tidak ada slot hari ini yang lolos, pakai slot 1 besok (pasti future).
-// scheduled_at WAJIB offset '+07:00' eksplisit (lihat buildSlotTimes) supaya
-// substr(scheduled_at,1,10) langsung jadi tanggal WIB (DATE('now') D1 = UTC).
 const MIN_LEAD_MS = 5 * 60 * 1000; // minimal 5 menit ke depan, hindari mepet detik terakhir
 
 export async function pickNextSlot(env, preset) {
   const todayWib = tanggalWib();
+  const driftToday = getDriftMinutes(todayWib);
   const res = await env.DB.prepare(
-    `SELECT DISTINCT slot_index FROM viralframe_scheduled_posts WHERE substr(scheduled_at,1,10) = ?`
+    `SELECT DISTINCT slot_index FROM viralframe_scheduled_posts WHERE substr(scheduled_at,1,10) = ? AND status = 'scheduled'`
   ).bind(todayWib).all();
   const used = new Set((res.results ?? []).map(r => r.slot_index));
   const now = Date.now();
@@ -59,22 +87,11 @@ export async function pickNextSlot(env, preset) {
     if (used.has(slot)) continue;
     const row = preset.find(p => p.slot === slot);
     if (!row) continue;
-    const times = buildSlotTimes(todayWib, row);
-    const allFuture = [times.fbIgThreads, times.tiktok, times.youtube]
-      .every(t => new Date(t).getTime() > now + MIN_LEAD_MS);
-    if (allFuture) return { slotIndex: slot, dateWib: todayWib };
+    const iso = buildSlotTime(todayWib, row, driftToday);
+    if (new Date(iso).getTime() > now + MIN_LEAD_MS) return { slotIndex: slot, dateWib: todayWib, driftMinutes: driftToday };
   }
-  return { slotIndex: 1, dateWib: tanggalWib(new Date(), 1) };
-}
-
-// Gabungkan tanggal WIB + jam preset jadi datetime ISO ber-offset +07:00.
-export function buildSlotTimes(dateWib, presetRow) {
-  const withOffset = (hhmm) => `${dateWib}T${hhmm}:00+07:00`;
-  return {
-    fbIgThreads: withOffset(presetRow.fb_ig_threads),
-    tiktok: withOffset(presetRow.tiktok),
-    youtube: withOffset(presetRow.youtube),
-  };
+  const tomorrowWib = tanggalWib(new Date(), 1);
+  return { slotIndex: 1, dateWib: tomorrowWib, driftMinutes: getDriftMinutes(tomorrowWib) };
 }
 
 // Fan-out inti dipakai oleh Content Library (viralframe_videos) DAN Konten
@@ -94,9 +111,9 @@ export async function scheduleFanOut(env, { assetUrl, caption }) {
   ]);
 
   const preset = await getSchedulePreset(env);
-  const { slotIndex, dateWib } = await pickNextSlot(env, preset);
+  const { slotIndex, dateWib, driftMinutes } = await pickNextSlot(env, preset);
   const presetRow = preset.find(p => p.slot === slotIndex) ?? preset[0];
-  const times = buildSlotTimes(dateWib, presetRow);
+  const scheduledAt = buildSlotTime(dateWib, presetRow, driftMinutes);
 
   const zernioPlatforms = [];
   if (fbAccount) zernioPlatforms.push({ platform: 'facebook', accountId: fbAccount });
@@ -104,28 +121,28 @@ export async function scheduleFanOut(env, { assetUrl, caption }) {
 
   const zernioJob = zernioPlatforms.length > 0
     ? () => callZernioCreatePost({
-        apiKey: zernioKey, content: caption, scheduledFor: times.fbIgThreads,
+        apiKey: zernioKey, content: caption, scheduledFor: scheduledAt,
         timezone: 'Asia/Jakarta', platforms: zernioPlatforms, mediaUrl: assetUrl,
       })
     : () => Promise.resolve({ ok: false, error: 'Akun Facebook/Instagram belum dikonfigurasi' });
 
   const [ytRes, tiktokRes, threadsRes, zernioRes] = await Promise.all([
-    callBufferCreatePost({ apiKey: bufferKey, channelId: ytChannel, assetUrl, dueAt: times.youtube, caption, platform: 'youtube' }),
-    callBufferCreatePost({ apiKey: bufferKey, channelId: tiktokChannel, assetUrl, dueAt: times.tiktok, caption, platform: 'tiktok' }),
-    callBufferCreatePost({ apiKey: bufferKey, channelId: threadsChannel, assetUrl, dueAt: times.fbIgThreads, caption, platform: 'threads' }),
+    callBufferCreatePost({ apiKey: bufferKey, channelId: ytChannel, assetUrl, dueAt: scheduledAt, caption, platform: 'youtube' }),
+    callBufferCreatePost({ apiKey: bufferKey, channelId: tiktokChannel, assetUrl, dueAt: scheduledAt, caption, platform: 'tiktok' }),
+    callBufferCreatePost({ apiKey: bufferKey, channelId: threadsChannel, assetUrl, dueAt: scheduledAt, caption, platform: 'threads' }),
     zernioJob(),
   ]);
 
   const rows = [
-    { platform: 'youtube', provider: 'buffer', scheduledAt: times.youtube, result: ytRes },
-    { platform: 'tiktok', provider: 'buffer', scheduledAt: times.tiktok, result: tiktokRes },
-    { platform: 'threads', provider: 'buffer', scheduledAt: times.fbIgThreads, result: threadsRes },
-    // Satu panggilan Zernio menjadwalkan FB+IG sekaligus (jam sama) — sukses/gagalnya
+    { platform: 'youtube', provider: 'buffer', scheduledAt, result: ytRes },
+    { platform: 'tiktok', provider: 'buffer', scheduledAt, result: tiktokRes },
+    { platform: 'threads', provider: 'buffer', scheduledAt, result: threadsRes },
+    // Satu panggilan Zernio menjadwalkan FB+IG sekaligus — sukses/gagalnya
     // atomik untuk keduanya, respons Zernio tidak memisahkan status per-platform.
     ...(zernioPlatforms.some(p => p.platform === 'facebook')
-      ? [{ platform: 'facebook', provider: 'zernio', scheduledAt: times.fbIgThreads, result: zernioRes }] : []),
+      ? [{ platform: 'facebook', provider: 'zernio', scheduledAt, result: zernioRes }] : []),
     ...(zernioPlatforms.some(p => p.platform === 'instagram')
-      ? [{ platform: 'instagram', provider: 'zernio', scheduledAt: times.fbIgThreads, result: zernioRes }] : []),
+      ? [{ platform: 'instagram', provider: 'zernio', scheduledAt, result: zernioRes }] : []),
   ];
 
   return { slotIndex, rows };

@@ -41,11 +41,11 @@ const SCHEDULER_PROVIDERS: { id: SchedulerProviderId; label: string; hint: strin
   { id: 'zernio', label: 'Zernio (Facebook Pages, Instagram)',  hint: 'docs.zernio.com' },
 ];
 const DEFAULT_SCHEDULE_PRESET: SchedulePresetRow[] = [
-  { slot: 1, fb_ig_threads: '09:00', tiktok: '12:30', youtube: '12:30' },
-  { slot: 2, fb_ig_threads: '11:00', tiktok: '18:00', youtube: '17:30' },
-  { slot: 3, fb_ig_threads: '13:00', tiktok: '19:30', youtube: '19:00' },
-  { slot: 4, fb_ig_threads: '19:00', tiktok: '20:30', youtube: '20:00' },
-  { slot: 5, fb_ig_threads: '20:00', tiktok: '21:00', youtube: '13:30' },
+  { slot: 1, time: '06:00' },
+  { slot: 2, time: '09:00' },
+  { slot: 3, time: '12:00' },
+  { slot: 4, time: '17:00' },
+  { slot: 5, time: '19:00' },
 ];
 
 interface AdminUser { sub: number; email: string; nama: string; role: string; }
@@ -248,8 +248,8 @@ export default function AdminSettingsPage() {
     }
   };
 
-  const setPresetTime = (slot: number, col: 'fb_ig_threads' | 'tiktok' | 'youtube', val: string) => {
-    setPreset(prev => prev.map(row => row.slot === slot ? { ...row, [col]: val } : row));
+  const setPresetTime = (slot: number, val: string) => {
+    setPreset(prev => prev.map(row => row.slot === slot ? { ...row, time: val } : row));
   };
 
   const handleSaveSchedulerConfig = async () => {
@@ -737,24 +737,24 @@ export default function AdminSettingsPage() {
 
           <div className="border-t border-gray-100 pt-4">
             <h3 className="text-sm font-semibold text-[#0F172A] mb-1">Preset Jam Primetime (WIB)</h3>
-            <p className="text-[10px] text-[#94A3B8] mb-2">Klik "Jadwalkan ke Sosmed" di Content Library otomatis pakai slot kosong berikutnya hari ini, jam sesuai tabel ini.</p>
+            <p className="text-[10px] text-[#94A3B8] mb-2">
+              Klik "Jadwalkan ke Sosmed" otomatis pakai slot kosong berikutnya hari ini, jam dasar sesuai tabel ini —
+              lalu digeser otomatis +5 menit tiap hari (maks +120 menit dari jam dasar), lalu reset ke jam dasar lagi
+              (siklus 24 hari), supaya jam posting tidak identik persis tiap hari.
+            </p>
             <div className="overflow-x-auto">
-              <table className="w-full text-xs border-collapse">
+              <table className="w-full text-xs border-collapse max-w-xs">
                 <thead>
                   <tr className="text-left text-[#64748B]">
                     <th className="py-1 pr-2 font-semibold">Slot</th>
-                    <th className="py-1 px-2 font-semibold">FB / IG / Threads</th>
-                    <th className="py-1 px-2 font-semibold">TikTok</th>
-                    <th className="py-1 pl-2 font-semibold">YouTube Shorts</th>
+                    <th className="py-1 pl-2 font-semibold">Jam Dasar</th>
                   </tr>
                 </thead>
                 <tbody>
                   {preset.map(row => (
                     <tr key={row.slot} className="border-t border-gray-50">
                       <td className="py-1.5 pr-2 font-medium text-[#0F172A]">{row.slot}</td>
-                      <td className="py-1.5 px-2"><input type="time" value={row.fb_ig_threads} onChange={e => setPresetTime(row.slot, 'fb_ig_threads', e.target.value)} className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs" /></td>
-                      <td className="py-1.5 px-2"><input type="time" value={row.tiktok} onChange={e => setPresetTime(row.slot, 'tiktok', e.target.value)} className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs" /></td>
-                      <td className="py-1.5 pl-2"><input type="time" value={row.youtube} onChange={e => setPresetTime(row.slot, 'youtube', e.target.value)} className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs" /></td>
+                      <td className="py-1.5 pl-2"><input type="time" value={row.time} onChange={e => setPresetTime(row.slot, e.target.value)} className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs" /></td>
                     </tr>
                   ))}
                 </tbody>

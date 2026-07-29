@@ -17,6 +17,7 @@ import {
 } from './viralframe/options';
 import CharacterStepBase, { type Step3State } from './viralframe/CharacterStep';
 import BacksoundPicker, { backsoundMediaUrl, type BacksoundItem } from './viralframe/BacksoundPicker';
+import SlotIndicatorStrip from './viralframe/SlotIndicatorStrip';
 import { readNdjsonFinal } from '../../../lib/ndjson';
 // #2: memoize komponen anak agar tak re-render saat parent re-render tanpa perubahan prop.
 const CharacterStep = memo(CharacterStepBase);
@@ -1638,6 +1639,7 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
   const [savingId, setSavingId] = useState<number | null>(null);
   const [view, setView] = useState<LibraryViewMode>('active');
   const [scheduleTarget, setScheduleTarget] = useState<VideoItem | null>(null);
+  const [slotRefreshTick, setSlotRefreshTick] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1733,8 +1735,10 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
   return (
     <div className="space-y-4">
       {viewToggle}
+      <SlotIndicatorStrip refreshKey={slotRefreshTick} />
       {scheduleTarget && (
-        <ScheduleModal video={scheduleTarget} onClose={() => setScheduleTarget(null)} onScheduled={() => { setScheduleTarget(null); load(); }} />
+        <ScheduleModal video={scheduleTarget} onClose={() => setScheduleTarget(null)}
+          onScheduled={() => { setScheduleTarget(null); setSlotRefreshTick(t => t + 1); load(); }} />
       )}
       {/* Tahap 6: ringkasan analitik gaya "pemenang" */}
       {view === 'active' && analytics.length > 0 && (

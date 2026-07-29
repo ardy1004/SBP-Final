@@ -25,7 +25,7 @@ function isValidPreset(preset) {
   for (const row of preset) {
     if (!row || typeof row !== 'object') return false;
     if (!Number.isInteger(row.slot) || row.slot < 1 || row.slot > 5) return false;
-    if (!TIME_RE.test(row.fb_ig_threads) || !TIME_RE.test(row.tiktok) || !TIME_RE.test(row.youtube)) return false;
+    if (!TIME_RE.test(row.time)) return false;
     slots.add(row.slot);
   }
   return slots.size === 5;

@@ -530,7 +530,7 @@ export async function getAiModels(provider: AiProviderId) {
 // ── Scheduler ViralFrame (Buffer + Zernio) ──────────────────────────────────
 export type SchedulerProviderId = 'buffer' | 'zernio';
 export interface SchedulerKeyInfo { configured: boolean; masked: string | null }
-export interface SchedulePresetRow { slot: number; fb_ig_threads: string; tiktok: string; youtube: string }
+export interface SchedulePresetRow { slot: number; time: string }
 export interface SchedulerConfig {
   buffer_channel_id_youtube: string | null;
   buffer_channel_id_tiktok: string | null;
@@ -574,6 +574,26 @@ export interface SchedulerAccountsResult {
 /** GET /api/admin/settings/scheduler-accounts — daftar channel Buffer & akun Zernio tertaut (untuk cari ID) */
 export async function getSchedulerAccounts() {
   return apiFetch<SchedulerAccountsResult>('/admin/settings/scheduler-accounts');
+}
+
+export type ScheduleSlotStatus = 'available' | 'used' | 'passed';
+export interface ScheduleSlotUsedBy {
+  video_id: number;
+  video_type: 'library' | 'agent';
+  video_name: string;
+  platforms: { platform: string; status: 'scheduled' | 'failed'; error: string | null }[];
+}
+export interface ScheduleSlot {
+  slot: number;
+  time_wib: string;
+  scheduled_at: string;
+  status: ScheduleSlotStatus;
+  used_by: ScheduleSlotUsedBy | null;
+}
+
+/** GET /api/admin/viralframe/schedule/status — status 5 slot primetime hari ini */
+export async function getScheduleSlotsStatus() {
+  return apiFetch<{ slots: ScheduleSlot[]; drift_minutes: number }>('/admin/viralframe/schedule/status');
 }
 
 /** GET /api/testimonials */

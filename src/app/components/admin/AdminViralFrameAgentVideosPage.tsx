@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { buildOverlayVideoUrl, composeOverlaysForProperty, pickStatusBadgeType, toAttachmentUrl, toImageThumbnailUrl, type BadgeAsset, type BadgeType } from '../../lib/cloudinaryOverlay';
 import BadgeLogoSettings from './viralframe/BadgeLogoSettings';
+import SlotIndicatorStrip from './viralframe/SlotIndicatorStrip';
 
 const STATUS_BADGE_LABEL: Record<BadgeType, string> = {
   sold: 'SOLD', premium: 'Premium', featured: 'Featured', hot: 'Hot', pilihan: 'Pilihan', logo: 'Logo',
@@ -104,6 +105,7 @@ export default function AdminViralFrameAgentVideosPage() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [scheduleTarget, setScheduleTarget] = useState<AgentVideo | null>(null);
+  const [slotRefreshTick, setSlotRefreshTick] = useState(0);
 
   useEffect(() => {
     const saved = localStorage.getItem(CARD_SIZE_STORAGE_KEY) as CardSize | null;
@@ -323,6 +325,7 @@ export default function AdminViralFrameAgentVideosPage() {
 
         {/* Grid video */}
         <div className="flex-1 min-w-0 space-y-3">
+          <SlotIndicatorStrip refreshKey={slotRefreshTick} />
           {/* Tab Aktif/Sampah */}
           <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-full p-0.5 w-fit">
             {([{ v: 'active', label: 'Aktif' }, { v: 'trash', label: 'Sampah' }] as const).map(t => (
@@ -555,7 +558,7 @@ export default function AdminViralFrameAgentVideosPage() {
 
       {scheduleTarget && (
         <AgentScheduleModal video={scheduleTarget} onClose={() => setScheduleTarget(null)}
-          onScheduled={() => { setScheduleTarget(null); if (selectedCharId != null) loadVideos(selectedCharId, view); }} />
+          onScheduled={() => { setScheduleTarget(null); setSlotRefreshTick(t => t + 1); if (selectedCharId != null) loadVideos(selectedCharId, view); }} />
       )}
     </div>
   );
