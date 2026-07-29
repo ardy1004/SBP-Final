@@ -5,6 +5,30 @@
 
 ---
 
+## SESI 29 JULI 2026 — ViralFrame: Auto-Scheduling Sosmed via Buffer + Zernio (baru, LIVE)
+
+Fitur baru: tombol "Jadwalkan ke Sosmed" di Content Library (video R2) DAN Konten Agent (video Cloudinary) — 1 klik fan-out video ke 5 akun sekaligus (Buffer: YT Shorts/TikTok/Threads; Zernio: FB Pages/Instagram), otomatis pakai slot primetime berikutnya yang masih kosong hari ini. Migrasi 0028-0031, commit berurutan `master` (terakhir `d5a3996`), semua live production dan **diverifikasi dengan post nyata ke ke-5 platform** (bukan cuma review kode).
+
+### Arsitektur
+- `functions/_lib/schedulerProviders.js`: integrasi Buffer (GraphQL, union type response `... on PostActionSuccess/MutationError`) + Zernio (REST). `scheduleFanOut()`/`persistScheduleResult()` dipakai bersama Library & Konten Agent.
+- Library: upload video ke Zernio presigned URL dari **browser** (bukan Worker) — sesuai gotcha wall-clock 30 detik. Konten Agent: `cloudinary_url` sudah publik, satu panggilan server cukup, tidak perlu presign.
+- Preset scheduler: 5 slot/hari, **1 jam seragam per slot** (bukan beda per platform — disederhanakan dari desain awal), + **rotasi otomatis +5 menit/hari** (maks +120 menit, siklus 24 hari lalu reset) supaya jam posting tidak identik tiap hari. Slot HANYA dianggap "terpakai" kalau ≥1 platform sukses (percobaan gagal total tidak membakar slot).
+- Indikator visual `SlotIndicatorStrip.tsx` (endpoint `schedule/status.js`): 5 lampu 🟢tersedia/⚪terpakai/🔴lewat jam, tampil di Library & Konten Agent, klik slot terpakai → detail video + status per-platform. Auto-reset ke hijau tiap ganti hari WIB (00:00), dihitung live tiap request — bukan cron.
+- Admin → Pengaturan: section "Scheduler Sosmed" — API key (masked), 5 ID channel/akun, grid preset jam. Fitur bantu: "Lihat Daftar Akun & ID" (query langsung ke Buffer/Zernio pakai key tersimpan) + "Isi Otomatis Semua Field ID" (cocokkan by service/platform).
+
+### 7 bug nyata ditemukan & diperbaiki lewat percobaan LIVE (bukan cuma baca dokumentasi API)
+1. Mutation Buffer `createPost` awalnya salah bentuk (objek datar, seharusnya union type + field `schedulingType` wajib).
+2. Field Zernio `GET /v1/accounts` (`name`) kadang objek bersarang `{_id,name}`, bukan string — sempat bikin **React error #31 crash total halaman Pengaturan**, diperbaiki dengan validasi tipe defensif (`pickString()`).
+3. **FK salah target** (migrasi 0028 `video_id REFERENCES viralframe_videos(id)` hardcoded) — bikin SEMUA insert scheduling Konten Agent gagal "FOREIGN KEY constraint failed" karena video_id-nya sebenarnya merujuk tabel lain (`viralframe_agent_videos`). Migrasi 0030 rebuild tabel tanpa FK.
+4. `pickNextSlot` tidak cek apakah jam slot sudah lewat hari ini → dueAt di masa lalu → Buffer/Zernio menolak.
+5. Buffer mewajibkan `metadata.youtube.{title,categoryId}` untuk post YouTube — belum dikirim sama sekali.
+6. Video Konten Agent yang terpost ke sosmed tidak ada badge (SOLD/Hot/dll) — ternyata badge cuma overlay Cloudinary on-the-fly di URL, `cloudinary_url` mentah dari DB tidak pernah punya badge. Fix: kirim `displayUrl` (versi siap-post, sama dgn preview admin) bukan `cloudinary_url` mentah.
+7. Kombinasi video+badge yang belum pernah di-render Cloudinary sebelumnya → Buffer sempat baca durasi video sbg ~0 detik (baca metadata sebelum Cloudinary selesai transcode on-the-fly) → ditolak "must be at least 1 second". Fix: pre-warm (fetch penuh) URL sebelum diserahkan ke Buffer/Zernio.
+
+**Pelajaran umum**: dokumentasi resmi API pihak ketiga (bahkan yang baru dibaca) tetap bisa meleset dari response nyata — semua 7 bug di atas HANYA ketahuan dari percobaan post sungguhan, bukan dari review kode atau baca dokumentasi. Anggaran bundle (`BUDGET_FUNCTIONS_RAW`) dinaikkan bertahap 5.900.000 → 6.000.000 selama sesi ini.
+
+---
+
 ## SESI 28-29 JULI 2026 — ViralFrame: Studio Backsound (fix) + Auto Caption (baru, LIVE)
 
 Semua di bawah live production, commit berurutan di `master`.
@@ -48,7 +72,7 @@ Semua tahap: build 0 error + Functions bundle OK + deploy + verifikasi health. E
 
 ---
 
-## STATUS SAAT INI: Domain `salambumi.xyz` LIVE di produksi. ViralFrame terus berkembang — backsound (musik latar) & Auto Caption (transkripsi kata-per-kata + burn-in, pilihan font, edit teks) di alur Upload Hasil, keduanya LIVE. `master` = produksi. — Terakhir diupdate 29 Juli 2026
+## STATUS SAAT INI: Domain `salambumi.xyz` LIVE di produksi. ViralFrame terus berkembang — backsound & Auto Caption di alur Upload Hasil, dan Auto-Scheduling ke 5 akun sosmed (Buffer+Zernio) dgn indikator slot, keduanya LIVE. `master` = produksi. — Terakhir diupdate 29 Juli 2026
 
 ---
 
