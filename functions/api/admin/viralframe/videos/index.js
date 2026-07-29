@@ -67,15 +67,19 @@ export async function onRequestPost(context) {
   }
 }
 
+const SELECT_COLS = 'id, property_id, r2_key, label, gaya, rasio, duration_sec, size_bytes, post_url, views, likes, trashed_at, created_at';
+
 export async function onRequestGet(context) {
   const { request, env } = context;
-  const pid = parseInt(new URL(request.url).searchParams.get('property_id') ?? '', 10);
+  const url = new URL(request.url);
+  const pid = parseInt(url.searchParams.get('property_id') ?? '', 10);
+  const view = url.searchParams.get('view') === 'trash' ? 'trash' : 'active';
+  const trashCond = view === 'trash' ? 'trashed_at IS NOT NULL' : 'trashed_at IS NULL';
+  const orderBy = view === 'trash' ? 'trashed_at DESC, id DESC' : 'created_at DESC, id DESC';
   try {
     const stmt = Number.isInteger(pid) && pid > 0
-      ? env.DB.prepare(`SELECT id, property_id, r2_key, label, gaya, rasio, duration_sec, size_bytes, post_url, views, likes, created_at
-                        FROM viralframe_videos WHERE property_id = ? ORDER BY created_at DESC, id DESC`).bind(pid)
-      : env.DB.prepare(`SELECT id, property_id, r2_key, label, gaya, rasio, duration_sec, size_bytes, post_url, views, likes, created_at
-                        FROM viralframe_videos ORDER BY created_at DESC, id DESC LIMIT 200`);
+      ? env.DB.prepare(`SELECT ${SELECT_COLS} FROM viralframe_videos WHERE property_id = ? AND ${trashCond} ORDER BY ${orderBy}`).bind(pid)
+      : env.DB.prepare(`SELECT ${SELECT_COLS} FROM viralframe_videos WHERE ${trashCond} ORDER BY ${orderBy} LIMIT 200`);
     const res = await stmt.all();
     return jsonOk({ items: res.results ?? [] });
   } catch (err) {

@@ -33,11 +33,16 @@ export async function onRequestPatch(context) {
   const post_url = typeof body.post_url === 'string' ? body.post_url.slice(0, 500) || null : undefined;
   const views = body.views != null ? (parseInt(body.views, 10) || 0) : undefined;
   const likes = body.likes != null ? (parseInt(body.likes, 10) || 0) : undefined;
+  const trash = typeof body.trash === 'boolean' ? body.trash : undefined;
 
   const sets = [], binds = [];
   if (post_url !== undefined) { sets.push('post_url = ?'); binds.push(post_url); }
   if (views !== undefined)    { sets.push('views = ?');    binds.push(views); }
   if (likes !== undefined)    { sets.push('likes = ?');    binds.push(likes); }
+  // trash: true -> pindah ke Sampah (soft-delete, dihapus permanen otomatis 30 hari
+  // kemudian oleh worker cron, lihat purge-trash.js); false -> pulihkan ke Aktif.
+  if (trash === true) { sets.push("trashed_at = datetime('now')"); }
+  else if (trash === false) { sets.push('trashed_at = NULL'); }
   if (sets.length === 0) return jsonError('Tidak ada field diupdate', 400);
 
   try {

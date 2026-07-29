@@ -527,6 +527,45 @@ export async function getAiModels(provider: AiProviderId) {
   );
 }
 
+// ── Scheduler ViralFrame (Buffer + Zernio) ──────────────────────────────────
+export type SchedulerProviderId = 'buffer' | 'zernio';
+export interface SchedulerKeyInfo { configured: boolean; masked: string | null }
+export interface SchedulePresetRow { slot: number; fb_ig_threads: string; tiktok: string; youtube: string }
+export interface SchedulerConfig {
+  buffer_channel_id_youtube: string | null;
+  buffer_channel_id_tiktok: string | null;
+  buffer_channel_id_threads: string | null;
+  zernio_account_id_facebook: string | null;
+  zernio_account_id_instagram: string | null;
+  viralframe_schedule_preset: SchedulePresetRow[];
+}
+
+/** GET /api/admin/settings/scheduler-keys — key Buffer/Zernio ter-mask */
+export async function getSchedulerKeys() {
+  return apiFetch<Record<SchedulerProviderId, SchedulerKeyInfo>>('/admin/settings/scheduler-keys');
+}
+
+/** PATCH /api/admin/settings/scheduler-keys — simpan key (kirim hanya yang diubah) */
+export async function saveSchedulerKeys(body: Partial<Record<SchedulerProviderId, string>>) {
+  return apiFetch<{ updated: string[] }>('/admin/settings/scheduler-keys', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+/** GET /api/admin/settings/scheduler-config — channel/account ID + preset jam posting */
+export async function getSchedulerConfig() {
+  return apiFetch<SchedulerConfig>('/admin/settings/scheduler-config');
+}
+
+/** PATCH /api/admin/settings/scheduler-config */
+export async function saveSchedulerConfig(body: Partial<SchedulerConfig>) {
+  return apiFetch<{ updated: true }>('/admin/settings/scheduler-config', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
 /** GET /api/testimonials */
 export async function getTestimonials() {
   return apiFetch<ApiTestimonialsData>('/testimonials');

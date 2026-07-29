@@ -4,6 +4,7 @@ import { useParams, useNavigate, useSearchParams, Link } from 'react-router';
 import {
   ArrowLeft, ArrowRight, ImageOff, Check, Film, AlertCircle,
   Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles, History, Trash2, RefreshCw, Upload, Music, Captions,
+  Archive, RotateCcw, Send,
 } from 'lucide-react';
 // JSZip di-dynamic-import di handler (bukan static) agar tidak masuk chunk awal workspace.
 import {
@@ -1617,8 +1618,17 @@ function CaptionStudio({ propertyId, platform, registerInstruction }: {
 const CaptionStudioMemo = memo(CaptionStudio);
 
 // ── Content Library (Tahap 3): video hasil generate tersimpan di R2 ──
-interface VideoItem { id: number; r2_key: string; label: string | null; gaya: string | null; rasio: string | null; duration_sec: number | null; size_bytes: number | null; created_at: string; post_url: string | null; views: number | null; likes: number | null }
+interface VideoItem { id: number; r2_key: string; label: string | null; gaya: string | null; rasio: string | null; duration_sec: number | null; size_bytes: number | null; created_at: string; post_url: string | null; views: number | null; likes: number | null; trashed_at: string | null }
 interface AnalyticsRow { gaya: string; jumlah: number; avg_views: number; avg_likes: number }
+type LibraryViewMode = 'active' | 'trash';
+
+function daysUntilPurge(trashedAt: string): number {
+  const trashedMs = new Date(trashedAt).getTime();
+  if (Number.isNaN(trashedMs)) return 30;
+  const purgeMs = trashedMs + 30 * 24 * 60 * 60 * 1000;
+  return Math.ceil((purgeMs - Date.now()) / (24 * 60 * 60 * 1000));
+}
+
 function VideoLibrary({ propertyId }: { propertyId: number }) {
   const [items, setItems] = useState<VideoItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1626,12 +1636,14 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
   const [analytics, setAnalytics] = useState<AnalyticsRow[]>([]);
   const [edits, setEdits] = useState<Record<number, { post_url: string; views: string; likes: string }>>({});
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [view, setView] = useState<LibraryViewMode>('active');
+  const [scheduleTarget, setScheduleTarget] = useState<VideoItem | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError('');
     try {
-      const r = await fetch(`/api/admin/viralframe/videos?property_id=${propertyId}`, { credentials: 'include' });
+      const r = await fetch(`/api/admin/viralframe/videos?property_id=${propertyId}&view=${view}`, { credentials: 'include' });
       const j = await bacaJson(r);
       if (j.success) {
         const list: VideoItem[] = j.data?.items ?? [];
@@ -1647,11 +1659,27 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
       setLoadError(err instanceof Error ? err.message : 'Gagal memuat library video');
     } finally { setLoading(false); }
     try { const a = await fetch('/api/admin/viralframe/analytics', { credentials: 'include' }); const aj = await bacaJson(a); if (aj.success) setAnalytics(aj.data?.items ?? []); } catch { /* noop — analitik best-effort, tidak wajib untuk library berfungsi */ }
-  }, [propertyId]);
+  }, [propertyId, view]);
   useEffect(() => { load(); }, [load]);
 
-  const del = async (id: number) => {
-    if (!window.confirm('Hapus video ini dari Library?')) return;
+  const trashOne = async (id: number) => {
+    try {
+      await fetch(`/api/admin/viralframe/videos/${id}`, {
+        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trash: true }),
+      });
+    } catch { /* noop */ } finally { load(); }
+  };
+  const restoreOne = async (id: number) => {
+    try {
+      await fetch(`/api/admin/viralframe/videos/${id}`, {
+        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trash: false }),
+      });
+    } catch { /* noop */ } finally { load(); }
+  };
+  const deletePermanentOne = async (id: number) => {
+    if (!window.confirm('Hapus video ini PERMANEN? Tidak bisa dipulihkan lagi.')) return;
     try {
       const r = await fetch(`/api/admin/viralframe/videos/${id}`, { method: 'DELETE', credentials: 'include' });
       if (!r.ok) { const j = await bacaJson(r); alert(`Gagal menghapus: ${j.error ?? `HTTP ${r.status}`}`); }
@@ -1672,23 +1700,44 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
     setEdits(prev => ({ ...prev, [id]: { ...(prev[id] ?? { post_url: '', views: '', likes: '' }), [k]: val } }));
   const mediaUrl = (key: string) => `/api/admin/media?key=${encodeURIComponent(key)}`;
 
-  if (loading) return <div className="py-8 text-center text-sm text-[#94A3B8]"><Loader2 size={18} className="animate-spin mx-auto mb-1" /> Memuat library…</div>;
+  const viewToggle = (
+    <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit">
+      {([{ v: 'active' as const, label: 'Aktif' }, { v: 'trash' as const, label: 'Sampah' }]).map(t => (
+        <button key={t.v} onClick={() => setView(t.v)}
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === t.v ? 'bg-[#1565C0] text-white' : 'text-[#64748B] hover:bg-white'}`}>
+          {t.v === 'trash' && <Archive size={12} />} {t.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (loading) return <div className="space-y-4">{viewToggle}<div className="py-8 text-center text-sm text-[#94A3B8]"><Loader2 size={18} className="animate-spin mx-auto mb-1" /> Memuat library…</div></div>;
   if (loadError) return (
-    <div className="text-center py-10 border border-dashed border-red-200 rounded-2xl">
-      <p className="text-sm text-red-600 mb-2">{loadError}</p>
-      <button onClick={load} className="text-xs font-semibold text-[#1565C0] underline">Coba lagi</button>
+    <div className="space-y-4">{viewToggle}
+      <div className="text-center py-10 border border-dashed border-red-200 rounded-2xl">
+        <p className="text-sm text-red-600 mb-2">{loadError}</p>
+        <button onClick={load} className="text-xs font-semibold text-[#1565C0] underline">Coba lagi</button>
+      </div>
     </div>
   );
   if (items.length === 0) return (
-    <div className="text-center py-10 border border-dashed border-gray-200 rounded-2xl">
-      <Film size={26} className="text-gray-300 mx-auto mb-2" />
-      <p className="text-sm text-[#64748B]">Belum ada video tersimpan. Generate video di tab Video VO — hasilnya otomatis tersimpan di sini.</p>
+    <div className="space-y-4">{viewToggle}
+      <div className="text-center py-10 border border-dashed border-gray-200 rounded-2xl">
+        <Film size={26} className="text-gray-300 mx-auto mb-2" />
+        <p className="text-sm text-[#64748B]">
+          {view === 'trash' ? 'Sampah kosong.' : 'Belum ada video tersimpan. Generate video di tab Video VO — hasilnya otomatis tersimpan di sini.'}
+        </p>
+      </div>
     </div>
   );
   return (
     <div className="space-y-4">
+      {viewToggle}
+      {scheduleTarget && (
+        <ScheduleModal video={scheduleTarget} onClose={() => setScheduleTarget(null)} onScheduled={() => { setScheduleTarget(null); load(); }} />
+      )}
       {/* Tahap 6: ringkasan analitik gaya "pemenang" */}
-      {analytics.length > 0 && (
+      {view === 'active' && analytics.length > 0 && (
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
           <div className="text-sm font-semibold text-[#0F172A] mb-2">📊 Performa per Gaya (dari metrik yang diisi)</div>
           <div className="space-y-1">
@@ -1714,11 +1763,22 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
                     <div className="text-sm font-medium text-[#0F172A] truncate">{v.label ?? 'Video'}</div>
                     <div className="text-[11px] text-[#94A3B8]">
                       {v.gaya ?? '—'} · {v.rasio ?? '—'} · {v.size_bytes ? `${(v.size_bytes / 1024 / 1024).toFixed(1)}MB` : ''} · {new Date(v.created_at).toLocaleDateString('id-ID')}
+                      {view === 'trash' && v.trashed_at && ` · hapus permanen ${Math.max(0, daysUntilPurge(v.trashed_at))} hari lagi`}
                     </div>
                   </div>
                   <div className="flex gap-1.5 flex-shrink-0">
                     <a href={mediaUrl(v.r2_key)} download className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download"><Download size={15} /></a>
-                    <button onClick={() => del(v.id)} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50" title="Hapus"><X size={15} /></button>
+                    {view === 'active' ? (
+                      <>
+                        <button onClick={() => setScheduleTarget(v)} className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50" title="Jadwalkan ke Sosmed"><Send size={15} /></button>
+                        <button onClick={() => trashOne(v.id)} className="p-1.5 rounded-lg text-[#64748B] hover:bg-gray-100" title="Pindahkan ke Sampah"><Archive size={15} /></button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => restoreOne(v.id)} className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50" title="Pulihkan ke Aktif"><RotateCcw size={15} /></button>
+                        <button onClick={() => deletePermanentOne(v.id)} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50" title="Hapus permanen sekarang"><Trash2 size={15} /></button>
+                      </>
+                    )}
                   </div>
                 </div>
                 {/* Tahap 6: input metrik A/B */}
@@ -1745,6 +1805,101 @@ function VideoLibrary({ propertyId }: { propertyId: number }) {
   );
 }
 const VideoLibraryMemo = memo(VideoLibrary);
+
+// ── Modal "Jadwalkan ke Sosmed": upload video ke Zernio dari BROWSER (bukan
+// Worker) supaya tidak kena limit wall-clock 30 detik Cloudflare, lalu trigger
+// fan-out Buffer (YT Shorts/TikTok/Threads) + Zernio (FB Pages/Instagram). ──
+type ScheduleResult = { platform: string; status: 'scheduled' | 'failed'; error: string | null };
+const PLATFORM_LABEL: Record<string, string> = { youtube: 'YouTube Shorts', tiktok: 'TikTok', threads: 'Threads', facebook: 'Facebook Pages', instagram: 'Instagram' };
+
+function ScheduleModal({ video, onClose, onScheduled }: { video: VideoItem; onClose: () => void; onScheduled: () => void }) {
+  const [caption, setCaption] = useState(video.label ?? '');
+  const [phase, setPhase] = useState<'form' | 'uploading' | 'committing' | 'done' | 'error'>('form');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [results, setResults] = useState<ScheduleResult[]>([]);
+
+  const submit = async () => {
+    setErrorMsg('');
+    try {
+      setPhase('uploading');
+      const presignRes = await fetch('/api/admin/viralframe/schedule/presign', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_id: video.id }),
+      });
+      const presignJson = await bacaJson<{ upload_url: string; public_url: string }>(presignRes);
+      if (!presignJson.success || !presignJson.data) throw new Error(presignJson.error ?? 'Gagal membuat URL upload Zernio');
+
+      // Ambil bytes video dari proxy admin (butuh cookie login), lalu PUT LANGSUNG
+      // ke Zernio dari browser — bukan lewat Worker kita (video bisa puluhan MB).
+      const videoBlob = await fetch(`/api/admin/media?key=${encodeURIComponent(video.r2_key)}`, { credentials: 'include' }).then(r => r.blob());
+      const uploadRes = await fetch(presignJson.data.upload_url, { method: 'PUT', body: videoBlob });
+      if (!uploadRes.ok) throw new Error(`Upload ke Zernio gagal (HTTP ${uploadRes.status})`);
+
+      setPhase('committing');
+      const commitRes = await fetch('/api/admin/viralframe/schedule/commit', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_id: video.id, public_url: presignJson.data.public_url, caption }),
+      });
+      const commitJson = await bacaJson<{ results: ScheduleResult[]; trashed: boolean }>(commitRes);
+      if (!commitJson.success || !commitJson.data) throw new Error(commitJson.error ?? 'Gagal menjadwalkan post');
+
+      setResults(commitJson.data.results);
+      setPhase('done');
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Gagal menjadwalkan');
+      setPhase('error');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[9998] bg-black/40 flex items-center justify-center p-4" onClick={phase === 'form' || phase === 'error' ? onClose : undefined}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold text-[#0F172A]">Jadwalkan ke Sosmed</h3>
+          {(phase === 'form' || phase === 'error' || phase === 'done') && (
+            <button onClick={phase === 'done' ? onScheduled : onClose} className="p-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
+          )}
+        </div>
+
+        {(phase === 'form' || phase === 'error') && (
+          <>
+            <p className="text-xs text-[#64748B] mb-3">Video akan dijadwalkan otomatis ke 5 akun (YT Shorts, TikTok, Threads, FB Pages, Instagram) pada slot jam primetime berikutnya yang masih kosong hari ini.</p>
+            <textarea value={caption} onChange={e => setCaption(e.target.value)} rows={3} placeholder="Caption / deskripsi post…"
+              className="w-full text-sm px-3 py-2 border border-gray-200 rounded-xl outline-none focus:border-[#1565C0] mb-3" />
+            {errorMsg && <p className="text-xs text-red-600 mb-3">{errorMsg}</p>}
+            <button onClick={submit} className="w-full py-2.5 rounded-xl text-sm font-semibold text-white bg-[#1565C0] hover:bg-[#1565C0]/90">
+              Jadwalkan Sekarang
+            </button>
+          </>
+        )}
+
+        {(phase === 'uploading' || phase === 'committing') && (
+          <div className="py-6 text-center text-sm text-[#64748B]">
+            <Loader2 size={20} className="animate-spin mx-auto mb-2" />
+            {phase === 'uploading' ? 'Mengunggah video ke Zernio…' : 'Menjadwalkan ke 5 akun…'}
+          </div>
+        )}
+
+        {phase === 'done' && (
+          <div className="space-y-1.5">
+            {results.map(r => (
+              <div key={r.platform} className="flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg bg-gray-50">
+                <span className="font-medium text-[#0F172A]">{PLATFORM_LABEL[r.platform] ?? r.platform}</span>
+                {r.status === 'scheduled'
+                  ? <span className="text-emerald-600 font-semibold">✅ Terjadwal</span>
+                  : <span className="text-red-500 font-semibold" title={r.error ?? ''}>❌ Gagal</span>}
+              </div>
+            ))}
+            {results.some(r => r.status === 'failed') && (
+              <p className="text-[11px] text-[#94A3B8] pt-1">Platform yang gagal bisa dicoba ulang manual nanti. Video sudah pindah ke Sampah karena minimal 1 platform sukses.</p>
+            )}
+            <button onClick={onScheduled} className="w-full mt-2 py-2 rounded-xl text-sm font-semibold text-white bg-[#1565C0] hover:bg-[#1565C0]/90">Selesai</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ── Upload Hasil (Tahap 4): upload video jadi dari AI eksternal ke Cloudinary, tertaut karakter/agent ──
 interface CharacterOption { id: number; nama: string; foto_url: string }

@@ -60,11 +60,51 @@ export async function onRequestPost(context) {
       await env.DB.prepare(`DELETE FROM viralframe_agent_videos WHERE id IN (${placeholders})`).bind(...deletable).run();
     }
 
-    return jsonOk({ purged: deletable.length, failed: rows.length - deletable.length });
+    const videosResult = await purgeContentLibraryVideos(env);
+
+    return jsonOk({
+      purged: deletable.length + videosResult.purged,
+      failed: (rows.length - deletable.length) + videosResult.failed,
+    });
   } catch (err) {
     console.error('[purge-trash]', err.message);
     return jsonError('Gagal purge sampah', 500);
   }
+}
+
+// Sampah Content Library (viralframe_videos, R2 — bukan Cloudinary). Sama pola
+// rollback-safe: baris D1 cuma dihapus kalau objek R2-nya sukses dihapus (atau
+// memang tidak ada), supaya tidak ada file R2 yatim tanpa jejak untuk retry.
+async function purgeContentLibraryVideos(env) {
+  const res = await env.DB.prepare(
+    `SELECT id, r2_key FROM viralframe_videos
+     WHERE trashed_at IS NOT NULL AND trashed_at <= datetime('now', '-30 days')
+     LIMIT ?`
+  ).bind(PURGE_LIMIT_PER_RUN).all();
+  const rows = res.results ?? [];
+  if (rows.length === 0) return { purged: 0, failed: 0 };
+
+  const deletable = [];
+  await Promise.all(rows.map(async row => {
+    if (!row.r2_key) { deletable.push(row.id); return; }
+    try {
+      await env.MEDIA.delete(row.r2_key);
+      deletable.push(row.id);
+    } catch (err) {
+      console.error('[purge-trash] R2 delete', row.id, err.message);
+      await logServerError(env, {
+        message: `Gagal hapus R2 object saat cron purge-trash video #${row.id}: ${err.message}`,
+        source: 'server',
+        context: { endpoint: 'internal/viralframe/purge-trash', id: row.id, r2_key: row.r2_key },
+      });
+    }
+  }));
+
+  if (deletable.length > 0) {
+    const placeholders = deletable.map(() => '?').join(',');
+    await env.DB.prepare(`DELETE FROM viralframe_videos WHERE id IN (${placeholders})`).bind(...deletable).run();
+  }
+  return { purged: deletable.length, failed: rows.length - deletable.length };
 }
 
 export async function onRequestOptions() { return handleOptions(); }

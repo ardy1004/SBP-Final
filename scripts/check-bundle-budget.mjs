@@ -73,7 +73,7 @@ import { join } from 'node:path';
 //             karena metrik yang benar-benar berbahaya tidak bergerak.
 // ─────────────────────────────────────────────────────────────────────────────
 const BUDGET_SSR_MAIN_CHUNK = 560_000;    // 503.003 +11% — headroom nyata, bukan tepi jurang
-const BUDGET_FUNCTIONS_RAW  = 5_900_000;  // 5.861.345 +0,7% (naik dari 5.850.000, lihat catatan 2026-07-29)
+const BUDGET_FUNCTIONS_RAW  = 5_950_000;  // 5.911.244 +0,7% (naik dari 5.900.000 — fitur scheduler ViralFrame Buffer/Zernio, 2026-07-29)
 const BUDGET_FUNCTIONS_GZIP = 8_000_000;  // jauh di bawah batas 10 MB; alarm jaring pengaman saja
 
 /**

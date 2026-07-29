@@ -3,8 +3,12 @@ import { useOutletContext } from 'react-router';
 import GridLayout, { WidthProvider, type Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { Lock, User, CheckCircle, XCircle, Eye, EyeOff, BarChart2, Plus, Trash2, Edit2, ToggleLeft, ToggleRight, KeyRound, RotateCcw } from 'lucide-react';
-import { getAiKeys, saveAiKeys, getAiStatus, type AiProviderId, type AiKeyInfo, type AiStatusInfo, bacaJson } from '../../../lib/api';
+import { Lock, User, CheckCircle, XCircle, Eye, EyeOff, BarChart2, Plus, Trash2, Edit2, ToggleLeft, ToggleRight, KeyRound, RotateCcw, Send } from 'lucide-react';
+import {
+  getAiKeys, saveAiKeys, getAiStatus, type AiProviderId, type AiKeyInfo, type AiStatusInfo, bacaJson,
+  getSchedulerKeys, saveSchedulerKeys, getSchedulerConfig, saveSchedulerConfig,
+  type SchedulerProviderId, type SchedulerKeyInfo, type SchedulePresetRow,
+} from '../../../lib/api';
 
 const ResponsiveGridLayout = WidthProvider(GridLayout);
 
@@ -14,6 +18,7 @@ const DEFAULT_SETTINGS_LAYOUT: Layout[] = [
   { i: 'password',     x: 6, y: 0,  w: 6,  h: 13, minW: 3, minH: 8 },
   { i: 'tracking',     x: 0, y: 8,  w: 12, h: 20, minW: 4, minH: 8 },
   { i: 'ai-providers', x: 0, y: 28, w: 12, h: 14, minW: 4, minH: 6 },
+  { i: 'scheduler',    x: 0, y: 42, w: 12, h: 22, minW: 4, minH: 10 },
 ];
 const SETTINGS_LAYOUT_STORAGE_KEY = 'sbp_admin_settings_layout';
 // Selector elemen yang TIDAK memicu drag (blacklist) — drag tetap aktif dari area
@@ -30,6 +35,18 @@ const AI_PROVIDERS: { id: AiProviderId; label: string; hint: string }[] = [
 const STATUS_COLOR: Record<'green' | 'yellow' | 'red', string> = {
   green: '#10B981', yellow: '#F59E0B', red: '#EF4444',
 };
+
+const SCHEDULER_PROVIDERS: { id: SchedulerProviderId; label: string; hint: string }[] = [
+  { id: 'buffer', label: 'Buffer (YT Shorts, TikTok, Threads)', hint: 'buffer.com → Settings → API' },
+  { id: 'zernio', label: 'Zernio (Facebook Pages, Instagram)',  hint: 'docs.zernio.com' },
+];
+const DEFAULT_SCHEDULE_PRESET: SchedulePresetRow[] = [
+  { slot: 1, fb_ig_threads: '09:00', tiktok: '12:30', youtube: '12:30' },
+  { slot: 2, fb_ig_threads: '11:00', tiktok: '18:00', youtube: '17:30' },
+  { slot: 3, fb_ig_threads: '13:00', tiktok: '19:30', youtube: '19:00' },
+  { slot: 4, fb_ig_threads: '19:00', tiktok: '20:30', youtube: '20:00' },
+  { slot: 5, fb_ig_threads: '20:00', tiktok: '21:00', youtube: '13:30' },
+];
 
 interface AdminUser { sub: number; email: string; nama: string; role: string; }
 interface PasswordForm { password_lama: string; password_baru: string; password_baru_konfirmasi: string; }
@@ -144,6 +161,64 @@ export default function AdminSettingsPage() {
     } else {
       setAiMsg({ type: 'error', text: r.error ?? 'Gagal menyimpan key.' });
     }
+  };
+
+  // ── Scheduler ViralFrame (Buffer + Zernio) ──
+  const [schedulerKeys, setSchedulerKeys] = useState<Record<SchedulerProviderId, SchedulerKeyInfo> | null>(null);
+  const [schedulerInput, setSchedulerInput] = useState<Record<SchedulerProviderId, string>>({ buffer: '', zernio: '' });
+  const [schedulerSaving, setSchedulerSaving] = useState<SchedulerProviderId | null>(null);
+  const [schedulerMsg, setSchedulerMsg] = useState<Msg | null>(null);
+
+  const [channelIds, setChannelIds] = useState({
+    buffer_channel_id_youtube: '', buffer_channel_id_tiktok: '', buffer_channel_id_threads: '',
+    zernio_account_id_facebook: '', zernio_account_id_instagram: '',
+  });
+  const [preset, setPreset] = useState<SchedulePresetRow[]>(DEFAULT_SCHEDULE_PRESET);
+  const [savingSchedulerConfig, setSavingSchedulerConfig] = useState(false);
+  const [schedulerConfigMsg, setSchedulerConfigMsg] = useState<Msg | null>(null);
+
+  const loadScheduler = () => {
+    getSchedulerKeys().then(r => { if (r.success && r.data) setSchedulerKeys(r.data); });
+    getSchedulerConfig().then(r => {
+      if (r.success && r.data) {
+        setChannelIds({
+          buffer_channel_id_youtube: r.data.buffer_channel_id_youtube ?? '',
+          buffer_channel_id_tiktok: r.data.buffer_channel_id_tiktok ?? '',
+          buffer_channel_id_threads: r.data.buffer_channel_id_threads ?? '',
+          zernio_account_id_facebook: r.data.zernio_account_id_facebook ?? '',
+          zernio_account_id_instagram: r.data.zernio_account_id_instagram ?? '',
+        });
+        if (r.data.viralframe_schedule_preset?.length === 5) setPreset(r.data.viralframe_schedule_preset);
+      }
+    });
+  };
+  useEffect(() => { loadScheduler(); }, []);
+
+  const handleSaveSchedulerKey = async (id: SchedulerProviderId) => {
+    const val = schedulerInput[id].trim();
+    if (!val) { setSchedulerMsg({ type: 'error', text: 'Isi key dulu sebelum menyimpan.' }); return; }
+    setSchedulerSaving(id); setSchedulerMsg(null);
+    const r = await saveSchedulerKeys({ [id]: val });
+    setSchedulerSaving(null);
+    if (r.success) {
+      setSchedulerMsg({ type: 'success', text: `Key ${id} tersimpan.` });
+      setSchedulerInput(s => ({ ...s, [id]: '' }));
+      loadScheduler();
+    } else {
+      setSchedulerMsg({ type: 'error', text: r.error ?? 'Gagal menyimpan key.' });
+    }
+  };
+
+  const setPresetTime = (slot: number, col: 'fb_ig_threads' | 'tiktok' | 'youtube', val: string) => {
+    setPreset(prev => prev.map(row => row.slot === slot ? { ...row, [col]: val } : row));
+  };
+
+  const handleSaveSchedulerConfig = async () => {
+    setSavingSchedulerConfig(true); setSchedulerConfigMsg(null);
+    const r = await saveSchedulerConfig({ ...channelIds, viralframe_schedule_preset: preset });
+    setSavingSchedulerConfig(false);
+    if (r.success) setSchedulerConfigMsg({ type: 'success', text: 'Konfigurasi scheduler disimpan' });
+    else setSchedulerConfigMsg({ type: 'error', text: r.error ?? 'Gagal menyimpan' });
   };
 
   // ── Load pixel configs + tracking settings ──
@@ -509,6 +584,84 @@ export default function AdminSettingsPage() {
             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: STATUS_COLOR.green }} /> Kuota aman</span>
             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: STATUS_COLOR.yellow }} /> Hampir habis / rate-limit</span>
             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: STATUS_COLOR.red }} /> Habis / belum diisi</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Scheduler ViralFrame (Buffer + Zernio) ── */}
+      <div key="scheduler" className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 overflow-y-auto">
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#EFF6FF]"><Send size={17} color="#1565C0" /></div>
+          <div>
+            <h2 className="font-display font-semibold text-[#0F172A]">Scheduler Sosmed (Buffer &amp; Zernio)</h2>
+            <p className="text-xs text-[#64748B]">Auto-jadwalkan video Content Library ViralFrame ke YT Shorts, TikTok, Threads, FB Pages &amp; Instagram</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {SCHEDULER_PROVIDERS.map(p => {
+            const info = schedulerKeys?.[p.id];
+            return (
+              <div key={p.id}>
+                <label className="text-sm font-semibold text-[#0F172A] flex items-center gap-2 mb-1">
+                  {p.label}
+                  {info?.configured && <span className="text-[10px] font-normal text-[#64748B]">({info.masked})</span>}
+                </label>
+                <div className="flex gap-2">
+                  <input type="password" value={schedulerInput[p.id]} onChange={e => setSchedulerInput(s => ({ ...s, [p.id]: e.target.value }))}
+                    placeholder={info?.configured ? 'Ketik key baru untuk mengganti…' : `Tempel API key (${p.hint})`}
+                    className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0]/20" />
+                  <button onClick={() => handleSaveSchedulerKey(p.id)} disabled={schedulerSaving === p.id || !schedulerInput[p.id].trim()}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-[#1565C0] hover:bg-[#1565C0]/90 disabled:opacity-40 transition-colors flex-shrink-0">
+                    {schedulerSaving === p.id ? '...' : 'Simpan'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          <MsgBox msg={schedulerMsg} />
+
+          <div className="border-t border-gray-100 pt-4">
+            <h3 className="text-sm font-semibold text-[#0F172A] mb-2">ID Channel / Akun</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input value={channelIds.buffer_channel_id_youtube} onChange={e => setChannelIds(c => ({ ...c, buffer_channel_id_youtube: e.target.value }))} placeholder="Buffer channel ID — YouTube Shorts" className={inputClassNoPR} />
+              <input value={channelIds.buffer_channel_id_tiktok} onChange={e => setChannelIds(c => ({ ...c, buffer_channel_id_tiktok: e.target.value }))} placeholder="Buffer channel ID — TikTok" className={inputClassNoPR} />
+              <input value={channelIds.buffer_channel_id_threads} onChange={e => setChannelIds(c => ({ ...c, buffer_channel_id_threads: e.target.value }))} placeholder="Buffer channel ID — Threads" className={inputClassNoPR} />
+              <input value={channelIds.zernio_account_id_facebook} onChange={e => setChannelIds(c => ({ ...c, zernio_account_id_facebook: e.target.value }))} placeholder="Zernio account ID — Facebook Pages" className={inputClassNoPR} />
+              <input value={channelIds.zernio_account_id_instagram} onChange={e => setChannelIds(c => ({ ...c, zernio_account_id_instagram: e.target.value }))} placeholder="Zernio account ID — Instagram" className={inputClassNoPR} />
+            </div>
+          </div>
+
+          <div className="border-t border-gray-100 pt-4">
+            <h3 className="text-sm font-semibold text-[#0F172A] mb-1">Preset Jam Primetime (WIB)</h3>
+            <p className="text-[10px] text-[#94A3B8] mb-2">Klik "Jadwalkan ke Sosmed" di Content Library otomatis pakai slot kosong berikutnya hari ini, jam sesuai tabel ini.</p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="text-left text-[#64748B]">
+                    <th className="py-1 pr-2 font-semibold">Slot</th>
+                    <th className="py-1 px-2 font-semibold">FB / IG / Threads</th>
+                    <th className="py-1 px-2 font-semibold">TikTok</th>
+                    <th className="py-1 pl-2 font-semibold">YouTube Shorts</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preset.map(row => (
+                    <tr key={row.slot} className="border-t border-gray-50">
+                      <td className="py-1.5 pr-2 font-medium text-[#0F172A]">{row.slot}</td>
+                      <td className="py-1.5 px-2"><input type="time" value={row.fb_ig_threads} onChange={e => setPresetTime(row.slot, 'fb_ig_threads', e.target.value)} className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs" /></td>
+                      <td className="py-1.5 px-2"><input type="time" value={row.tiktok} onChange={e => setPresetTime(row.slot, 'tiktok', e.target.value)} className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs" /></td>
+                      <td className="py-1.5 pl-2"><input type="time" value={row.youtube} onChange={e => setPresetTime(row.slot, 'youtube', e.target.value)} className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <MsgBox msg={schedulerConfigMsg} />
+            <button onClick={handleSaveSchedulerConfig} disabled={savingSchedulerConfig}
+              className="w-full mt-2 bg-[#1565C0] hover:bg-[#1565C0]/90 disabled:opacity-50 text-white rounded-xl py-2.5 text-sm font-semibold transition-colors">
+              {savingSchedulerConfig ? 'Menyimpan...' : 'Simpan Konfigurasi Scheduler'}
+            </button>
           </div>
         </div>
       </div>
