@@ -6,8 +6,8 @@ import 'react-resizable/css/styles.css';
 import { Lock, User, CheckCircle, XCircle, Eye, EyeOff, BarChart2, Plus, Trash2, Edit2, ToggleLeft, ToggleRight, KeyRound, RotateCcw, Send } from 'lucide-react';
 import {
   getAiKeys, saveAiKeys, getAiStatus, type AiProviderId, type AiKeyInfo, type AiStatusInfo, bacaJson,
-  getSchedulerKeys, saveSchedulerKeys, getSchedulerConfig, saveSchedulerConfig,
-  type SchedulerProviderId, type SchedulerKeyInfo, type SchedulePresetRow,
+  getSchedulerKeys, saveSchedulerKeys, getSchedulerConfig, saveSchedulerConfig, getSchedulerAccounts,
+  type SchedulerProviderId, type SchedulerKeyInfo, type SchedulePresetRow, type SchedulerAccountsResult,
 } from '../../../lib/api';
 
 const ResponsiveGridLayout = WidthProvider(GridLayout);
@@ -176,6 +176,16 @@ export default function AdminSettingsPage() {
   const [preset, setPreset] = useState<SchedulePresetRow[]>(DEFAULT_SCHEDULE_PRESET);
   const [savingSchedulerConfig, setSavingSchedulerConfig] = useState(false);
   const [schedulerConfigMsg, setSchedulerConfigMsg] = useState<Msg | null>(null);
+  const [schedulerAccounts, setSchedulerAccounts] = useState<SchedulerAccountsResult | null>(null);
+  const [loadingAccounts, setLoadingAccounts] = useState(false);
+
+  const handleLoadAccounts = async () => {
+    setLoadingAccounts(true);
+    const r = await getSchedulerAccounts();
+    setLoadingAccounts(false);
+    if (r.success && r.data) setSchedulerAccounts(r.data);
+    else setSchedulerConfigMsg({ type: 'error', text: r.error ?? 'Gagal memuat daftar akun' });
+  };
 
   const loadScheduler = () => {
     getSchedulerKeys().then(r => { if (r.success && r.data) setSchedulerKeys(r.data); });
@@ -622,7 +632,42 @@ export default function AdminSettingsPage() {
           <MsgBox msg={schedulerMsg} />
 
           <div className="border-t border-gray-100 pt-4">
-            <h3 className="text-sm font-semibold text-[#0F172A] mb-2">ID Channel / Akun</h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold text-[#0F172A]">ID Channel / Akun</h3>
+              <button onClick={handleLoadAccounts} disabled={loadingAccounts}
+                className="text-xs font-semibold text-[#1565C0] underline disabled:opacity-50">
+                {loadingAccounts ? 'Memuat...' : 'Lihat Daftar Akun & ID'}
+              </button>
+            </div>
+            <p className="text-[10px] text-[#94A3B8] mb-2">Channel/account ID tidak tampil di dashboard Buffer/Zernio biasa — klik tombol di atas untuk ambil langsung dari API pakai key yang sudah kamu simpan (simpan API key dulu sebelum klik).</p>
+
+            {schedulerAccounts && (
+              <div className="mb-3 space-y-2 text-xs">
+                <div className="rounded-xl border border-gray-100 p-2.5">
+                  <div className="font-semibold text-[#0F172A] mb-1">Channel Buffer</div>
+                  {!schedulerAccounts.buffer.ok && <p className="text-red-600">{schedulerAccounts.buffer.error}</p>}
+                  {schedulerAccounts.buffer.ok && (schedulerAccounts.buffer.channels?.length ?? 0) === 0 && <p className="text-[#94A3B8]">Tidak ada channel tertaut.</p>}
+                  {schedulerAccounts.buffer.channels?.map(ch => (
+                    <div key={ch.id} className="flex items-center justify-between gap-2 py-0.5">
+                      <span className="text-[#374151]">{ch.name} <span className="text-[#94A3B8]">({ch.service})</span></span>
+                      <code className="bg-gray-50 px-1.5 py-0.5 rounded select-all">{ch.id}</code>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-xl border border-gray-100 p-2.5">
+                  <div className="font-semibold text-[#0F172A] mb-1">Akun Zernio</div>
+                  {!schedulerAccounts.zernio.ok && <p className="text-red-600">{schedulerAccounts.zernio.error}</p>}
+                  {schedulerAccounts.zernio.ok && (schedulerAccounts.zernio.accounts?.length ?? 0) === 0 && <p className="text-[#94A3B8]">Tidak ada akun tertaut.</p>}
+                  {schedulerAccounts.zernio.accounts?.map(ac => (
+                    <div key={ac.id} className="flex items-center justify-between gap-2 py-0.5">
+                      <span className="text-[#374151]">{ac.name} <span className="text-[#94A3B8]">({ac.platform})</span></span>
+                      <code className="bg-gray-50 px-1.5 py-0.5 rounded select-all">{ac.id}</code>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <input value={channelIds.buffer_channel_id_youtube} onChange={e => setChannelIds(c => ({ ...c, buffer_channel_id_youtube: e.target.value }))} placeholder="Buffer channel ID — YouTube Shorts" className={inputClassNoPR} />
               <input value={channelIds.buffer_channel_id_tiktok} onChange={e => setChannelIds(c => ({ ...c, buffer_channel_id_tiktok: e.target.value }))} placeholder="Buffer channel ID — TikTok" className={inputClassNoPR} />

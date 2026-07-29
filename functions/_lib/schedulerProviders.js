@@ -69,8 +69,14 @@ export async function callBufferCreatePost({ apiKey, channelId, assetUrl, dueAt,
   if (!apiKey) return { ok: false, error: 'Buffer API key belum diatur' };
   if (!channelId) return { ok: false, error: 'Buffer channel ID belum diatur' };
 
+  // createPost mengembalikan union type (contoh resmi developers.buffer.com) —
+  // WAJIB inline fragment ... on PostActionSuccess / ... on MutationError,
+  // tidak bisa select field langsung di root createPost.
   const query = `mutation CreatePost($input: CreatePostInput!) {
-    createPost(input: $input) { id }
+    createPost(input: $input) {
+      ... on PostActionSuccess { post { id } }
+      ... on MutationError { message }
+    }
   }`;
   const variables = {
     input: {
@@ -78,6 +84,7 @@ export async function callBufferCreatePost({ apiKey, channelId, assetUrl, dueAt,
       text: caption || '',
       assets: [{ video: { url: assetUrl } }],
       dueAt,
+      schedulingType: 'automatic',
       mode: 'customScheduled',
     },
   };
@@ -97,9 +104,73 @@ export async function callBufferCreatePost({ apiKey, channelId, assetUrl, dueAt,
   const json = await res.json().catch(() => null);
   if (!res.ok || !json) return { ok: false, error: `Buffer HTTP ${res.status}` };
   if (json.errors?.length) return { ok: false, error: json.errors.map(e => e.message).join('; ').slice(0, 300) };
-  const id = json.data?.createPost?.id;
+  const result = json.data?.createPost;
+  if (result?.message) return { ok: false, error: `Buffer: ${result.message}`.slice(0, 300) };
+  const id = result?.post?.id;
   if (!id) return { ok: false, error: 'Buffer tidak mengembalikan post id' };
   return { ok: true, remoteId: String(id) };
+}
+
+// Channel ID Buffer tidak muncul di dashboard biasa — harus ditanya lewat API.
+// organizationId dulu, baru channels per organisasi (pola resmi "Your First Post").
+export async function listBufferChannels(apiKey) {
+  if (!apiKey) return { ok: false, error: 'Buffer API key belum diatur' };
+  const orgQuery = `query { account { organizations { id name } } }`;
+  let res;
+  try {
+    res = await fetch('https://api.buffer.com', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ query: orgQuery }),
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (err) {
+    return { ok: false, error: `Gagal menghubungi Buffer: ${err.message}` };
+  }
+  const orgJson = await res.json().catch(() => null);
+  if (!res.ok || !orgJson) return { ok: false, error: `Buffer HTTP ${res.status}` };
+  if (orgJson.errors?.length) return { ok: false, error: orgJson.errors.map(e => e.message).join('; ').slice(0, 300) };
+  const orgs = orgJson.data?.account?.organizations ?? [];
+  if (orgs.length === 0) return { ok: false, error: 'Tidak ada organisasi Buffer ditemukan' };
+
+  const chQuery = `query GetChannels($organizationId: OrganizationId!) {
+    channels(input: { organizationId: $organizationId }) { id name service }
+  }`;
+  const channels = [];
+  for (const org of orgs) {
+    let chRes;
+    try {
+      chRes = await fetch('https://api.buffer.com', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ query: chQuery, variables: { organizationId: org.id } }),
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch (err) {
+      return { ok: false, error: `Gagal menghubungi Buffer (channels): ${err.message}` };
+    }
+    const chJson = await chRes.json().catch(() => null);
+    if (!chRes.ok || !chJson) continue;
+    for (const ch of (chJson.data?.channels ?? [])) channels.push({ id: ch.id, name: ch.name, service: ch.service });
+  }
+  return { ok: true, channels };
+}
+
+export async function listZernioAccounts(apiKey) {
+  if (!apiKey) return { ok: false, error: 'Zernio API key belum diatur' };
+  let res;
+  try {
+    res = await fetch('https://zernio.com/api/v1/accounts', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (err) {
+    return { ok: false, error: `Gagal menghubungi Zernio: ${err.message}` };
+  }
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json) return { ok: false, error: `Zernio HTTP ${res.status}` };
+  const accounts = (json.accounts ?? []).map(a => ({ id: a.accountId, platform: a.platform, name: a.name }));
+  return { ok: true, accounts };
 }
 
 export async function zernioPresign({ apiKey, filename, contentType }) {

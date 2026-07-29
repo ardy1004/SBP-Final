@@ -566,6 +566,16 @@ export async function saveSchedulerConfig(body: Partial<SchedulerConfig>) {
   });
 }
 
+export interface SchedulerAccountsResult {
+  buffer: { ok: boolean; error?: string; channels?: { id: string; name: string; service: string }[] };
+  zernio: { ok: boolean; error?: string; accounts?: { id: string; platform: string; name: string }[] };
+}
+
+/** GET /api/admin/settings/scheduler-accounts — daftar channel Buffer & akun Zernio tertaut (untuk cari ID) */
+export async function getSchedulerAccounts() {
+  return apiFetch<SchedulerAccountsResult>('/admin/settings/scheduler-accounts');
+}
+
 /** GET /api/testimonials */
 export async function getTestimonials() {
   return apiFetch<ApiTestimonialsData>('/testimonials');
