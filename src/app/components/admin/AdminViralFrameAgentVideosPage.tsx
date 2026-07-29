@@ -573,12 +573,25 @@ export default function AdminViralFrameAgentVideosPage() {
 // PERNAH punya badge, cuma jadi bahan baku overlay.
 function AgentScheduleModal({ video, assetUrl, onClose, onScheduled }: { video: AgentVideo; assetUrl: string; onClose: () => void; onScheduled: () => void }) {
   const [caption, setCaption] = useState(video.caption ?? '');
-  const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
+  const [phase, setPhase] = useState<'form' | 'warming' | 'submitting' | 'done' | 'error'>('form');
   const [errorMsg, setErrorMsg] = useState('');
   const [results, setResults] = useState<{ platform: string; status: 'scheduled' | 'failed'; error: string | null }[]>([]);
 
   const submit = async () => {
     setErrorMsg('');
+    try {
+      // Kombinasi video+overlay badge ini bisa saja BELUM PERNAH dirender
+      // Cloudinary (on-the-fly transform). Kalau Buffer/Zernio yang fetch
+      // duluan saat masih cold, mereka bisa baca metadata video yang belum
+      // utuh (durasi kebaca ~0 detik -> ditolak). "Panaskan" dulu dari browser
+      // (GET penuh, bukan HEAD, supaya Cloudinary benar2 selesai transcode
+      // dan meng-cache hasilnya) SEBELUM diserahkan ke Buffer/Zernio.
+      setPhase('warming');
+      await fetch(assetUrl).then(r => r.blob());
+    } catch {
+      // Warm-up gagal (mis. CORS/network) -- tetap lanjut, jangan blokir user;
+      // risikonya cuma sama seperti sebelum fix ini ada.
+    }
     setPhase('submitting');
     try {
       const res = await fetch('/api/admin/viralframe/schedule/commit-agent', {
@@ -602,7 +615,7 @@ function AgentScheduleModal({ video, assetUrl, onClose, onScheduled }: { video: 
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-bold text-[#0F172A]">Jadwalkan ke Sosmed</h3>
-          {phase !== 'submitting' && (
+          {phase !== 'submitting' && phase !== 'warming' && (
             <button onClick={phase === 'done' ? onScheduled : onClose} className="p-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
           )}
         </div>
@@ -619,9 +632,10 @@ function AgentScheduleModal({ video, assetUrl, onClose, onScheduled }: { video: 
           </>
         )}
 
-        {phase === 'submitting' && (
+        {(phase === 'warming' || phase === 'submitting') && (
           <div className="py-6 text-center text-sm text-[#64748B]">
-            <Loader2 size={20} className="animate-spin mx-auto mb-2" /> Menjadwalkan ke 5 akun…
+            <Loader2 size={20} className="animate-spin mx-auto mb-2" />
+            {phase === 'warming' ? 'Menyiapkan video (render badge)…' : 'Menjadwalkan ke 5 akun…'}
           </div>
         )}
 
