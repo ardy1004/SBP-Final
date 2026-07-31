@@ -1,9 +1,8 @@
 import { bacaJson } from '../../../lib/api';
 import { readNdjsonFinal } from '../../../lib/ndjson';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Link } from 'react-router';
 import {
-  Search, Filter, ImageOff, Video, X, Sparkles, PenLine, Clapperboard,
+  Search, Filter, ImageOff, Video,
   SlidersHorizontal, ChevronDown, ChevronUp, RotateCcw, Crown, Award, Flame, Star,
 } from 'lucide-react';
 
@@ -64,96 +63,12 @@ function coverSrc(url: string | null) {
   return url;
 }
 
-interface SelectedProperty { id: number; judul: string }
-
-function ModeSelectionModal({ property, onClose }: {
-  property: SelectedProperty;
-  onClose: () => void;
-}) {
-  const hrefFor = (mode: 'ai-generate' | 'manual' | 'video-vo' | 'youtube-long') =>
-    mode === 'manual' ? `/admin/viralframe/${property.id}` : `/admin/viralframe/${property.id}?mode=${mode}`;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-5 space-y-4">
-        <div className="flex items-start justify-between">
-          <div>
-            <h3 className="font-display font-bold text-[#0F172A] flex items-center gap-2">
-              🎬 Buat Video
-            </h3>
-            <p className="text-sm text-[#64748B] mt-0.5 line-clamp-1">{property.judul}</p>
-          </div>
-          <button onClick={onClose} className="text-[#94A3B8] hover:text-[#0F172A]"><X size={18} /></button>
-        </div>
-
-        <div className="space-y-3">
-          <Link
-            to={hrefFor('ai-generate')}
-            onClick={onClose}
-            className="block w-full text-left p-4 rounded-xl border-2 border-[#1565C0]/30 bg-[#F0F7FF] hover:border-[#1565C0] transition-colors"
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <Sparkles size={16} className="text-[#1565C0]" />
-              <span className="font-semibold text-sm text-[#0F172A]">⚡ AI Generate</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white bg-[#1565C0]">REKOMENDASI</span>
-            </div>
-            <p className="text-xs text-[#64748B] mb-2">Gemini / Groq / OpenRouter / DeepSeek dengan fallback otomatis. Lewat 3 langkah singkat (foto + karakter) untuk hasil akurat, lalu naskah per-scene siap pakai.</p>
-            <span className="text-xs font-semibold text-[#1565C0]">Mulai →</span>
-          </Link>
-
-          <Link
-            to={hrefFor('manual')}
-            onClick={onClose}
-            className="block w-full text-left p-4 rounded-xl border border-gray-200 hover:border-[#1565C0]/40 hover:bg-gray-50 transition-colors"
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <PenLine size={16} className="text-[#64748B]" />
-              <span className="font-semibold text-sm text-[#0F172A]">Manual (4 Step)</span>
-            </div>
-            <p className="text-xs text-[#64748B] mb-2">Kontrol penuh atas setiap detail.</p>
-            <span className="text-xs font-semibold text-[#1565C0]">Buat Manual →</span>
-          </Link>
-
-          <Link
-            to={hrefFor('video-vo')}
-            onClick={onClose}
-            className="block w-full text-left p-4 rounded-xl border border-gray-200 hover:border-[#1565C0]/40 hover:bg-gray-50 transition-colors"
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <Clapperboard size={16} className="text-[#64748B]" />
-              <span className="font-semibold text-sm text-[#0F172A]">Generate Video VO</span>
-            </div>
-            <p className="text-xs text-[#64748B] mb-2">Video + voiceover AI langsung.</p>
-            <span className="text-xs font-semibold text-[#1565C0]">Generate →</span>
-          </Link>
-
-          <Link
-            to={hrefFor('youtube-long')}
-            onClick={onClose}
-            className="block w-full text-left p-4 rounded-xl border-2 border-red-200 bg-red-50/50 hover:border-red-400 transition-colors"
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-base">📺</span>
-              <span className="font-semibold text-sm text-[#0F172A]">YouTube Long (16:9)</span>
-              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold text-white bg-red-500">16:9</span>
-            </div>
-            <p className="text-xs text-[#64748B] mb-2">Pilih foto + label + gaya visual/kamera → AI susun storyboard: prompt JSON thumbnail, opening, scene per foto, ending. Siap copy-paste.</p>
-            <span className="text-xs font-semibold text-red-500">Generate Storyboard →</span>
-          </Link>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function AdminViralFramePage() {
   const [properties, setProperties] = useState<PropertyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [displayLimit, setDisplayLimit] = useState(24);
-  const [selectedProperty, setSelectedProperty] = useState<SelectedProperty | null>(null);
   // Status konten per properti (R6)
   const [withScript, setWithScript] = useState<Set<number>>(new Set());
   const [withVideo, setWithVideo] = useState<Set<number>>(new Set());
@@ -272,9 +187,6 @@ export default function AdminViralFramePage() {
   };
 
   const stopBatch = () => batchAbortRef.current?.abort();
-
-  const openModeModal = (id: number, judul: string) => setSelectedProperty({ id, judul });
-  const closeModal = () => setSelectedProperty(null);
 
   const fetchProperties = useCallback(async () => {
     setLoading(true);
@@ -647,7 +559,7 @@ export default function AdminViralFramePage() {
                   </div>
                   <div className="mt-auto pt-2">
                     <button
-                      onClick={() => openModeModal(p.id, p.title)}
+                      onClick={() => window.open(`/admin/viralframe/${p.id}`, '_blank')}
                       className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
                       style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
                     >
@@ -680,12 +592,6 @@ export default function AdminViralFramePage() {
         </div>
       )}
 
-      {selectedProperty && (
-        <ModeSelectionModal
-          property={selectedProperty}
-          onClose={closeModal}
-        />
-      )}
     </div>
   );
 }

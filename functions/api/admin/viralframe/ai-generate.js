@@ -94,7 +94,7 @@ function isAutoValue(label) {
   return !label || label.trim().toLowerCase().startsWith('auto');
 }
 
-function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec }) {
+function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, excludedHooks, excludedCtas, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec }) {
   // Budget kata kini PER SCENE (audit 2026-07-26). Bila semua scene berdurasi
   // sama, sebut angkanya langsung supaya instruksinya sekonkret dulu; bila
   // berbeda-beda, arahkan ke kolom 'Maks kata' milik masing-masing scene.
@@ -139,10 +139,14 @@ Ekspresi/emosi karakter WAJIB konsisten '${expressionLabel}' di SEMUA scene — 
     ? ''
     : `Gaya visual WAJIB: ${visualStyle}. Terapkan konsisten di setiap scene (pencahayaan, komposisi, mood).\n`;
   const hookLine = isAutoValue(hookType)
-    ? ''
+    ? (excludedHooks?.length
+        ? `Scene berperan HOOK: pilih gaya opening yang paling sesuai dengan properti ini, TAPI JANGAN memakai gaya yang baru dipakai di video-video sebelumnya: ${excludedHooks.join(', ')}. Variasikan supaya konten tidak terasa monoton/generik dan tidak terdeteksi berulang oleh algoritma media sosial.\n`
+        : '')
     : `Scene berperan HOOK WAJIB memakai gaya opening: ${hookType}.\n`;
   const ctaLine = isAutoValue(ctaType)
-    ? ''
+    ? (excludedCtas?.length
+        ? `Scene berperan CTA: pilih gaya ajakan yang paling sesuai dengan properti ini, TAPI JANGAN memakai gaya yang baru dipakai di video-video sebelumnya: ${excludedCtas.join(', ')}. Variasikan supaya konten tidak terasa monoton/generik dan tidak terdeteksi berulang oleh algoritma media sosial.\n`
+        : '')
     : `Scene berperan CTA WAJIB memakai gaya ajakan: ${ctaType}.\n`;
   const toneStyleSection = (toneLine + visualStyleLine + hookLine + ctaLine).trim();
   const toneStyleBlock = toneStyleSection
@@ -789,7 +793,34 @@ export async function onRequestPost(context) {
   const nativeAudio = isNativeAudioTool(aiTool);
   const clipMaxSec = getClipMaxSec(aiTool);
 
-  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec });
+  // Hook/CTA "Auto" — sebelum audit 2026-08-01 ini berarti "tanpa instruksi tambahan",
+  // jadi AI cenderung jatuh ke pola paling generik berulang-ulang. Sekarang: kalau Auto,
+  // ambil hook/cta yang BARU dipakai (lintas seluruh katalog, bukan cuma properti ini —
+  // penonton feed sosmed melihat semua listing bercampur) dari riwayat generate, lalu
+  // instruksikan AI untuk TIDAK memakainya lagi. Gagal-aman: query gagal → tetap 'auto' tanpa exclusion.
+  let excludedHooks = [];
+  let excludedCtas = [];
+  if (isAutoValue(hookType) || isAutoValue(ctaType)) {
+    try {
+      const histRes = await env.DB.prepare(
+        `SELECT params_json FROM viralframe_generations ORDER BY created_at DESC LIMIT 8`
+      ).all();
+      for (const row of histRes.results ?? []) {
+        let p;
+        try { p = JSON.parse(row.params_json); } catch { continue; }
+        if (p?.hookType && !isAutoValue(p.hookType) && !excludedHooks.includes(p.hookType) && excludedHooks.length < 5) {
+          excludedHooks.push(p.hookType);
+        }
+        if (p?.ctaType && !isAutoValue(p.ctaType) && !excludedCtas.includes(p.ctaType) && excludedCtas.length < 5) {
+          excludedCtas.push(p.ctaType);
+        }
+      }
+    } catch (err) {
+      console.error('[viralframe ai-generate hook/cta history]', err.message);
+    }
+  }
+
+  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, excludedHooks, excludedCtas, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec });
   const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneDurations, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes });
 
   // ── Panggil AI dengan fallback berantai, respons streaming NDJSON ──────────

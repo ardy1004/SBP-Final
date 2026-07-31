@@ -529,6 +529,68 @@ export function compileMasterPrompt(
   return L.join('\n');
 }
 
+// ─── Copy Prompt Natural — renderer KEDUA dari data terkompilasi yang SAMA ───
+// compileMasterPrompt() di atas menghasilkan prompt terstruktur (instruksi AI
+// mengeluarkan JSON per BLOK 5) — cocok untuk jalur AI Generate yang mem-parse
+// output mesin. compileNaturalPrompt() merender data Part/Scene/Karakter/
+// Parameter yang SAMA sebagai paragraf naratif bahasa Inggris per scene (dialog
+// tetap Bahasa Indonesia) — cocok untuk paste manual ke tool percakapan seperti
+// Google Flow/Veo, mengikuti format storyboard manual yang sudah terbukti bagus.
+export function compileNaturalPrompt(
+  prop: CompilerProperty, s1: CompilerS1, scenes: CompilerScene[], s3: CompilerS3,
+): string {
+  const L: string[] = [];
+  const n = s1.sceneCount;
+  const archetype = findArchetype(s1.archetype);
+  const parts = partsValidForTotal(s1.parts, n) ? s1.parts : undefined;
+
+  const charDesc = s3.useCharacter && s3.character ? buildCharacterDescription(s3.character, s3.expression) : '';
+  const talentName = s3.useCharacter && s3.character ? s3.character.nama : '';
+
+  L.push(`# PROMPT NATURAL — ${prop.title}`);
+  L.push(`Talent: ${talentName || 'Tanpa karakter (faceless/b-roll)'} | Total durasi: ${totalDuration(s1)} detik | ${n} scene`);
+  L.push(`Gaya: ${archetype ? archetype.label : labelOf(VISUAL_STYLES, s1.visualStyle)} — Tone: ${labelOf(TONES, s1.tone)}`);
+  const regInstr = REGISTER_INSTRUCTION[s1.register ?? 'auto'] ?? '';
+  if (regInstr) L.push(`Gaya bahasa dialog: ${regInstr}`);
+  L.push('');
+
+  for (let i = 0; i < n; i++) {
+    const role = sceneRoleFromParts(i, n, parts);
+    const dur = durationOf(s1, i);
+    const label = scenes[i]?.label || '(belum dilabeli)';
+    const hint = PHOTO_LABEL_HINT[label] ?? 'elemen visual properti yang relevan';
+    const kamera = archetype
+      ? compileCameraChoreography(archetype.cameraGrammar, role, dur, i, s1.aiTool, true)
+      : 'steady cinematic frame with subtle natural motion';
+
+    L.push(`## SCENE ${i + 1} — ${role} (${dur} detik)`);
+    L.push('');
+    L.push('```');
+    let visual = s3.useCharacter && charDesc
+      ? `${charDesc} is on screen at a property, in front of/near the ${hint} (reference: ${label}). Camera: ${kamera}.`
+      : `A ${hint} (reference: ${label}) is shown, no presenter on screen. Camera: ${kamera}.`;
+    if (role === 'Hook') visual += ` Opening style: ${labelOf(HOOK_TYPES, s1.hookType)}.`;
+    if (role === 'CTA') visual += ` Closing/CTA style: ${labelOf(CTA_TYPES, s1.ctaType)}.`;
+    L.push(visual);
+    L.push('');
+    L.push(`Style: ${labelOf(VISUAL_STYLES, s1.visualStyle)}, ${labelOf(TONES, s1.tone).toLowerCase()} mood, vertical framing, natural daylight unless scene suggests otherwise.`);
+    L.push('```');
+    L.push('');
+    L.push(`Dialog (Bahasa Indonesia${regInstr ? ', ikuti gaya bahasa di atas' : ''}): [AI/kamu isi naskah untuk scene ini sesuai peran ${role} — target durasi ${dur} detik].`);
+    L.push('');
+  }
+
+  L.push('## CATATAN PRODUKSI');
+  L.push(`- Loop edit: frame penutup scene terakhir (CTA) sebaiknya "menyambung" secara visual ke frame pembuka scene pertama (Hook), supaya autoplay loop terasa mulus.`);
+  L.push(`- Caption/subtitle wajib ditambahkan sepanjang video (banyak penonton mute audio).`);
+  L.push(`- Rasio: ${s1.ratio || '9:16 vertikal'} — optimal untuk ${s1.platforms.map(p => labelOf(PLATFORMS, p)).join(', ') || 'TikTok/Reels'}.`);
+  if (s1.ctaType === 'comment_keyword' && s1.ctaKeyword.trim()) {
+    L.push(`- CTA keyword komentar: "${s1.ctaKeyword.trim()}".`);
+  }
+
+  return L.join('\n');
+}
+
 // Estimasi token kasar (≈ panjang / 4).
 export function estimateTokens(text: string): number {
   return Math.round(text.length / 4);

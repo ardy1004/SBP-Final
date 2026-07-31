@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router';
+import { useParams, useNavigate, Link } from 'react-router';
 import {
   ArrowLeft, ArrowRight, ImageOff, Check, Film, AlertCircle,
   Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles, History, Trash2, RefreshCw, Upload, Music, Captions,
@@ -18,6 +18,7 @@ import {
 import CharacterStepBase, { type Step3State } from './viralframe/CharacterStep';
 import BacksoundPicker, { backsoundMediaUrl, type BacksoundItem } from './viralframe/BacksoundPicker';
 import SlotIndicatorStrip from './viralframe/SlotIndicatorStrip';
+import LabelFotoStep from './viralframe/LabelFotoStep';
 import { readNdjsonFinal } from '../../../lib/ndjson';
 // #2: memoize komponen anak agar tak re-render saat parent re-render tanpa perubahan prop.
 const CharacterStep = memo(CharacterStepBase);
@@ -39,7 +40,7 @@ const PLATFORM_DURASI_VF: Record<string, number> = { tiktok: 8, ig_reels: 8, yt_
 import {
   PLATFORM_OPTIONS, MUSIK_OPTIONS, FOTO_LABEL_OPTIONS,
 } from '../../lib/viralframe-constants';
-import { compileMasterPrompt, estimateTokens } from './viralframe/masterPromptCompiler';
+import { compileMasterPrompt, compileNaturalPrompt, estimateTokens } from './viralframe/masterPromptCompiler';
 import { validateSceneJson, type ParsedJSON, type ValidateResult } from './viralframe/jsonValidator';
 import SceneCardsBase from './viralframe/SceneCards';
 const SceneCards = memo(SceneCardsBase);
@@ -260,8 +261,9 @@ function StepIndicator({ current }: { current: number }) {
   const steps = [
     { n: 1, label: 'Pilih Foto per Scene', enabled: true },
     { n: 2, label: 'Pilih Karakter', enabled: true },
-    { n: 3, label: 'Parameter Video', enabled: true },
-    { n: 4, label: 'Generate Prompt', enabled: true },
+    { n: 3, label: 'Pilih Mode', enabled: true },
+    { n: 4, label: 'Parameter Video', enabled: true },
+    { n: 5, label: 'Generate Prompt', enabled: true },
   ];
   return (
     <div className="flex items-center">
@@ -292,515 +294,6 @@ function StepIndicator({ current }: { current: number }) {
           </div>
         );
       })}
-    </div>
-  );
-}
-
-// ─── Jalur B: Video VO constants & component ────────────────────────────────
-
-// PENTING (image-to-video): prompt ini WAJIB "motion-only + scene-preserving".
-// Foto yang dikirim = frame pertama; deskripsi ADEGAN/pencahayaan/objek yang tidak
-// ada di foto akan membuat model (Wan2.2 I2V) melenceng dari foto. Jadi:
-//  - HANYA jelaskan gerakan kamera + perintah menjaga adegan tetap sama.
-//  - JANGAN sebut "facade/interior/sky/golden hour/neighborhood" (biarkan foto yang menentukan).
-//  - Utamakan gerakan yang TIDAK menuntut area di luar frame (push-in/dolly/pan/parallax);
-//    gerakan "reveal/pull-back/orbit" dibatasi ringan agar tidak memaksa mengarang.
-const GAYA_KAMERA = [
-  { label: '▶️ Push-in Lembut', value: 'dolly_pushin', prompt: 'slow steady push-in, camera moves gently forward into the existing scene, smooth cinematic motion, subtle natural parallax, keep the scene, architecture, objects and lighting exactly as shown, no new elements' },
-  { label: '🏠 Walk-through', value: 'walkthrough', prompt: 'slow steady forward gimbal glide through the existing space, smooth stabilized motion, first-person tour feel, preserve the scene, layout and lighting exactly as shown, gentle natural parallax, no new elements' },
-  { label: '🎯 Detail Pan', value: 'close_detail', prompt: 'slow gentle lateral pan across the existing scene, smooth micro-movement, shallow depth of field, keep all elements, textures and lighting consistent with the reference image, no new objects' },
-  { label: '↕️ Tilt Halus', value: 'gentle_tilt', prompt: 'slow smooth vertical tilt over the existing scene, subtle steady motion, keep the architecture, framing and lighting exactly as shown, natural parallax, no new elements' },
-  { label: '🤏 Slow Zoom-in', value: 'slow_zoom', prompt: 'very slow cinematic zoom-in on the existing scene, minimal steady motion, preserve every detail, geometry and lighting of the reference image, no distortion, no new objects' },
-  { label: '🚁 Pull-back Ringan', value: 'drone_pullback', prompt: 'slow gentle pull-back, camera eases steadily backward while keeping the existing scene consistent, smooth stable motion, natural parallax, do not invent areas outside the original framing, no new elements' },
-  { label: '🔄 Orbit Ringan', value: 'aerial_orbit', prompt: 'slow subtle orbital drift around the existing subject, small stable arc, keep the scene, architecture and lighting consistent with the reference image, minimal reveal, no new elements' },
-];
-
-const RASIO_OPTIONS = [
-  { label: '16:9 — Landscape (YouTube/properti)', value: '1280x720', w: 1280, h: 720 },
-  { label: '9:16 — Portrait (TikTok/Reels)', value: '720x1280', w: 720, h: 1280 },
-  { label: '1:1 — Square (Instagram feed)', value: '960x960', w: 960, h: 960 },
-] as const;
-type RasioValue = typeof RASIO_OPTIONS[number]['value'];
-
-interface VOScene {
-  foto_id: number | null;
-  foto_url: string | null;
-  gaya_kamera: string;
-  prompt_en: string;
-}
-
-interface VideoResult {
-  scene_index: number;
-  request_id: string | null;
-  status: 'idle' | 'pending' | 'processing' | 'succeed' | 'failed';
-  video_url: string | null;
-  blob: Blob | null;
-}
-
-interface VideoVOTabProps {
-  propertyId: number;
-  propertyTitle: string;
-  jenisProperti: string;
-  lokasi: string;
-  photos: PropertyImage[];
-}
-
-function VideoVOTab({ propertyId, propertyTitle, jenisProperti, lokasi, photos }: VideoVOTabProps) {
-  const [voScenes, setVoScenes] = useState<VOScene[]>([
-    { foto_id: null, foto_url: null, gaya_kamera: '', prompt_en: '' },
-  ]);
-  const [naskah, setNaskah] = useState('');
-  const [isGeneratingNaskah, setIsGeneratingNaskah] = useState(false);
-  const [videoResults, setVideoResults] = useState<VideoResult[]>([]);
-  const [isGeneratingVideos, setIsGeneratingVideos] = useState(false);
-  const [voiceoverUrl, setVoiceoverUrl] = useState<string | null>(null);
-  const [voiceoverBlob, setVoiceoverBlob] = useState<Blob | null>(null);
-  const [isGeneratingVO, setIsGeneratingVO] = useState(false);
-  const [isMerging, setIsMerging] = useState(false);
-  const [mergeProgress, setMergeProgress] = useState('');
-  const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
-  const [genError, setGenError] = useState('');
-  const [rasio, setRasio] = useState<RasioValue>('1280x720');
-  // Polling status video (sampai 120s per scene) tidak punya guard sama sekali
-  // sebelumnya — dulu terus jalan di background walau user pindah tab/step
-  // (audit 2026-07-28). Dicek di setiap iterasi loop di bawah.
-  const cancelledRef = useRef(false);
-  useEffect(() => () => { cancelledRef.current = true; }, []);
-
-  const wordCount = naskah.trim() ? naskah.trim().split(/\s+/).length : 0;
-  const targetWords = Math.floor(voScenes.length * 8 * 1.9);
-  const wordPct = targetWords > 0 ? ((wordCount - targetWords) / targetWords) * 100 : 0;
-
-  const addScene = () => {
-    if (voScenes.length >= 6) return;
-    setVoScenes(prev => [...prev, { foto_id: null, foto_url: null, gaya_kamera: '', prompt_en: '' }]);
-  };
-  const removeScene = (idx: number) => {
-    if (voScenes.length <= 1) return;
-    setVoScenes(prev => prev.filter((_, i) => i !== idx));
-  };
-  const updateScene = (idx: number, patch: Partial<VOScene>) =>
-    setVoScenes(prev => prev.map((s, i) => i === idx ? { ...s, ...patch } : s));
-
-  const handleGenerateNaskah = async () => {
-    setIsGeneratingNaskah(true);
-    try {
-      const res = await fetch('/api/admin/viralframe/generate-naskah', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ property_title: propertyTitle, jenis_properti: jenisProperti, lokasi, jumlah_scene: voScenes.length, durasi_per_scene: 8 }),
-      });
-      // CATATAN: generate-naskah.js memakai Response.json() polos, BUKAN jsonOk(),
-      // jadi TIDAK ada amplop {success,data}. Satu-satunya endpoint admin yang
-      // menyimpang dari konvensi response.js — jangan pasang bacaJson di sini.
-      const json = await res.json() as { naskah?: string; error?: string };
-      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-      setNaskah(json.naskah ?? '');
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Gagal generate naskah');
-    } finally {
-      setIsGeneratingNaskah(false);
-    }
-  };
-
-  const photoToBase64WithRatio = async (foto_url: string, targetRatio: RasioValue): Promise<string> => {
-    const opt = RASIO_OPTIONS.find(r => r.value === targetRatio)!;
-    const src = mediaSrc(foto_url);
-    if (!src) throw new Error('URL foto tidak valid');
-    const res = await fetch(src, { credentials: 'include' });
-    if (!res.ok) throw new Error(`Gagal fetch foto (HTTP ${res.status})`);
-    const blob = await res.blob();
-    return new Promise((resolve, reject) => {
-      const img = new window.Image();
-      const objectUrl = URL.createObjectURL(blob);
-      img.onload = () => {
-        URL.revokeObjectURL(objectUrl);
-        // Center crop ke target ratio
-        const targetAspect = opt.w / opt.h;
-        const srcAspect = img.naturalWidth / img.naturalHeight;
-        let sx = 0, sy = 0, sw = img.naturalWidth, sh = img.naturalHeight;
-        if (srcAspect > targetAspect) {
-          // sumber lebih lebar — crop kiri kanan
-          sw = Math.round(img.naturalHeight * targetAspect);
-          sx = Math.round((img.naturalWidth - sw) / 2);
-        } else {
-          // sumber lebih tinggi — crop atas bawah
-          sh = Math.round(img.naturalWidth / targetAspect);
-          sy = Math.round((img.naturalHeight - sh) / 2);
-        }
-        // Gunakan dimensi penuh dari rasio option — tidak ada MAX limit
-        // karena SiliconFlow dipanggil langsung dari browser (tidak lewat Worker)
-        // number eksplisit: opt.w/opt.h bertipe literal union (1280|960|720),
-        // sedangkan keduanya diskalakan ulang beberapa baris di bawah.
-        let cw: number = opt.w;
-        let ch: number = opt.h;
-        // Jika source crop area lebih kecil dari target, scale down proportionally
-        if (sw < cw || sh < ch) {
-          const scale = Math.min(sw / cw, sh / ch);
-          // cw/ch berasal dari literal union (1280|960|720); setelah diskalakan
-          // nilainya jadi sembarang, jadi lebarkan tipenya ke number.
-          cw = Math.round(cw * scale);
-          ch = Math.round(ch * scale);
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = cw; canvas.height = ch;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) { reject(new Error('Canvas tidak tersedia')); return; }
-        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
-        const base64 = canvas.toDataURL('image/jpeg', 0.80); // return FULL data URL dengan prefix
-        console.log(`[VideoVO] rasio=${targetRatio} canvas=${cw}x${ch} filesize=~${Math.round(base64.length * 0.75 / 1024)}KB`);
-        resolve(base64);
-      };
-      img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Gagal load foto')); };
-      img.src = objectUrl;
-    });
-  };
-
-  const handleGenerateVideos = async () => {
-    setIsGeneratingVideos(true);
-    setGenError('');
-    setVideoResults(voScenes.map((_, i) => ({ scene_index: i, request_id: null, status: 'idle', video_url: null, blob: null })));
-    try {
-      for (let i = 0; i < voScenes.length; i++) {
-        if (cancelledRef.current) break;
-        const scene = voScenes[i];
-        if (!scene.foto_url || !scene.gaya_kamera) continue;
-        const image_base64 = await photoToBase64WithRatio(scene.foto_url, rasio);
-        // Submit via proxy Worker — API key SiliconFlow tidak pernah keluar ke browser.
-        const sfSubmitRes = await fetch('/api/admin/viralframe/submit-video', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            image_base64,
-            prompt: scene.prompt_en,
-            model: 'Wan-AI/Wan2.2-I2V-A14B',
-            image_size: rasio,
-            scene_index: i,
-          }),
-        });
-        if (!sfSubmitRes.ok) {
-          const errText = await sfSubmitRes.text();
-          throw new Error(`Scene ${i + 1}: submit gagal HTTP ${sfSubmitRes.status} — ${errText.slice(0, 200)}`);
-        }
-        // SiliconFlow API eksternal — bentuk responsnya milik mereka, bukan amplop kita.
-        const sfJson = await sfSubmitRes.json() as Record<string, any>;
-        const request_id = sfJson.request_id ?? sfJson.requestId ?? null;
-        if (!request_id) {
-          throw new Error(`Scene ${i + 1}: server tidak return request_id: ${JSON.stringify(sfJson).slice(0, 200)}`);
-        }
-        setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, request_id, status: 'pending' } : r));
-        // Poll until done (max 40 × 3s = 120s). statusRes.ok/videoRes.ok TIDAK
-        // pernah dicek sebelumnya (audit 2026-07-28) — 502/504 dari Worker bikin
-        // .json() melempar SyntaxError mentah yang membunuh SELURUH batch (scene
-        // lain yang belum diproses ikut gagal), atau halaman error tersimpan
-        // sebagai "video" yang diupload ke library. Sekarang: gagal transient di
-        // satu scene tidak menghentikan scene lain — loop lanjut ke scene berikutnya.
-        let done = false;
-        for (let p = 0; p < 40 && !done; p++) {
-          if (cancelledRef.current) { done = true; break; }
-          await new Promise(r => setTimeout(r, 3000));
-          const statusRes = await fetch(`/api/admin/viralframe/video-status/${request_id}`, { credentials: 'include' });
-          if (!statusRes.ok) continue; // transient — coba lagi di iterasi berikutnya
-          // Sama seperti submit: proxy status meneruskan bentuk SiliconFlow apa adanya.
-          const statusJson = await statusRes.json() as Record<string, any>;
-          const status: VideoResult['status'] = statusJson.status ?? 'pending';
-          setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, status, video_url: statusJson.video_url ?? null } : r));
-          if (status === 'succeed' && statusJson.video_url) {
-            const videoRes = await fetch(statusJson.video_url);
-            if (!videoRes.ok) {
-              done = true;
-              setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, status: 'failed' } : r));
-              setGenError(prev => `${prev ? prev + ' | ' : ''}Scene ${i + 1}: gagal mengambil file video hasil (HTTP ${videoRes.status}).`);
-              break;
-            }
-            const videoBlob = await videoRes.blob();
-            setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, blob: videoBlob } : r));
-            done = true;
-            // Tahap 3: simpan ke Content Library (R2 + D1) — best-effort, tak blokir UI
-            try {
-              const qs = new URLSearchParams({ property_id: String(propertyId), label: `Scene ${i + 1}`, gaya: scene.gaya_kamera ?? '', rasio: String(rasio) });
-              fetch(`/api/admin/viralframe/videos?${qs.toString()}`, {
-                method: 'POST', credentials: 'include', headers: { 'Content-Type': 'video/mp4' }, body: videoBlob,
-              }).catch(() => {});
-            } catch { /* noop */ }
-          } else if (status === 'failed') {
-            done = true;
-            setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, status: 'failed' } : r));
-            setGenError(prev => `${prev ? prev + ' | ' : ''}Scene ${i + 1}: SiliconFlow gagal — ${JSON.stringify(statusJson._raw ?? statusJson.reason ?? 'no detail').slice(0, 200)}`);
-          }
-        }
-        if (!done) setVideoResults(prev => prev.map((r, ri) => ri === i ? { ...r, status: 'failed' } : r));
-      }
-    } catch (err: unknown) {
-      setGenError(prev => `${prev ? prev + ' | ' : ''}${err instanceof Error ? err.message : 'Gagal generate video'}`);
-    } finally {
-      setIsGeneratingVideos(false);
-    }
-  };
-
-  const handleGenerateVO = async () => {
-    if (!naskah.trim() || isGeneratingVO) return;
-    setIsGeneratingVO(true);
-    try {
-      const res = await fetch('/api/admin/viralframe/generate-voiceover', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ naskah: naskah.trim(), voice: 'alloy' }),
-      });
-      if (!res.ok) {
-        const err = await bacaJson(res);
-        throw new Error(err.error ?? 'Gagal generate voiceover');
-      }
-      const blob = new Blob([await res.arrayBuffer()], { type: res.headers.get('Content-Type') || 'audio/mpeg' });
-      setVoiceoverBlob(blob);
-      // Revoke URL lama sebelum ganti — dulu tidak pernah di-revoke sama sekali
-      // (audit 2026-07-28), regenerate VO berkali-kali membocorkan 1 blob URL
-      // per percobaan sepanjang sesi tab terbuka.
-      setVoiceoverUrl(prev => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(blob); });
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Gagal generate voiceover');
-    } finally {
-      setIsGeneratingVO(false);
-    }
-  };
-
-  const handleMerge = async () => {
-    if (!voiceoverBlob || isMerging) return;
-    setIsMerging(true);
-    setMergeProgress('Loading FFmpeg…');
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { FFmpeg } = await import('@ffmpeg/ffmpeg') as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { fetchFile } = await import('@ffmpeg/util') as any;
-      const ffmpeg = new FFmpeg();
-      ffmpeg.on('log', ({ message }: { message: string }) => setMergeProgress(message));
-      await ffmpeg.load();
-      for (let i = 0; i < videoResults.length; i++) {
-        const r = videoResults[i];
-        if (!r.blob) throw new Error(`Scene ${i + 1} belum selesai`);
-        await ffmpeg.writeFile(`scene${i}.mp4`, await fetchFile(r.blob));
-      }
-      await ffmpeg.writeFile('voiceover.mp3', await fetchFile(voiceoverBlob));
-      const concatContent = videoResults.map((_, i) => `file 'scene${i}.mp4'`).join('\n');
-      await ffmpeg.writeFile('concat.txt', concatContent);
-      await ffmpeg.exec(['-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-c', 'copy', 'combined.mp4']);
-      await ffmpeg.exec(['-i', 'combined.mp4', '-i', 'voiceover.mp3', '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-shortest', 'final.mp4']);
-      const data = await ffmpeg.readFile('final.mp4');
-      // Revoke URL lama sebelum ganti — sama seperti voiceoverUrl di atas.
-      setFinalVideoUrl(prev => {
-        if (prev) URL.revokeObjectURL(prev);
-        return URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
-      });
-      setMergeProgress('✅ Selesai!');
-    } catch (err: unknown) {
-      setMergeProgress(`Error: ${err instanceof Error ? err.message : 'Gagal merge'}`);
-    } finally {
-      setIsMerging(false);
-    }
-  };
-
-  const canGenerateVideos = voScenes.every(s => s.foto_id !== null && s.gaya_kamera !== '');
-  const allVideosReady = videoResults.length === voScenes.length && videoResults.length > 0 && videoResults.every(r => r.blob !== null);
-
-  // R4: cegah tutup/refresh tab saat proses berjalan (video/merge/VO) — hindari kehilangan kerja.
-  const voBusy = isGeneratingVideos || isMerging || isGeneratingVO;
-  useEffect(() => {
-    if (!voBusy) return;
-    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
-    window.addEventListener('beforeunload', h);
-    return () => window.removeEventListener('beforeunload', h);
-  }, [voBusy]);
-
-  return (
-    <div className="space-y-6 pt-2">
-      {/* SECTION 1 — SCENE BUILDER */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-3 flex-wrap">
-          <h3 className="font-semibold text-[#0F172A] text-sm">Susun Scene Video</h3>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-[#EFF6FF] text-[#1565C0] font-medium">
-            {voScenes.length} scene × 8 dtk = {voScenes.length * 8} dtk
-          </span>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-medium">
-            Target naskah: ~{targetWords} kata
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-medium text-[#64748B]">Rasio Video:</label>
-          <select
-            value={rasio}
-            onChange={e => setRasio(e.target.value as RasioValue)}
-            className={`${selectCls} w-auto`}
-          >
-            {RASIO_OPTIONS.map(r => (
-              <option key={r.value} value={r.value}>{r.label}</option>
-            ))}
-          </select>
-        </div>
-
-        {voScenes.map((scene, i) => {
-          const selectedPhoto = photos.find(p => p.id === scene.foto_id);
-          return (
-            <div key={i} className="border border-gray-100 rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-sm text-[#0F172A]">Scene {i + 1}</span>
-                {voScenes.length > 1 && (
-                  <button type="button" onClick={() => removeScene(i)} className="text-[#94A3B8] hover:text-red-500 transition-colors p-1">
-                    <X size={15} />
-                  </button>
-                )}
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="flex items-center gap-2">
-                  {selectedPhoto && (
-                    <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200">
-                      <img src={thumbSrc(selectedPhoto.url_webp, 480)} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
-                    </div>
-                  )}
-                  <div className="flex-1">
-                    <label className="block text-xs font-medium text-[#64748B] mb-1">Foto</label>
-                    <select
-                      value={scene.foto_id ?? ''}
-                      onChange={e => {
-                        const pid = Number(e.target.value) || null;
-                        const photo = photos.find(p => p.id === pid);
-                        updateScene(i, { foto_id: pid, foto_url: photo?.url_webp ?? null });
-                      }}
-                      className={selectCls}
-                    >
-                      <option value="">— Pilih foto —</option>
-                      {photos.map(p => (
-                        <option key={p.id} value={p.id}>Foto #{p.urutan}{p.is_cover ? ' (Cover)' : ''}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#64748B] mb-1">Gaya Kamera</label>
-                  <select
-                    value={scene.gaya_kamera}
-                    onChange={e => {
-                      const gk = GAYA_KAMERA.find(g => g.value === e.target.value);
-                      updateScene(i, { gaya_kamera: e.target.value, prompt_en: gk?.prompt ?? '' });
-                    }}
-                    className={selectCls}
-                  >
-                    <option value="">— Pilih gaya kamera —</option>
-                    {GAYA_KAMERA.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
-                  </select>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-
-        <button type="button" onClick={addScene} disabled={voScenes.length >= 6}
-          className="w-full py-2 rounded-xl text-sm font-medium text-[#1565C0] border border-dashed border-[#1565C0]/40 hover:bg-[#F0F7FF] disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-          + Tambah Scene{voScenes.length >= 6 ? ' (max 6)' : ''}
-        </button>
-      </div>
-
-      {/* SECTION 2 — NASKAH VOICEOVER */}
-      <div className="space-y-3 pt-4 border-t border-gray-100">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <h3 className="font-semibold text-[#0F172A] text-sm">Naskah Voiceover</h3>
-          <button type="button" onClick={handleGenerateNaskah} disabled={isGeneratingNaskah}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
-            style={{ background: 'linear-gradient(135deg, #7C3AED 0%, #4F46E5 100%)' }}>
-            {isGeneratingNaskah
-              ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Generating...</>
-              : <><Sparkles size={13} /> ✨ Generate Naskah (DeepSeek)</>}
-          </button>
-        </div>
-        <textarea value={naskah} onChange={e => setNaskah(e.target.value)} rows={6}
-          placeholder="Tulis atau generate naskah voiceover di sini…"
-          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] resize-y transition-colors" />
-        <div className="flex items-center gap-2 text-xs">
-          <span className={`font-medium ${wordCount === 0 ? 'text-[#94A3B8]' : Math.abs(wordPct) <= 10 ? 'text-emerald-600' : 'text-amber-600'}`}>
-            {wordCount} kata
-          </span>
-          <span className="text-[#94A3B8]">/ target ~{targetWords} kata</span>
-          {wordCount > 0 && (Math.abs(wordPct) <= 10
-            ? <span className="text-emerald-600">✅ Pas</span>
-            : wordCount < targetWords
-              ? <span className="text-amber-600">⚠️ Kurang {Math.round(Math.abs(wordPct))}%</span>
-              : <span className="text-amber-600">⚠️ Kelebihan {Math.round(wordPct)}%</span>)}
-        </div>
-      </div>
-
-      {/* SECTION 3 — GENERATE & OUTPUT */}
-      <div className="space-y-5 pt-4 border-t border-gray-100">
-
-        {/* 3A — Generate Video */}
-        <div className="space-y-3">
-          <h3 className="font-semibold text-[#0F172A] text-sm">Generate Video per Scene</h3>
-          {!canGenerateVideos && (
-            <p className="text-xs text-amber-600">⚠️ Lengkapi foto dan gaya kamera untuk semua scene.</p>
-          )}
-          <button type="button" onClick={handleGenerateVideos} disabled={!canGenerateVideos || isGeneratingVideos}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
-            style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
-            {isGeneratingVideos
-              ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Generating...</>
-              : '🎬 Generate Semua Video (SiliconFlow)'}
-          </button>
-          {videoResults.length > 0 && (
-            <div className="space-y-1.5 text-sm">
-              {videoResults.map((r, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="text-[#64748B] w-16 flex-shrink-0">Scene {i + 1}</span>
-                  <span className={r.status === 'succeed' ? 'text-emerald-600' : r.status === 'failed' ? 'text-red-600' : r.status === 'idle' ? 'text-[#94A3B8]' : 'text-amber-600'}>
-                    {r.status === 'succeed' ? '✅ Selesai' : r.status === 'failed' ? '❌ Gagal' : r.status === 'idle' ? '⬜ Menunggu' : r.status === 'pending' ? '⏳ Dalam antrian…' : '⚙️ Processing…'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-          {genError && <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl p-3">{genError}</div>}
-        </div>
-
-        {/* 3B — Generate Voiceover */}
-        <div className="space-y-3 pt-3 border-t border-gray-100">
-          <h3 className="font-semibold text-[#0F172A] text-sm">Generate Voiceover</h3>
-          <button type="button" onClick={handleGenerateVO} disabled={!naskah.trim() || isGeneratingVO}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
-            style={{ background: 'linear-gradient(135deg, #059669 0%, #10B981 100%)' }}>
-            {isGeneratingVO
-              ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Generating...</>
-              : '🎙️ Generate Voiceover (Pollinations)'}
-          </button>
-          {voiceoverUrl && <audio controls src={voiceoverUrl} className="w-full mt-1" />}
-        </div>
-
-        {/* 3C — Merge & Download */}
-        <div className="space-y-3 pt-3 border-t border-gray-100">
-          <h3 className="font-semibold text-[#0F172A] text-sm">Gabungkan &amp; Download</h3>
-          <button type="button" onClick={handleMerge} disabled={!allVideosReady || !voiceoverBlob || isMerging}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
-            style={{ background: 'linear-gradient(135deg, #DC2626 0%, #F97316 100%)' }}>
-            {isMerging
-              ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Merging...</>
-              : '🔀 Gabungkan & Download Final.mp4'}
-          </button>
-          {mergeProgress && (
-            <p className="text-xs font-mono text-[#64748B] bg-gray-50 rounded-lg px-3 py-2 break-all">{mergeProgress}</p>
-          )}
-          {finalVideoUrl && (
-            <div className="space-y-2">
-              <video controls src={finalVideoUrl} className="w-full rounded-xl border border-gray-100" />
-              <a href={finalVideoUrl} download="final.mp4"
-                className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-semibold text-white hover:opacity-90 transition-opacity"
-                style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
-                <Download size={15} /> Download final.mp4
-              </a>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
@@ -2824,16 +2317,16 @@ const YouTubeLongViewMemo = memo(YouTubeLongView);
 
 // #2: versi memo dari tab berat — hanya re-render bila prop berubah (prop-nya
 // distabilkan via useMemo/useCallback di parent), bukan tiap parent re-render.
-const VideoVOTabMemo = memo(VideoVOTab);
 const AIGenerateTabMemo = memo(AIGenerateTab);
 
 export default function AdminViralFrameWorkspacePage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const isVideoVOMode = searchParams.get('mode') === 'video-vo';
-  const isAIGenerateMode = searchParams.get('mode') === 'ai-generate';
-  const isYoutubeLongMode = searchParams.get('mode') === 'youtube-long';
+  // Mode (AI Generate / Manual / YouTube Long) dulu dipilih via modal + query
+  // ?mode= SEBELUM wizard dimulai. Sekarang jadi Step 3 di dalam wizard sendiri
+  // (lihat render step===3 di bawah) — state lokal, bukan lagi dari URL.
+  const [mode, setMode] = useState<'ai-generate' | 'manual' | 'youtube-long' | null>(null);
+  const isAIGenerateMode = mode === 'ai-generate';
 
   const [prop, setProp] = useState<PropertyDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2841,6 +2334,24 @@ export default function AdminViralFrameWorkspacePage() {
   const [step, setStep] = useState(1);
   const [showErrors, setShowErrors] = useState(false);
   const [activePhotoScene, setActivePhotoScene] = useState(1);
+
+  // YouTube Long mengganti SELURUH wizard (bukan cuma pre-select tab Step 5) —
+  // baru aktif setelah user melewati Step 3 (Mode), bukan begitu mode dipilih,
+  // supaya kartu pilihan mode itu sendiri masih sempat ter-render.
+  const isYoutubeLongMode = mode === 'youtube-long' && step > 3;
+
+  // Step 0 — Label Foto: gerbang sebelum wizard 1-4. selectedForVideo = pool foto
+  // yang dicentang "jadi bahan" — Step 1 (Pilih Foto per Scene) hanya menampilkan
+  // foto dari pool ini, bukan seluruh galeri properti.
+  const [labelFotoDone, setLabelFotoDone] = useState(false);
+  const [selectedForVideo, setSelectedForVideo] = useState<Set<number>>(new Set());
+  const toggleSelectedForVideo = (photoId: number) => {
+    setSelectedForVideo(prev => {
+      const next = new Set(prev);
+      if (next.has(photoId)) next.delete(photoId); else next.add(photoId);
+      return next;
+    });
+  };
 
   const [s1, setS1] = useState<Step1State>({
     sceneCount: 4,
@@ -3030,7 +2541,7 @@ export default function AdminViralFrameWorkspacePage() {
   const savedPromptRef = useRef<string>('');
 
   // Step 4 — Tab Paste & Validate (Fase V4b)
-  const [step4Tab, setStep4Tab] = useState<'prompt' | 'validate' | 'video_vo' | 'ai_generate' | 'library' | 'upload'>('prompt');
+  const [step4Tab, setStep4Tab] = useState<'prompt' | 'validate' | 'ai_generate' | 'library' | 'upload'>('prompt');
   const [pasteRaw, setPasteRaw] = useState('');
   const [valResult, setValResult] = useState<ValidateResult | null>(null);
   const [validData, setValidData] = useState<ParsedJSON | null>(null);
@@ -3057,16 +2568,8 @@ export default function AdminViralFrameWorkspacePage() {
     return () => { cancel = true; };
   }, [id]);
 
-  // Pilihan dari list page (?mode=video-vo) — tetap mulai dari Step 1, tapi
-  // begitu user sampai di Step 4 secara natural, tab Video VO sudah aktif duluan.
-  useEffect(() => {
-    if (isVideoVOMode) {
-      setStep4Tab('video_vo');
-    }
-  }, [isVideoVOMode]);
-
-  // Pilihan dari list page (?mode=ai-generate) — tetap mulai dari Step 1, tapi
-  // begitu user sampai di Step 4 secara natural, tab AI Generate sudah aktif duluan.
+  // Mode dipilih di Step 3 (bukan lagi dari URL) — begitu user sampai di Step 5
+  // (Generate) secara natural, tab yang sesuai mode sudah aktif duluan.
   useEffect(() => {
     if (isAIGenerateMode) {
       setStep4Tab('ai_generate');
@@ -3171,6 +2674,31 @@ export default function AdminViralFrameWorkspacePage() {
   // Arketipe hybrid (allowMultiShotPerScene): default scene terakhir (CTA) DIKECUALIKAN
   // dari cutaway — jadi talking-head/selfie murni sebagai penutup. User bisa override
   // per scene lewat toggle "Per-Scene: Cutaway B-Roll" di bawah picker arketipe.
+  // "Preset Selanjutnya" — rotasi archetype berdasarkan riwayat generate PROPERTI INI
+  // (history sudah difilter per property_id, lihat loadHistory di atas). Prioritas:
+  // 1) archetype yang belum pernah dipakai sama sekali, 2) kalau semua 9 sudah pernah,
+  // pilih yang PALING LAMA tidak dipakai (round robin) — supaya generate ulang untuk
+  // properti yang sama tidak terasa monoton/generik di feed sosmed.
+  const pilihPresetSelanjutnya = () => {
+    const lastSeenIdx = new Map<string, number>();
+    history.forEach((h, idx) => {
+      if (!h.params_json) return;
+      try {
+        const p = JSON.parse(h.params_json);
+        if (p?.archetype && !lastSeenIdx.has(p.archetype)) lastSeenIdx.set(p.archetype, idx);
+      } catch { /* riwayat lama/rusak — lewati */ }
+    });
+    const belumPernah = ARCHETYPES.find(a => !lastSeenIdx.has(a.id));
+    if (belumPernah) { applyArchetype(belumPernah.id); return; }
+    let paling = ARCHETYPES[0];
+    let palingIdx = -1;
+    for (const a of ARCHETYPES) {
+      const idx = lastSeenIdx.get(a.id) ?? Infinity;
+      if (idx > palingIdx) { palingIdx = idx; paling = a; }
+    }
+    applyArchetype(paling.id);
+  };
+
   const applyArchetype = (id: string) => {
     const arc = findArchetype(id);
     if (!arc) { setS1(prev => ({ ...prev, archetype: ARCHETYPE_CUSTOM_ID, cutawayExcluded: [] })); return; }
@@ -3234,7 +2762,7 @@ export default function AdminViralFrameWorkspacePage() {
   };
 
   // ─── Validasi ───────────────────────────────────────────────────────────
-  // Urutan wizard: 1 Foto per Scene → 2 Karakter → 3 Parameter Video → 4 Generate.
+  // Urutan wizard: 1 Foto per Scene → 2 Karakter → 3 Pilih Mode → 4 Parameter Video → 5 Generate.
   const fotoErrors = useMemo(() => {
     const e: string[] = [];
     if (s1.sceneCount < 2 || s1.sceneCount > 12) e.push('Jumlah scene harus 2–12.');
@@ -3252,6 +2780,12 @@ export default function AdminViralFrameWorkspacePage() {
     }
     return e;
   }, [s3]);
+
+  const modeErrors = useMemo(() => {
+    const e: string[] = [];
+    if (mode == null) e.push('Pilih mode generate terlebih dahulu (AI Generate, Manual, atau YouTube Long).');
+    return e;
+  }, [mode]);
 
   const paramErrors = useMemo(() => {
     const e: string[] = [];
@@ -3271,21 +2805,21 @@ export default function AdminViralFrameWorkspacePage() {
     return e;
   }, [s1]);
 
-  const errorsFor = (st: number) => (st === 1 ? fotoErrors : st === 2 ? karakterErrors : st === 3 ? paramErrors : []);
+  const errorsFor = (st: number) => (st === 1 ? fotoErrors : st === 2 ? karakterErrors : st === 3 ? modeErrors : st === 4 ? paramErrors : []);
 
   const goNext = () => {
     const errs = errorsFor(step);
     if (errs.length > 0) { setShowErrors(true); return; }
     setShowErrors(false);
-    setStep(s => Math.min(4, s + 1));
+    setStep(s => Math.min(5, s + 1));
   };
   const goBack = () => { setShowErrors(false); setStep(s => Math.max(1, s - 1)); };
 
-  // ─── Step 4: compile Master Prompt ──
-  // #1: hanya kompilasi saat benar-benar berada di Step 4, dan pakai input yang
-  // di-debounce 300ms — supaya mengetik/memilih di Step 1-3 tidak memicu build
-  // string besar tiap ketukan (penyebab utama lag).
-  const onStep4 = step === 4;
+  // ─── Step 5: compile Master Prompt ──
+  // #1: hanya kompilasi saat benar-benar berada di Step 5 (Generate), dan pakai
+  // input yang di-debounce 300ms — supaya mengetik/memilih di Step 1-4 tidak
+  // memicu build string besar tiap ketukan (penyebab utama lag).
+  const onStep4 = step === 5;
   const compileSrc = useMemo(() => ({ s1, scenes, s3 }), [s1, scenes, s3]);
   const debouncedSrc = useDebouncedValue(compileSrc, 300);
   const masterPrompt = useMemo(
@@ -3314,7 +2848,7 @@ export default function AdminViralFrameWorkspacePage() {
 
   // Simpan riwayat otomatis saat Step 4 tampil; record baru bila prompt berubah.
   useEffect(() => {
-    if (step !== 4 || !prop || !masterPrompt) return;
+    if (step !== 5 || !prop || !masterPrompt) return;
     if (savedPromptRef.current === masterPrompt) return;
     savedPromptRef.current = masterPrompt;
     setGenerationId(null);
@@ -3339,6 +2873,54 @@ export default function AdminViralFrameWorkspacePage() {
     // s1/scenes/s3 sengaja tidak di deps — perubahannya tercermin via masterPrompt
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, masterPrompt, prop]);
+
+  // Copy Prompt Natural — renderer KEDUA dari data yang sama persis dengan masterPrompt
+  // (Part/Scene/Karakter/Parameter), berupa paragraf naratif untuk paste manual ke
+  // tool percakapan (Google Flow/Veo) — pelengkap "Copy JSON" (masterPrompt di atas).
+  const naturalPrompt = useMemo(
+    () => (prop && onStep4 ? compileNaturalPrompt(prop, debouncedSrc.s1, debouncedSrc.scenes, debouncedSrc.s3) : ''),
+    [prop, onStep4, debouncedSrc],
+  );
+  const [copiedNatural, setCopiedNatural] = useState(false);
+  const handleCopyNatural = async () => {
+    try {
+      await navigator.clipboard.writeText(naturalPrompt);
+      setCopiedNatural(true);
+      setTimeout(() => setCopiedNatural(false), 2000);
+    } catch { /* clipboard tidak tersedia */ }
+  };
+
+  // Thumbnail composite (Cloudinary fetch delivery) — bukan AI image-gen, lihat
+  // functions/api/admin/viralframe/thumbnail.js untuk alasannya.
+  interface ThumbData { thumbnail_url: string; harga_turun: boolean; harga_text: string; spec_text: string; has_character: boolean }
+  const [thumbData, setThumbData] = useState<ThumbData | null>(null);
+  const [thumbLoading, setThumbLoading] = useState(false);
+  const [thumbError, setThumbError] = useState('');
+  const [copiedThumb, setCopiedThumb] = useState(false);
+  const loadThumbnail = async () => {
+    if (!prop) return;
+    setThumbLoading(true); setThumbError(''); setThumbData(null);
+    try {
+      const qs = new URLSearchParams({ property_id: String(prop.id) });
+      if (s3.useCharacter && s3.characterId != null) qs.set('character_id', String(s3.characterId));
+      const res = await fetch(`/api/admin/viralframe/thumbnail?${qs.toString()}`, { credentials: 'include' });
+      const json = await bacaJson(res);
+      if (!json.success) throw new Error(json.error ?? 'Gagal membangun thumbnail');
+      setThumbData(json.data);
+    } catch (err) {
+      setThumbError(err instanceof Error ? err.message : 'Gagal membangun thumbnail');
+    } finally {
+      setThumbLoading(false);
+    }
+  };
+  const handleCopyThumbUrl = async () => {
+    if (!thumbData) return;
+    try {
+      await navigator.clipboard.writeText(thumbData.thumbnail_url);
+      setCopiedThumb(true);
+      setTimeout(() => setCopiedThumb(false), 2000);
+    } catch { /* clipboard tidak tersedia */ }
+  };
 
   const handleCopy = async () => {
     try {
@@ -3378,8 +2960,8 @@ export default function AdminViralFrameWorkspacePage() {
 
   // Reset hasil validasi bila PARAMETER (s1/scenes/s3) benar-benar berubah agar
   // tidak stale — sengaja pakai `debouncedSrc`, BUKAN `masterPrompt`. `masterPrompt`
-  // sengaja di-set '' setiap kali step !== 4 (optimasi performa, lihat komentar di
-  // deklarasinya), jadi dulu dependency ini membuat navigasi Step 4→3→4 TANPA
+  // sengaja di-set '' setiap kali step !== 5 (optimasi performa, lihat komentar di
+  // deklarasinya), jadi dulu dependency ini membuat navigasi Step 5→4→5 TANPA
   // edit apa pun ikut menghapus JSON yang sudah dipaste+divalidasi + scene cards
   // (audit 2026-07-28). `debouncedSrc` hanya berubah referensi kalau s1/scenes/s3
   // benar-benar berubah, tidak terpengaruh navigasi step.
@@ -3583,7 +3165,7 @@ export default function AdminViralFrameWorkspacePage() {
                           className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF]">Muat konfigurasi</button>
                       )}
                       {hasResult && (
-                        <button onClick={() => { try { setValidData(JSON.parse(h.result_json!)); setStep(4); setStep4Tab('validate'); setShowHistory(false); } catch { /* ignore */ } }}
+                        <button onClick={() => { try { setValidData(JSON.parse(h.result_json!)); setStep(5); setStep4Tab('validate'); setShowHistory(false); } catch { /* ignore */ } }}
                           className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-emerald-700 border border-emerald-200 hover:bg-emerald-50">Lihat hasil</button>
                       )}
                       <button onClick={() => deleteHistoryItem(h.id)} disabled={deletingHistoryId === h.id}
@@ -3600,13 +3182,29 @@ export default function AdminViralFrameWorkspacePage() {
         </div>
       )}
 
+      {/* Step 0 — Label Foto: gerbang sebelum wizard 1-4 */}
+      {!labelFotoDone && prop && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <LabelFotoStep
+            images={prop.images}
+            kodeListing={prop.kode_listing}
+            onSaveLabel={savePhotoLabel}
+            selectedIds={selectedForVideo}
+            onToggleSelected={toggleSelectedForVideo}
+            onContinue={() => setLabelFotoDone(true)}
+          />
+        </div>
+      )}
+
       {/* Step indicator */}
+      {labelFotoDone && (
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
         <StepIndicator current={step} />
       </div>
+      )}
 
       {/* Daftar error */}
-      {showErrors && activeErrors.length > 0 && (
+      {labelFotoDone && showErrors && activeErrors.length > 0 && (
         <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
           <div className="flex items-center gap-2 text-red-700 font-semibold text-sm mb-1.5">
             <AlertCircle size={15} /> Lengkapi dulu:
@@ -3618,10 +3216,10 @@ export default function AdminViralFrameWorkspacePage() {
       )}
 
       {/* ─── STEP 3 — Parameter Video ─── */}
-      {step === 3 && (
+      {labelFotoDone && step === 4 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-5">
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <h2 className="font-display font-bold text-[#0F172A]">Step 3 — Parameter Video</h2>
+            <h2 className="font-display font-bold text-[#0F172A]">Step 4 — Parameter Video</h2>
             {/* R11: Preset tim */}
             <div className="flex items-center gap-2">
               {presets.length > 0 && (
@@ -3632,6 +3230,11 @@ export default function AdminViralFrameWorkspacePage() {
                 </select>
               )}
               <button onClick={savePreset} className="text-xs font-semibold text-[#1565C0] border border-[#1565C0]/30 rounded-lg px-2 py-1.5 hover:bg-[#F0F7FF]">💾 Simpan preset</button>
+              <button type="button" onClick={pilihPresetSelanjutnya}
+                title="Pilih archetype berbeda dari generate sebelumnya untuk properti ini — biar hasil videonya bervariasi, tidak dianggap spam."
+                className="text-xs font-semibold text-white rounded-lg px-2 py-1.5 hover:opacity-90" style={{ background: '#7C3AED' }}>
+                🔄 Preset Selanjutnya
+              </button>
             </div>
           </div>
 
@@ -3851,7 +3454,7 @@ export default function AdminViralFrameWorkspacePage() {
       {/* ─── STEP 1 — Pilih Foto per Scene ───
           Termasuk Jumlah Scene + Rancang Part + AI Rancang Storyboard (pindahan dari
           blok parameter): struktur scene dan pengisian fotonya dirancang di satu layar. */}
-      {step === 1 && (
+      {labelFotoDone && step === 1 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-5">
           <h2 className="font-display font-bold text-[#0F172A]">Step 1 — Pilih Foto per Scene</h2>
           <p className="text-sm text-[#64748B] -mt-3">
@@ -3955,9 +3558,9 @@ export default function AdminViralFrameWorkspacePage() {
 
                   {isOpen && (
                     <div className="p-4 space-y-3">
-                      {/* Grid foto */}
+                      {/* Grid foto — hanya foto yang dicentang "jadi bahan" di Step 0 (Label Foto) */}
                       <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                        {prop.images.map(im => {
+                        {prop.images.filter(im => selectedForVideo.has(im.id)).map(im => {
                           const selected = sc?.photoId === im.id;
                           const src = thumbSrc(im.url_webp, 160);
                           // Memilih foto ikut mengisi labelnya dari label_ruangan
@@ -4018,19 +3621,43 @@ export default function AdminViralFrameWorkspacePage() {
       )}
 
       {/* ─── STEP 2 — Pilih Karakter ─── */}
-      {step === 2 && <CharacterStep value={s3} onChange={update3} />}
+      {labelFotoDone && step === 2 && <CharacterStep value={s3} onChange={update3} />}
 
-      {/* ─── STEP 4 — Generate & Validate ─── */}
-      {step === 4 && (
+      {/* ─── STEP 3 — Pilih Mode ─── */}
+      {labelFotoDone && step === 3 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
-          <h2 className="font-display font-bold text-[#0F172A]">Step 4 — Generate Prompt &amp; Validasi</h2>
+          <h2 className="font-display font-bold text-[#0F172A]">Step 3 — Pilih Mode</h2>
+          <p className="text-sm text-[#64748B]">Pilih jalur generate yang mau dipakai untuk video ini.</p>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <button type="button" onClick={() => setMode('ai-generate')}
+              className={`text-left p-4 rounded-2xl border-2 transition-all ${mode === 'ai-generate' ? 'border-[#1565C0] bg-[#F0F7FF]' : 'border-gray-100 hover:border-gray-200'}`}>
+              <div className="text-sm font-bold text-[#0F172A] flex items-center gap-1.5">⚡ AI Generate <span className="text-[10px] font-semibold text-white bg-[#1565C0] rounded-full px-1.5 py-0.5">REKOMENDASI</span></div>
+              <p className="text-xs text-[#64748B] mt-1">AI menyusun prompt & narasi otomatis dari parameter yang kamu pilih.</p>
+            </button>
+            <button type="button" onClick={() => setMode('manual')}
+              className={`text-left p-4 rounded-2xl border-2 transition-all ${mode === 'manual' ? 'border-[#1565C0] bg-[#F0F7FF]' : 'border-gray-100 hover:border-gray-200'}`}>
+              <div className="text-sm font-bold text-[#0F172A]">Manual (4 Step)</div>
+              <p className="text-xs text-[#64748B] mt-1">Kamu susun & tulis sendiri Master Prompt-nya, AI hanya bantu compile.</p>
+            </button>
+            <button type="button" onClick={() => setMode('youtube-long')}
+              className={`text-left p-4 rounded-2xl border-2 transition-all ${mode === 'youtube-long' ? 'border-red-500 bg-red-50' : 'border-gray-100 hover:border-gray-200'}`}>
+              <div className="text-sm font-bold text-[#0F172A]">📺 YouTube Long (16:9)</div>
+              <p className="text-xs text-[#64748B] mt-1">Alur 1-klik terpisah untuk video landscape berdurasi panjang.</p>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── STEP 5 — Generate & Validate ─── */}
+      {labelFotoDone && step === 5 && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+          <h2 className="font-display font-bold text-[#0F172A]">Step 5 — Generate Prompt &amp; Validasi</h2>
 
           {/* Tab toggle */}
           <div className="flex gap-2 border-b border-gray-100 -mx-1 px-1">
             {([
               { v: 'prompt', label: 'Master Prompt', icon: <Copy size={14} /> },
               { v: 'validate', label: 'Paste & Validate', icon: <FileCheck2 size={14} /> },
-              { v: 'video_vo', label: 'Video VO', icon: <Film size={14} /> },
               { v: 'ai_generate', label: 'AI Generate ✨', icon: <Sparkles size={14} /> },
               { v: 'library', label: 'Library', icon: <Film size={14} /> },
               { v: 'upload', label: 'Upload Hasil', icon: <Upload size={14} /> },
@@ -4053,7 +3680,12 @@ export default function AdminViralFrameWorkspacePage() {
                 <button onClick={handleCopy}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
                   style={{ background: copied ? '#10B981' : 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
-                  {copied ? <><Check size={15} /> Copied!</> : <><Copy size={15} /> Copy Master Prompt</>}
+                  {copied ? <><Check size={15} /> Copied!</> : <><Copy size={15} /> Copy Prompt JSON</>}
+                </button>
+                <button onClick={handleCopyNatural}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  style={{ background: copiedNatural ? '#10B981' : 'linear-gradient(135deg, #F5A623 0%, #F59E0B 100%)' }}>
+                  {copiedNatural ? <><Check size={15} /> Copied!</> : <><Copy size={15} /> Copy Prompt Natural</>}
                 </button>
                 <button onClick={handleDownload}
                   className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF] transition-colors">
@@ -4062,9 +3694,45 @@ export default function AdminViralFrameWorkspacePage() {
               </div>
 
               <p className="text-sm text-[#64748B]">
-                Salin teks di bawah, paste ke AI eksternal (mis. ChatGPT/Gemini/Claude) untuk menghasilkan JSON Scene.
-                Lalu buka tab <strong>Paste &amp; Validate</strong> untuk menempel hasilnya.
+                <strong>Prompt JSON</strong>: salin, paste ke AI eksternal (mis. ChatGPT/Gemini/Claude) untuk menghasilkan JSON Scene,
+                lalu buka tab <strong>Paste &amp; Validate</strong> untuk menempel hasilnya. <strong>Prompt Natural</strong>: paragraf
+                naratif bahasa Inggris per scene (data sama persis) — cocok untuk di-paste langsung ke tool percakapan seperti Google Flow/Veo.
               </p>
+
+              {/* Thumbnail composite — fasad + karakter (kalau dipakai) + judul/harga/spek */}
+              <div className="rounded-xl border border-gray-200 p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <div className="text-sm font-semibold text-[#0F172A]">🖼️ Thumbnail</div>
+                    <p className="text-xs text-[#64748B]">Composite otomatis dari foto Fasad (Step 0) + judul + harga{s3.useCharacter ? ' + foto karakter' : ''}.</p>
+                  </div>
+                  <button type="button" onClick={loadThumbnail} disabled={thumbLoading}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                    style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+                    {thumbLoading ? <><Loader2 size={15} className="animate-spin" /> Membangun…</> : '🖼️ Generate Thumbnail'}
+                  </button>
+                </div>
+                {thumbError && <p className="text-xs text-red-600">{thumbError}</p>}
+                {thumbData && (
+                  <div className="space-y-2">
+                    <img src={thumbData.thumbnail_url} alt="Thumbnail" className="w-full max-w-xs rounded-xl border border-gray-200" />
+                    {thumbData.harga_turun && (
+                      <p className="text-xs font-semibold text-emerald-600">✓ Harga turun terdeteksi otomatis: {thumbData.harga_text}</p>
+                    )}
+                    <button type="button" onClick={handleCopyThumbUrl}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF]">
+                      {copiedThumb ? <><Check size={13} /> Copied!</> : <><Copy size={13} /> Copy URL Thumbnail</>}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <details className="rounded-xl border border-amber-200 bg-amber-50/50">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-amber-800">Pratinjau Prompt Natural</summary>
+                <textarea readOnly value={naturalPrompt}
+                  className="w-full h-72 max-h-[50vh] overflow-y-auto p-3 border-t border-amber-200 text-xs font-mono text-[#0F172A] bg-white outline-none resize-y leading-relaxed"
+                />
+              </details>
 
               {/* Style Pair A/B — bandingkan 2 gaya untuk uji split */}
               <div className="flex items-center gap-2 flex-wrap p-3 rounded-xl bg-[#F8FAFC] border border-gray-100">
@@ -4126,18 +3794,7 @@ export default function AdminViralFrameWorkspacePage() {
             </div>
           )}
 
-          {/* ── TAB 3: VIDEO VO ── */}
-          {step4Tab === 'video_vo' && prop && (
-            <VideoVOTabMemo
-              propertyId={prop.id}
-              propertyTitle={prop.title}
-              jenisProperti={prop.jenis_properti}
-              lokasi={`${prop.kecamatan}, ${prop.kabupaten}`}
-              photos={prop.images}
-            />
-          )}
-
-          {/* ── TAB 4: AI GENERATE (Jalur C) ── */}
+          {/* ── TAB: AI GENERATE (Jalur C) ── */}
           {step4Tab === 'ai_generate' && prop && (
             <AIGenerateTabMemo
               propertyId={prop.id}
@@ -4269,7 +3926,7 @@ export default function AdminViralFrameWorkspacePage() {
           className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-[#64748B] border border-gray-200 hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
           <ArrowLeft size={15} /> Kembali
         </button>
-        {step < 4 ? (
+        {step < 5 ? (
           <button onClick={goNext}
             className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
             style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
