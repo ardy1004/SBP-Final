@@ -258,7 +258,9 @@ function Select({ value, onChange, opts }: {
 }
 
 function StepIndicator({ current }: { current: number }) {
+  // current = 0 saat Step 0 (Label Foto), 1-5 saat wizard.
   const steps = [
+    { n: 0, label: 'Label Foto', enabled: true },
     { n: 1, label: 'Pilih Foto per Scene', enabled: true },
     { n: 2, label: 'Pilih Karakter', enabled: true },
     { n: 3, label: 'Pilih Mode', enabled: true },
@@ -2813,7 +2815,13 @@ export default function AdminViralFrameWorkspacePage() {
     setShowErrors(false);
     setStep(s => Math.min(5, s + 1));
   };
-  const goBack = () => { setShowErrors(false); setStep(s => Math.max(1, s - 1)); };
+  // Dari Step 1, "Kembali" pulang ke Step 0 (Label Foto) — bukan mentok/disabled,
+  // supaya seleksi bahan & label masih bisa dikoreksi tanpa reload halaman.
+  const goBack = () => {
+    setShowErrors(false);
+    if (step === 1) { setLabelFotoDone(false); return; }
+    setStep(s => Math.max(1, s - 1));
+  };
 
   // ─── Step 5: compile Master Prompt ──
   // #1: hanya kompilasi saat benar-benar berada di Step 5 (Generate), dan pakai
@@ -3179,6 +3187,13 @@ export default function AdminViralFrameWorkspacePage() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Step indicator — tampil sejak Step 0 supaya alurnya punya konteks */}
+      {!labelFotoDone && prop && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <StepIndicator current={0} />
         </div>
       )}
 
@@ -3921,10 +3936,14 @@ export default function AdminViralFrameWorkspacePage() {
       )}
 
       {/* ─── Navigasi wizard ─── */}
+      {/* Disembunyikan di Step 0: LabelFotoStep punya tombol Lanjut sendiri yang
+          ter-gate "minimal 1 foto jadi bahan". Kalau nav ini ikut tampil, tombol
+          Lanjut-nya aktif tanpa syarat dan gerbang Step 0 bisa dilewati. */}
+      {labelFotoDone && (
       <div className="flex items-center justify-between">
-        <button onClick={goBack} disabled={step === 1}
-          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-[#64748B] border border-gray-200 hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-          <ArrowLeft size={15} /> Kembali
+        <button onClick={goBack}
+          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-[#64748B] border border-gray-200 hover:bg-gray-50 transition-colors">
+          <ArrowLeft size={15} /> {step === 1 ? 'Kembali ke Label Foto' : 'Kembali'}
         </button>
         {step < 5 ? (
           <button onClick={goNext}
@@ -3936,6 +3955,7 @@ export default function AdminViralFrameWorkspacePage() {
           <span className="text-xs text-[#94A3B8]">Fase V4 — Coming Soon</span>
         )}
       </div>
+      )}
       </>)}
     </div>
   );
