@@ -99,8 +99,24 @@ export async function onRequestPost(context) {
       return jsonOk({ success: true, affected: result.meta?.changes ?? numericIds.length });
     }
 
-    // action === 'delete' — bersihkan SEMUA objek R2 (foto, video ViralFrame,
-    // tanda tangan & PDF perjanjian) sebelum baris DB hilang via CASCADE.
+    // action === 'delete' — properti dengan perjanjian signed diblokir SELURUH
+    // batch (all-or-nothing), karena agreements+R2 signature/PDF ikut CASCADE
+    // dan menghancurkan bukti tanda tangan legal (UU ITE) tanpa jejak.
+    const signedRows = await env.DB.prepare(
+      `SELECT property_id FROM agreements WHERE property_id IN (${placeholders}) AND status = 'signed'`
+    ).bind(...numericIds).all();
+
+    if ((signedRows.results ?? []).length > 0) {
+      const blockedIds = signedRows.results.map(r => r.property_id);
+      return jsonError(
+        'Sebagian properti memiliki perjanjian signed dan tidak dapat dihapus',
+        409,
+        { blocked_ids: blockedIds }
+      );
+    }
+
+    // Bersihkan SEMUA objek R2 (foto, video ViralFrame, tanda tangan & PDF
+    // perjanjian) sebelum baris DB hilang via CASCADE.
     const r2Keys = await collectPropertyR2Keys(env.DB, numericIds);
     await deleteR2Keys(env.MEDIA, r2Keys);
 

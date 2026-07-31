@@ -695,7 +695,7 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {cardItems.map(p => (
-                <PropertyCard key={p.id} property={p as any} />
+                <PropertyCard key={p.id} property={p} />
               ))}
             </div>
           )}

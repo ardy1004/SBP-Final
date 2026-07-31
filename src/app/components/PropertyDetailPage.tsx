@@ -705,7 +705,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                         {reason}
                       </span>
                     </div>
-                    <PropertyCard property={p as any} className="mt-3" />
+                    <PropertyCard property={p} className="mt-3" />
                   </div>
                 );
               })}

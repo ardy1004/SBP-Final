@@ -1,12 +1,12 @@
 import { useState, useRef, useCallback } from 'react';
 import { Link } from 'react-router';
 import { MapPin, Maximize2, BedDouble, Bath, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
-import { type Property } from '../data/mockData';
+import type { NormalizedProperty } from '../../lib/api';
 import { formatRibuan } from '../../lib/format';
 import { cfImg, cfSrcSet } from '../../lib/img';
 
 interface Props {
-  property: Property;
+  property: NormalizedProperty;
   className?: string;
 }
 
@@ -42,7 +42,7 @@ export default function PropertyCard({ property, className = '' }: Props) {
   const touchStartX = useRef(0);
   const imgs = property.images;
   const total = imgs.length;
-  const isSold = property.status_sold || property.status_publish === 'sold';
+  const isSold = property.status_sold;
 
   const kec = (property.kecamatan || 'jogja').toLowerCase().replace(/\s+/g, '-');
   const jenisSlug = (property.jenisRaw ?? property.jenis).toLowerCase();

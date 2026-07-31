@@ -344,6 +344,16 @@ export async function onRequestDelete(context) {
     const exists = await env.DB.prepare('SELECT id FROM properties WHERE id = ?').bind(id).first();
     if (!exists) return jsonError('Properti tidak ditemukan', 404);
 
+    // Properti dengan perjanjian signed tidak boleh dihapus — agreements ikut
+    // CASCADE dan signature/PDF di R2 ikut lenyap, menghancurkan bukti tanda
+    // tangan legal (UU ITE) tanpa jejak. Cek SEBELUM R2 disentuh sama sekali.
+    const signed = await env.DB.prepare(
+      `SELECT 1 FROM agreements WHERE property_id = ? AND status = 'signed' LIMIT 1`
+    ).bind(id).first();
+    if (signed) {
+      return jsonError('Properti memiliki perjanjian yang sudah signed dan tidak dapat dihapus', 409);
+    }
+
     // Kumpulkan SEMUA objek R2 milik properti (foto, video ViralFrame, tanda
     // tangan & PDF perjanjian) SEBELUM baris DB hilang via CASCADE.
     const r2Keys = await collectPropertyR2Keys(env.DB, [id]);

@@ -1,14 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router';
 import { Search } from 'lucide-react';
-import { getBlogPosts, type ApiBlogPost } from '../../lib/api';
-import { pageMeta } from '../../lib/pageMeta';
-
-export const meta = () => pageMeta({
-  title: 'Blog & Panduan Properti Yogyakarta | Salam Bumi Property',
-  description: 'Artikel, tips, dan panduan seputar jual-beli properti, investasi kost, KPR, dan legalitas di Yogyakarta — ditulis oleh tim Salam Bumi Property.',
-  path: '/blog',
-});
+import type { ApiBlogPost } from '../../lib/api';
 
 function formatTanggal(s: string): string {
   if (!s) return '';
@@ -17,25 +10,11 @@ function formatTanggal(s: string): string {
   return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Jakarta' });
 }
 
-export default function BlogPage() {
+export default function BlogPage({ ssrPosts }: { ssrPosts: ApiBlogPost[] }) {
   const [search, setSearch] = useState('');
   const [activeKat, setActiveKat] = useState('Semua');
-  const [posts, setPosts] = useState<ApiBlogPost[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const posts = ssrPosts;
   const kategori = ['Semua', 'KPR', 'Investasi', 'Panduan'];
-
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    getBlogPosts({ limit: 50 })
-      .then(res => {
-        if (res.success && res.data) setPosts(res.data.items);
-        else setError(res.error ?? 'Gagal memuat artikel');
-      })
-      .catch(() => setError('Koneksi ke server gagal'))
-      .finally(() => setLoading(false));
-  }, []);
 
   const filtered = posts.filter(p =>
     (activeKat === 'Semua' || p.kategori === activeKat) &&
@@ -74,25 +53,7 @@ export default function BlogPage() {
             ))}
           </div>
 
-          {loading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="bg-white rounded-2xl overflow-hidden border border-gray-100 animate-pulse">
-                  <div className="w-full bg-gray-200" style={{ paddingTop: '56.25%' }} />
-                  <div className="p-5 space-y-3">
-                    <div className="h-5 w-20 bg-gray-200 rounded-full" />
-                    <div className="h-4 w-full bg-gray-200 rounded" />
-                    <div className="h-4 w-3/4 bg-gray-200 rounded" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : error ? (
-            <div className="text-center py-16">
-              <div className="text-5xl mb-4">⚠️</div>
-              <p className="text-[#64748B]">{error}</p>
-            </div>
-          ) : filtered.length === 0 ? (
+          {filtered.length === 0 ? (
             <div className="text-center py-16">
               <div className="text-5xl mb-4">📝</div>
               <p className="text-[#64748B]">Belum ada artikel{search || activeKat !== 'Semua' ? ' yang sesuai' : ''}</p>

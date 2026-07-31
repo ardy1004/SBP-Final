@@ -12,7 +12,7 @@ export default [
     route(":slug", "./routes/properties.tsx", { id: "programmatic-seo" }),   // /rumah-dijual-jogja (slug tak valid → 404)
     route("about", "./components/AboutPage.tsx"),
     route("portfolio", "./components/PortfolioPage.tsx"),
-    route("blog", "./components/BlogPage.tsx"),
+    route("blog", "./routes/blog.tsx"),
     route("blog/:slug", "./routes/blog-detail.tsx", { id: "blog-detail" }),
     route("faq", "./components/FAQPage.tsx"),
     route("contact", "./components/ContactPage.tsx"),
@@ -26,8 +26,8 @@ export default [
   // Route yang menunjuk ke ./routes/admin/* dibungkus src/app/lib/clientOnly.tsx
   // supaya grafnya TIDAK ikut dievaluasi saat startup Worker (penyebab Error 1102
   // pada 2026-07-25). Route admin baru WAJIB mengikuti pola yang sama.
-  route("admin/login", "./components/admin/AdminLoginPage.tsx"),
-  layout("./components/admin/AdminLayout.tsx", [
+  route("admin/login", "./routes/admin/login.tsx"),
+  layout("./routes/admin/layout.tsx", [
     route("admin", "./routes/admin/overview.tsx"),
     route("admin/agreements", "./routes/admin/agreements.tsx", { id: "admin-agreements" }),
     route("admin/agreements/:id", "./routes/admin/agreement-detail.tsx", { id: "admin-agreement-detail" }),

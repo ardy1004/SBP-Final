@@ -783,7 +783,7 @@ export default function PropertiesPage({ ssrData, heading, subheading }: Propert
               </div>
             ) : viewMode === 'grid' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
-                {properties.map(p => <PropertyCard key={p.id} property={p as any} />)}
+                {properties.map(p => <PropertyCard key={p.id} property={p} />)}
               </div>
             ) : (
               <div className="space-y-4">

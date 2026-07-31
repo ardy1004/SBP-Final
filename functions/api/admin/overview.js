@@ -2,7 +2,7 @@
 // Auth: _middleware.js (admin-only, otomatis mencakup semua /api/admin/*)
 
 import { jsonOk, jsonError, handleOptions } from '../_shared/response.js';
-import { SQL_TANGGAL_WIB, sqlTanggalWibMinus, tanggalWib } from '../../_lib/waktu.js';
+import { SQL_TANGGAL_WIB, sqlTanggalWibMinus, tanggalWib, SQL_BULAN_INI_WIB, sqlBulanWibMinus, bulanWib } from '../../_lib/waktu.js';
 
 const JENIS_LABEL = {
   apartment: 'Apartment', rumah: 'Rumah', tanah: 'Tanah', kost: 'Kost',
@@ -49,9 +49,9 @@ export async function onRequestGet(context) {
       db.prepare(`
         SELECT
           COUNT(*) AS total,
-          SUM(CASE WHEN created_at >= strftime('%Y-%m-01','now') THEN 1 ELSE 0 END) AS bulan_ini,
-          SUM(CASE WHEN created_at >= strftime('%Y-%m-01','now','-1 month')
-                   AND created_at < strftime('%Y-%m-01','now') THEN 1 ELSE 0 END) AS bulan_lalu
+          SUM(CASE WHEN created_at >= ${SQL_BULAN_INI_WIB} THEN 1 ELSE 0 END) AS bulan_ini,
+          SUM(CASE WHEN created_at >= ${sqlBulanWibMinus(1)}
+                   AND created_at < ${SQL_BULAN_INI_WIB} THEN 1 ELSE 0 END) AS bulan_lalu
         FROM leads
       `).first(),
 
@@ -74,9 +74,9 @@ export async function onRequestGet(context) {
 
       // 7. Leads per bulan — 6 bulan terakhir
       db.prepare(`
-        SELECT strftime('%Y-%m', created_at) AS ym, COUNT(*) AS leads
+        SELECT strftime('%Y-%m', created_at, '+7 hours') AS ym, COUNT(*) AS leads
         FROM leads
-        WHERE created_at >= strftime('%Y-%m-01','now','-5 months')
+        WHERE created_at >= ${sqlBulanWibMinus(5)}
         GROUP BY ym ORDER BY ym
       `).all(),
 
@@ -145,11 +145,9 @@ export async function onRequestGet(context) {
 
     // --- Leads per Bulan (isi missing month dengan 0) ---
     const leadsMap = Object.fromEntries((leadsPerBulanRes.results ?? []).map(r => [r.ym, r.leads]));
-    const now = new Date();
     const leads_per_bulan = Array.from({ length: 6 }, (_, i) => {
-      const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      return { bulan: BULAN_ID[d.getMonth()], leads: leadsMap[ym] ?? 0 };
+      const { ym, bulanIdx } = bulanWib(new Date(), -(5 - i));
+      return { bulan: BULAN_ID[bulanIdx], leads: leadsMap[ym] ?? 0 };
     });
 
     // --- Distribusi Jenis ---

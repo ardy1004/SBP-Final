@@ -39,3 +39,33 @@ export function tanggalWib(dasar = new Date(), geserHari = 0) {
   const ms = dasar.getTime() + 7 * 60 * 60 * 1000 + geserHari * 24 * 60 * 60 * 1000;
   return new Date(ms).toISOString().slice(0, 10);
 }
+
+// Kolom seperti leads.created_at menyimpan DATETIME UTC mentah (bukan tanggal
+// WIB seperti property_view_daily.tanggal), jadi batas bulan harus dikonversi
+// BALIK ke instant UTC yang setara (+7 jam lalu -7 jam) memakai DATETIME agar
+// jam-nya tidak dibuang — kalau dipotong ke DATE() saja, batasnya melebar
+// hingga 7 jam dan salah mengklasifikasi lead di awal/akhir bulan.
+
+/** Ekspresi SQL (DATETIME UTC) untuk awal bulan WIB bulan ini. */
+export const SQL_BULAN_INI_WIB = `DATETIME('now','${WIB_OFFSET}','start of month','-7 hours')`;
+
+/** Ekspresi SQL (DATETIME UTC) untuk awal bulan WIB N bulan lalu. */
+export function sqlBulanWibMinus(bulan) {
+  return `DATETIME('now','${WIB_OFFSET}','-${bulan} months','start of month','-7 hours')`;
+}
+
+/**
+ * Bulan WIB (YYYY-MM) dari sisi JavaScript, untuk mengisi bulan kosong pada
+ * grafik. WAJIB dipakai alih-alih new Date() lokal — Worker berjalan di UTC,
+ * jadi bulan hasil new Date() bisa meleset dari bucket bulan WIB di database.
+ * @param {Date} [dasar] - titik acuan (default: sekarang)
+ * @param {number} [geserBulan] - offset bulan terhadap dasar
+ */
+export function bulanWib(dasar = new Date(), geserBulan = 0) {
+  const wib = new Date(dasar.getTime() + 7 * 60 * 60 * 1000);
+  const totalBulan = wib.getUTCFullYear() * 12 + wib.getUTCMonth() + geserBulan;
+  return {
+    ym: `${Math.floor(totalBulan / 12)}-${String(totalBulan % 12 + 1).padStart(2, '0')}`,
+    bulanIdx: totalBulan % 12,
+  };
+}
