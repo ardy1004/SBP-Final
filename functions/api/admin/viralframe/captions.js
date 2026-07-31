@@ -13,6 +13,16 @@ import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiP
 const PROVIDER_ORDER = ['gemini', 'groq', 'openrouter', 'deepseek'];
 const PLATFORM_LABEL = { tiktok: 'TikTok', ig_reels: 'Instagram Reels', yt_shorts: 'YouTube Shorts', fb_reels: 'Facebook Reels' };
 
+// Kalimat pertama caption, dinormalisasi — jadi kunci pembanding "pembuka yang
+// baru dipakai". Dipotong 120 char supaya baris exclusion di prompt tetap pendek.
+function openingOf(caption) {
+  return String(caption ?? '')
+    .split(/[.!?\n]/)[0]
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 120);
+}
+
 function fmtRupiah(n) {
   if (n == null || n <= 0) return 'hubungi kami';
   if (n >= 1e9) return `Rp ${(n / 1e9).toFixed(1).replace(/\.0$/, '')} M`;
@@ -42,6 +52,37 @@ export async function onRequestPost(context) {
   }
   if (!p) return jsonError('Properti tidak ditemukan', 404);
 
+  // Exclusion berbasis riwayat (Tahap 8a) — lintas seluruh katalog, keputusan
+  // yang sama dengan hook/CTA di ai-generate.js: kalau dibatasi per-properti,
+  // properti baru selalu dapat pembuka "template" yang sama dan justru itu yang
+  // terbaca berulang oleh algoritma. Gagal query = lanjut tanpa exclusion.
+  const excludedOpenings = [];
+  const excludedTags = [];
+  try {
+    const hist = await env.DB.prepare(
+      `SELECT opening, hashtags FROM viralframe_caption_history ORDER BY created_at DESC LIMIT 12`
+    ).all();
+    for (const row of hist.results ?? []) {
+      const op = String(row.opening ?? '').trim();
+      if (op && !excludedOpenings.includes(op) && excludedOpenings.length < 6) excludedOpenings.push(op);
+      for (const t of String(row.hashtags ?? '').split(/\s+/)) {
+        const tag = t.trim();
+        // Hashtag brand sengaja TIDAK di-exclude — itu identitas, wajib konsisten.
+        if (!tag.startsWith('#') || /^#salambumi/i.test(tag)) continue;
+        if (!excludedTags.includes(tag) && excludedTags.length < 12) excludedTags.push(tag);
+      }
+    }
+  } catch (err) {
+    console.error('[captions] riwayat exclusion', err.message);
+  }
+
+  const exclusionBlock = (excludedOpenings.length || excludedTags.length)
+    ? `\nHINDARI PENGULANGAN (konten sebelumnya baru saja memakai ini):
+${excludedOpenings.length ? `- JANGAN memulai caption dengan pembuka yang sama atau mirip dengan: ${excludedOpenings.map(o => `"${o}"`).join(' | ')}` : ''}
+${excludedTags.length ? `- Hashtag berikut baru saja dipakai berulang, pakai maksimal 1 saja dari daftar ini dan cari alternatif yang tetap relevan: ${excludedTags.join(' ')}` : ''}
+- Tujuannya supaya konten tidak terasa monoton/generik dan tidak terdeteksi sebagai postingan berulang oleh algoritma media sosial.\n`
+    : '';
+
   const system = `Kamu copywriter media sosial properti Indonesia. Output HANYA JSON valid, mulai { akhiri }, tanpa markdown.`;
   const user = `Buat ${variasi} variasi CAPTION untuk ${platform} mempromosikan properti berikut. Setiap caption (variasi) punya SATU baris hashtag berisi kombinasi 5 hashtag — BUKAN beberapa pilihan hashtag per caption.
 
@@ -59,7 +100,7 @@ ${registerInstruction ? `- GAYA BAHASA: ${registerInstruction}` : ''}
 - Field "hashtags" = SATU string berisi TEPAT 5 hashtag dipisah spasi, campurkan: lokasi (${p.kecamatan}/${p.kabupaten}/Jogja), jenis (${p.jenis_properti}), niat beli (rumahdijual/propertijogja/investasiproperti), dan brand (#salambumiproperty #salambumi).
 - Jika ${variasi} > 1, tiap variasi (caption + hashtags) WAJIB berbeda kombinasi dari variasi lain — jangan mengulang kombinasi hashtag yang sama persis.
 - JANGAN mengarang fasilitas yang tidak disebutkan.
-
+${exclusionBlock}
 Format JSON WAJIB:
 {"captions":[{"caption":"...","hashtags":"#a #b #c #d #e"}]}
 Jumlah item captions = ${variasi}. Setiap "hashtags" berisi TEPAT 5 hashtag dalam satu string.`;
@@ -115,6 +156,22 @@ Jumlah item captions = ${variasi}. Setiap "hashtags" berisi TEPAT 5 hashtag dala
       if (captions.length === 0) {
         send({ done: true, error: 'AI tidak mengembalikan caption. Coba lagi.' });
         return;
+      }
+
+      // Catat ke riwayat supaya generate berikutnya punya bahan exclusion.
+      // Kegagalan tulis TIDAK boleh membatalkan respons yang sudah valid —
+      // efeknya cuma variasi berikutnya kurang terinformasi.
+      try {
+        const stmt = env.DB.prepare(
+          `INSERT INTO viralframe_caption_history (property_id, opening, hashtags) VALUES (?, ?, ?)`
+        );
+        await env.DB.batch(
+          captions
+            .filter(c => openingOf(c.caption))
+            .map(c => stmt.bind(propertyId, openingOf(c.caption), c.hashtags ?? ''))
+        );
+      } catch (err) {
+        console.error('[captions] simpan riwayat', err.message);
       }
 
       send({ done: true, data: { captions, provider_used: used } });

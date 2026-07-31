@@ -225,6 +225,8 @@ export default function AdminPropertyDetailPage() {
   const [saving, setSaving]           = useState(false);
   const [saveMsg, setSaveMsg]         = useState('');
   const [saveError, setSaveError]     = useState('');
+  // Tahap 8c — muncul setelah simpan bila harga baru < harga_lama.
+  const [promoTurunHarga, setPromoTurunHarga] = useState(false);
   const [geoCoords, setGeoCoords]     = useState<{ latitude: number | null; longitude: number | null } | null>(null);
 
   // Location cascade
@@ -581,6 +583,9 @@ export default function AdminPropertyDetailPage() {
       setTimeout(() => setSaveMsg(''), 3000);
       const saved = json.data?.properti;
       if (saved) setGeoCoords({ latitude: saved.latitude ?? null, longitude: saved.longitude ?? null });
+      // Backend menandai harga_turun bila harga baru < harga_lama. Momen ini
+      // paling laku untuk konten, jadi tawarkan langsung bikin video promo.
+      if (json.data?.harga_turun) setPromoTurunHarga(true);
     } catch (err: unknown) {
       setSaveError(err instanceof Error ? err.message : 'Gagal menyimpan');
     } finally {
@@ -1181,6 +1186,37 @@ export default function AdminPropertyDetailPage() {
           {saveMsg   && <span className="text-sm text-emerald-600 font-medium">{saveMsg}</span>}
           {saveError && <span className="text-sm text-red-600">{saveError}</span>}
         </div>
+
+        {/* Tahap 8c — tawaran video promo saat harga baru saja diturunkan */}
+        {promoTurunHarga && !isNew && (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
+            <span className="text-lg leading-none">📉</span>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-amber-900">Harga properti ini turun.</p>
+              <p className="text-xs text-amber-800 mt-0.5">
+                Turun harga adalah momen paling laku untuk konten. Buat video promo sekarang —
+                thumbnail-nya otomatis memasang badge “TURUN HARGA”.
+              </p>
+              <div className="flex items-center gap-2 mt-2.5">
+                <button
+                  type="button"
+                  onClick={() => window.open(`/admin/viralframe/${id}`, '_blank')}
+                  className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white hover:opacity-90 transition-opacity"
+                  style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
+                >
+                  🎬 Buat Video Promo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPromoTurunHarga(false)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium text-amber-800 hover:bg-amber-100 transition-colors"
+                >
+                  Nanti saja
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* (I) Foto */}

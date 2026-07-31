@@ -41,17 +41,54 @@ export async function onRequestPost(context) {
     return jsonError('Gagal mengambil foto properti', 500);
   }
 
-  // Dedup label: 2+ foto share label sama → backend pilih representatif (is_cover
-  // dulu, else urutan terkecil) — AI TIDAK PERNAH melihat foto_id individual, jadi
-  // AI tidak bisa jadi yang "memilih" di antara foto duplikat.
-  const byLabel = new Map();
+  // Kelompokkan per label, urut preferensi bawaan (is_cover dulu, lalu urutan
+  // terkecil). AI TIDAK PERNAH melihat foto_id individual — backend yang memilih
+  // di antara foto yang berbagi label, jadi AI tidak bisa jadi penentunya.
+  const candidatesByLabel = new Map();
   for (const r of rows) {
     const label = String(r.label_ruangan).trim();
-    const cur = byLabel.get(label);
-    if (!cur) { byLabel.set(label, r); continue; }
-    const curScore = (cur.is_cover ? 1000 : 0) - (cur.urutan ?? 0);
-    const newScore = (r.is_cover ? 1000 : 0) - (r.urutan ?? 0);
-    if (newScore > curScore) byLabel.set(label, r);
+    const arr = candidatesByLabel.get(label) ?? [];
+    arr.push(r);
+    candidatesByLabel.set(label, arr);
+  }
+  const skor = (x) => (x.is_cover ? 1000 : 0) - (x.urutan ?? 0);
+  for (const arr of candidatesByLabel.values()) arr.sort((a, b) => skor(b) - skor(a));
+
+  // Tahap 8b — rotasi foto dalam label yang sama. Tanpa ini, label "Kamar Tidur"
+  // yang punya 3 foto akan SELALU memakai foto yang sama tiap regenerate, dan
+  // video untuk properti yang sama terlihat identik di mata algoritma medsos.
+  // Urutan pemakaian diambil dari riwayat generate properti ini: foto yang belum
+  // pernah dipakai menang duluan, sisanya yang paling lama tidak dipakai.
+  const lastUsedIdx = new Map();
+  try {
+    const gens = await env.DB.prepare(
+      `SELECT params_json FROM viralframe_generations WHERE property_id = ? ORDER BY created_at DESC LIMIT 10`
+    ).bind(propertyId).all();
+    let idx = 0;
+    for (const g of gens.results ?? []) {
+      let parsedGen;
+      try { parsedGen = JSON.parse(g.params_json); } catch { continue; }
+      for (const sc of parsedGen?.scenes ?? []) {
+        if (sc?.photoId != null && !lastUsedIdx.has(sc.photoId)) lastUsedIdx.set(sc.photoId, idx);
+      }
+      idx += 1;
+    }
+  } catch (err) {
+    // Riwayat gagal dibaca → jatuh ke preferensi bawaan, bukan error fatal.
+    console.error('[suggest-storyboard] riwayat rotasi foto', err.message);
+  }
+
+  const byLabel = new Map();
+  for (const [label, arr] of candidatesByLabel) {
+    // arr sudah urut preferensi; pilih yang paling lama tidak dipakai.
+    // Infinity = belum pernah dipakai sama sekali → prioritas tertinggi.
+    let pilih = arr[0];
+    let pilihIdx = lastUsedIdx.has(arr[0].id) ? lastUsedIdx.get(arr[0].id) : Infinity;
+    for (const cand of arr.slice(1)) {
+      const candIdx = lastUsedIdx.has(cand.id) ? lastUsedIdx.get(cand.id) : Infinity;
+      if (candIdx > pilihIdx) { pilih = cand; pilihIdx = candIdx; }
+    }
+    byLabel.set(label, pilih);
   }
   const uniqueLabels = [...byLabel.keys()];
 

@@ -324,8 +324,25 @@ export async function onRequestPatch(context) {
       }
     }
 
-    const updated = await env.DB.prepare('SELECT id, title, status_publish, updated_at, latitude, longitude FROM properties WHERE id = ?').bind(id).first();
-    return jsonOk({ pesan: 'Properti berhasil diperbarui', properti: updated });
+    const updated = await env.DB.prepare(
+      'SELECT id, title, status_publish, updated_at, latitude, longitude, harga, harga_lama FROM properties WHERE id = ?'
+    ).bind(id).first();
+
+    // Tahap 8c — sinyal price-drop. Dihitung dari kondisi SETELAH update (bukan
+    // dari body), supaya benar juga saat admin hanya mengubah salah satu dari
+    // harga/harga_lama. Frontend memakai ini untuk menawarkan "generate video
+    // promo TURUN HARGA" — momen paling laku untuk konten, dan thumbnail
+    // ViralFrame sudah bisa merender badge turun harga otomatis.
+    const sentuhHarga = pairs.some(p => p.col === 'harga' || p.col === 'harga_lama');
+    const hargaTurun = !!(
+      sentuhHarga && updated?.harga_lama && updated?.harga > 0 && updated.harga_lama > updated.harga
+    );
+
+    return jsonOk({
+      pesan: 'Properti berhasil diperbarui',
+      properti: updated,
+      harga_turun: hargaTurun,
+    });
   } catch (err) {
     console.error('[admin property PATCH]', err.message);
     return jsonError('Gagal menyimpan perubahan', 500);
