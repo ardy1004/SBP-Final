@@ -2,6 +2,7 @@ import { Link } from 'react-router';
 import { Shield, CheckCircle, Scale, Handshake, ArrowRight, Star } from 'lucide-react';
 import { useContactEmail } from './useContactEmail';
 import { pageMeta } from '../../lib/pageMeta';
+import { trackWaClick } from '../../lib/waTrack';
 
 export const meta = () => pageMeta({
   title: 'Tentang Kami | Salam Bumi Property',
@@ -94,7 +95,12 @@ export default function AboutPage() {
                 <h3 className="font-display font-bold text-[#0F172A] text-lg">{t.nama}</h3>
                 <p className="text-[#1565C0] text-sm font-medium mb-3">{t.jabatan}</p>
                 <p className="text-[#64748B] text-sm leading-relaxed mb-4">{t.desc}</p>
+                {/* Klik dicatat sebagai lead quick_wa (source 'about_agent'). trackWaClick
+                    memakai sendBeacon fire-and-forget — <a href> di bawah TIDAK menunggu
+                    apa pun, jadi link WA tetap jalan walau endpoint gagal/diblokir adblock,
+                    dan tidak kena blokir in-app browser Meta (gotcha CLAUDE.md). */}
                 <a href={`https://wa.me/${t.wa}`} target="_blank" rel="noopener noreferrer"
+                  onClick={() => trackWaClick('about_agent')}
                   className="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white bg-[#10B981] hover:bg-[#059669] transition-colors">
                   💬 WhatsApp
                 </a>
