@@ -109,7 +109,7 @@ function isAutoValue(label) {
   return !label || label.trim().toLowerCase().startsWith('auto');
 }
 
-function buildSystemPrompt({ jumlahPart, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, excludedHooks, excludedCtas, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotPart, cutawayExcludedParts, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec }) {
+function buildSystemPrompt({ jumlahPart, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, excludedHooks, excludedCtas, excludedOpenings, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotPart, cutawayExcludedParts, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec }) {
   // Budget kata kini PER SCENE (audit 2026-07-26). Bila semua scene berdurasi
   // sama, sebut angkanya langsung supaya instruksinya sekonkret dulu; bila
   // berbeda-beda, arahkan ke kolom 'Maks kata' milik masing-masing scene.
@@ -153,17 +153,29 @@ Ekspresi/emosi karakter WAJIB konsisten '${expressionLabel}' di SEMUA scene — 
   const visualStyleLine = isAutoValue(visualStyle)
     ? ''
     : `Gaya visual WAJIB: ${visualStyle}. Terapkan konsisten di setiap scene (pencahayaan, komposisi, mood).\n`;
+  // Catatan perumusan: JANGAN menulis klaim bahwa model tahu "algoritma media
+  // sosial terkini" — ia tidak punya data itu dan akan mengarang dengan percaya
+  // diri. Alasan yang sah dan cukup: konten berulang lemah secara craft.
   const hookLine = isAutoValue(hookType)
     ? (excludedHooks?.length
-        ? `Scene berperan HOOK: pilih gaya opening yang paling sesuai dengan properti ini, TAPI JANGAN memakai gaya yang baru dipakai di video-video sebelumnya: ${excludedHooks.join(', ')}. Variasikan supaya konten tidak terasa monoton/generik dan tidak terdeteksi berulang oleh algoritma media sosial.\n`
+        ? `Scene berperan HOOK: pilih gaya opening yang paling sesuai dengan properti ini, TAPI JANGAN memakai gaya yang baru dipakai di video-video sebelumnya: ${excludedHooks.join(', ')}. Variasikan supaya konten tidak terasa monoton/generik.\n`
         : '')
-    : `Scene berperan HOOK WAJIB memakai gaya opening: ${hookType}.\n`;
+    // Tipe pilihan user DIPATUHI. Yang divariasikan hanya eksekusinya — sudut
+    // masuk, struktur kalimat, dan diksi — supaya video ke-N tidak terasa
+    // fotokopi video ke-1 meskipun tipe hook-nya sengaja sama.
+    : `Scene berperan HOOK WAJIB memakai gaya opening: ${hookType}. Tipe ini WAJIB dipertahankan, TAPI eksekusinya WAJIB terasa baru: ubah sudut masuk, struktur kalimat, dan pilihan kata dibanding video sebelumnya — jangan sekadar menyusun ulang kalimat yang sama.\n`;
   const ctaLine = isAutoValue(ctaType)
     ? (excludedCtas?.length
-        ? `Scene berperan CTA: pilih gaya ajakan yang paling sesuai dengan properti ini, TAPI JANGAN memakai gaya yang baru dipakai di video-video sebelumnya: ${excludedCtas.join(', ')}. Variasikan supaya konten tidak terasa monoton/generik dan tidak terdeteksi berulang oleh algoritma media sosial.\n`
+        ? `Scene berperan CTA: pilih gaya ajakan yang paling sesuai dengan properti ini, TAPI JANGAN memakai gaya yang baru dipakai di video-video sebelumnya: ${excludedCtas.join(', ')}. Variasikan supaya konten tidak terasa monoton/generik.\n`
         : '')
-    : `Scene berperan CTA WAJIB memakai gaya ajakan: ${ctaType}.\n`;
-  const toneStyleSection = (toneLine + visualStyleLine + hookLine + ctaLine).trim();
+    : `Scene berperan CTA WAJIB memakai gaya ajakan: ${ctaType}. Tipe ini WAJIB dipertahankan, TAPI kalimat ajakannya WAJIB dirumuskan berbeda dari video sebelumnya.\n`;
+  // Berlaku untuk KEDUA mode (auto maupun manual) — inilah sinyal anti-pengulangan
+  // yang paling berguna saat user memilih tipe hook secara manual, karena tipe
+  // enum-nya memang sengaja tidak berubah.
+  const openingLine = excludedOpenings?.length
+    ? `JANGAN mengulang atau memparafrase kalimat pembuka yang sudah dipakai di video-video sebelumnya:\n${excludedOpenings.map(o => `  - "${o}"`).join('\n')}\nKalimat pembuka Part pertama WAJIB benar-benar baru.\n`
+    : '';
+  const toneStyleSection = (toneLine + visualStyleLine + hookLine + ctaLine + openingLine).trim();
   const toneStyleBlock = toneStyleSection
     ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n[2b] TONE, GAYA VISUAL & PERAN SCENE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${toneStyleSection}\nSetiap scene punya peran (Hook/Body/CTA, lihat "Role" di user prompt) — sesuaikan penekanan narasi dengan peran itu.\n`
     : '';
@@ -753,13 +765,14 @@ export async function onRequestPost(context) {
   const supportsRefImage = body.supports_ref_image === true;
   const expression = typeof body.expression === 'string' ? body.expression : 'auto';
   // Arketipe (opsional) — string siap-pakai dari client (client compute, backend consume).
-  // Cap dinaikkan dari 600→2000: arketipe baru (agent_broll_hybrid, kinetic_typography,
-  // client_testimonial) punya shotGrammarNote lebih detail (hingga ~1480 char) — 600 char
-  // memotong instruksi krusial di tengah kalimat (mis. klarifikasi audio-tidak-terpotong
-  // pada agent_broll_hybrid jatuh SETELAH byte ke-600, jadi tidak pernah sampai ke LLM).
-  // Cap 4000, BUKAN 2000. shotGrammarNote terpanjang (selfie_luxury_hybrid) sudah
-  // 1.661 char — hanya 339 char headroom, sehingga menambah satu-dua kalimat ke
-  // arahan arketipe akan memotongnya DIAM-DIAM tanpa error apa pun.
+  // Riwayat cap: 600 → 2000 → 4000. Naik ke 2000 karena arketipe baru
+  // (agent_broll_hybrid, kinetic_typography, client_testimonial) punya
+  // shotGrammarNote lebih detail dan 600 char memotong instruksi krusial di tengah
+  // kalimat (klarifikasi audio-tidak-terpotong pada agent_broll_hybrid jatuh SETELAH
+  // byte ke-600, jadi tidak pernah sampai ke LLM). Naik lagi ke 4000 pada 2026-08-02
+  // karena shotGrammarNote terpanjang (selfie_luxury_hybrid) sudah 1.661 char —
+  // sisa 339 char terlalu tipis, satu-dua kalimat tambahan akan memotongnya
+  // DIAM-DIAM tanpa error apa pun. Dijaga gate BAGIAN 4 check-viralframe-rulebook.
   const archetypeNote = typeof body.archetype_note === 'string' ? body.archetype_note.slice(0, 4000) : '';
   const PRESENTER_VALID = ['on_camera', 'voiceover_only', 'faceless_broll'];
   const presenterMode = PRESENTER_VALID.includes(body.presenter_mode) ? body.presenter_mode : 'on_camera';
@@ -885,29 +898,60 @@ export async function onRequestPost(context) {
   // ambil hook/cta yang BARU dipakai (lintas seluruh katalog, bukan cuma properti ini —
   // penonton feed sosmed melihat semua listing bercampur) dari riwayat generate, lalu
   // instruksikan AI untuk TIDAK memakainya lagi. Gagal-aman: query gagal → tetap 'auto' tanpa exclusion.
+  //
+  // ⚠️ DUA BUG DIPERBAIKI DI SINI (2026-08-02) — mekanisme ini TIDAK PERNAH BERJALAN:
+  //
+  // (1) BENTUK DATA SALAH. Blok ini membaca `p.hookType` (top-level), tapi
+  //     satu-satunya penulis menyimpannya NESTED sebagai `p.s1.hookType`
+  //     (AdminViralFrameWorkspacePage.tsx, params_json = {s1, s3}). Diverifikasi ke
+  //     D1 produksi: dari 8 generate terakhir, `p.hookType` = 0 baris, `p.s1.hookType`
+  //     = 8 baris. Jadi excludedHooks/excludedCtas SELALU kosong sejak awal.
+  //     Sekarang mentoleransi kedua bentuk, sama seperti suggest-storyboard.js yang
+  //     memang sudah benar (`parsedGen?.parts ?? parsedGen?.s1?.parts`).
+  //
+  // (2) GATE `isAutoValue` MEMATIKAN SEMUANYA. Dulu riwayat hanya dibaca kalau
+  //     hook/CTA dibiarkan "Auto". Begitu user memilih sendiri di dropdown —
+  //     yang justru perilaku normal — anti-pengulangan mati total. Sekarang riwayat
+  //     SELALU dibaca; yang berbeda hanya CARA PAKAInya di hookLine/ctaLine:
+  //       • Auto   → hindari TIPE yang baru dipakai.
+  //       • Manual → tipe pilihan user tetap DIPATUHI (jangan pernah ditimpa),
+  //                  tapi AI diwajibkan memvariasikan EKSEKUSInya dan dilarang
+  //                  mengulang kalimat pembuka yang sudah pernah dipakai.
+  //
+  // Gagal-aman dipertahankan: query gagal → array kosong, generate tetap jalan.
   let excludedHooks = [];
   let excludedCtas = [];
-  if (isAutoValue(hookType) || isAutoValue(ctaType)) {
-    try {
-      const histRes = await env.DB.prepare(
-        `SELECT params_json FROM viralframe_generations ORDER BY created_at DESC LIMIT 8`
-      ).all();
-      for (const row of histRes.results ?? []) {
-        let p;
-        try { p = JSON.parse(row.params_json); } catch { continue; }
-        if (p?.hookType && !isAutoValue(p.hookType) && !excludedHooks.includes(p.hookType) && excludedHooks.length < 5) {
-          excludedHooks.push(p.hookType);
-        }
-        if (p?.ctaType && !isAutoValue(p.ctaType) && !excludedCtas.includes(p.ctaType) && excludedCtas.length < 5) {
-          excludedCtas.push(p.ctaType);
-        }
+  let excludedOpenings = [];
+  try {
+    const histRes = await env.DB.prepare(
+      `SELECT params_json, result_json FROM viralframe_generations ORDER BY created_at DESC LIMIT 8`
+    ).all();
+    for (const row of histRes.results ?? []) {
+      let p;
+      try { p = JSON.parse(row.params_json); } catch { continue; }
+      const s1 = p?.s1 ?? p ?? {};
+      const hk = s1.hookType;
+      const ct = s1.ctaType;
+      if (hk && !isAutoValue(hk) && !excludedHooks.includes(hk) && excludedHooks.length < 5) excludedHooks.push(hk);
+      if (ct && !isAutoValue(ct) && !excludedCtas.includes(ct) && excludedCtas.length < 5) excludedCtas.push(ct);
+
+      // Kalimat pembuka NYATA dari Part pertama — sinyal jauh lebih kaya daripada
+      // enum tipe hook, dan satu-satunya yang berguna saat user memilih tipe manual.
+      if (row.result_json && excludedOpenings.length < 8) {
+        try {
+          const r = JSON.parse(row.result_json);
+          const p0 = (r?.parts ?? [])[0];
+          const kalimat = p0?.dialogue?.line ?? p0?.dialog ?? p0?.dialog_karakter ?? '';
+          const bersih = String(kalimat).trim().slice(0, 120);
+          if (bersih.length > 12 && !excludedOpenings.includes(bersih)) excludedOpenings.push(bersih);
+        } catch { /* baris rusak — lewati, jangan gagalkan generate */ }
       }
-    } catch (err) {
-      console.error('[viralframe ai-generate hook/cta history]', err.message);
     }
+  } catch (err) {
+    console.error('[viralframe ai-generate hook/cta history]', err.message);
   }
 
-  const systemPrompt = buildSystemPrompt({ jumlahPart, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, excludedHooks, excludedCtas, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotPart, cutawayExcludedParts, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec });
+  const systemPrompt = buildSystemPrompt({ jumlahPart, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, excludedHooks, excludedCtas, excludedOpenings, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotPart, cutawayExcludedParts, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec });
   const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahPart, partAssignments, durasiDetik, partDurations, partRoles, cameraDirectives, archetypeNote, regeneratePart, existingParts });
 
   // ── Panggil AI dengan fallback berantai, respons streaming NDJSON ──────────
@@ -1058,6 +1102,45 @@ export async function onRequestPost(context) {
           },
         },
       });
+
+      // ── Catat hasil ke riwayat (Tahap 2, 2026-08-02) ────────────────────────
+      // Sebelumnya Jalur C HANYA MEMBACA viralframe_generations dan tidak pernah
+      // menulis — hasil Part-nya di-stream ke client lalu hilang. Akibatnya
+      // exclusion berbasis kalimat pembuka nyata mustahil untuk jalur ini, dan
+      // riwayat hanya terisi kalau user kebetulan memakai alur paste+validate.
+      //
+      // params_json ditulis dengan bentuk `{s1, s3}` — SAMA PERSIS seperti yang
+      // ditulis frontend — supaya satu pembaca melayani semua penulis. JANGAN
+      // menciptakan bentuk ketiga; ketidakcocokan bentuk persis itulah yang
+      // membuat excludedHooks mati diam-diam sejak awal.
+      //
+      // Dijalankan SETELAH send() sukses dan tidak di-await oleh response, jadi
+      // tidak menambah wall-clock. Gagal tulis TIDAK boleh membatalkan hasil yang
+      // sudah diterima user — efeknya cuma variasi berikutnya kurang terinformasi.
+      // Mode regenerate SATU Part sengaja TIDAK dicatat: hasilnya cuma 1 Part
+      // pengganti, bukan video utuh. Mencatatnya akan mengotori riwayat dengan
+      // baris yang Part-pertamanya bukan Hook, sehingga kalimat pembuka yang
+      // di-exclude jadi salah.
+      if (regeneratePart == null) {
+        try {
+          await env.DB.prepare(
+            `INSERT INTO viralframe_generations (property_id, params_json, master_prompt, result_json)
+             VALUES (?, ?, ?, ?)`
+          ).bind(
+            propertyId,
+            JSON.stringify({
+              s1: { hookType, ctaType, tone, visualStyle, aiTool, platform },
+              s3: { karakter_id: Number.isInteger(karakterId) ? karakterId : null },
+              sumber: 'ai_generate',
+              rulebook_version: RULEBOOK_VERSION,
+            }),
+            null,
+            JSON.stringify({ parts: enrichedParts }),
+          ).run();
+        } catch (err) {
+          console.error('[ai-generate] simpan riwayat', err.message);
+        }
+      }
     } catch (err) {
       console.error('[ai-generate] stream', err.message);
       send({ done: true, error: 'Terjadi kesalahan internal saat generate. Coba lagi.' });
