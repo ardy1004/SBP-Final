@@ -1,74 +1,47 @@
-// Validator JSON Scene hasil AI eksternal — ViralFrame Fase V4b.
+// Validator JSON Part hasil AI eksternal — ViralFrame Part-as-Generate-Unit (refactor 2026-08-01).
 // NON-BLOCKING: hanya JSON invalid (Step A) & field wajib hilang (Step B) = hard error.
-// Sisanya (jumlah scene, field scene kosong, word_count, char limit) = warning saja.
+// Sisanya (jumlah Part, field kosong, word_count, char limit) = warning saja.
+//
+// ─── REFACTOR 2026-08-01 ───────────────────────────────────────────────────
+// Skema output BLOK 5 (masterPromptCompiler.ts, Agent 3 Gelombang 2) berubah dari
+// `data.scenes[]` (1 scene = 1 foto) menjadi `data.parts[]` (1 Part = 1 generate
+// call, `cuts[]` di dalamnya adalah potongan visual DI DALAM Part itu). Field
+// tunggal `ai_ready_prompt` per scene TIDAK ADA lagi di skema baru — Part
+// menyimpan field terstruktur (`dialog`, `cuts[]`, `reference_images[]`, dst),
+// jadi `partPromptText()` di bawah merangkainya jadi SATU blok teks siap-tempel
+// per Part (menggantikan peran `promptToText(ai_ready_prompt)` lama).
 
-import { AI_TOOLS, getLipsync, isNativeAudioTool, getClipMaxSec } from './options';
+import { AI_TOOLS, getLipsync, isNativeAudioTool, getClipMaxSec, MAX_REF_IMAGES_PER_PART, type PartDef } from './options';
 
-/**
- * Prompt terstruktur untuk tool ber-audio native (Veo 3.x / Google Flow).
- * `dialogue.line` adalah jalur audio native — tanpa itu videonya bisu.
- */
-export interface VeoPrompt {
-  shot?: string;
-  subject?: string;
+export interface ParsedCut {
+  t?: string;
+  photo?: string;
   action?: string;
-  scene?: string;
-  camera_movement?: string;
-  lighting?: string;
-  mood?: string;
-  style?: string;
-  dialogue?: { speaker?: string; language?: string; line?: string; voice?: string; delivery?: string };
-  audio?: string;
-  /** Beat bertimecode opsional (Fase 6, riset resmi Veo 3.1) — environment/foto SAMA di
-   * semua elemen, hanya aksi/kamera yang berubah per timecode. Wajib untuk scene > 6 detik
-   * (lihat BLOK 3e masterPromptCompiler.ts), opsional/1-elemen untuk scene lain. */
-  sequences?: { sequence?: number; timestamp?: string; action?: string; audio?: string }[];
-  negative_prompt?: string;
+  camera?: string;
+}
+export interface ParsedDialogue { speaker?: string; language?: string; line?: string; voice?: string; delivery?: string }
+
+export interface ParsedPart {
+  part?: number;
+  role?: string;
   duration_sec?: number;
-  aspect_ratio?: string;
+  vo_duration_sec?: number;
+  reference_images?: string[];
+  cuts?: ParsedCut[];
+  dialog?: string;
+  dialogue?: ParsedDialogue;
+  negative_prompt?: string;
+  on_screen_text?: string[];
+  audio?: string;
+  transition_to_next?: string;
   [k: string]: unknown;
 }
 
-export interface ParsedScene {
-  scene_number?: number;
-  /** Part naratif opsional (Fase 6) — hanya ada bila Master Prompt dikompilasi dengan `parts`. */
-  part_number?: number;
-  role?: string;
-  duration_sec?: number;
-  photo_reference_label?: string;
-  script_narration?: string;
-  word_count?: number;
-  /**
-   * String untuk tool biasa; OBJEK untuk tool ber-audio native (Veo/Flow).
-   * Bentuk string tetap diterima pada tool Veo demi riwayat generation lama
-   * yang tersimpan di `viralframe_generations` sebelum Tahap 2.
-   */
-  ai_ready_prompt?: string | VeoPrompt;
-  /** Bentuk lama Tahap 1 (top-level). Pada skema objek ia pindah ke dalam ai_ready_prompt. */
-  negative_prompt?: string;
-  on_screen_text?: string;
-  transition_to_next?: string;
-}
-
-/** Objek prompt Veo, atau null bila scene ini masih memakai bentuk string. */
-export function asVeoPrompt(p: ParsedScene['ai_ready_prompt']): VeoPrompt | null {
-  return p != null && typeof p === 'object' && !Array.isArray(p) ? (p as VeoPrompt) : null;
-}
-
-/**
- * Teks yang benar-benar ditempel user ke tool video. Objek di-serialize apa adanya —
- * Veo/Flow menerima prompt berformat JSON sebagai teks, dan justru lebih patuh
- * dibanding paragraf bebas.
- */
-export function promptToText(p: ParsedScene['ai_ready_prompt']): string {
-  if (p == null) return '';
-  return typeof p === 'string' ? p : JSON.stringify(p, null, 2);
-}
 export interface ParsedJSON {
   video_metadata?: Record<string, unknown>;
   global_style?: Record<string, unknown>;
   character_sheet?: Record<string, unknown>;
-  scenes?: ParsedScene[];
+  parts?: ParsedPart[];
   production_notes?: {
     caption?: string;
     hashtags?: string[];
@@ -79,13 +52,11 @@ export interface ParsedJSON {
   [k: string]: unknown;
 }
 
-export interface SceneAssignLite { photoId: number | null; label: string }
 export interface ValidateExpected {
-  sceneCount: number;
+  /** PartDef milik user (durationSec/voDurationSec/role terkunci) — dipakai
+   * membandingkan invarian jumlah & durasi terhadap jawaban AI eksternal. */
+  parts: PartDef[];
   aiTool: string;
-  scenes: SceneAssignLite[];
-  /** durasi per scene (detik) — untuk cek word_count vs lipsync */
-  durations: number[];
 }
 
 export interface ValidateResult {
@@ -95,9 +66,47 @@ export interface ValidateResult {
   warnings: string[];
 }
 
-const REQUIRED_TOP = ['video_metadata', 'global_style', 'character_sheet', 'scenes', 'production_notes'] as const;
+const REQUIRED_TOP = ['video_metadata', 'global_style', 'character_sheet', 'parts', 'production_notes'] as const;
 
-export function validateSceneJson(raw: string, expected: ValidateExpected): ValidateResult {
+/**
+ * Teks siap-tempel untuk SATU Part (1 Part = 1 generate call), dirangkai dari
+ * field terstruktur BLOK 5 — pengganti `promptToText(ai_ready_prompt)` skema
+ * scene lama (yang punya satu field string/objek tunggal). Dipakai baik oleh
+ * validator (cek panjang vs char limit tool) maupun PartCards (tombol Copy).
+ */
+export function partPromptText(p: ParsedPart): string {
+  const L: string[] = [];
+  if (Array.isArray(p.reference_images) && p.reference_images.length > 0) {
+    L.push('REFERENCE IMAGES:');
+    p.reference_images.forEach((f, i) => L.push(`${i + 1}. ${f}`));
+    L.push('');
+  }
+  if (Array.isArray(p.cuts) && p.cuts.length > 0) {
+    for (const c of p.cuts) {
+      L.push(`${c.t ?? ''} — ${c.photo ?? ''}: ${c.action ?? ''}${c.camera ? ` (camera: ${c.camera})` : ''}`.trim());
+    }
+    L.push('');
+  }
+  if (p.dialog) L.push(`Dialog/Narasi: ${p.dialog}`);
+  if (p.dialogue?.line) L.push(`Dialogue line (audio native): ${p.dialogue.line}`);
+  if (p.audio) L.push(`Audio: ${p.audio}`);
+  if (Array.isArray(p.on_screen_text) && p.on_screen_text.length > 0) L.push(`On-screen text (editor): ${p.on_screen_text.join(' / ')}`);
+  if (p.transition_to_next) L.push(`Transisi: ${p.transition_to_next}`);
+  if (p.negative_prompt) L.push(`Negative prompt: ${p.negative_prompt}`);
+  return L.join('\n').trim();
+}
+
+/** Σ durasi cut dari field "t" (mis. "0-4s", "4-7s") — dipakai memverifikasi
+ * invarian Σ durasi cut = duration_sec Part terhadap jawaban AI eksternal.
+ * Toleran terhadap format t yang tidak konsisten (kembalikan 0 bila tak terparse). */
+function sumDurasiDariT(cuts: ParsedCut[]): number {
+  return cuts.reduce((s, c) => {
+    const m = /(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/.exec(c.t ?? '');
+    return s + (m ? Math.max(0, parseFloat(m[2]) - parseFloat(m[1])) : 0);
+  }, 0);
+}
+
+export function validatePartJson(raw: string, expected: ValidateExpected): ValidateResult {
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -128,113 +137,82 @@ export function validateSceneJson(raw: string, expected: ValidateExpected): Vali
       errors.push(`Field wajib "${key}" tidak ditemukan di JSON.`);
     }
   }
-  if (!Array.isArray(parsed.scenes)) {
-    errors.push('Field "scenes" harus berupa array.');
+  if (!Array.isArray(parsed.parts)) {
+    errors.push('Field "parts" harus berupa array.');
   }
-  // Hard error → stop, jangan lanjut cek scene.
   if (errors.length > 0) {
     return { ok: false, data: null, errors, warnings };
   }
 
-  const scenes = parsed.scenes ?? [];
+  const parts = parsed.parts ?? [];
 
-  // ── Step C — jumlah scene (warning) ──
-  if (scenes.length !== expected.sceneCount) {
-    warnings.push(`Jumlah scene tidak sesuai. Diharapkan ${expected.sceneCount}, dapat ${scenes.length}.`);
+  // ── Step C — jumlah Part (warning) ──
+  if (parts.length !== expected.parts.length) {
+    warnings.push(`Jumlah Part tidak sesuai. Diharapkan ${expected.parts.length}, dapat ${parts.length}.`);
   }
 
   const charLimit = AI_TOOLS.find(t => t.value === expected.aiTool)?.charLimit ?? 1000;
   const nativeAudio = isNativeAudioTool(expected.aiTool);
   const clipMax = getClipMaxSec(expected.aiTool);
 
-  scenes.forEach((sc, i) => {
-    // Pakai scene_number kalau ada & valid (1..sceneCount) untuk mengambil durasi yang
-    // BENAR — sebelumnya selalu dari posisi array (i+1), jadi scene yang di-skip/reorder
-    // AI (lihat warning Step C bila jumlah scene tak sesuai) membuat SEMUA cek word-count
-    // & lipsync sesudahnya salah sasaran (audit 2026-07-28).
-    const declared = Number(sc.scene_number);
-    const n = Number.isInteger(declared) && declared >= 1 && declared <= expected.sceneCount ? declared : i + 1;
-    // ── Step D — field scene tidak kosong (warning) ──
-    if (!sc.script_narration?.toString().trim()) warnings.push(`Scene ${n}: script_narration kosong.`);
-    if (!promptToText(sc.ai_ready_prompt).trim()) warnings.push(`Scene ${n}: ai_ready_prompt kosong.`);
-    if (!sc.photo_reference_label?.toString().trim()) warnings.push(`Scene ${n}: photo_reference_label kosong.`);
-    if (!sc.transition_to_next?.toString().trim()) warnings.push(`Scene ${n}: transition_to_next kosong.`);
+  parts.forEach((p, i) => {
+    // Pakai "part" (nomor) kalau ada & valid — sama alasannya dengan scene_number
+    // lama: AI yang men-skip/reorder Part akan membuat cek berikutnya salah sasaran
+    // kalau hanya mengandalkan posisi array.
+    const declared = Number(p.part);
+    const n = Number.isInteger(declared) && declared >= 1 && declared <= expected.parts.length ? declared : i + 1;
+    const exp = expected.parts[n - 1];
 
-    // ── Step E — word_count vs lipsync (toleransi +10%) ──
-    const durasi = expected.durations[n - 1] ?? expected.durations[0] ?? 6;
-    const maxWords = getLipsync(durasi).maxWords;
-    const wc = Number(sc.word_count) || (sc.script_narration ? sc.script_narration.trim().split(/\s+/).length : 0);
+    // ── Step D — field Part tidak kosong (warning) ──
+    if (!Array.isArray(p.cuts) || p.cuts.length === 0) warnings.push(`Part ${n}: cuts kosong.`);
+    if (!Array.isArray(p.reference_images) || p.reference_images.length === 0) warnings.push(`Part ${n}: reference_images kosong.`);
+    if (Array.isArray(p.reference_images) && p.reference_images.length > MAX_REF_IMAGES_PER_PART) {
+      warnings.push(`Part ${n}: reference_images (${p.reference_images.length}) melebihi kuota MAX_REF_IMAGES_PER_PART (${MAX_REF_IMAGES_PER_PART}).`);
+    }
+    if (!p.dialog?.toString().trim()) warnings.push(`Part ${n}: dialog kosong.`);
+    if (!p.transition_to_next?.toString().trim()) warnings.push(`Part ${n}: transition_to_next kosong.`);
+
+    // ── Step E — word_count (dialog) vs lipsync dari voDurationSec (toleransi +10%) ──
+    const voDurasi = exp?.voDurationSec ?? Number(p.vo_duration_sec) ?? 8;
+    const maxWords = getLipsync(voDurasi).maxWords;
+    const wc = p.dialog ? p.dialog.trim().split(/\s+/).filter(Boolean).length : 0;
     if (wc > Math.ceil(maxWords * 1.1)) {
-      warnings.push(`Scene ${n}: word_count ${wc} melebihi target ${maxWords} kata (durasi ${durasi}s).`);
+      warnings.push(`Part ${n}: dialog ${wc} kata melebihi target ${maxWords} kata (VO ${voDurasi}s).`);
     }
 
-    // ── Step F — panjang ai_ready_prompt vs char limit (warning) ──
-    const prompt = promptToText(sc.ai_ready_prompt);
-    const promptLen = prompt.length;
+    // ── Step F — panjang prompt gabungan Part vs char limit tool (warning) ──
+    const promptLen = partPromptText(p).length;
     if (promptLen > charLimit) {
-      warnings.push(`Scene ${n}: ai_ready_prompt ${promptLen} karakter melebihi batas tool (±${charLimit}).`);
+      warnings.push(`Part ${n}: prompt gabungan ${promptLen} karakter melebihi batas tool (±${charLimit}).`);
     }
 
-    // ── Step G — audio native (Veo/Flow): dialog HARUS ada di dalam prompt ──
-    // Tanpa ini video keluar BISU walau script_narration terisi rapi, karena Veo
-    // hanya mengucapkan teks yang ada di dalam prompt. Ini temuan utama audit
-    // ViralFrame 2026-07-26.
-    if (nativeAudio && promptLen > 0) {
-      const narasi = (sc.script_narration ?? '').toString().trim();
-      // Bandingkan longgar: abaikan beda tanda baca/kapital/spasi, agar perbedaan
-      // sepele tidak memicu alarm palsu tapi terjemahan/ringkasan tetap tertangkap.
-      const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-      const cocok = (dialog: string) => {
-        const a = norm(dialog), b = norm(narasi);
-        return !a || !b || a.includes(b) || b.includes(a);
-      };
-
-      const veo = asVeoPrompt(sc.ai_ready_prompt);
-      if (veo) {
-        // Bentuk objek (Tahap 2) — dialog punya field sendiri, jauh lebih andal
-        // daripada menebak lewat tanda kutip.
-        const line = (veo.dialogue?.line ?? '').toString().trim();
-        if (!line) {
-          warnings.push(`Scene ${n}: ai_ready_prompt.dialogue.line kosong — video akan BISU di Veo/Flow.`);
-        } else if (!cocok(line)) {
-          warnings.push(`Scene ${n}: dialogue.line berbeda dari script_narration — yang terucap di video akan beda dari naskah.`);
-        }
-        if (!veo.negative_prompt?.toString().trim()) {
-          warnings.push(`Scene ${n}: ai_ready_prompt.negative_prompt kosong — Veo/Flow rawan membakar subtitle ke dalam frame.`);
-        }
-        if (clipMax != null && Number(veo.duration_sec) > clipMax) {
-          warnings.push(`Scene ${n}: ai_ready_prompt.duration_sec ${veo.duration_sec}s melebihi batas ${clipMax}s per klip.`);
-        }
-        // ── Step G1 — sequences[] (Fase 6): wajib untuk scene >6s, sebelumnya TIDAK
-        // pernah dicek sama sekali walau BLOK 3e masterPromptCompiler.ts mewajibkannya
-        // (audit 2026-07-28). Non-blocking (warning), sama seperti field lain di sini.
-        if (durasi > 6) {
-          if (!Array.isArray(veo.sequences) || veo.sequences.length === 0) {
-            warnings.push(`Scene ${n}: ai_ready_prompt.sequences kosong padahal durasi ${durasi}s (>6s) — BLOK 3e mewajibkan beat bertimecode untuk scene sepanjang ini.`);
-          } else {
-            const rusak = veo.sequences.some(sq => !sq.timestamp?.toString().trim() || !sq.action?.toString().trim());
-            if (rusak) warnings.push(`Scene ${n}: ada elemen sequences tanpa "timestamp" atau "action" terisi.`);
-          }
-        } else if (Array.isArray(veo.sequences) && veo.sequences.some(sq => !sq.timestamp?.toString().trim() || !sq.action?.toString().trim())) {
-          warnings.push(`Scene ${n}: ada elemen sequences tanpa "timestamp" atau "action" terisi.`);
-        }
-      } else {
-        // Bentuk string — riwayat lama atau AI yang mengabaikan skema objek.
-        const kutipan = prompt.match(/"([^"]{4,})"|“([^”]{4,})”/);
-        if (!kutipan) {
-          warnings.push(`Scene ${n}: ai_ready_prompt tidak memuat dialog dalam tanda kutip — video akan BISU di Veo/Flow (audio native hanya mengucapkan teks di dalam prompt).`);
-        } else if (narasi && !cocok(kutipan[1] ?? kutipan[2] ?? '')) {
-          warnings.push(`Scene ${n}: dialog di ai_ready_prompt tidak cocok dengan script_narration — yang terucap di video akan beda dari naskah.`);
-        }
-        if (!sc.negative_prompt?.toString().trim()) {
-          warnings.push(`Scene ${n}: negative_prompt kosong — Veo/Flow rawan membakar subtitle ke dalam frame.`);
-        }
+    // ── Step F2 — Σ durasi cut (dari field "t") vs duration_sec Part (invarian) ──
+    if (exp && Array.isArray(p.cuts) && p.cuts.length > 0) {
+      const sumCuts = sumDurasiDariT(p.cuts);
+      if (sumCuts > 0 && Math.abs(sumCuts - exp.durationSec) > 1) {
+        warnings.push(`Part ${n}: Σ durasi cut dari field "t" (${sumCuts}s) tidak sama dengan durasi Part (${exp.durationSec}s).`);
       }
     }
 
-    // ── Step H — durasi melebihi batas satu klip tool ──
-    if (clipMax != null && durasi > clipMax) {
-      warnings.push(`Scene ${n}: durasi ${durasi}s melebihi batas ${clipMax}s per klip untuk tool ini — perlu disambung lewat fitur Extend.`);
+    // ── Step G — audio native (Veo/Flow): dialog HARUS ada di dialogue.line ──
+    if (nativeAudio) {
+      const narasi = (p.dialog ?? '').toString().trim();
+      const line = (p.dialogue?.line ?? '').toString().trim();
+      const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const cocok = (a: string, b: string) => { const A = norm(a), B = norm(b); return !A || !B || A.includes(B) || B.includes(A); };
+      if (!line) {
+        warnings.push(`Part ${n}: dialogue.line kosong — video akan BISU di Veo/Flow.`);
+      } else if (narasi && !cocok(line, narasi)) {
+        warnings.push(`Part ${n}: dialogue.line berbeda dari dialog — yang terucap di video akan beda dari naskah.`);
+      }
+      if (!p.negative_prompt?.toString().trim()) {
+        warnings.push(`Part ${n}: negative_prompt kosong — Veo/Flow rawan membakar subtitle ke dalam frame.`);
+      }
+    }
+
+    // ── Step H — durasi Part melebihi batas satu klip tool ──
+    if (clipMax != null && exp && exp.durationSec > clipMax) {
+      warnings.push(`Part ${n}: durasi ${exp.durationSec}s melebihi batas ${clipMax}s per klip untuk tool ini — perlu disambung lewat fitur Extend.`);
     }
   });
 

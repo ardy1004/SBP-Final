@@ -15,6 +15,7 @@ import {
   REALISM_BANNED_QUALITY_PHRASES as SHARED_REALISM_BANNED_QUALITY_PHRASES,
   RULEBOOK_VERSION as SHARED_RULEBOOK_VERSION,
   namaFileKarakter as sharedNamaFileKarakter,
+  MAX_REF_IMAGES_PER_PART as SHARED_MAX_REF_IMAGES_PER_PART,
 } from '../../../../../functions/_lib/viralframe-shared.js';
 
 export interface Opt { value: string; label: string }
@@ -156,104 +157,257 @@ export function sceneRole(index: number, total: number): 'Hook' | 'Body' | 'CTA'
   return 'Body';
 }
 
-// ─── Part — pengelompokan naratif di atas Scene (Fase 6) ──────────────────────
-// Part TIDAK mengubah mekanisme Scene (tetap 1 foto = 1 panggilan generate AI).
-// Part hanya membawa role di level yang lebih tinggi + label naratif opsional,
-// dengan mengonsumsi N scene berurutan dari array `scenes[]` yang sudah ada.
-// Opsional & backward-compatible: draft/riwayat lama tanpa field ini otomatis
-// fallback ke sceneRole() posisi-based di atas — lihat sceneRoleFromParts().
+// ─── Part — unit generate (refactor 2026-08-01) ────────────────────────────────
+// Model LAMA (Fase ≤6): Part mengelompokkan N `scene` berurutan dari array
+// `scenes[]` flat; 1 foto = 1 panggilan generate. Ternyata keliru — alur nyata
+// user: prompt di-paste ke Google Flow dengan BEBERAPA foto referensi sekaligus
+// (maks 7 didukung Flow, kita pakai `MAX_REF_IMAGES_PER_PART = 5` sebagai margin).
+// Konsekuensinya: **1 Part = 1 generate call**, dan `cuts[]` adalah potongan
+// (cut) DI DALAM satu generate itu — bukan lagi array `scenes[]` terpisah.
+//
+// Draft/riwayat lama (`{sceneCount, durationMode, uniformDuration/manualDurations,
+// scenes[], parts[] ber-sceneCount}`) TIDAK dibaca langsung oleh state baru —
+// WAJIB dilewatkan konversiDraftLama() dulu (lihat di bawah) saat applyConfig()
+// merehidrasi draft/riwayat, karena params_json lama sudah tersimpan di D1
+// (viralframe_generations) dan tidak boleh membuat halaman rusak.
+export interface CutDef {
+  /** id property_images — foto sumber cut ini. */
+  photoId: number;
+  /** Label ruangan foto ini (disalin dari label_ruangan saat cut dibuat, supaya
+   * nama file ZIP & rujukan di prompt tidak perlu join balik ke daftar foto). */
+  label: string;
+  /** Durasi cut ini (detik). Σ durasiDetik seluruh cuts dalam 1 Part = durationSec Part. */
+  durasiDetik: number;
+  /** Aksi/kamera singkat opsional untuk cut ini, mis. "pan kiri ke kanan". */
+  aksi?: string;
+}
+
 export interface PartDef {
   role: 'Hook' | 'Body' | 'CTA';
-  sceneCount: number;   // jumlah scene berurutan (dari scenes[]) milik part ini
-  label?: string;       // label naratif opsional, mis. "Interior Tour"
-  /** Fase 2 — durasi TOTAL part ini (detik). Sumber kebenaran durasi saat
-   * durationMode === 'part'; durasi tiap scene di dalamnya diturunkan dari sini
-   * lewat partDurationsToScenes(). Opsional agar Part lama (tanpa durasi) tetap
-   * valid di mode 'uniform'/'manual'. */
-  durationSec?: number;
-  /** Fase 2 — kolam foto milik part ini (id property_images), diisi AI Rancang
-   * Storyboard. Tiap scene di dalam part TETAP memakai 1 foto (batas teknis
-   * 1 foto = 1 generate call); ini hanya menyatakan foto mana saja yang
-   * "milik" part. Penyimpanan kanonik per scene tetap scenes[].photoId. */
-  photoIds?: number[];
+  /** Durasi TOTAL part ini (detik) — satu panggilan generate. WAJIB ≤ getClipMaxSec(aiTool). */
+  durationSec: number;
+  /** Durasi voiceover di dalam part ini (detik). Bisa < durationSec (sisa untuk
+   * hook text/transisi/end card tanpa VO) — WAJIB ≤ durationSec, divalidasi hilir. */
+  voDurationSec: number;
+  /** Foto referensi yang DILAMPIRKAN ke generate call ini (id property_images),
+   * unik, urutan = urutan lampir. Foto KARAKTER ikut dihitung ke kuota
+   * MAX_REF_IMAGES_PER_PART oleh konsumen (bukan disimpan di sini). */
+  refPhotoIds: number[];
+  /** Potongan (cut) di dalam generate call ini — beberapa cut boleh berbagi 1 foto. */
+  cuts: CutDef[];
+  /** Label naratif opsional, mis. "Interior Tour". */
+  label?: string;
+  /** Alasan singkat AI memilih susunan ini (Tahap 2 — AI Rancang Storyboard bervisi). */
+  rationale?: string;
 }
 
-/** Jumlah scene total yang diminta oleh rancangan Part (0 bila tidak ada Part). */
-export function totalSceneCountOfParts(parts?: PartDef[]): number {
+/** Σ durationSec seluruh Part (0 bila tidak ada Part). */
+export function totalDurationOfParts(parts?: PartDef[]): number {
   if (!Array.isArray(parts)) return 0;
-  return parts.reduce((s, p) => s + (Number.isInteger(p.sceneCount) && p.sceneCount > 0 ? p.sceneCount : 0), 0);
+  return parts.reduce((s, p) => s + (Number.isFinite(p.durationSec) && p.durationSec > 0 ? p.durationSec : 0), 0);
 }
 
-/** Batas durasi satu scene yang benar-benar didukung getLipsync() — di luar ini
- * nilainya di-clamp diam-diam, jadi lebih baik di-clamp terang-terangan di sini. */
-const SCENE_DUR_MIN = 2;
-const SCENE_DUR_MAX = 30;
+/** Total jumlah cut lintas semua Part (dipakai UI/validasi ringkas). */
+export function totalCutCountOfParts(parts?: PartDef[]): number {
+  if (!Array.isArray(parts)) return 0;
+  return parts.reduce((s, p) => s + (Array.isArray(p.cuts) ? p.cuts.length : 0), 0);
+}
+
+/** Σ durasiDetik satu daftar cut — dibandingkan dengan durationSec Part-nya untuk
+ * memvalidasi invarian "Σ durasi cut = durasi Part" (dipakai Tahap 3 Catatan Produksi). */
+export function sumDurasiCuts(cuts: CutDef[] | undefined): number {
+  if (!Array.isArray(cuts)) return 0;
+  return cuts.reduce((s, c) => s + (Number.isFinite(c.durasiDetik) && c.durasiDetik > 0 ? c.durasiDetik : 0), 0);
+}
 
 /**
- * Fase 2 — turunkan durasi PER SCENE dari durasi per Part.
- * durationSec tiap Part dibagi rata ke sceneCount-nya; sisa pembagian
- * dibagikan satu-satu ke scene-scene AWAL part itu (14s / 3 scene → 5,5,4).
- * Part tanpa durationSec memakai `fallbackPerScene` per scene-nya.
- * Selalu mengembalikan array sepanjang `total` — scene di luar jangkauan Part
- * (parts belum sinkron dengan total) diisi fallback, bukan undefined.
+ * Distribusi durasi rata ke N cut dari total durasi (fallback/reset — cuts[].durasiDetik
+ * dari AI atau editan user adalah sumber kanonik, ini HANYA dipakai saat perlu
+ * menurunkan durasi cut baru, mis. reset manual atau konversi draft lama).
+ * Sisa pembagian dibagikan satu-satu ke cut-cut AWAL (10s / 3 cut → 4,3,3).
  */
-export function partDurationsToScenes(
-  parts: PartDef[] | undefined,
-  total: number,
-  fallbackPerScene = 8,
-): number[] {
-  const clamp = (n: number) => Math.max(SCENE_DUR_MIN, Math.min(SCENE_DUR_MAX, Math.round(n)));
-  const out: number[] = Array.from({ length: Math.max(0, total) }, () => clamp(fallbackPerScene));
-  if (!Array.isArray(parts)) return out;
+export function distribusiDurasiCut(durationSec: number, jumlahCut: number): number[] {
+  const n = Math.max(0, Math.floor(jumlahCut));
+  if (n === 0) return [];
+  const total = Number.isFinite(durationSec) && durationSec > 0 ? durationSec : n;
+  const dasar = Math.floor(total / n);
+  const sisa = total - dasar * n;
+  return Array.from({ length: n }, (_, i) => dasar + (i < sisa ? 1 : 0));
+}
 
-  let cursor = 0;
-  for (const p of parts) {
-    const n = Number.isInteger(p.sceneCount) && p.sceneCount > 0 ? p.sceneCount : 0;
-    if (n === 0) continue;
-    const totalPart = Number.isFinite(p.durationSec) && (p.durationSec as number) > 0
-      ? (p.durationSec as number)
-      : fallbackPerScene * n;
-    const dasar = Math.floor(totalPart / n);
-    const sisa = totalPart - dasar * n;
-    for (let i = 0; i < n; i++) {
-      const idx = cursor + i;
-      if (idx >= out.length) break;
-      out[idx] = clamp(dasar + (i < sisa ? 1 : 0));
+// ─── Konversi bentuk lama → Part baru (kompatibilitas mundur wajib) ────────────
+
+/** Bentuk lama satu scene di array `scenes[]` flat (Fase ≤6). */
+export interface DraftLamaScene { photoId?: number | null; label?: string }
+
+/** Bentuk lama PartDef (Fase 6) — ber-`sceneCount`, tanpa `cuts[]`. */
+export interface DraftLamaPart {
+  role: 'Hook' | 'Body' | 'CTA';
+  sceneCount: number;
+  label?: string;
+  durationSec?: number;
+}
+
+/** Subset Step1State lama yang relevan untuk konversi (longgar/opsional supaya
+ * draft dari versi manapun — termasuk sebelum Fase 6 tanpa `parts` sama sekali —
+ * tetap diterima tanpa error). */
+export interface DraftLamaS1 {
+  durationMode?: 'uniform' | 'manual' | 'part' | string;
+  uniformDuration?: number;
+  manualDurations?: number[];
+  parts?: DraftLamaPart[];
+}
+
+/**
+ * Konversi bentuk lama `{s1: {sceneCount, durationMode, uniformDuration,
+ * manualDurations, parts?}, scenes: DraftLamaScene[]}` (Fase ≤6, tersimpan di
+ * `params_json` D1 `viralframe_generations` & draft `localStorage`) menjadi
+ * `PartDef[]` model baru (1 Part = 1 generate call, `cuts[]` di dalamnya).
+ *
+ * WAJIB dipanggil `applyConfig()` saat merehidrasi draft/riwayat lama — TIDAK
+ * boleh membuat halaman rusak/crash untuk `params_json` lama apa pun.
+ *
+ * Aturan konversi:
+ * 1. Durasi per scene lama dihitung ulang dari `durationMode` (manual → per-scene
+ *    apa adanya; part lama → didistribusikan dari durationSec Part via
+ *    distribusiDurasiCut(); selain itu/fallback → uniformDuration rata ke semua scene).
+ * 2. Pengelompokan: kalau `s1.parts` lama valid (Σ sceneCount === jumlah scene),
+ *    pakai pengelompokan & role-nya. Kalau tidak, SEMUA scene dianggap satu
+ *    kelompok (role ditentukan di langkah 4).
+ * 3. Tiap kelompok dipecah lagi jadi beberapa Part BARU secukupnya supaya patuh
+ *    `MAX_REF_IMAGES_PER_PART` (maks foto per Part) DAN `clipMaxSec` (maks durasi
+ *    per Part, dari `getClipMaxSec(aiTool)` — fallback 10 detik/google_flow bila
+ *    `aiTool` tak dikenal) — batas mana pun yang lebih dulu tercapai.
+ * 4. Kalau tidak ada `parts` lama valid, Part pertama hasil pecahan diberi role
+ *    'Hook' dan Part terakhir 'CTA' (meniru sceneRole() posisi lama); sisanya 'Body'.
+ * 5. Scene tanpa `photoId` (belum diisi foto) DILEWATI — tidak menghasilkan cut
+ *    kosong. Part yang jadi kosong akibat ini (semua scene-nya belum berfoto)
+ *    ikut dilewati (tidak masuk hasil).
+ * 6. `refPhotoIds` Part = photoId unik dari cuts miliknya (foto karakter TIDAK
+ *    disertakan di sini — itu ditambahkan konsumen hilir saat menghitung kuota
+ *    gabungan MAX_REF_IMAGES_PER_PART).
+ * 7. `voDurationSec` awal = `durationSec` (asumsi VO memenuhi seluruh durasi;
+ *    user bisa mengoreksi di UI baru).
+ */
+export function konversiDraftLama(
+  s1: DraftLamaS1,
+  scenes: DraftLamaScene[],
+  aiTool?: string,
+): PartDef[] {
+  const total = Array.isArray(scenes) ? scenes.length : 0;
+  if (total === 0) return [];
+
+  // Batas durasi satu generate call untuk tool ini — dipakai DUA kali: memotong
+  // durasi tiap cut (di bawah) dan mengelompokkan cut jadi Part (langkah 3).
+  const clipMaxKonv = (aiTool ? sharedGetClipMaxSec(aiTool) : null) ?? 10;
+
+  // 1) Durasi per scene ala model lama.
+  const durasiPerSceneMentah: number[] = (() => {
+    if (s1.durationMode === 'manual' && Array.isArray(s1.manualDurations)) {
+      const fallback = Number.isFinite(s1.uniformDuration) && (s1.uniformDuration as number) > 0
+        ? (s1.uniformDuration as number) : 8;
+      return Array.from({ length: total }, (_, i) => {
+        const d = s1.manualDurations![i];
+        return Number.isFinite(d) && d > 0 ? d : fallback;
+      });
     }
-    cursor += n;
+    if (s1.durationMode === 'part' && Array.isArray(s1.parts)) {
+      const sumSceneCount = s1.parts.reduce((sum, p) => sum + (p.sceneCount || 0), 0);
+      if (sumSceneCount === total) {
+        const fallback = Number.isFinite(s1.uniformDuration) && (s1.uniformDuration as number) > 0
+          ? (s1.uniformDuration as number) : 8;
+        const out: number[] = [];
+        for (const p of s1.parts) {
+          const n = p.sceneCount || 0;
+          if (n <= 0) continue;
+          const totalPart = Number.isFinite(p.durationSec) && (p.durationSec as number) > 0
+            ? (p.durationSec as number) : fallback * n;
+          out.push(...distribusiDurasiCut(totalPart, n));
+        }
+        if (out.length === total) return out;
+      }
+    }
+    const u = Number.isFinite(s1.uniformDuration) && (s1.uniformDuration as number) > 0
+      ? (s1.uniformDuration as number) : 8;
+    return Array.from({ length: total }, () => u);
+  })();
+
+  // Draft lama bisa memuat scene lebih panjang dari batas klip tool yang dipakai
+  // sekarang (mis. scene 10 detik pada veo3 yang batasnya 8). Satu cut TIDAK bisa
+  // dipecah lagi jadi Part terpisah, jadi durasinya DIPOTONG ke batas — kalau
+  // dibiarkan, hasil konversi langsung melanggar invarian "durasi Part ≤ clipMax"
+  // dan user mendapat draft yang ditolak validasi tanpa cara memperbaikinya.
+  const durasiPerScene: number[] = durasiPerSceneMentah.map(d => Math.min(d, clipMaxKonv));
+
+  // 2) Kelompok awal: pakai `parts` lama kalau valid, else satu kelompok besar.
+  interface Grup { role: 'Hook' | 'Body' | 'CTA'; label?: string; mulai: number; akhir: number }
+  const sumSceneCountParts = Array.isArray(s1.parts) ? s1.parts.reduce((s, p) => s + (p.sceneCount || 0), 0) : 0;
+  const partsLamaValid = Array.isArray(s1.parts) && s1.parts.length > 0 && sumSceneCountParts === total;
+
+  let groups: Grup[];
+  if (partsLamaValid) {
+    groups = [];
+    let cursor = 0;
+    for (const p of s1.parts!) {
+      const n = p.sceneCount || 0;
+      if (n > 0) groups.push({ role: p.role, label: p.label, mulai: cursor, akhir: cursor + n - 1 });
+      cursor += n;
+    }
+  } else {
+    groups = [{ role: 'Body', mulai: 0, akhir: total - 1 }];
   }
-  return out;
-}
 
-/** true bila `parts` valid dipakai untuk scene sejumlah `total` (jumlah sceneCount cocok). */
-export function partsValidForTotal(parts: PartDef[] | undefined, total: number): boolean {
-  return Array.isArray(parts) && parts.length > 0
-    && parts.every(p => Number.isInteger(p.sceneCount) && p.sceneCount > 0)
-    && parts.reduce((sum, p) => sum + p.sceneCount, 0) === total;
-}
+  // 3) Pecah tiap kelompok supaya patuh MAX_REF_IMAGES_PER_PART & clipMaxSec.
+  const partsBaru: PartDef[] = [];
+  for (const g of groups) {
+    let mulai = g.mulai;
+    while (mulai <= g.akhir) {
+      let akhir = mulai;
+      let durTotal = durasiPerScene[mulai] ?? 8;
+      let jumlahFoto = 1;
+      while (
+        akhir + 1 <= g.akhir
+        && jumlahFoto < MAX_REF_IMAGES_PER_PART
+        && durTotal + (durasiPerScene[akhir + 1] ?? 8) <= clipMaxKonv
+      ) {
+        akhir += 1;
+        durTotal += durasiPerScene[akhir] ?? 8;
+        jumlahFoto += 1;
+      }
 
-// Role scene: pakai `parts` kalau valid (jumlah sceneCount = total), else fallback sceneRole() lama.
-export function sceneRoleFromParts(index: number, total: number, parts?: PartDef[]): 'Hook' | 'Body' | 'CTA' {
-  if (partsValidForTotal(parts, total)) {
-    let acc = 0;
-    for (const p of parts!) {
-      if (index < acc + p.sceneCount) return p.role;
-      acc += p.sceneCount;
+      const cuts: CutDef[] = [];
+      const refIds: number[] = [];
+      for (let idx = mulai; idx <= akhir; idx++) {
+        const sc = scenes[idx];
+        if (sc?.photoId == null) continue; // scene belum berfoto — tidak jadi cut kosong
+        cuts.push({ photoId: sc.photoId, label: sc.label || '', durasiDetik: durasiPerScene[idx] ?? 8 });
+        if (!refIds.includes(sc.photoId)) refIds.push(sc.photoId);
+      }
+      if (cuts.length > 0) {
+        partsBaru.push({
+          role: g.role,
+          durationSec: durTotal,
+          voDurationSec: durTotal,
+          refPhotoIds: refIds,
+          cuts,
+          label: g.label,
+        });
+      }
+      mulai = akhir + 1;
     }
   }
-  return sceneRole(index, total);
-}
 
-// Index part (0-based) tempat scene `index` berada, atau -1 bila parts tidak valid/tidak ada.
-export function partIndexForScene(index: number, parts?: PartDef[], total?: number): number {
-  if (!Array.isArray(parts) || parts.length === 0) return -1;
-  if (total != null && !partsValidForTotal(parts, total)) return -1;
-  let acc = 0;
-  for (let i = 0; i < parts.length; i++) {
-    if (index < acc + parts[i].sceneCount) return i;
-    acc += parts[i].sceneCount;
+  // 4) Tanpa `parts` lama valid: koreksi role ujung meniru sceneRole() posisi lama.
+  if (!partsLamaValid && partsBaru.length > 0) {
+    if (partsBaru.length === 1) {
+      partsBaru[0].role = 'Hook';
+    } else {
+      partsBaru[0].role = 'Hook';
+      partsBaru[partsBaru.length - 1].role = 'CTA';
+    }
   }
-  return -1;
+
+  return partsBaru;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -431,6 +585,9 @@ export const EXPRESSION_EN: Record<string, string> = SHARED_EXPRESSION_EN;
 export const isNativeAudioTool: (toolId: string) => boolean = sharedIsNativeAudioTool;
 /** Batas panjang satu klip (detik) untuk tool ini, atau null bila tidak dibatasi. */
 export const getClipMaxSec: (toolId: string) => number | null = sharedGetClipMaxSec;
+/** Batas foto referensi per Part (karakter ikut dihitung). Sumber tunggal:
+ * functions/_lib/viralframe-shared.js — JANGAN duplikasi angkanya di tempat lain. */
+export const MAX_REF_IMAGES_PER_PART: number = SHARED_MAX_REF_IMAGES_PER_PART;
 export const NEGATIVE_PROMPT_VIDEO: string = SHARED_NEGATIVE_PROMPT_VIDEO;
 /** Kosakata realisme fisik kamera (lensa/grain/imperfection) — pengganti frasa kualitas generik. */
 export const REALISM_QUALITY_CUES: string[] = SHARED_REALISM_QUALITY_CUES;
@@ -446,17 +603,22 @@ export const namaFileKarakter: (nama: string) => string = sharedNamaFileKarakter
 // PENTING (requirement Fase V4b): ZIP generation WAJIB memakai sceneFileName() &
 // characterFileName() yang SAMA PERSIS dengan compiler agar nama file di prompt
 // selaras dengan file yang ada di ZIP. Jangan duplikasi logika penamaan di tempat lain.
+// ⚠️ Pemisah GARIS BAWAH (bukan strip) — keputusan refactor 2026-08-01 (rencana
+// "Part-as-Generate-Unit"). Nama file ZIP dilampirkan manual oleh user ke Google
+// Flow; garis bawah terbaca lebih jelas sebagai satu nama utuh (`kamar_tidur.webp`)
+// dibanding strip. Diverifikasi hanya dipakai 3 tempat, semuanya nama file
+// ViralFrame — TIDAK terkait `slugify()` slug URL/SEO backend (jangan disamakan).
 export function slugifyLabel(label: string): string {
   return (label || '')
     .toLowerCase()
-    .replace(/[\s/]+/g, '-')        // spasi & slash → '-'
-    .replace(/[^a-z0-9-]/g, '')     // buang non-alfanumerik selain '-'
-    .replace(/-+/g, '-')            // rapikan '-' beruntun
-    .replace(/^-+|-+$/g, '')        // trim '-' di tepi
+    .replace(/[\s/]+/g, '_')        // spasi & slash → '_'
+    .replace(/[^a-z0-9_]/g, '')     // buang non-alfanumerik selain '_'
+    .replace(/_+/g, '_')            // rapikan '_' beruntun
+    .replace(/^_+|_+$/g, '')        // trim '_' di tepi
     || 'untitled';
 }
 
-// scene01_fasad.webp, scene02_kamar-tidur.webp
+// scene01_fasad.webp, scene02_kamar_tidur.webp
 export function sceneFileName(sceneIndex: number, label: string): string {
   return `scene${String(sceneIndex + 1).padStart(2, '0')}_${slugifyLabel(label)}.webp`;
 }
@@ -464,4 +626,30 @@ export function sceneFileName(sceneIndex: number, label: string): string {
 // character_vina.webp
 export function characterFileName(nama: string): string {
   return `character_${slugifyLabel(nama)}.webp`;
+}
+
+// ─── Penamaan ZIP Foto Berlabel (dipindah dari LabelFotoStep.tsx, Tahap 1) ────
+// Sumber tunggal supaya semua jalur ZIP (Label Foto Step, dan nanti Storyboard
+// per-Part di Tahap 4) memakai penamaan yang SAMA PERSIS.
+export interface ZipSourceImage { id: number; label_ruangan?: string | null }
+
+/** Nama file ZIP per foto: label unik → "fasad.webp"; label dengan >1 foto →
+ *  "fasad1.webp", "fasad2.webp" (urutan sesuai urutan foto). */
+export function buildZipNames(images: ZipSourceImage[]): Map<number, string> {
+  const groups = new Map<string, ZipSourceImage[]>();
+  for (const im of images) {
+    const label = (im.label_ruangan ?? '').trim();
+    if (!label) continue;
+    const arr = groups.get(label) ?? [];
+    arr.push(im);
+    groups.set(label, arr);
+  }
+  const names = new Map<number, string>();
+  for (const [label, arr] of groups) {
+    const slug = slugifyLabel(label);
+    arr.forEach((im, i) => {
+      names.set(im.id, arr.length > 1 ? `${slug}${i + 1}.webp` : `${slug}.webp`);
+    });
+  }
+  return names;
 }

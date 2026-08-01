@@ -10,11 +10,13 @@ import {
 import {
   AI_TOOLS, RATIOS, LANGUAGES, HOOK_TYPES, CTA_TYPES, VISUAL_STYLES,
   TONES, PLATFORMS, PHOTO_LABELS, LANGUAGE_REGISTERS, REGISTER_INSTRUCTION,
-  sceneFileName, characterFileName, AI_TOOL_FORMAT_SPEC,
+  characterFileName, AI_TOOL_FORMAT_SPEC,
   isNativeAudioTool, getClipMaxSec, namaFileKarakter, PLATFORM_BEHAVIOR,
-  sceneRoleFromParts, partsValidForTotal, type PartDef,
-  partDurationsToScenes, totalSceneCountOfParts,
+  totalDurationOfParts,
+  konversiDraftLama, buildZipNames, slugifyLabel, MAX_REF_IMAGES_PER_PART,
   RULEBOOK_VERSION,
+  type PartDef, type ZipSourceImage,
+  type DraftLamaS1, type DraftLamaScene,
 } from './viralframe/options';
 import CharacterStepBase, { type Step3State } from './viralframe/CharacterStep';
 import BacksoundPicker, { backsoundMediaUrl, type BacksoundItem } from './viralframe/BacksoundPicker';
@@ -41,10 +43,10 @@ const PLATFORM_DURASI_VF: Record<string, number> = { tiktok: 8, ig_reels: 8, yt_
 import {
   PLATFORM_OPTIONS, MUSIK_OPTIONS, FOTO_LABEL_OPTIONS,
 } from '../../lib/viralframe-constants';
-import { compileMasterPrompt, compileNaturalPrompt, estimateTokens } from './viralframe/masterPromptCompiler';
-import { validateSceneJson, type ParsedJSON, type ValidateResult } from './viralframe/jsonValidator';
-import SceneCardsBase from './viralframe/SceneCards';
-const SceneCards = memo(SceneCardsBase);
+import { compileMasterPrompt, compileNaturalPrompt, estimateTokens, buildProductionNotes, buildCharacterDescription } from './viralframe/masterPromptCompiler';
+import { validatePartJson, partPromptText, type ParsedJSON, type ValidateResult } from './viralframe/jsonValidator';
+import PartCardsBase from './viralframe/SceneCards';
+const PartCards = memo(PartCardsBase);
 
 // Debounce nilai — dipakai menunda kompilasi Master Prompt saat mengetik (#1).
 function useDebouncedValue<T>(value: T, delay: number): T {
@@ -72,16 +74,6 @@ interface PropertyDetail {
 }
 
 interface Step1State {
-  /** Jumlah scene total. Di mode durasi 'part' field ini DERIVED — ditulis oleh
-   * Part designer (= jumlah sceneCount semua Part), bukan diketik user. Tetap
-   * dipertahankan sebagai satu-satunya angka yang dibaca semua konsumen hilir
-   * (validasi, ZIP, SRT, ketiga jalur prompt-engine). */
-  sceneCount: number;
-  /** 'part' (Fase 2) = durasi disetel per Part, durasi scene diturunkan.
-   * 'uniform'/'manual' dipertahankan agar draft/riwayat/preset lama tetap jalan. */
-  durationMode: 'uniform' | 'manual' | 'part';
-  uniformDuration: number;
-  manualDurations: number[];
   platforms: string[];          // urut; index 0 = primer
   aiTool: string;
   ratio: string;
@@ -94,16 +86,18 @@ interface Step1State {
   niche: string;                // fixed 'real_estate'
   archetype: string;            // id VideoArchetype ('custom' = manual)
   register: string;             // gaya bahasa dialog (auto/formal/santai/gaul/jawa_halus)
-  // Nomor scene (1-based) yang DIKECUALIKAN dari pola cutaway B-roll arketipe hybrid
-  // (agent_broll_hybrid/selfie_luxury_hybrid) — scene itu jadi talking-head/selfie
+  // Nomor PART (1-based, BUKAN lagi scene — refactor Part-as-Generate-Unit
+  // 2026-08-01) yang DIKECUALIKAN dari pola cutaway B-roll arketipe hybrid
+  // (agent_broll_hybrid/selfie_luxury_hybrid) — Part itu jadi talking-head/selfie
   // penuh durasi tanpa cutaway. Hanya relevan bila archetype.allowMultiShotPerScene.
   cutawayExcluded: number[];
-  /** Pengelompokan naratif opsional di atas Scene (Fase 6) — lihat PartDef di options.ts.
-   * undefined/tidak valid = fallback sceneRole() posisi lama (draft/riwayat lama tetap jalan). */
-  parts?: PartDef[];
+  /** Unit generate — 1 Part = 1 panggilan generate (model Part-as-Generate-Unit,
+   * refactor 2026-08-01, lihat PartDef di options.ts). SATU-SATUNYA sumber
+   * struktur & durasi — mode durasi lama (uniform/manual/sceneCount) DIHAPUS.
+   * Draft/riwayat lama ({s1:{durationMode,sceneCount,...}, scenes:[]}) dikonversi
+   * lewat konversiDraftLama() di applyConfig(), bukan dibaca langsung di sini. */
+  parts: PartDef[];
 }
-
-interface SceneAssign { photoId: number | null; label: string }
 
 const ACCENT = '#1565C0';
 
@@ -126,12 +120,6 @@ function thumbSrc(url: string | null, width: number): string {
   return mediaSrc(url) ?? '';
 }
 
-function resize<T>(arr: T[], len: number, fill: () => T): T[] {
-  const next = arr.slice(0, len);
-  while (next.length < len) next.push(fill());
-  return next;
-}
-
 // Font untuk Auto Caption (drawtext ffmpeg) — TTF statis di public/fonts/,
 // TERPISAH dari WOFF2 yang dipakai UI web biasa (freetype build ffmpeg.wasm
 // ini tidak bisa decode WOFF2, reproduced live 2026-07-28). Pola sama CapCut:
@@ -148,11 +136,13 @@ function srtTime(sec: number): string {
   const p = (n: number, l = 2) => String(n).padStart(l, '0');
   return `${p(Math.floor(ms / 3600000))}:${p(Math.floor((ms % 3600000) / 60000))}:${p(Math.floor((ms % 60000) / 1000))},${p(ms % 1000, 3)}`;
 }
-function buildSrt(scenes: { script_narration?: string }[], durations: number[]): string {
+// Subtitle .SRT per PART (bukan lagi per scene, refactor 2026-08-01) — timing
+// kumulatif dari duration_sec tiap Part, teks dari field "dialog" Part.
+function buildSrtFromParts(parts: { dialog?: string; duration_sec?: number }[]): string {
   let t = 0; const out: string[] = []; let idx = 1;
-  scenes.forEach((sc, i) => {
-    const dur = durations[i] ?? durations[0] ?? 6;
-    const text = (sc.script_narration ?? '').trim();
+  parts.forEach(p => {
+    const dur = Number(p.duration_sec) > 0 ? Number(p.duration_sec) : 6;
+    const text = (p.dialog ?? '').trim();
     if (text) { out.push(String(idx++), `${srtTime(t)} --> ${srtTime(t + dur)}`, text, ''); }
     t += dur;
   });
@@ -267,7 +257,7 @@ function Select({ value, onChange, opts }: {
 // Judul section wizard — SATU sumber, dipakai StepIndicator dan header <Section>
 // agar keduanya tidak pernah menyebut nama berbeda untuk step yang sama.
 const SECTION_TITLES = [
-  'Label Foto & Rancang Part',
+  'Label Foto',
   'Pilih Karakter',
   'Pilih Mode',
   'Parameter Video',
@@ -373,13 +363,18 @@ function Section({ n, title, open, done, onToggle, children, footer }: {
 // FOTO_LABEL_OPTIONS) diimport dari ../../lib/viralframe-constants — sumber
 // tunggal yang sama dipakai step Foto & Parameter agar value enum tidak divergen lagi.
 
+/** Satu PART hasil Jalur C = satu panggilan generate video (bukan lagi satu scene). */
 interface AIScene {
-  scene: number; kamera: string; prompt: string; dialog_karakter: string;
-  on_screen_text?: string; foto_label?: string; foto_deskripsi?: string;
+  part: number; kamera: string; prompt: string; dialog_karakter: string;
+  on_screen_text?: string; role?: string | null;
+  durasi_detik?: number | null; vo_durasi_detik?: number | null;
   /** Hanya untuk tool ber-audio native (Veo/Flow) — disuntik server, lihat ai-generate.js. */
   negative_prompt?: string; max_clip_sec?: number | null;
-  /** Beat bertimecode opsional (Fase 6) — hanya untuk scene >6s pada tool audio-native. */
-  sequences?: { sequence?: number; timestamp?: string; action?: string; audio?: string }[];
+  /** Potongan visual DI DALAM satu generate call. Menggantikan `sequences` lama:
+   * foto BOLEH berganti antar cut karena semua referensinya dilampirkan sekaligus. */
+  cuts?: { t?: string; photo?: string; foto_label?: string; durasi?: number; action?: string }[];
+  /** Nama file yang WAJIB dilampirkan user di Google Flow (identik dgn isi ZIP). */
+  reference_images?: string[]; character_reference?: string;
 }
 interface AIKarakter { nama: string; deskripsi: string; foto_url: string }
 interface AIMetadata {
@@ -431,12 +426,34 @@ function mapLanguageToBahasa(lang: string): string {
 
 interface ScenePhoto { foto_url: string; label: string }
 interface AISelectedKarakter { id: number; nama: string; deskripsi: string; foto_url: string; expression: string }
+
+// ─── Jalur C (ai-generate.js) — kontrak PART ─────────────────────────────────
+// Sejak refactor Part-as-Generate-Unit (2026-08-01): 1 Part = 1 panggilan generate
+// video, `cuts[]` = potongan visual DI DALAM generate itu, dan `foto_file` = nama
+// file PERSIS seperti di ZIP (buildZipNames()) supaya user tahu file mana yang
+// dilampirkan di Google Flow.
+export interface PartCutForAI {
+  foto_url: string;
+  foto_label: string;
+  /** Nama file di ZIP — WAJIB identik dengan yang disebut prompt. */
+  foto_file: string;
+  durasi: number;
+}
+export interface PartSpecForAI {
+  part: number;
+  role: 'Hook' | 'Body' | 'CTA';
+  durasi: number;
+  vo_durasi: number;
+  label?: string;
+  cuts: PartCutForAI[];
+}
+
 interface AIGenerateTabProps {
   propertyId: number;
   propertyTitle: string;
   kodeListingStr: string;
-  // Data dari Step 1 (Foto: jumlah scene + struktur Part) & Step 3 (Parameter Video)
-  jumlahScene: number;
+  /** Rancangan Part siap-kirim (1 Part = 1 generate call). */
+  partSpecs: PartSpecForAI[];
   platform: string;
   platforms: string[];
   aiTool: string;
@@ -448,15 +465,8 @@ interface AIGenerateTabProps {
   ctaType: string;
   archetype: string;
   register: string;
+  /** Nomor PART yang dikecualikan dari cutaway arketipe hybrid. */
   cutawayExcluded: number[];
-  sceneRoles: Record<number, 'Hook' | 'Body' | 'CTA'>;
-  /** Durasi per scene (detik) dari Step 3 (Parameter Video), index 0 = scene 1. */
-  sceneDurations: number[];
-  /** Rancangan Part (Fase 2) — dikirim ke backend supaya narasi koheren DALAM satu
-   * babak, bukan melompat tiap scene. Undefined/kosong = backend jalan seperti biasa. */
-  parts?: PartDef[];
-  // Data dari Step 1 (Pilih Foto per Scene)
-  scenePhotos: Record<number, ScenePhoto>;
   // Data dari Step 2 (Pilih Karakter)
   selectedKarakter: AISelectedKarakter | null;
   // Navigasi balik ke step yang belum lengkap
@@ -464,10 +474,11 @@ interface AIGenerateTabProps {
 }
 
 function AIGenerateTab({
-  propertyId, propertyTitle, kodeListingStr, jumlahScene, platform, platforms, aiTool, bahasa,
-  ratio, tone, visualStyle, hookType, ctaType, archetype, register, cutawayExcluded, sceneRoles,
-  sceneDurations, parts, scenePhotos, selectedKarakter, onEditStep,
+  propertyId, propertyTitle, kodeListingStr, partSpecs, platform, platforms, aiTool, bahasa,
+  ratio, tone, visualStyle, hookType, ctaType, archetype, register, cutawayExcluded,
+  selectedKarakter, onEditStep,
 }: AIGenerateTabProps) {
+  const jumlahPart = partSpecs.length;
   const [musik, setMusik] = useState('corporate');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedResult, setGeneratedResult] = useState<AIGeneratedResult | null>(null);
@@ -521,10 +532,9 @@ function AIGenerateTab({
     return () => window.removeEventListener('beforeunload', h);
   }, [isGenerating]);
 
-  const missingScenes = Array.from({ length: jumlahScene }, (_, i) => i + 1)
-    .filter(n => !scenePhotos[n]?.foto_url);
-  const allScenesHavePhoto = missingScenes.length === 0;
-  const canGenerate = selectedKarakter != null && allScenesHavePhoto;
+  const missingParts = partSpecs.filter(p => p.cuts.length === 0).map(p => p.part);
+  const allPartsHavePhoto = jumlahPart > 0 && missingParts.length === 0;
+  const canGenerate = selectedKarakter != null && allPartsHavePhoto;
   const platformOpt = PLATFORM_OPTIONS.find(p => p.value === platform);
 
   // Payload lengkap ai-generate dari state Step 1–3 — dipakai generate penuh
@@ -532,15 +542,16 @@ function AIGenerateTab({
   const buildGeneratePayload = () => {
     if (!selectedKarakter) return null;
     const musikOpt = MUSIK_OPTIONS.find(m => m.value === musik)!;
-    const foto_assignments = Array.from({ length: jumlahScene }, (_, i) => ({
-      scene: i + 1,
-      foto_url: scenePhotos[i + 1]?.foto_url ?? '',
-      foto_label: scenePhotos[i + 1]?.label ?? 'lainnya',
+    const part_assignments = partSpecs.map(p => ({
+      part: p.part,
+      role: p.role,
+      durasi: p.durasi,
+      vo_durasi: p.vo_durasi,
+      label: p.label,
+      cuts: p.cuts,
     }));
-    const scene_roles = Array.from({ length: jumlahScene }, (_, i) => ({
-      scene: i + 1,
-      role: sceneRoles[i + 1] ?? 'Body',
-    }));
+    const part_roles = partSpecs.map(p => ({ part: p.part, role: p.role }));
+    const part_durations = partSpecs.map(p => ({ part: p.part, durasi: p.durasi }));
     // Kirim label yang sudah diresolve (bukan raw value) — backend tinggal
     // menyisipkan teksnya, tidak perlu daftar terjemahan tone/style/hook/cta sendiri.
     const toneLabel = TONES.find(t => t.value === tone)?.label ?? tone;
@@ -549,44 +560,32 @@ function AIGenerateTab({
     const ctaTypeLabel = CTA_TYPES.find(c => c.value === ctaType)?.label ?? ctaType;
     const supportsRefImage = AI_TOOL_FORMAT_SPEC[aiTool]?.supportsRefImage ?? false;
 
-    // Arketipe (opsional) — client hitung koreografi kamera per scene + arahan sutradara,
-    // kirim sebagai string siap-pakai supaya backend tidak perlu menduplikasi data arketipe.
+    // Arketipe (opsional) — client hitung koreografi kamera PER PART + arahan
+    // sutradara, kirim sebagai string siap-pakai supaya backend tidak perlu
+    // menduplikasi data arketipe.
     const arc = findArchetype(archetype);
-    // Durasi PER SCENE dari Parameter Video (audit 2026-07-26). Sebelumnya jalur ini memakai
-    // PLATFORM_DURASI_VF sehingga pengaturan durasi Parameter Video tidak berpengaruh: budget
-    // kata selalu dari 8 detik, dan beatCountForDuration(8) selalu 2 beat sehingga
-    // cabang koreografi 3-beat tidak pernah tereksekusi.
-    const durasiScene = (n: number) => sceneDurations[n - 1] ?? PLATFORM_DURASI_VF[platform] ?? 8;
-    const scene_durations = Array.from({ length: jumlahScene }, (_, i) => ({
-      scene: i + 1,
-      durasi: durasiScene(i + 1),
-    }));
+    const durasiPart = (n: number) => partSpecs[n - 1]?.durasi ?? PLATFORM_DURASI_VF[platform] ?? 8;
     const archetype_note = arc
       ? `${arc.label} — ${arc.shotGrammarNote} (mode presenter: ${arc.presenterMode}, pacing: ${arc.pacing})`
       : '';
-    // Scene yang dikecualikan dari cutaway (arketipe hybrid) → kirim camera hint
-    // "steady, no cutaway" untuk scene itu, BUKAN koreografi cutaway biasa —
-    // supaya instruksi per-scene di user prompt tidak bertentangan dengan aturan
-    // "SATU shot talking-head saja" yang dikirim ke ai-generate.js.
+    // PART yang dikecualikan dari cutaway (arketipe hybrid) → kirim camera hint
+    // "steady, no cutaway", BUKAN koreografi cutaway biasa — supaya instruksi
+    // per-Part tidak bertentangan dengan aturan "SATU shot talking-head saja".
     const cutawayExcludedInRange = arc?.allowMultiShotPerScene
-      ? cutawayExcluded.filter(n => n >= 1 && n <= jumlahScene)
+      ? cutawayExcluded.filter(n => n >= 1 && n <= jumlahPart)
       : [];
     const camera_directives = arc
-      ? Array.from({ length: jumlahScene }, (_, i) => {
-          const sceneNum = i + 1;
-          const isExcluded = cutawayExcludedInRange.includes(sceneNum);
-          return {
-            scene: sceneNum,
-            camera: isExcluded
-              ? 'steady handheld shot, presenter stays in frame throughout, no cutaway'
-              : compileCameraChoreography(arc.cameraGrammar, sceneRoles[sceneNum] ?? 'Body', durasiScene(sceneNum), i, aiTool, supportsRefImage),
-          };
-        })
+      ? partSpecs.map((p, i) => ({
+          part: p.part,
+          camera: cutawayExcludedInRange.includes(p.part)
+            ? 'steady handheld shot, presenter stays in frame throughout, no cutaway'
+            : compileCameraChoreography(arc.cameraGrammar, p.role, durasiPart(p.part), i, aiTool, supportsRefImage),
+        }))
       : [];
 
     return {
       property_id: propertyId,
-      jumlah_scene: jumlahScene,
+      jumlah_part: jumlahPart,
       platform,
       ai_tool: aiTool,
       bahasa,
@@ -594,18 +593,13 @@ function AIGenerateTab({
       visual_style: visualStyleLabel,
       hook_type: hookTypeLabel,
       cta_type: ctaTypeLabel,
-      scene_roles,
-      scene_durations,
-      // Batas babak (Fase 2) — hanya dikirim bila rancangan Part konsisten dengan
-      // jumlah scene, supaya backend tidak pernah menerima pembagian yang timpang.
-      parts: partsValidForTotal(parts, jumlahScene)
-        ? parts!.map(p => ({ role: p.role, sceneCount: p.sceneCount, label: p.label }))
-        : undefined,
+      part_roles,
+      part_durations,
       musik_value: musik,
       musik_prompt: musikOpt.prompt,
       karakter_id: selectedKarakter.id,
       expression: selectedKarakter.expression,
-      foto_assignments,
+      part_assignments,
       supports_ref_image: supportsRefImage,
       archetype_note,
       camera_directives,
@@ -694,9 +688,9 @@ function AIGenerateTab({
         signal: ac.signal,
         body: JSON.stringify({
           ...payload,
-          regenerate_scene: sceneNum,
-          existing_scenes: generatedResult.scenes.map(s => ({
-            scene: s.scene, kamera: s.kamera, dialog_karakter: s.dialog_karakter,
+          regenerate_part: sceneNum,
+          existing_parts: generatedResult.scenes.map(s => ({
+            part: s.part, kamera: s.kamera, dialog_karakter: s.dialog_karakter,
           })),
         }),
       });
@@ -706,17 +700,17 @@ function AIGenerateTab({
       // Backend sudah memaksa scene = regenerateScene di mode ini (lihat ai-generate.js
       // "Mode regenerate: paksa nomor scene"), tapi tetap divalidasi ulang di sini —
       // kalau backend berubah/gagal, JANGAN menimpa scene yang salah secara diam-diam.
-      if (newScene.scene !== sceneNum) {
-        throw new Error(`AI mengembalikan scene ${newScene.scene}, bukan scene ${sceneNum} yang diminta — tidak disimpan.`);
+      if (newScene.part !== sceneNum) {
+        throw new Error(`AI mengembalikan Part ${newScene.part}, bukan Part ${sceneNum} yang diminta — tidak disimpan.`);
       }
       setGeneratedResult(prev => prev
-        ? { ...prev, scenes: prev.scenes.map(s => (s.scene === sceneNum ? newScene : s)) }
+        ? { ...prev, scenes: prev.scenes.map(s => (s.part === sceneNum ? newScene : s)) }
         : prev);
       getAiStatus().then(r => { if (r.success && r.data) setAiStatus(r.data); });
     } catch (e: unknown) {
       // Pembatalan oleh user bukan kegagalan.
       if (e instanceof DOMException && e.name === 'AbortError') { /* diam */ }
-      else setError(e instanceof Error ? e.message : `Gagal regenerate scene ${sceneNum}`);
+      else setError(e instanceof Error ? e.message : `Gagal regenerate Part ${sceneNum}`);
     } finally {
       setRegenScene(null);
       regenAbortRef.current = null;
@@ -736,69 +730,80 @@ function AIGenerateTab({
       const musikLabel = musik?.label ?? metadata.musik_value;
       const kode = (metadata.kode_listing ?? 'SBP').replace(/[^a-zA-Z0-9]/g, '-');
 
-      for (const scene of scenes) {
-        const sceneData = {
-          scene: scene.scene,
-          total_scene: scenes.length,
+      // ZIP per-PART: satu folder per Part berisi PROMPT.txt siap-tempel +
+      // LAMPIRKAN/ berisi foto referensi. Nama file di LAMPIRKAN/ WAJIB identik
+      // dengan yang disebut PROMPT.txt (keduanya dari cuts[].photo yang berasal
+      // dari buildZipNames()) — salah nama = user melampirkan ruangan yang keliru.
+      const karakterFile = namaFileKarakter(karakter.nama);
+      const urlByFile = new Map<string, string>();
+      partSpecs.forEach(ps => ps.cuts.forEach(c => urlByFile.set(c.foto_file, c.foto_url)));
+
+      const missingFoto: string[] = [];
+      for (const part of scenes) {
+        const refFiles = [...new Set((part.cuts ?? []).map(c => c.photo).filter((x): x is string => !!x))];
+        const folder = `part${part.part}_${slugifyLabel(part.role || 'part')}`;
+        const partData = {
+          part: part.part,
+          total_part: scenes.length,
+          role: part.role ?? null,
           properti: metadata.judul_properti,
           kode_listing: metadata.kode_listing,
           platform: platform?.label ?? metadata.platform,
           rasio: platform?.rasio ?? null,
-          // Durasi scene INI, bukan default platform. Sejak durasi per scene
-          // dihormati backend, memakai platform?.durasi membuat ZIP menyebut
-          // "8 detik" untuk prompt yang disusun untuk 15 detik.
-          durasi_detik: sceneDurations[scene.scene - 1] ?? platform?.durasi ?? null,
+          durasi_detik: part.durasi_detik ?? platform?.durasi ?? null,
+          vo_durasi_detik: part.vo_durasi_detik ?? null,
           ai_tool: metadata.ai_tool,
           bahasa: metadata.bahasa,
           musik: musikLabel,
-          foto_file: `scene${scene.scene}_foto.webp`,
-          foto_label: scene.foto_label ?? null,
-          foto_deskripsi: scene.foto_deskripsi ?? null,
-          karakter_file: namaFileKarakter(karakter.nama),
-          kamera: scene.kamera,
-          prompt: scene.prompt,
+          lampirkan_reference_image: part.reference_images ?? refFiles,
+          karakter_file: karakterFile,
+          kamera: part.kamera,
+          prompt: part.prompt,
           // Untuk Veo/Flow, dialog sudah TERTANAM di dalam 'prompt' (di dalam tanda
           // kutip) — 'dialog_karakter' tinggal jadi rujukan naskah untuk editor.
-          dialog_karakter: scene.dialog_karakter,
-          ...(scene.negative_prompt ? { negative_prompt: scene.negative_prompt } : {}),
-          ...(scene.max_clip_sec ? { max_clip_sec: scene.max_clip_sec } : {}),
-          // sequences[] (Fase 6) — beat bertimecode untuk scene >6s pada tool audio-native.
-          // Sebelumnya dibuang total dari ZIP walau diminta ke AI (audit 2026-07-28).
-          ...(Array.isArray(scene.sequences) && scene.sequences.length > 0 ? { sequences: scene.sequences } : {}),
-          on_screen_text: scene.on_screen_text || null,
+          dialog_karakter: part.dialog_karakter,
+          ...(part.negative_prompt ? { negative_prompt: part.negative_prompt } : {}),
+          ...(part.max_clip_sec ? { max_clip_sec: part.max_clip_sec } : {}),
+          // cuts[] — potongan visual DI DALAM satu generate call (pengganti sequences[]).
+          ...(Array.isArray(part.cuts) && part.cuts.length > 0 ? { cuts: part.cuts } : {}),
+          on_screen_text: part.on_screen_text || null,
           catatan_musik: metadata.musik_value !== 'none'
             ? 'Deskripsi audio optimal untuk Veo3/Google Flow. Kling/Wan: efek suara saja, tambahkan musik via CapCut.'
             : 'Mode tanpa musik.',
           generated_at: metadata.generated_at,
           generator: 'ViralFrame AI · salambumi.xyz',
         };
-        zip.file(`scene${scene.scene}.txt`, JSON.stringify(sceneData, null, 2));
-      }
 
-      // Foto per scene diambil lewat foto_urls[scene.scene - 1] (BUKAN index loop
-      // terpisah) — foto_urls[] backend selalu terurut scene 1..N (ai-generate.js
-      // men-sort fotoAssignments by scene sebelum kirim), jadi ini satu-satunya
-      // sumber kebenaran yang taut ke nama file `scene${scene.scene}_foto.webp`
-      // yang sama persis dengan yang ditulis ke sceneN.txt di atas. Gagal fetch
-      // TIDAK lagi ditelan diam-diam — dulu ZIP bisa "sukses" tanpa foto padahal
-      // sceneN.txt tetap menyebut nama filenya (audit 2026-07-28).
-      const missingFoto: number[] = [];
-      for (const scene of scenes) {
-        const url = foto_urls[scene.scene - 1];
-        if (!url) { missingFoto.push(scene.scene); continue; }
-        const res = await fetch(`/api/admin/media?key=${encodeURIComponent(url)}`, { credentials: 'include' });
-        if (!res.ok) { missingFoto.push(scene.scene); continue; }
-        zip.file(`scene${scene.scene}_foto.webp`, await res.blob());
+        const daftarLampiran = [...refFiles, ...(karakter.foto_url ? [karakterFile] : [])];
+        zip.file(`${folder}/PROMPT.txt`, [
+          `LAMPIRKAN SEBAGAI REFERENCE IMAGE (isi folder LAMPIRKAN/):`,
+          ...daftarLampiran.map((f, i2) => `  ${i2 + 1}. ${f}`),
+          '─'.repeat(60),
+          part.prompt,
+          '',
+          '─'.repeat(60),
+          'METADATA (JSON):',
+          JSON.stringify(partData, null, 2),
+        ].join('\n'));
+
+        for (const file of refFiles) {
+          const url = urlByFile.get(file);
+          if (!url) { missingFoto.push(`${file} (Part ${part.part})`); continue; }
+          const res = await fetch(`/api/admin/media?key=${encodeURIComponent(url)}`, { credentials: 'include' });
+          if (!res.ok) { missingFoto.push(`${file} (Part ${part.part})`); continue; }
+          zip.file(`${folder}/LAMPIRKAN/${file}`, await res.blob());
+        }
+        if (karakter.foto_url) {
+          try {
+            const res = await fetch(`/api/admin/media?key=${encodeURIComponent(karakter.foto_url)}`, { credentials: 'include' });
+            if (res.ok) zip.file(`${folder}/LAMPIRKAN/${karakterFile}`, await res.blob());
+          } catch { /* foto karakter opsional */ }
+        }
       }
+      // Gagal fetch TIDAK ditelan diam-diam — ZIP "sukses" tanpa foto sementara
+      // PROMPT.txt tetap menyebut namanya adalah jebakan (audit 2026-07-28).
       if (missingFoto.length > 0) {
-        throw new Error(`Gagal mengambil foto untuk scene ${missingFoto.join(', ')} — ZIP dibatalkan agar tidak mengunduh paket yang tidak lengkap.`);
-      }
-
-      if (karakter.foto_url) {
-        try {
-          const res = await fetch(`/api/admin/media?key=${encodeURIComponent(karakter.foto_url)}`, { credentials: 'include' });
-          if (res.ok) zip.file(namaFileKarakter(karakter.nama), await res.blob());
-        } catch { /* skip */ }
+        throw new Error(`Gagal mengambil foto: ${missingFoto.join(', ')} — ZIP dibatalkan agar tidak mengunduh paket yang tidak lengkap.`);
       }
 
       const readme = [
@@ -834,9 +839,8 @@ function AIGenerateTab({
         '',
         '───────────────────────────────────────────',
         'ISI FILE ZIP:',
-        ...scenes.map(s => `  scene${s.scene}.txt  — Prompt + metadata scene ${s.scene}`),
-        ...scenes.map((_, i) => `  scene${i + 1}_foto.webp — Foto properti untuk scene ${i + 1}`),
-        `  ${namaFileKarakter(karakter.nama)} — Foto karakter`,
+        ...scenes.map(s => `  part${s.part}_${slugifyLabel(s.role || 'part')}/PROMPT.txt  — Prompt siap-tempel Part ${s.part}`),
+        ...scenes.map(s => `  part${s.part}_${slugifyLabel(s.role || 'part')}/LAMPIRKAN/  — Foto referensi Part ${s.part} (lampirkan SEMUA)`),
         '  README_cara_pakai.txt — File ini',
         '',
         '───────────────────────────────────────────',
@@ -905,8 +909,8 @@ function AIGenerateTab({
                 <span className="text-sm font-medium text-[#0F172A]">{AI_TOOLS.find(t => t.value === aiTool)?.label ?? aiTool}</span>
               </div>
               <div className="flex items-center justify-between px-4 py-2.5">
-                <span className="text-xs text-[#64748B]">Jumlah Scene</span>
-                <span className="text-sm font-medium text-[#0F172A]">{jumlahScene} scene</span>
+                <span className="text-xs text-[#64748B]">Jumlah Part</span>
+                <span className="text-sm font-medium text-[#0F172A]">{jumlahPart} Part · {partSpecs.reduce((a, p) => a + p.cuts.length, 0)} cut</span>
               </div>
               <div className="flex items-center justify-between px-4 py-2.5">
                 <span className="text-xs text-[#64748B]">Bahasa Dialog Karakter</span>
@@ -955,14 +959,14 @@ function AIGenerateTab({
                 );
               })()}
               <div className="px-4 py-2.5">
-                <span className="text-xs text-[#64748B] block mb-1.5">Foto per Scene</span>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                  {Array.from({ length: jumlahScene }, (_, i) => i + 1).map(n => {
-                    const sp = scenePhotos[n];
-                    const labelText = sp ? (FOTO_LABEL_OPTIONS.find(o => o.value === sp.label)?.label ?? sp.label) : null;
+                <span className="text-xs text-[#64748B] block mb-1.5">Foto referensi per Part</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {partSpecs.map(p => {
+                    const files = [...new Set(p.cuts.map(c => c.foto_file))];
+                    const kosong = files.length === 0;
                     return (
-                      <span key={n} className={`text-xs px-2 py-1 rounded-lg ${sp ? 'bg-[#F0F7FF] text-[#1565C0]' : 'bg-amber-50 text-amber-600'}`}>
-                        Scene {n}: {sp ? labelText : '⚠️ kosong'}
+                      <span key={p.part} className={`text-xs px-2 py-1 rounded-lg ${kosong ? 'bg-amber-50 text-amber-600' : 'bg-[#F0F7FF] text-[#1565C0]'}`}>
+                        Part {p.part} ({p.role}): {kosong ? '⚠️ kosong' : files.join(', ')}
                       </span>
                     );
                   })}
@@ -1016,7 +1020,7 @@ function AIGenerateTab({
 
           {!canGenerate && (
             <p className="text-xs text-amber-600 bg-amber-50 rounded-xl px-3 py-2">
-              ⚠️ Lengkapi {!selectedKarakter && 'karakter (Step 2)'}{!selectedKarakter && !allScenesHavePhoto && ' dan '}{!allScenesHavePhoto && `foto (Step 1 — scene ${missingScenes.join(', ')})`} terlebih dahulu.
+              ⚠️ Lengkapi {!selectedKarakter && 'karakter (Step 2)'}{!selectedKarakter && !allPartsHavePhoto && ' dan '}{!allPartsHavePhoto && (jumlahPart === 0 ? 'rancangan Part (Parameter Video)' : `foto Part ${missingParts.join(', ')}`)} terlebih dahulu.
             </p>
           )}
           {error && <p className="text-sm text-red-600">{error}</p>}
@@ -1067,23 +1071,23 @@ function AIGenerateTab({
 
           <div className="space-y-3">
             {generatedResult.scenes.map(s => (
-              <div key={s.scene} className={`p-3 border rounded-xl bg-[#F8FAFC] transition-colors ${regenScene === s.scene ? 'border-[#1565C0]/40' : 'border-gray-100'}`}>
+              <div key={s.part} className={`p-3 border rounded-xl bg-[#F8FAFC] transition-colors ${regenScene === s.part ? 'border-[#1565C0]/40' : 'border-gray-100'}`}>
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="w-6 h-6 rounded-full bg-[#1565C0] text-white text-xs font-bold flex items-center justify-center">{s.scene}</span>
+                  <span className="w-6 h-6 rounded-full bg-[#1565C0] text-white text-xs font-bold flex items-center justify-center">{s.part}</span>
                   <span className="text-xs font-semibold text-[#64748B] flex-1">{s.kamera}</span>
                   <button
-                    onClick={() => handleRegenerateScene(s.scene)}
+                    onClick={() => handleRegenerateScene(s.part)}
                     disabled={regenScene != null}
-                    title={`Generate ulang scene ${s.scene} dengan variasi baru (scene lain tidak berubah)`}
+                    title={`Generate ulang scene ${s.part} dengan variasi baru (scene lain tidak berubah)`}
                     className="flex-shrink-0 text-[11px] font-semibold text-amber-600 flex items-center gap-1 disabled:opacity-40">
-                    {regenScene === s.scene
+                    {regenScene === s.part
                       ? <><Loader2 size={12} className="animate-spin" /> Membuat ulang…</>
                       : <><RefreshCw size={12} /> Regenerate</>}
                   </button>
                   <button
-                    onClick={() => { navigator.clipboard?.writeText(JSON.stringify(s, null, 2)).then(() => { setCopiedScene(s.scene); setTimeout(() => setCopiedScene(c => (c === s.scene ? null : c)), 1500); }).catch(() => {}); }}
+                    onClick={() => { navigator.clipboard?.writeText(JSON.stringify(s, null, 2)).then(() => { setCopiedScene(s.part); setTimeout(() => setCopiedScene(c => (c === s.part ? null : c)), 1500); }).catch(() => {}); }}
                     className="flex-shrink-0 text-[11px] font-semibold text-[#1565C0] flex items-center gap-1">
-                    {copiedScene === s.scene ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy JSON</>}
+                    {copiedScene === s.part ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy JSON</>}
                   </button>
                 </div>
                 <p className="text-xs text-[#0F172A] leading-relaxed">{s.prompt.slice(0, 200)}{s.prompt.length > 200 ? '…' : ''}</p>
@@ -2413,7 +2417,7 @@ export default function AdminViralFrameWorkspacePage() {
   // Wizard = accordion (2026-08-01). `step` bukan lagi "halaman yang sedang
   // ditampilkan" melainkan "section yang sedang TERBUKA"; section lain tetap
   // ter-render sebagai header tertutup dan bisa dibuka kapan saja.
-  // Index section: 0 Label Foto & Rancang Part · 1 Karakter · 2 Mode
+  // Index section: 0 Label Foto · 1 Karakter · 2 Mode
   //                3 Parameter Video · 4 Generate Prompt
   const [step, setStep] = useState(0);
   const [showErrors, setShowErrors] = useState(false);
@@ -2434,21 +2438,19 @@ export default function AdminViralFrameWorkspacePage() {
     });
   };
 
-  // Default sesi BARU = mode 'part' (Fase 2): user merancang Part + durasinya,
-  // AI yang menentukan berapa scene tiap Part. Part awal mencerminkan struktur
-  // Hook/Body/CTA klasik dengan sceneCount 1/2/1 sebagai titik mulai — akan
-  // ditimpa begitu "AI Rancang Storyboard" dijalankan. Draft/riwayat LAMA tetap
-  // rehydrate ke 'uniform'/'manual' lewat applyConfig() dan tidak tersentuh.
+  // Default sesi BARU (model Part-as-Generate-Unit, refactor 2026-08-01): user
+  // merancang Part + durasi + durasi VO-nya, AI ("AI Rancang Storyboard", Section
+  // Parameter Video) yang menentukan cuts/foto referensi tiap Part. Part awal
+  // mencerminkan struktur Hook/Body/CTA klasik sebagai titik mulai (cuts kosong)
+  // — akan ditimpa begitu AI Rancang Storyboard dijalankan. Draft/riwayat LAMA
+  // ({durationMode,sceneCount,scenes[],...}) dikonversi lewat konversiDraftLama()
+  // di applyConfig(), TIDAK dibaca langsung di sini.
   const [s1, setS1] = useState<Step1State>({
-    sceneCount: 4,
-    durationMode: 'part',
     parts: [
-      { role: 'Hook', sceneCount: 1, durationSec: 8 },
-      { role: 'Body', sceneCount: 2, durationSec: 20 },
-      { role: 'CTA',  sceneCount: 1, durationSec: 8 },
+      { role: 'Hook', durationSec: 8, voDurationSec: 8, refPhotoIds: [], cuts: [] },
+      { role: 'Body', durationSec: 20, voDurationSec: 20, refPhotoIds: [], cuts: [] },
+      { role: 'CTA', durationSec: 8, voDurationSec: 8, refPhotoIds: [], cuts: [] },
     ],
-    uniformDuration: 10,
-    manualDurations: [10, 10, 10, 10],
     platforms: ['tiktok', 'ig_reels', 'yt_shorts', 'fb_reels'],
     aiTool: 'google_flow',
     ratio: '9:16',
@@ -2463,9 +2465,6 @@ export default function AdminViralFrameWorkspacePage() {
     register: 'auto',
     cutawayExcluded: [],
   });
-  const [scenes, setScenes] = useState<SceneAssign[]>(
-    Array.from({ length: 4 }, () => ({ photoId: null, label: '' }))
-  );
   const [s3, setS3] = useState<Step3State>({
     useCharacter: false,
     characterId: null,
@@ -2483,12 +2482,34 @@ export default function AdminViralFrameWorkspacePage() {
   const [draftFound, setDraftFound] = useState<{ ts: number } | null>(null);
   const [hydrated, setHydrated] = useState(false); // true = boleh autosave (draft sudah diputuskan / tak ada)
 
-  // Terapkan konfigurasi tersimpan ({s1,scenes,s3}) ke state — merge defensif.
-  const applyConfig = useCallback((cfg: { s1?: Partial<Step1State>; scenes?: SceneAssign[]; s3?: Partial<Step3State> } | null) => {
+  // Bentuk konfigurasi tersimpan bisa LAMA ({s1:{durationMode,sceneCount,...},
+  // scenes:[...]}) atau BARU ({s1:{parts:PartDef[]...}}) — draft localStorage
+  // (`vf_draft_<id>`) dan riwayat D1 (`viralframe_generations.params_json`)
+  // sama-sama bisa berisi format lama, dan itu TIDAK BOLEH membuat halaman rusak.
+  interface LegacyOrNewCfg {
+    s1?: (Partial<Step1State> & Partial<DraftLamaS1> & { parts?: unknown }) | null;
+    scenes?: DraftLamaScene[];
+    s3?: Partial<Step3State>;
+  }
+  // Terapkan konfigurasi tersimpan ke state — merge defensif, dengan konversi
+  // otomatis format lama → PartDef[] (Tahap 1, konversiDraftLama()).
+  const applyConfig = useCallback((cfg: LegacyOrNewCfg | null) => {
     if (!cfg) return;
-    if (cfg.s1)  setS1(prev => ({ ...prev, ...cfg.s1 }));
-    if (Array.isArray(cfg.scenes)) setScenes(cfg.scenes);
-    if (cfg.s3)  setS3(prev => ({ ...prev, ...cfg.s3 }));
+    if (cfg.s1) {
+      const s1Raw = cfg.s1;
+      const isLegacy = 'durationMode' in s1Raw || Array.isArray(cfg.scenes);
+      if (isLegacy) {
+        const convertedParts = konversiDraftLama(s1Raw as DraftLamaS1, cfg.scenes ?? [], (s1Raw as { aiTool?: string }).aiTool);
+        const {
+          durationMode: _dm, sceneCount: _sc, uniformDuration: _ud, manualDurations: _md, parts: _pt,
+          ...rest
+        } = s1Raw as Record<string, unknown>;
+        setS1(prev => ({ ...prev, ...(rest as Partial<Step1State>), parts: convertedParts }));
+      } else {
+        setS1(prev => ({ ...prev, ...(s1Raw as Partial<Step1State>) }));
+      }
+    }
+    if (cfg.s3) setS3(prev => ({ ...prev, ...cfg.s3 }));
   }, []);
 
   // Cek draft tersimpan saat id siap (belum autosave sebelum user memutuskan).
@@ -2517,7 +2538,9 @@ export default function AdminViralFrameWorkspacePage() {
   };
 
   // Autosave debounced (hanya setelah draft diputuskan agar tak menimpa draft lama).
-  const autosaveSrc = useMemo(() => ({ s1, scenes, s3 }), [s1, scenes, s3]);
+  // Tidak lagi menyimpan `scenes` terpisah (dihapus Tahap 4) — foto/label sekarang
+  // hidup DI DALAM s1.parts[].cuts[], jadi {s1,s3} sudah lengkap merepresentasikan sesi.
+  const autosaveSrc = useMemo(() => ({ s1, s3 }), [s1, s3]);
   const debouncedAutosave = useDebouncedValue(autosaveSrc, 800);
   useEffect(() => {
     if (!draftKey || !hydrated) return;
@@ -2579,7 +2602,6 @@ export default function AdminViralFrameWorkspacePage() {
       archetype: s1.archetype, register: s1.register, tone: s1.tone, visualStyle: s1.visualStyle,
       hookType: s1.hookType, ctaType: s1.ctaType, ctaKeyword: s1.ctaKeyword, platforms: s1.platforms,
       aiTool: s1.aiTool, ratio: s1.ratio, language: s1.language,
-      durationMode: s1.durationMode, uniformDuration: s1.uniformDuration,
       cutawayExcluded: s1.cutawayExcluded,
     };
     try { await fetch('/api/admin/viralframe/presets', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), params }) }); } catch { /* noop */ }
@@ -2588,37 +2610,45 @@ export default function AdminViralFrameWorkspacePage() {
   const applyPreset = (name: string) => {
     const p = presets.find(x => x.name === name);
     if (!p) return;
-    // Buang field struktur dari preset (lama maupun baru) — jangan sentuh scenes[],
-    // sceneCount, parts, atau manualDurations milik Step 1.
-    const { sceneCount: _sc, parts: _pt, manualDurations: _md, ...visualParams } = p.params;
-    setS1(prev => {
-      const next = { ...prev, ...visualParams };
-      // Preset ber-durationMode 'part' hanya masuk akal kalau sesi ini PUNYA Part
-      // (parts sengaja tidak ikut preset — lihat komentar di atas). Tanpa guard ini
-      // preset lama bisa memindahkan user ke mode Part tanpa satu Part pun, yang
-      // membuat durasi jatuh ke fallback diam-diam.
-      if (next.durationMode === 'part' && (prev.parts ?? []).length === 0) {
-        next.durationMode = prev.durationMode;
-      }
-      return next;
-    });
+    // Buang field struktur dari preset (lama maupun baru) — Part (s1.parts) SENGAJA
+    // tidak ikut preset: preset hanya parameter visual, Part dirancang per sesi.
+    const { sceneCount: _sc, parts: _pt, manualDurations: _md, durationMode: _dmode, uniformDuration: _ud, ...visualParams } =
+      p.params as Partial<Step1State> & Record<string, unknown>;
+    setS1(prev => ({ ...prev, ...(visualParams as Partial<Step1State>) }));
   };
 
-  // ─── Jalur C: derivasi props AIGenerateTab dari state Step 1–3 (bukan form independen lagi) ──
+  // ─── Jalur C: derivasi props AIGenerateTab dari state Step 1–3 ───────────────
+  // Sejak refactor Part-as-Generate-Unit, ai-generate.js menerima kontrak PART
+  // langsung (part_assignments/part_roles/part_durations) — tidak ada lagi
+  // adapter "scene virtual". `foto_file` diambil dari buildZipNames() yang SAMA
+  // dengan yang menulis ZIP, sehingga nama file di prompt identik dengan isi ZIP.
   const platformForAI = s1.platforms[0] ?? 'tiktok';
-  const scenePhotosForAI = useMemo(() => {
-    const map: Record<number, ScenePhoto> = {};
-    if (!prop) return map;
+  const partSpecsForAI: PartSpecForAI[] = useMemo(() => {
+    if (!prop) return [];
     const imgById = new Map(prop.images.map(im => [im.id, im]));
-    scenes.forEach((sc, i) => {
-      if (sc.photoId == null) return;
-      if (!sc.label) return; // belum dilabeli — jangan diam-diam fallback ke 'lainnya', treat sebagai belum lengkap
-      const img = imgById.get(sc.photoId);
-      if (!img) return;
-      map[i + 1] = { foto_url: img.url_webp, label: PHOTO_LABEL_TO_FOTO_LABEL[sc.label] ?? 'lainnya' };
-    });
-    return map;
-  }, [scenes, prop]);
+    const nameMap = buildZipNames(prop.images);
+    return (s1.parts ?? []).map((p, pi) => ({
+      part: pi + 1,
+      role: p.role,
+      durasi: p.durationSec,
+      vo_durasi: p.voDurationSec,
+      label: p.label,
+      cuts: p.cuts
+        .map(c => {
+          const img = imgById.get(c.photoId);
+          const file = nameMap.get(c.photoId);
+          if (!img || !file || !c.label) return null;
+          return {
+            foto_url: img.url_webp,
+            foto_label: PHOTO_LABEL_TO_FOTO_LABEL[c.label] ?? 'lainnya',
+            foto_file: file,
+            durasi: c.durasiDetik,
+          };
+        })
+        .filter((c): c is NonNullable<typeof c> => c !== null),
+    }));
+  }, [s1.parts, prop]);
+
   const selectedKarakterForAI: AISelectedKarakter | null = s3.character
     ? {
         id: s3.character.id,
@@ -2629,12 +2659,6 @@ export default function AdminViralFrameWorkspacePage() {
         expression: s3.expression,
       }
     : null;
-  const sceneRolesForAI = useMemo(() => {
-    const map: Record<number, 'Hook' | 'Body' | 'CTA'> = {};
-    for (let i = 0; i < s1.sceneCount; i++) map[i + 1] = sceneRoleFromParts(i, s1.sceneCount, s1.parts);
-    return map;
-  }, [s1.sceneCount, s1.parts]);
-
   // Step 4 — compile + save history
   const [copied, setCopied] = useState(false);
   const [generationId, setGenerationId] = useState<number | null>(null);
@@ -2677,128 +2701,62 @@ export default function AdminViralFrameWorkspacePage() {
     }
   }, [isAIGenerateMode]);
 
-  // Ubah jumlah scene → resize manualDurations & scenes (pertahankan nilai lama).
-  // cutawayExcluded: bila sebelumnya persis default "hanya scene terakhir" (CTA),
-  // geser mengikuti scene terakhir yang baru; selain itu cukup buang nomor scene
-  // yang sudah tidak ada lagi (di atas n).
-  // Mode 'part': sceneCount adalah TURUNAN dari rancangan Part (lihat commitParts).
-  // Input manual "Jumlah Scene" tidak dirender di mode itu; guard di sini menjaga
-  // agar tidak ada jalur lain yang diam-diam menimpa sceneCount turunan.
-  const setSceneCount = useCallback((raw: number) => {
-    if (s1.durationMode === 'part') return;
-    const n = Math.max(2, Math.min(12, raw || 0));
-    setS1(prev => {
-      const wasDefaultCtaOnly = prev.cutawayExcluded.length === 1 && prev.cutawayExcluded[0] === prev.sceneCount;
-      const cutawayExcluded = wasDefaultCtaOnly ? [n] : prev.cutawayExcluded.filter(x => x <= n);
-      // Jumlah scene berubah → rancangan Part lama (kalau ada) kemungkinan besar
-      // sum-nya sudah tidak cocok lagi. Dari pada diam-diam fallback ke role posisi
-      // (membingungkan user yang sudah rancang Part), hapus saja — user rancang ulang.
-      const partsSum = (prev.parts ?? []).reduce((s, p) => s + p.sceneCount, 0);
-      const parts = prev.parts && partsSum === n ? prev.parts : undefined;
-      return {
-        ...prev,
-        sceneCount: n,
-        manualDurations: resize(prev.manualDurations, n, () => prev.uniformDuration || 6),
-        cutawayExcluded,
-        parts,
-      };
-    });
-    setScenes(prev => resize(prev, n, () => ({ photoId: null, label: '' })));
-  }, [s1.durationMode]);
-
   const update1 = <K extends keyof Step1State>(key: K, val: Step1State[K]) =>
     setS1(prev => ({ ...prev, [key]: val }));
 
-  // ─── Part designer (Fase 6 → Part model Fase 2) ─────────────────────────────
-  // commitParts = SATU-SATUNYA jalan menulis s1.parts. Di mode 'part' ia sekaligus
-  // menurunkan sceneCount (= jumlah sceneCount semua Part) lalu me-resize scenes[]
-  // dan manualDurations agar tetap sepanjang sceneCount. Ini yang membuat seluruh
-  // konsumen hilir (validasi, ZIP, SRT, 3 jalur prompt-engine) tidak perlu tahu
-  // apa pun soal Part — mereka cukup baca sceneCount & durations seperti biasa.
-  const commitParts = useCallback((buat: (prev: PartDef[]) => PartDef[]) => {
-    const parts = buat(s1.parts ?? []);
-    if (s1.durationMode !== 'part') { setS1(prev => ({ ...prev, parts })); return; }
-
-    const total = Math.max(0, Math.min(12, totalSceneCountOfParts(parts)));
-    setS1(prev => {
-      const wasDefaultCtaOnly = prev.cutawayExcluded.length === 1 && prev.cutawayExcluded[0] === prev.sceneCount;
-      return {
-        ...prev,
-        parts,
-        sceneCount: total,
-        manualDurations: resize(prev.manualDurations, total, () => prev.uniformDuration || 6),
-        cutawayExcluded: wasDefaultCtaOnly ? [total] : prev.cutawayExcluded.filter(x => x <= total),
-      };
-    });
-    // scenes[] tetap penyimpanan kanonik per scene — resize mengikuti total Part,
-    // mempertahankan foto/label yang sudah dipilih di scene-scene awal.
-    setScenes(prev => resize(prev, total, () => ({ photoId: null, label: '' })));
-  }, [s1.parts, s1.durationMode]);
-
+  // ─── Part designer (model Part-as-Generate-Unit, refactor 2026-08-01) ───────
+  // Part sekarang SATU-SATUNYA struktur (bukan lagi turunan dari sceneCount).
+  // updatePart/addPart/removePart menulis s1.parts langsung — tidak ada lagi
+  // resize scenes[]/manualDurations (dihapus) karena cuts hidup DI DALAM Part.
+  const clipMaxForTool = getClipMaxSec(s1.aiTool) ?? 10;
   const addPart = useCallback(() => {
-    commitParts(prev => {
-      // Klik pertama (belum ada Part sama sekali): seed 3 part yang MENCERMINKAN
-      // distribusi role legacy (Hook scene pertama, CTA scene terakhir, sisanya
-      // Body) — supaya mengaktifkan fitur Part TIDAK diam-diam mengubah role
-      // scene yang sudah ada jadi "Body" semua (footgun kalau langsung 1 part).
-      if (prev.length === 0) {
-        const n = s1.sceneCount;
-        const bodyCount = Math.max(0, n - 2);
-        return n >= 2
-          ? [
-              { role: 'Hook' as const, sceneCount: 1, durationSec: 8 },
-              ...(bodyCount > 0 ? [{ role: 'Body' as const, sceneCount: bodyCount, durationSec: bodyCount * 8 }] : []),
-              { role: 'CTA' as const, sceneCount: 1, durationSec: 8 },
-            ]
-          : [{ role: 'Body' as const, sceneCount: n, durationSec: n * 8 }];
-      }
-      return [...prev, { role: 'Body', sceneCount: 1, durationSec: 8 }];
+    setS1(prev => {
+      const dur = Math.min(8, clipMaxForTool);
+      const role: PartDef['role'] = prev.parts.length === 0 ? 'Hook' : 'Body';
+      return { ...prev, parts: [...prev.parts, { role, durationSec: dur, voDurationSec: dur, refPhotoIds: [], cuts: [] }] };
     });
-  }, [commitParts, s1.sceneCount]);
+  }, [clipMaxForTool]);
   const removePart = useCallback((idx: number) => {
-    commitParts(prev => prev.filter((_, i) => i !== idx));
-  }, [commitParts]);
+    setS1(prev => ({ ...prev, parts: prev.parts.filter((_, i) => i !== idx) }));
+  }, []);
   const updatePart = useCallback((idx: number, patch: Partial<PartDef>) => {
-    commitParts(prev => prev.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
-  }, [commitParts]);
+    setS1(prev => ({ ...prev, parts: prev.parts.map((p, i) => (i === idx ? { ...p, ...patch } : p)) }));
+  }, []);
 
-  // ─── AI Rancang Storyboard ──────────────────────────────────────────────────
-  // Sekali klik: AI bernalar dari label_ruangan yang sudah tersimpan (TANPA vision
-  // AI, murni teks) untuk mengisi s1.parts DAN scenes[] sekaligus — meniru pola
-  // applyArchetype() (AI mengisi default, user tetap bisa timpa manual sesudahnya).
+  // ─── AI Rancang Storyboard (sutradara AI bervisi, Tahap 2 Agent 2) ──────────
+  // Sekali klik: kirim rancangan Part (role/durationSec/voDurationSec DIKUNCI
+  // user) ke suggest-storyboard.js — AI (bervisi bila memungkinkan, degradasi
+  // teks-saja bila kuota provider bervisi habis) menentukan cuts[]/refPhotoIds/
+  // rationale tiap Part, lalu MENIMPA s1.parts (role/durasi tidak berubah).
   const [suggestLoading, setSuggestLoading] = useState(false);
   const [suggestError, setSuggestError] = useState('');
+  const [suggestUsedVision, setSuggestUsedVision] = useState<boolean | null>(null);
+  const [suggestProviderUsed, setSuggestProviderUsed] = useState<string>('');
   const suggestStoryboard = useCallback(async () => {
     if (!prop) return;
     setSuggestLoading(true); setSuggestError('');
     try {
-      // Part model: yang dikirim adalah rancangan Part + durasinya. AI yang
-      // menentukan BERAPA scene tiap Part dan foto mana saja yang dipakai —
-      // itulah inti Fase 2 (dulu scene_count dikunci user di sini).
       const r = await fetch('/api/admin/viralframe/suggest-storyboard', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           property_id: prop.id,
-          parts: (s1.parts ?? []).map(p => ({ role: p.role, durationSec: p.durationSec, label: p.label })),
+          parts: s1.parts.map(p => ({ role: p.role, durationSec: p.durationSec, voDurationSec: p.voDurationSec, label: p.label })),
           archetype: s1.archetype,
           register: s1.register,
+          character_photo_url: s3.useCharacter ? (s3.character?.foto_url ?? undefined) : undefined,
+          ai_tool: s1.aiTool,
         }),
       });
-      const data = await readNdjsonFinal<{
-        parts: PartDef[];
-        scene_photo_order: { scene: number; label: string; photo_id: number; url_webp: string }[];
-      }>(r);
-      // scenes[] diisi DULU (penyimpanan kanonik), lalu commitParts menurunkan
-      // sceneCount dari parts hasil AI. commitParts juga me-resize scenes[], jadi
-      // panjang keduanya dijamin konsisten walau AI mengembalikan jumlah berbeda.
-      setScenes(data.scene_photo_order.map(x => ({ photoId: x.photo_id, label: x.label })));
-      commitParts(() => data.parts);
+      const data = await readNdjsonFinal<{ parts: PartDef[]; provider_used: string; used_vision: boolean }>(r);
+      setS1(prev => ({ ...prev, parts: data.parts }));
+      setSuggestUsedVision(data.used_vision);
+      setSuggestProviderUsed(data.provider_used);
     } catch (e: unknown) {
       setSuggestError(e instanceof Error ? e.message : 'Gagal rancang storyboard');
     } finally {
       setSuggestLoading(false);
     }
-  }, [prop, s1.parts, s1.archetype, s1.register, commitParts]);
+  }, [prop, s1.parts, s1.archetype, s1.register, s1.aiTool, s3.useCharacter, s3.character]);
 
   // Pilih arketipe → prefill visualStyle/tone/register/cutaway (parameter Step 3 saja).
   // Nilai tetap bisa di-override manual setelahnya (memilih 'custom' tidak mereset).
@@ -2843,15 +2801,17 @@ export default function AdminViralFrameWorkspacePage() {
       visualStyle: arc.defaults.visualStyle,
       tone: arc.defaults.tone,
       register: arc.defaults.register ?? prev.register,
-      cutawayExcluded: arc.allowMultiShotPerScene ? [prev.sceneCount] : [],
+      // cutawayExcluded sekarang berisi nomor PART (1-based), bukan scene — default
+      // Part TERAKHIR (CTA) dikecualikan dari cutaway (talking-head/selfie penutup).
+      cutawayExcluded: arc.allowMultiShotPerScene ? [prev.parts.length] : [],
     }));
   };
 
-  // Toggle satu scene masuk/keluar dari daftar pengecualian cutaway.
-  const toggleCutawayExcluded = (sceneNum: number) => {
+  // Toggle satu PART (bukan lagi scene) masuk/keluar dari daftar pengecualian cutaway.
+  const toggleCutawayExcluded = (partNum: number) => {
     setS1(prev => {
-      const has = prev.cutawayExcluded.includes(sceneNum);
-      return { ...prev, cutawayExcluded: has ? prev.cutawayExcluded.filter(x => x !== sceneNum) : [...prev.cutawayExcluded, sceneNum].sort((a, b) => a - b) };
+      const has = prev.cutawayExcluded.includes(partNum);
+      return { ...prev, cutawayExcluded: has ? prev.cutawayExcluded.filter(x => x !== partNum) : [...prev.cutawayExcluded, partNum].sort((a, b) => a - b) };
     });
   };
 
@@ -2860,14 +2820,6 @@ export default function AdminViralFrameWorkspacePage() {
       const has = prev.platforms.includes(value);
       const platforms = has ? prev.platforms.filter(p => p !== value) : [...prev.platforms, value];
       return { ...prev, platforms };
-    });
-  };
-
-  const setManualDuration = (idx: number, val: number) => {
-    setS1(prev => {
-      const md = [...prev.manualDurations];
-      md[idx] = val;
-      return { ...prev, manualDurations: md };
     });
   };
 
@@ -2894,48 +2846,17 @@ export default function AdminViralFrameWorkspacePage() {
   };
 
   // ─── Validasi ───────────────────────────────────────────────────────────
-  // Urutan wizard: 1 Foto per Scene → 2 Karakter → 3 Pilih Mode → 4 Parameter Video → 5 Generate.
+  // Urutan wizard (Tahap 4 reorder): 1 Label Foto → 2 Karakter → 3 Pilih Mode →
+  // 4 Parameter Video (Part designer + AI Rancang Storyboard pindah ke sini) → 5 Generate.
+  // Section 0 sekarang murni Label Foto + centang bahan — validasi Part pindah
+  // ke paramErrors (Section 3), tempat kontrolnya sekarang berada.
   const fotoErrors = useMemo(() => {
     const e: string[] = [];
-    if (s1.durationMode === 'part') {
-      // Mode Part: sceneCount turunan, jadi pesan errornya harus menunjuk ke Part
-      // (bukan ke input "Jumlah Scene" yang memang tidak ada di layar ini).
-      const parts = s1.parts ?? [];
-      if (parts.length === 0) {
-        e.push('Rancang minimal 1 Part terlebih dahulu.');
-      } else {
-        parts.forEach((p, i) => {
-          const d = p.durationSec;
-          if (!Number.isFinite(d) || (d as number) <= 0) {
-            e.push(`Part ${i + 1} (${p.role}): durasi belum diisi.`);
-          } else if (p.sceneCount > 0) {
-            const perScene = (d as number) / p.sceneCount;
-            if (perScene < 2 || perScene > 30) {
-              e.push(`Part ${i + 1} (${p.role}): ${d} detik dibagi ${p.sceneCount} scene = ${perScene.toFixed(1)} detik/scene, di luar rentang 2–30 detik. Ubah durasi Part atau jumlah scene-nya.`);
-            }
-          }
-        });
-        if (s1.sceneCount < 2 || s1.sceneCount > 12) {
-          e.push(`Total scene dari semua Part = ${s1.sceneCount}, harus 2–12. Jalankan "AI Rancang Storyboard" atau sesuaikan Part.`);
-        }
-      }
-    } else if (s1.sceneCount < 2 || s1.sceneCount > 12) {
-      e.push('Jumlah scene harus 2–12.');
-    }
-    // Gerbang yang dulu dipegang tombol "Lanjut" milik LabelFotoStep — sekarang
-    // section ini menampung label foto DAN Part, jadi syaratnya ikut ke sini.
     if (selectedForVideo.size === 0) {
       e.push('Centang minimal 1 foto sebagai bahan video.');
     }
-    // Foto per scene ditugaskan AI, bukan dipilih manual lagi — arahkan user ke
-    // tombolnya alih-alih menyuruh "pilih foto" yang kontrolnya sudah tidak ada.
-    const sceneBelumLengkap = scenes.slice(0, s1.sceneCount)
-      .some(sc => sc.photoId == null || !sc.label);
-    if (sceneBelumLengkap) {
-      e.push('Foto per scene belum ditugaskan — jalankan "AI Rancang Storyboard" untuk mengisi tiap Part.');
-    }
     return e;
-  }, [scenes, s1.sceneCount, s1.durationMode, s1.parts, selectedForVideo]);
+  }, [selectedForVideo]);
 
   const karakterErrors = useMemo(() => {
     const e: string[] = [];
@@ -2951,21 +2872,26 @@ export default function AdminViralFrameWorkspacePage() {
     return e;
   }, [mode]);
 
+  // Part designer + AI Rancang Storyboard pindah ke Section Parameter Video
+  // (Tahap 4 reorder) — validasi Part-nya ikut ke sini.
   const paramErrors = useMemo(() => {
     const e: string[] = [];
     if (s1.platforms.length === 0) e.push('Pilih minimal 1 platform distribusi.');
-    // Rentang 2–30 detik = rentang yang benar-benar didukung getLipsync().
-    // Di luar itu nilainya di-clamp diam-diam, jadi lebih baik ditolak terang-terangan.
-    const durasiSah = (d: number) => Number.isFinite(d) && d >= 2 && d <= 30;
-    if (s1.durationMode === 'part') {
-      // Durasi mode Part sudah divalidasi di Step 1 (fotoErrors) tempat Part
-      // dirancang — tidak diulang di sini agar user tidak diblokir di layar yang
-      // tidak punya kontrolnya.
-    } else if (s1.durationMode === 'uniform') {
-      if (!durasiSah(s1.uniformDuration)) e.push('Durasi per scene harus antara 2–30 detik.');
+    const clipMax = getClipMaxSec(s1.aiTool) ?? 999;
+    if (s1.parts.length === 0) {
+      e.push('Rancang minimal 1 Part terlebih dahulu.');
     } else {
-      const bad = s1.manualDurations.slice(0, s1.sceneCount).some(d => !durasiSah(d));
-      if (bad) e.push('Setiap durasi scene harus antara 2–30 detik.');
+      s1.parts.forEach((p, i) => {
+        if (!Number.isFinite(p.durationSec) || p.durationSec <= 0 || p.durationSec > clipMax) {
+          e.push(`Part ${i + 1} (${p.role}): durasi harus 1–${clipMax} detik${s1.aiTool ? ` (batas ${s1.aiTool})` : ''}.`);
+        }
+        if (!Number.isFinite(p.voDurationSec) || p.voDurationSec < 0 || p.voDurationSec > p.durationSec) {
+          e.push(`Part ${i + 1} (${p.role}): durasi VO harus 0..durasi Part itu.`);
+        }
+        if (p.cuts.length === 0) {
+          e.push(`Part ${i + 1} (${p.role}): belum ada cuts/foto referensi — jalankan "AI Rancang Storyboard".`);
+        }
+      });
     }
     if (s1.ctaType === 'comment_keyword' && !s1.ctaKeyword.trim()) {
       e.push('Keyword komentar wajib diisi untuk CTA "Komen [KEYWORD]".');
@@ -3002,11 +2928,19 @@ export default function AdminViralFrameWorkspacePage() {
   // input yang di-debounce 300ms — supaya mengetik/memilih di section lain tidak
   // memicu build string besar tiap ketukan (penyebab utama lag).
   const onStep4 = step === LAST_SECTION;
-  const compileSrc = useMemo(() => ({ s1, scenes, s3 }), [s1, scenes, s3]);
+  // `images` WAJIB array yang SAMA PERSIS (id + label_ruangan, urutan sama) dipakai
+  // di SETIAP jalur ZIP (handleDownloadZipPerPart di bawah) — kalau tidak, nomor
+  // "fasad1.webp"/"fasad2.webp" bisa berbeda antara yang disebut di prompt dan isi
+  // ZIP (invarian paling penting Tahap 4, lihat buildZipNames() di options.ts).
+  const zipImages: ZipSourceImage[] = useMemo(
+    () => (prop ? prop.images.filter(im => im.label_ruangan?.trim()).map(im => ({ id: im.id, label_ruangan: im.label_ruangan })) : []),
+    [prop],
+  );
+  const compileSrc = useMemo(() => ({ s1, s3 }), [s1, s3]);
   const debouncedSrc = useDebouncedValue(compileSrc, 300);
   const masterPrompt = useMemo(
-    () => (prop && onStep4 ? compileMasterPrompt(prop, debouncedSrc.s1, debouncedSrc.scenes, debouncedSrc.s3) : ''),
-    [prop, onStep4, debouncedSrc],
+    () => (prop && onStep4 ? compileMasterPrompt(prop, debouncedSrc.s1, debouncedSrc.s3, zipImages) : ''),
+    [prop, onStep4, debouncedSrc, zipImages],
   );
 
   // Style Pair A/B — varian kedua dengan arketipe berbeda untuk uji split.
@@ -3018,15 +2952,15 @@ export default function AdminViralFrameWorkspacePage() {
     if (!prop || !abVariant || !onStep4) return '';
     const arcB = findArchetype(abVariant);
     if (!arcB) return '';
-    const { s1: ds1, scenes: dscenes, s3: ds3 } = debouncedSrc;
+    const { s1: ds1, s3: ds3 } = debouncedSrc;
     // cutawayExcluded ikut aturan applyArchetype: B hybrid mewarisi pilihan A bila
-    // A juga hybrid; kalau tidak, pakai default hybrid (scene terakhir dikecualikan).
+    // A juga hybrid; kalau tidak, pakai default hybrid (Part terakhir dikecualikan).
     const aIsHybrid = findArchetype(ds1.archetype)?.allowMultiShotPerScene === true;
-    const cutawayB = arcB.allowMultiShotPerScene ? (aIsHybrid ? ds1.cutawayExcluded : [ds1.sceneCount]) : [];
+    const cutawayB = arcB.allowMultiShotPerScene ? (aIsHybrid ? ds1.cutawayExcluded : [ds1.parts.length]) : [];
     const s1B: Step1State = { ...ds1, archetype: abVariant, visualStyle: arcB.defaults.visualStyle, tone: arcB.defaults.tone, cutawayExcluded: cutawayB };
     const s3B: Step3State = { ...ds3, useCharacter: arcB.defaults.useCharacter, expression: arcB.defaults.expression };
-    return compileMasterPrompt(prop, s1B, dscenes, s3B);
-  }, [prop, abVariant, onStep4, debouncedSrc]);
+    return compileMasterPrompt(prop, s1B, s3B, zipImages);
+  }, [prop, abVariant, onStep4, debouncedSrc, zipImages]);
 
   // Simpan riwayat otomatis saat Step 4 tampil; record baru bila prompt berubah.
   useEffect(() => {
@@ -3044,7 +2978,7 @@ export default function AdminViralFrameWorkspacePage() {
         // rulebook_version (Stage 3) — stempel aditif, tidak dibaca applyConfig(),
         // murni untuk traceability: generate lama bisa dibandingkan ke aturan yang
         // berlaku saat itu dibuat kalau REALISM_*/dsb berubah lagi di masa depan.
-        params_json: JSON.stringify({ s1, scenes, s3, rulebook_version: RULEBOOK_VERSION }),
+        params_json: JSON.stringify({ s1, s3, rulebook_version: RULEBOOK_VERSION }),
         master_prompt: masterPrompt,
       }),
     })
@@ -3052,16 +2986,16 @@ export default function AdminViralFrameWorkspacePage() {
       .then(j => { if (j?.data?.id) setGenerationId(j.data.id); })
       .catch(() => {})
       .finally(() => setSaving(false));
-    // s1/scenes/s3 sengaja tidak di deps — perubahannya tercermin via masterPrompt
+    // s1/s3 sengaja tidak di deps — perubahannya tercermin via masterPrompt
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, masterPrompt, prop]);
 
   // Copy Prompt Natural — renderer KEDUA dari data yang sama persis dengan masterPrompt
-  // (Part/Scene/Karakter/Parameter), berupa paragraf naratif untuk paste manual ke
-  // tool percakapan (Google Flow/Veo) — pelengkap "Copy JSON" (masterPrompt di atas).
+  // (Part/Karakter/Parameter), berupa paragraf naratif per Part untuk paste manual ke
+  // tool percakapan (Google Flow/Veo) — pelengkap "Copy Prompt JSON" (masterPrompt di atas).
   const naturalPrompt = useMemo(
-    () => (prop && onStep4 ? compileNaturalPrompt(prop, debouncedSrc.s1, debouncedSrc.scenes, debouncedSrc.s3) : ''),
-    [prop, onStep4, debouncedSrc],
+    () => (prop && onStep4 ? compileNaturalPrompt(prop, debouncedSrc.s1, debouncedSrc.s3, zipImages) : ''),
+    [prop, onStep4, debouncedSrc, zipImages],
   );
   const [copiedNatural, setCopiedNatural] = useState(false);
   const handleCopyNatural = async () => {
@@ -3094,6 +3028,35 @@ export default function AdminViralFrameWorkspacePage() {
     } finally {
       setThumbLoading(false);
     }
+  };
+  // Prompt VISUAL-SAJA untuk thumbnail (Tahap 4, poin 6) — TIDAK menyentuh pipeline
+  // composite Cloudinary di thumbnail.js (tetap dipakai untuk menempel judul/harga,
+  // keputusan lama yang benar: model image-gen buruk merender teks legible). Ini
+  // hanya teks bantu opsional bila user ingin variasi latar via AI image-gen lain,
+  // dibangun lokal di sini (bukan dari masterPromptCompiler.ts — di luar kepemilikan).
+  const thumbnailVisualPrompt = useMemo(() => {
+    if (!prop) return '';
+    const arc = findArchetype(s1.archetype);
+    const styleLabel = VISUAL_STYLES.find(v => v.value === s1.visualStyle)?.label ?? s1.visualStyle;
+    const moodParts = [arc ? arc.label : styleLabel, 'natural daylight, realistic photography, shallow depth of field'];
+    const subjek = s3.useCharacter && s3.character
+      ? `${buildCharacterDescription(s3.character, s3.expression)} standing near the property facade`
+      : 'property facade as the main subject, no visible people';
+    return [
+      `Real estate thumbnail background, ${prop.jenis_properti} facade, ${prop.kecamatan}, ${prop.kabupaten}.`,
+      `Subject: ${subjek}.`,
+      `Mood/style: ${moodParts.join(', ')}.`,
+      'Composition: leave empty negative space in upper third for text overlay (added separately, NOT part of this image).',
+      'IMPORTANT: no text, no letters, no numbers, no logos, no watermark rendered in the image — visual only.',
+    ].join('\n');
+  }, [prop, s1.archetype, s1.visualStyle, s3.useCharacter, s3.character, s3.expression]);
+  const [copiedThumbPrompt, setCopiedThumbPrompt] = useState(false);
+  const handleCopyThumbPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(thumbnailVisualPrompt);
+      setCopiedThumbPrompt(true);
+      setTimeout(() => setCopiedThumbPrompt(false), 2000);
+    } catch { /* clipboard tidak tersedia */ }
   };
   const handleCopyThumbUrl = async () => {
     if (!thumbData) return;
@@ -3132,22 +3095,16 @@ export default function AdminViralFrameWorkspacePage() {
     URL.revokeObjectURL(url);
   };
 
-  // ─── Step 4b: durasi per scene (untuk validasi & scene cards) ─────────────
-  const durations = useMemo(
-    () => (s1.durationMode === 'part'
-      ? partDurationsToScenes(s1.parts, s1.sceneCount, s1.uniformDuration || 8)
-      : s1.durationMode === 'uniform'
-        ? Array.from({ length: s1.sceneCount }, () => s1.uniformDuration)
-        : s1.manualDurations.slice(0, s1.sceneCount)),
-    [s1.durationMode, s1.sceneCount, s1.uniformDuration, s1.manualDurations, s1.parts],
-  );
+  // ─── Catatan Produksi (Σ VO vs Σ durasi Part, Tahap 3 Agent 3) ────────────
+  const productionNotes = useMemo(() => buildProductionNotes(s1.parts), [s1.parts]);
+  const totalDurationSec = useMemo(() => totalDurationOfParts(s1.parts), [s1.parts]);
 
-  // Reset hasil validasi bila PARAMETER (s1/scenes/s3) benar-benar berubah agar
-  // tidak stale — sengaja pakai `debouncedSrc`, BUKAN `masterPrompt`. `masterPrompt`
+  // Reset hasil validasi bila PARAMETER (s1/s3) benar-benar berubah agar tidak
+  // stale — sengaja pakai `debouncedSrc`, BUKAN `masterPrompt`. `masterPrompt`
   // sengaja di-set '' setiap kali step !== 5 (optimasi performa, lihat komentar di
   // deklarasinya), jadi dulu dependency ini membuat navigasi Step 5→4→5 TANPA
-  // edit apa pun ikut menghapus JSON yang sudah dipaste+divalidasi + scene cards
-  // (audit 2026-07-28). `debouncedSrc` hanya berubah referensi kalau s1/scenes/s3
+  // edit apa pun ikut menghapus JSON yang sudah dipaste+divalidasi + Part Cards
+  // (audit 2026-07-28). `debouncedSrc` hanya berubah referensi kalau s1/s3
   // benar-benar berubah, tidak terpengaruh navigasi step.
   useEffect(() => {
     setValResult(null); setValidData(null); setWarningsDismissed(false); setZipError('');
@@ -3155,9 +3112,7 @@ export default function AdminViralFrameWorkspacePage() {
 
   const handleValidate = () => {
     setZipError('');
-    const result = validateSceneJson(pasteRaw, {
-      sceneCount: s1.sceneCount, aiTool: s1.aiTool, scenes, durations,
-    });
+    const result = validatePartJson(pasteRaw, { parts: s1.parts, aiTool: s1.aiTool });
     setValResult(result);
     setWarningsDismissed(false);
     if (result.ok && result.data) {
@@ -3176,40 +3131,142 @@ export default function AdminViralFrameWorkspacePage() {
     }
   };
 
+  // ─── Nama file referensi per Part (lokal, sinkron ZIP ↔ Prompt) ────────────
+  // Logika IDENTIK dengan `partRefImageNames()` privat di masterPromptCompiler.ts
+  // (karakter dulu bila dipakai, lalu refPhotoIds Part via nameMap) — dipertahankan
+  // terpisah di sini (bukan diimpor, fungsi itu tidak diekspor) supaya ZIP builder
+  // tidak bergantung pada internal compiler, tapi berbasis SUMBER data yang sama
+  // (buildZipNames(zipImages) dari options.ts) sehingga hasilnya WAJIB identik.
+  function partRefFileNamesLocal(p: PartDef, nameMap: Map<number, string>): string[] {
+    const names: string[] = [];
+    if (s3.useCharacter && s3.character) names.push(characterFileName(s3.character.nama));
+    for (const pid of p.refPhotoIds) {
+      const label = p.cuts.find(c => c.photoId === pid)?.label ?? '';
+      const nm = nameMap.get(pid) ?? `${slugifyLabel(label)}.webp`;
+      if (!names.includes(nm)) names.push(nm);
+    }
+    return names;
+  }
+
+  // Potong naturalPrompt (yang SAMA PERSIS dipakai tombol "Copy Prompt Natural")
+  // jadi per-Part berdasarkan header "## PART {n} —" yang selalu ditulis
+  // compileNaturalPrompt() — dipakai isi PROMPT.txt per folder ZIP, supaya teksnya
+  // IDENTIK dengan yang tampil di layar (bukan dirakit ulang dari data mentah).
+  function splitNaturalPromptByPart(natural: string, totalParts: number): string[] {
+    const out: string[] = [];
+    for (let i = 0; i < totalParts; i++) {
+      const start = natural.indexOf(`## PART ${i + 1} —`);
+      if (start === -1) { out.push(''); continue; }
+      const nextMarker = i + 1 < totalParts ? `## PART ${i + 2} —` : '## CATATAN PRODUKSI';
+      const end = natural.indexOf(nextMarker, start);
+      out.push(natural.slice(start, end === -1 ? undefined : end).trim());
+    }
+    return out;
+  }
+
+  // ─── ZIP PER-PART (Tahap 4, utama) — dari Master Prompt/Parameter aktif ────
+  // Struktur: part{N}_{label}/PROMPT.txt + part{N}_{label}/LAMPIRKAN/{foto}.webp,
+  // README.txt. Nama file di LAMPIRKAN/ WAJIB identik dengan yang disebut di
+  // PROMPT.txt — keduanya dibangun dari `zipImages` + `buildZipNames()` yang SAMA,
+  // itulah yang menjamin invariannya (lihat validasi di laporan akhir agent).
+  const [zipPerPartBusy, setZipPerPartBusy] = useState(false);
+  const [zipPerPartError, setZipPerPartError] = useState('');
+  const handleDownloadZipPerPart = async () => {
+    if (!prop) return;
+    setZipPerPartBusy(true); setZipPerPartError('');
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      const nameMap = buildZipNames(zipImages);
+      const parts = s1.parts;
+      const sections = splitNaturalPromptByPart(naturalPrompt, parts.length);
+
+      for (let pi = 0; pi < parts.length; pi++) {
+        const p = parts[pi];
+        const folder = `part${pi + 1}_${slugifyLabel(p.label || p.role)}`;
+        zip.file(`${folder}/PROMPT.txt`, sections[pi] || '(Master Prompt belum terkompilasi — buka tab Master Prompt dulu)');
+        const lampirkan = zip.folder(`${folder}/LAMPIRKAN`);
+        const fileNames = partRefFileNamesLocal(p, nameMap);
+        for (const fname of fileNames) {
+          if (s3.useCharacter && s3.character && fname === characterFileName(s3.character.nama)) {
+            if (s3.character.foto_url) {
+              const res = await fetch(`/api/admin/media?key=${encodeURIComponent(s3.character.foto_url)}`, { credentials: 'include' });
+              if (res.ok) lampirkan?.file(fname, await res.blob());
+            }
+            continue;
+          }
+          const photoId = [...nameMap.entries()].find(([, n]) => n === fname)?.[0];
+          const img = photoId != null ? prop.images.find(im => im.id === photoId) : null;
+          if (!img) continue;
+          const res = await fetch(`/api/admin/media?key=${encodeURIComponent(img.url_webp)}`, { credentials: 'include' });
+          if (res.ok) lampirkan?.file(fname, await res.blob());
+        }
+      }
+
+      zip.file(
+        'README.txt',
+        `ZIP per-Part — ${prop.kode_listing}\n\n` +
+        `Tiap folder "part{N}_{label}" berisi:\n` +
+        `- PROMPT.txt   : teks siap-tempel untuk Part itu (1 Part = 1 generate call di Google Flow/Veo/dst).\n` +
+        `- LAMPIRKAN/   : foto referensi yang DISEBUT di PROMPT.txt — nama file IDENTIK, lampirkan semuanya\n` +
+        `                 sebagai reference image sebelum menekan generate.\n\n` +
+        `Total ${parts.length} Part, total durasi ${totalDurationSec} detik.\n`,
+      );
+
+      const out = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(out);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(prop.kode_listing ?? 'SBP').replace(/[^a-zA-Z0-9-]/g, '-')}-per-part.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: unknown) {
+      setZipPerPartError(err instanceof Error ? err.message : 'Gagal membuat ZIP per-Part');
+    } finally {
+      setZipPerPartBusy(false);
+    }
+  };
+
+  // ─── ZIP dari tab "Paste & Validate" — dari JSON hasil AI eksternal ────────
+  // reference_images[] di JSON AI sudah berisi nama file (disalin dari daftar
+  // "LAMPIRKAN SEBAGAI REFERENCE IMAGE" BLOK 3b) — reverseMap menemukan foto
+  // sumbernya lewat nameMap yang SAMA, sehingga tetap sinkron dengan buildZipNames().
   const handleDownloadZip = async () => {
     if (!validData || !prop) return;
     setZipBusy(true); setZipError('');
     try {
       const { default: JSZip } = await import('jszip');
       const zip = new JSZip();
-      const photosFolder = zip.folder('photos');
+      const nameMap = buildZipNames(zipImages);
+      const reverseMap = new Map<string, number>();
+      for (const [pid, name] of nameMap) reverseMap.set(name, pid);
+      const characterFname = s3.useCharacter && s3.character ? characterFileName(s3.character.nama) : null;
 
-      // (a) Foto tiap scene → photos/sceneNN_label.webp (nama PERSIS dari options.ts)
-      const imgById = new Map(prop.images.map(im => [im.id, im]));
-      for (let i = 0; i < s1.sceneCount; i++) {
-        const sc = scenes[i];
-        if (!sc?.photoId) continue;
-        const img = imgById.get(sc.photoId);
-        if (!img) continue;
-        const res = await fetch(`/api/admin/media?key=${encodeURIComponent(img.url_webp)}`, { credentials: 'include' });
-        if (!res.ok) throw new Error(`Gagal unduh foto scene ${i + 1} (HTTP ${res.status})`);
-        const blob = await res.blob();
-        photosFolder?.file(sceneFileName(i, sc.label || ''), blob);
-      }
-
-      // (b) Foto karakter → character/character_nama.webp
-      if (s3.useCharacter && s3.character?.foto_url) {
-        const res = await fetch(`/api/admin/media?key=${encodeURIComponent(s3.character.foto_url)}`, { credentials: 'include' });
-        if (res.ok) {
-          const blob = await res.blob();
-          zip.folder('character')?.file(characterFileName(s3.character.nama), blob);
+      const parts = validData.parts ?? [];
+      for (let pi = 0; pi < parts.length; pi++) {
+        const p = parts[pi];
+        const folder = `part${pi + 1}_${slugifyLabel(p.role || `part${pi + 1}`)}`;
+        zip.file(`${folder}/PROMPT.txt`, partPromptText(p));
+        const lampirkan = zip.folder(`${folder}/LAMPIRKAN`);
+        for (const fname of (p.reference_images ?? [])) {
+          if (characterFname && fname === characterFname) {
+            if (s3.character?.foto_url) {
+              const res = await fetch(`/api/admin/media?key=${encodeURIComponent(s3.character.foto_url)}`, { credentials: 'include' });
+              if (res.ok) lampirkan?.file(fname, await res.blob());
+            }
+            continue;
+          }
+          const photoId = reverseMap.get(fname);
+          const img = photoId != null ? prop.images.find(im => im.id === photoId) : null;
+          if (!img) continue;
+          const res = await fetch(`/api/admin/media?key=${encodeURIComponent(img.url_webp)}`, { credentials: 'include' });
+          if (res.ok) lampirkan?.file(fname, await res.blob());
         }
       }
 
-      // (c) prompt.txt = Master Prompt
-      zip.file('prompt.txt', masterPrompt);
-
-      // (d) caption_hashtag.txt
+      // caption_hashtag.txt
       const pn = validData.production_notes ?? {};
       const caption = pn.caption ?? '';
       const hashtags = Array.isArray(pn.hashtags)
@@ -3217,15 +3274,13 @@ export default function AdminViralFrameWorkspacePage() {
         : '';
       zip.file('caption_hashtag.txt', `CAPTION:\n${caption}\n\nHASHTAGS:\n${hashtags}`);
 
-      // (d2) subtitles.srt — timing dari narasi + durasi scene (R8)
-      const srt = buildSrt(validData.scenes ?? [], durations);
+      // subtitles.srt — timing dari dialog + duration_sec tiap Part
+      const srt = buildSrtFromParts(parts);
       if (srt.trim()) zip.file('subtitles.srt', srt);
 
-      // (d3) scenes.json — JSON hasil AI tervalidasi (ai_ready_prompt per scene ada
-      // di sini), agar bundle mandiri: user tidak perlu balik ke web untuk copy prompt.
-      zip.file('scenes.json', JSON.stringify(validData, null, 2));
+      // parts.json — JSON hasil AI tervalidasi apa adanya, agar bundle mandiri.
+      zip.file('parts.json', JSON.stringify(validData, null, 2));
 
-      // (e) generate + download
       const out = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(out);
       const a = document.createElement('a');
@@ -3393,11 +3448,12 @@ export default function AdminViralFrameWorkspacePage() {
       )}
 
 
-      {/* ─── SECTION 0 — Label Foto & Rancang Part ───
-          Gabungan Step 0 (label + centang bahan) dan Part designer. Pemilihan foto
-          per scene SENGAJA dihapus (2026-08-01): dulu foto ditanya dua kali (di
-          Label Foto lalu lagi per scene) dan itu membingungkan. Sekarang AI Rancang
-          Storyboard yang menugaskan foto; hasilnya tampil read-only per Part. */}
+      {/* ─── SECTION 0 — Label Foto ───
+          Reorder Tahap 4 (2026-08-01): Section ini kembali MURNI Label Foto +
+          centang bahan. Part designer & tombol "AI Rancang Storyboard" pindah ke
+          Section 3 (Parameter Video) — di titik itu karakter (Section 1) & mode
+          (Section 2) sudah terisi, jadi payload ke suggest-storyboard.js lengkap
+          (character_photo_url, ai_tool tersedia). Lihat Section 3 di bawah. */}
       {prop && (
         <Section
           n={0} title={SECTION_TITLES[0]}
@@ -3419,161 +3475,6 @@ export default function AdminViralFrameWorkspacePage() {
             selectedIds={selectedForVideo}
             onToggleSelected={toggleSelectedForVideo}
           />
-
-          <div className="border-t border-gray-100 pt-4 space-y-5">
-          <p className="text-sm text-[#64748B]">
-            {s1.durationMode === 'part'
-              ? 'Tentukan babak (Part) video dan durasi tiap Part, lalu jalankan AI Rancang Storyboard — AI yang menentukan berapa scene tiap Part dan foto mana saja yang dipakai.'
-              : 'Tentukan jumlah scene. Foto tiap scene ditugaskan lewat AI Rancang Storyboard.'}
-          </p>
-
-          {s1.durationMode === 'part' ? (
-            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-[#F0F7FF] border border-[#1565C0]/20">
-              <span className="text-xs text-[#1565C0]">
-                Total <strong>{s1.sceneCount} scene</strong> · <strong>{durations.reduce((a, b) => a + b, 0)} detik</strong> — dihitung otomatis dari Part di bawah.
-              </span>
-              <button type="button"
-                onClick={() => update1('durationMode', 'uniform')}
-                className="text-[11px] text-[#64748B] hover:text-[#0F172A] underline shrink-0 ml-3">
-                Atur durasi per scene saja
-              </button>
-            </div>
-          ) : (
-            <Field label="Jumlah Scene" hint="Antara 2–12 scene">
-              <div className="flex items-center gap-3">
-                <input type="number" min={2} max={12} value={s1.sceneCount}
-                  onChange={e => setSceneCount(parseInt(e.target.value, 10))}
-                  className={`${selectCls} sm:w-40`} />
-                <button type="button"
-                  onClick={() => update1('durationMode', 'part')}
-                  className="text-[11px] text-[#1565C0] hover:text-[#0F4C9E] underline shrink-0">
-                  Pakai durasi per Part
-                </button>
-              </div>
-            </Field>
-          )}
-
-          {/* Rancang Part (Fase 6, opsional) — pengelompokan naratif di atas Scene.
-              Part TIDAK mengubah mekanisme Scene (tetap 1 foto = 1 generate call);
-              hanya membawa role di level lebih tinggi + label naratif. Kosong = fallback
-              role otomatis berdasar posisi (Hook scene pertama, CTA scene terakhir). */}
-          <Field
-            label={s1.durationMode === 'part' ? 'Rancang Part' : 'Rancang Part (opsional)'}
-            hint={s1.durationMode === 'part'
-              ? 'Tiap Part = satu babak naratif dengan durasi sendiri. Jumlah scene & foto per Part diisi AI.'
-              : 'Kelompokkan scene jadi babak naratif (Hook/Body/CTA) — kosongkan untuk perilaku otomatis berdasar posisi seperti biasa.'}>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={suggestStoryboard} disabled={suggestLoading}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-[#1565C0]/30 text-[#1565C0] hover:bg-[#F0F7FF] disabled:opacity-50 disabled:cursor-not-allowed">
-                  {suggestLoading ? 'Merancang…' : '🤖 AI Rancang Storyboard'}
-                </button>
-                <span className="text-[11px] text-[#94A3B8]">
-                  {s1.durationMode === 'part'
-                    ? 'AI menentukan jumlah scene & foto tiap Part dari durasi yang kamu set + label ruangan tersimpan.'
-                    : 'Isi Part + foto per scene otomatis dari label ruangan yang sudah tersimpan — tetap bisa diedit manual.'}
-                </span>
-              </div>
-              {suggestError && <p className="text-xs text-red-500">{suggestError}</p>}
-              {(s1.parts ?? []).map((p, idx) => {
-                // Scene yang dimiliki Part ini (nomor 1-based) — untuk menampilkan
-                // foto yang benar-benar terpasang, bukan sekadar kolam photoIds.
-                const mulai = (s1.parts ?? []).slice(0, idx).reduce((s, x) => s + x.sceneCount, 0);
-                const sceneNums = Array.from({ length: p.sceneCount }, (_, k) => mulai + k + 1);
-                const perScene = p.durationSec && p.sceneCount > 0 ? p.durationSec / p.sceneCount : 0;
-                return (
-                  <div key={idx} className="px-3 py-2 border border-gray-100 rounded-xl space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-[#94A3B8] w-14 shrink-0">Part {idx + 1}</span>
-                      <select value={p.role} onChange={e => updatePart(idx, { role: e.target.value as PartDef['role'] })}
-                        className="text-sm border border-gray-200 rounded-lg px-2 py-1">
-                        <option value="Hook">Hook</option>
-                        <option value="Body">Body</option>
-                        <option value="CTA">CTA</option>
-                      </select>
-
-                      {s1.durationMode === 'part' ? (
-                        <>
-                          <input type="number" min={2} max={120} value={p.durationSec ?? ''}
-                            onChange={e => updatePart(idx, { durationSec: Math.max(0, parseInt(e.target.value, 10) || 0) })}
-                            className="w-16 text-sm border border-gray-200 rounded-lg px-2 py-1" title="Durasi Part (detik)" />
-                          <span className="text-xs text-[#94A3B8] shrink-0">detik</span>
-                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#EFF6FF] text-[#1565C0] shrink-0" title="Ditentukan AI Rancang Storyboard">
-                            {p.sceneCount} scene{perScene > 0 ? ` · ~${perScene.toFixed(perScene % 1 ? 1 : 0)}s/scene` : ''}
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <input type="number" min={1} max={s1.sceneCount} value={p.sceneCount}
-                            onChange={e => updatePart(idx, { sceneCount: Math.max(1, parseInt(e.target.value, 10) || 1) })}
-                            className="w-16 text-sm border border-gray-200 rounded-lg px-2 py-1" title="Jumlah scene" />
-                          <span className="text-xs text-[#94A3B8]">scene</span>
-                        </>
-                      )}
-
-                      <input type="text" value={p.label ?? ''} placeholder="Label (opsional)"
-                        onChange={e => updatePart(idx, { label: e.target.value })}
-                        className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1 min-w-0" />
-                      <button type="button" onClick={() => removePart(idx)}
-                        className="text-xs text-red-500 hover:text-red-700 shrink-0">Hapus</button>
-                    </div>
-
-                    {/* Foto milik Part ini — dibaca dari scenes[] (penyimpanan kanonik),
-                        bukan dari p.photoIds, supaya edit manual per scene langsung terlihat. */}
-                    {s1.durationMode === 'part' && sceneNums.length > 0 && (
-                      <div className="flex items-center gap-1.5 flex-wrap pl-14">
-                        {sceneNums.map(num => {
-                          const sc = scenes[num - 1];
-                          const img = sc?.photoId != null ? prop.images.find(im => im.id === sc.photoId) : null;
-                          return img ? (
-                            <img key={num} src={thumbSrc(img.url_webp, 64)} alt={sc?.label ?? ''}
-                              title={`Scene ${num}${sc?.label ? ` — ${sc.label}` : ''}`}
-                              className="w-8 h-8 rounded object-cover border border-gray-200" loading="lazy" decoding="async" />
-                          ) : (
-                            <span key={num} title={`Scene ${num} — belum ada foto`}
-                              className="w-8 h-8 rounded border border-dashed border-gray-300 flex items-center justify-center text-[9px] text-[#94A3B8]">{num}</span>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              <div className="flex items-center justify-between">
-                <button type="button" onClick={addPart}
-                  className="text-xs font-semibold text-[#1565C0] hover:text-[#0F4C9E]">+ Tambah Part</button>
-                {s1.durationMode !== 'part' && (s1.parts ?? []).length > 0 && (() => {
-                  const sum = s1.parts!.reduce((s, p) => s + p.sceneCount, 0);
-                  return sum !== s1.sceneCount ? (
-                    <span className="text-xs text-amber-600">
-                      Jumlah scene di Part ({sum}) belum sama dengan Jumlah Scene total ({s1.sceneCount}) — role fallback ke otomatis sampai cocok.
-                    </span>
-                  ) : (
-                    <span className="text-xs text-emerald-600">✓ Sum cocok, Part aktif</span>
-                  );
-                })()}
-              </div>
-            </div>
-          </Field>
-
-          {/* Ringkasan penugasan foto — READ-ONLY. Foto per scene ditentukan AI
-              Rancang Storyboard; strip thumbnail per Part di atas adalah preview
-              utamanya. Blok ini hanya menegaskan kalau belum ada yang ditugaskan. */}
-          {prop.images.length === 0 ? (
-            <div className="text-center py-10">
-              <ImageOff size={28} className="text-gray-300 mx-auto mb-2" />
-              <p className="text-sm text-[#64748B]">Properti ini belum punya foto. Tambahkan foto di menu Properti dulu.</p>
-            </div>
-          ) : scenes.slice(0, s1.sceneCount).some(sc => sc?.photoId == null) ? (
-            <p className="text-xs text-amber-600">
-              Foto per scene belum ditugaskan. Klik <strong>AI Rancang Storyboard</strong> di atas — AI akan memilih foto dari {selectedForVideo.size} foto yang kamu centang jadi bahan.
-            </p>
-          ) : (
-            <p className="text-xs text-emerald-600">
-              ✓ {s1.sceneCount} scene sudah punya foto &amp; label. Lihat pembagiannya di strip tiap Part di atas.
-            </p>
-          )}
-          </div>
         </Section>
       )}
 
@@ -3673,23 +3574,23 @@ export default function AdminViralFrameWorkspacePage() {
             </div>
           </Field>
 
-          {/* Per-scene cutaway override — hanya muncul untuk arketipe hybrid
-              (agent_broll_hybrid/selfie_luxury_hybrid). Default: scene terakhir
+          {/* Per-Part cutaway override — hanya muncul untuk arketipe hybrid
+              (agent_broll_hybrid/selfie_luxury_hybrid). Default: Part terakhir
               (CTA) dikecualikan dari cutaway (talking-head/selfie murni sebagai
-              penutup); user bisa toggle scene mana pun secara manual. */}
+              penutup); user bisa toggle Part mana pun secara manual. */}
           {(() => {
             const arc = findArchetype(s1.archetype);
             if (!arc?.allowMultiShotPerScene) return null;
             return (
-              <Field label="Per-Scene: Cutaway B-Roll" hint='Nonaktifkan cutaway di scene tertentu (mis. CTA/penutup) — scene itu jadi talking-head/selfie murni tanpa disela b-roll.'>
+              <Field label="Per-Part: Cutaway B-Roll" hint='Nonaktifkan cutaway di Part tertentu (mis. CTA/penutup) — Part itu jadi talking-head/selfie murni tanpa disela b-roll.'>
                 <div className="space-y-1.5">
-                  {Array.from({ length: s1.sceneCount }, (_, i) => i + 1).map(sceneNum => {
-                    const role = sceneRoleFromParts(sceneNum - 1, s1.sceneCount, s1.parts);
-                    const excluded = s1.cutawayExcluded.includes(sceneNum);
+                  {s1.parts.map((p, idx) => {
+                    const partNum = idx + 1;
+                    const excluded = s1.cutawayExcluded.includes(partNum);
                     return (
-                      <div key={sceneNum} className="flex items-center justify-between px-3 py-2 border border-gray-100 rounded-xl">
-                        <span className="text-sm text-[#0F172A]">Scene {sceneNum} <span className="text-xs text-[#94A3B8]">({role})</span></span>
-                        <button type="button" onClick={() => toggleCutawayExcluded(sceneNum)}
+                      <div key={partNum} className="flex items-center justify-between px-3 py-2 border border-gray-100 rounded-xl">
+                        <span className="text-sm text-[#0F172A]">Part {partNum} <span className="text-xs text-[#94A3B8]">({p.role})</span></span>
+                        <button type="button" onClick={() => toggleCutawayExcluded(partNum)}
                           className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
                             excluded ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-[#EFF6FF] border-[#1565C0]/30 text-[#1565C0]'
                           }`}>
@@ -3703,112 +3604,105 @@ export default function AdminViralFrameWorkspacePage() {
             );
           })()}
 
-          {/* Jumlah Scene, Rancang Part, dan AI Rancang Storyboard pindah ke
-              Step 1 (Pilih Foto per Scene) — struktur scene dirancang bersama foto. */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Mode Durasi */}
-            <Field label="Mode Durasi" hint={s1.durationMode === 'part' ? 'Durasi diatur per Part di Step 1.' : undefined}>
-              <div className="flex gap-2">
-                {(['part', 'uniform', 'manual'] as const).map(m => (
-                  <button key={m} type="button" onClick={() => update1('durationMode', m)}
-                    className={`flex-1 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${
-                      s1.durationMode === m
-                        ? 'bg-[#1565C0] text-white border-[#1565C0]'
-                        : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'
-                    }`}>
-                    {m === 'part' ? 'Per Part' : m === 'uniform' ? 'Seragam' : 'Manual per Scene'}
-                  </button>
-                ))}
+          {/* ── Rancang Part (model Part-as-Generate-Unit) — PINDAH ke sini dari
+              Section 0 (Tahap 4 reorder): di titik ini karakter (Section 1) & mode
+              (Section 2) sudah terisi, jadi payload ke suggest-storyboard.js bisa
+              berisi character_photo_url + ai_tool. 1 Part = 1 panggilan generate;
+              AI ("AI Rancang Storyboard") menentukan cuts/foto referensi/rationale
+              tiap Part — role/durasi/durasi VO TETAP dikunci user di sini. */}
+          <Field label="Rancang Part" hint={`Total Part, durasi (≤${clipMaxForTool}s untuk ${AI_TOOLS.find(t => t.value === s1.aiTool)?.label ?? s1.aiTool}), dan durasi VO tiap Part. AI mengisi cuts & foto referensi dari label ruangan tersimpan.`}>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button type="button" onClick={suggestStoryboard} disabled={suggestLoading || s1.parts.length === 0}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-[#1565C0]/30 text-[#1565C0] hover:bg-[#F0F7FF] disabled:opacity-50 disabled:cursor-not-allowed">
+                  {suggestLoading ? 'Merancang…' : '🤖 AI Rancang Storyboard'}
+                </button>
+                <span className="text-[11px] text-[#94A3B8]">
+                  AI melihat foto berlabel (bervisi bila memungkinkan) untuk menentukan cuts &amp; foto referensi tiap Part.
+                </span>
+                {suggestUsedVision != null && (
+                  <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${suggestUsedVision ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}
+                    title={suggestUsedVision ? `Dirancang dengan visi AI (${suggestProviderUsed})` : `Mode teks saja — provider bervisi tidak tersedia (${suggestProviderUsed})`}>
+                    {suggestUsedVision ? `👁️ dirancang dengan visi AI (${suggestProviderUsed})` : `📝 mode teks (${suggestProviderUsed})`}
+                  </span>
+                )}
               </div>
-            </Field>
-          </div>
+              {suggestError && <p className="text-xs text-red-500">{suggestError}</p>}
 
-          {/* Mode Part: durasi dirancang di Step 1, di sini hanya rincian read-only
-              supaya user tetap bisa memeriksa hasil pembagiannya sebelum generate. */}
-          {s1.durationMode === 'part' && (
-            <Field label="Durasi per Part" hint="Diatur di Step 1 — Rancang Part. Durasi tiap scene dibagi rata dari durasi Part-nya.">
-              <div className="border border-gray-100 rounded-xl divide-y divide-gray-50">
-                {(s1.parts ?? []).length === 0 ? (
-                  <p className="text-xs text-[#94A3B8] px-3 py-2">Belum ada Part. Kembali ke Step 1 untuk merancangnya.</p>
-                ) : (s1.parts ?? []).map((p, idx) => {
-                  const mulai = (s1.parts ?? []).slice(0, idx).reduce((s, x) => s + x.sceneCount, 0);
-                  const nums = Array.from({ length: p.sceneCount }, (_, k) => mulai + k + 1);
-                  return (
-                    <div key={idx} className="flex items-center justify-between px-3 py-2 text-sm">
-                      <span className="text-[#0F172A]">
-                        Part {idx + 1} — {p.role}{p.label ? `: ${p.label}` : ''}
-                        <span className="text-[#94A3B8] text-xs"> (Scene {nums.join(', ') || '—'})</span>
-                      </span>
-                      <span className="text-[#64748B] text-xs shrink-0 ml-3">
-                        {p.durationSec ?? 0} detik → {nums.map(n => `${durations[n - 1] ?? 0}s`).join(' + ') || '—'}
-                      </span>
+              {s1.parts.map((p, idx) => {
+                const refCount = p.refPhotoIds.length + (s3.useCharacter && s3.character ? 1 : 0);
+                const overQuota = refCount > MAX_REF_IMAGES_PER_PART;
+                return (
+                  <div key={idx} className="px-3 py-2 border border-gray-100 rounded-xl space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold text-[#94A3B8] w-14 shrink-0">Part {idx + 1}</span>
+                      <select value={p.role} onChange={e => updatePart(idx, { role: e.target.value as PartDef['role'] })}
+                        className="text-sm border border-gray-200 rounded-lg px-2 py-1">
+                        <option value="Hook">Hook</option>
+                        <option value="Body">Body</option>
+                        <option value="CTA">CTA</option>
+                      </select>
+                      <input type="number" min={1} max={clipMaxForTool} value={p.durationSec}
+                        onChange={e => {
+                          const d = Math.max(1, Math.min(clipMaxForTool, parseInt(e.target.value, 10) || 1));
+                          updatePart(idx, { durationSec: d, voDurationSec: Math.min(p.voDurationSec, d) });
+                        }}
+                        className="w-16 text-sm border border-gray-200 rounded-lg px-2 py-1" title={`Durasi Part, maks ${clipMaxForTool} detik`} />
+                      <span className="text-xs text-[#94A3B8] shrink-0">detik</span>
+                      <input type="number" min={0} max={p.durationSec} value={p.voDurationSec}
+                        onChange={e => updatePart(idx, { voDurationSec: Math.max(0, Math.min(p.durationSec, parseInt(e.target.value, 10) || 0)) })}
+                        className="w-16 text-sm border border-gray-200 rounded-lg px-2 py-1" title="Durasi VO (detik)" />
+                      <span className="text-xs text-[#94A3B8] shrink-0">detik VO</span>
+                      <input type="text" value={p.label ?? ''} placeholder="Label (opsional)"
+                        onChange={e => updatePart(idx, { label: e.target.value })}
+                        className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1 min-w-[120px]" />
+                      <button type="button" onClick={() => removePart(idx)}
+                        className="text-xs text-red-500 hover:text-red-700 shrink-0">Hapus</button>
                     </div>
-                  );
-                })}
-              </div>
-            </Field>
-          )}
 
-          {/* Durasi seragam */}
-          {s1.durationMode === 'uniform' && (
-            <Field label="Durasi per Scene (detik)" hint="2–30 detik">
-              <input type="number" min={2} max={30} value={s1.uniformDuration}
-                onChange={e => update1('uniformDuration', parseInt(e.target.value, 10) || 0)}
-                className={`${selectCls} sm:w-40`} />
-            </Field>
-          )}
+                    {p.rationale && (
+                      <p className="text-[11px] text-[#64748B] italic pl-14">💡 {p.rationale}</p>
+                    )}
 
-          {/* Durasi manual per scene */}
-          {s1.durationMode === 'manual' && (
-            <div className="border border-gray-100 rounded-xl overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="text-left px-3 py-2 text-xs font-semibold text-[#64748B]">No. Scene</th>
-                    <th className="text-left px-3 py-2 text-xs font-semibold text-[#64748B]">Durasi (detik)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {Array.from({ length: s1.sceneCount }).map((_, i) => (
-                    <tr key={i}>
-                      <td className="px-3 py-1.5 text-[#0F172A]">Scene {i + 1} <span className="text-[#94A3B8] text-xs">({sceneRoleFromParts(i, s1.sceneCount, s1.parts)})</span></td>
-                      <td className="px-3 py-1.5">
-                        {/* 2–30 detik, SAMA dengan mode seragam. Dulu 1–60 padahal
-                            getLipsync() meng-clamp ke 2–30, jadi durasi 45 detik
-                            diam-diam diperlakukan sebagai 30 detik tanpa peringatan. */}
-                        <input type="number" min={2} max={30} value={s1.manualDurations[i] ?? 0}
-                          onChange={e => setManualDuration(i, parseInt(e.target.value, 10) || 0)}
-                          className="w-24 px-2 py-1 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0]" />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                    {/* Strip foto referensi (maks MAX_REF_IMAGES_PER_PART, termasuk
+                        karakter) — dari AI Rancang Storyboard. */}
+                    <div className="flex items-center gap-1.5 flex-wrap pl-14">
+                      {s3.useCharacter && s3.character && (
+                        <img src={thumbSrc(s3.character.foto_url, 64)} alt={s3.character.nama}
+                          title={`Karakter — ${s3.character.nama}`}
+                          className="w-8 h-8 rounded object-cover border-2 border-[#1565C0]" loading="lazy" decoding="async" />
+                      )}
+                      {p.refPhotoIds.map(pid => {
+                        const img = prop.images.find(im => im.id === pid);
+                        const label = p.cuts.find(c => c.photoId === pid)?.label ?? '';
+                        return img ? (
+                          <img key={pid} src={thumbSrc(img.url_webp, 64)} alt={label}
+                            title={label} className="w-8 h-8 rounded object-cover border border-gray-200" loading="lazy" decoding="async" />
+                        ) : null;
+                      })}
+                      {p.cuts.length === 0 && (
+                        <span className="text-[11px] text-[#94A3B8]">Belum ada cuts/foto — jalankan AI Rancang Storyboard.</span>
+                      )}
+                      {overQuota && (
+                        <span className="text-[11px] font-semibold text-red-600">⚠ {refCount} foto melebihi kuota {MAX_REF_IMAGES_PER_PART}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              <button type="button" onClick={addPart}
+                className="text-xs font-semibold text-[#1565C0] hover:text-[#0F4C9E]">+ Tambah Part</button>
             </div>
-          )}
+          </Field>
 
-          {/* Peringatan batas klip tool (Veo/Flow = 8 detik per sekali generate).
-              Sebelumnya batas ini tidak pernah disebut di mana pun, sehingga user
-              bisa menyusun scene 20-30 detik yang mustahil dihasilkan sekali jalan. */}
-          {(() => {
-            const clipMax = getClipMaxSec(s1.aiTool);
-            if (clipMax == null) return null;
-            const lewat = durations
-              .map((d, i) => ({ d, n: i + 1 }))
-              .filter(x => x.d > clipMax);
-            if (lewat.length === 0) return null;
-            const toolLabel = AI_TOOLS.find(t => t.value === s1.aiTool)?.label ?? s1.aiTool;
-            return (
-              <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
-                <span aria-hidden="true">⚠️</span>
-                <p>
-                  <strong>{toolLabel}</strong> hanya menghasilkan <strong>{clipMax} detik</strong> per sekali generate.
-                  {' '}Scene {lewat.map(x => x.n).join(', ')} melebihi itu, jadi harus disambung memakai fitur <em>Extend</em> di tool tersebut.
-                  {' '}Master Prompt sudah diberi tahu soal ini, tapi lebih mulus kalau durasinya diturunkan ke ≤{clipMax} detik.
-                </p>
-              </div>
-            );
-          })()}
+          {/* Catatan Produksi (Tahap 3 Agent 3) — Σ VO vs Σ durasi, sisa waktu, peringatan over-VO */}
+          <div className={`flex gap-2 rounded-xl border px-3 py-2.5 text-sm ${productionNotes.overVoWarning ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-[#1565C0]/20 bg-[#F0F7FF] text-[#0F172A]'}`}>
+            <span aria-hidden="true">{productionNotes.overVoWarning ? '⚠️' : 'ℹ️'}</span>
+            <p>
+              <strong>Catatan Produksi:</strong> {productionNotes.summaryText}
+              {' '}Total <strong>{totalDurationSec} detik</strong> dari {s1.parts.length} Part.
+            </p>
+          </div>
 
           {/* (c) Platform */}
           <Field label="Platform Distribusi" hint="Centang pertama = platform primer">
@@ -3925,15 +3819,28 @@ export default function AdminViralFrameWorkspacePage() {
                   className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF] transition-colors">
                   <Download size={15} /> Download .txt
                 </button>
+                <button onClick={handleDownloadZipPerPart} disabled={zipPerPartBusy || s1.parts.length === 0}
+                  title="ZIP per-Part: PROMPT.txt siap-tempel + foto referensi (LAMPIRKAN/) per Part"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                  style={{ background: 'linear-gradient(135deg, #10B981 0%, #34D399 100%)' }}>
+                  {zipPerPartBusy ? <Loader2 size={15} className="animate-spin" /> : <FileArchive size={15} />}
+                  {zipPerPartBusy ? 'Menyiapkan ZIP…' : 'Download ZIP per-Part'}
+                </button>
               </div>
+              {zipPerPartError && <p className="text-xs text-red-600">{zipPerPartError}</p>}
 
               <p className="text-sm text-[#64748B]">
-                <strong>Prompt JSON</strong>: salin, paste ke AI eksternal (mis. ChatGPT/Gemini/Claude) untuk menghasilkan JSON Scene,
+                <strong>Prompt JSON</strong>: salin, paste ke AI eksternal (mis. ChatGPT/Gemini/Claude) untuk menghasilkan JSON per Part,
                 lalu buka tab <strong>Paste &amp; Validate</strong> untuk menempel hasilnya. <strong>Prompt Natural</strong>: paragraf
-                naratif bahasa Inggris per scene (data sama persis) — cocok untuk di-paste langsung ke tool percakapan seperti Google Flow/Veo.
+                naratif per Part (data sama persis) — cocok untuk di-paste langsung ke tool percakapan seperti Google Flow/Veo.
+                {' '}<strong>ZIP per-Part</strong>: satu folder per Part berisi <code>PROMPT.txt</code> + folder <code>LAMPIRKAN/</code>
+                berisi foto referensi bernama IDENTIK dengan yang disebut di PROMPT.txt.
               </p>
 
-              {/* Thumbnail composite — fasad + karakter (kalau dipakai) + judul/harga/spek */}
+              {/* Thumbnail — prompt visual (AI image-gen, TANPA teks) + composite Cloudinary
+                  (judul/harga/spek) YANG SUDAH ADA, TIDAK DIUBAH. Model image-gen buruk
+                  merender teks legible, jadi teks tetap ditempel via Cloudinary, prompt visual
+                  di bawah hanya untuk menghasilkan latar (fasad/agen/mood) TANPA teks. */}
               <div className="rounded-xl border border-gray-200 p-3 space-y-3">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div>
@@ -3959,6 +3866,17 @@ export default function AdminViralFrameWorkspacePage() {
                     </button>
                   </div>
                 )}
+                <details className="rounded-lg border border-gray-100 bg-[#F8FAFC]">
+                  <summary className="cursor-pointer px-3 py-1.5 text-xs font-semibold text-[#64748B]">Prompt Visual Thumbnail (AI image-gen, tanpa teks)</summary>
+                  <div className="px-3 pb-3 pt-1 space-y-2">
+                    <p className="text-[11px] text-[#94A3B8]">Untuk AI image-gen (mis. Midjourney/Ideogram) bila ingin variasi latar selain foto Fasad asli. Teks judul/harga TETAP lewat composite Cloudinary di atas — model image-gen buruk merender teks legible.</p>
+                    <pre className="w-full p-2.5 border border-gray-200 rounded-lg text-xs font-mono text-[#0F172A] bg-white whitespace-pre-wrap break-words">{thumbnailVisualPrompt}</pre>
+                    <button type="button" onClick={handleCopyThumbPrompt}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF]">
+                      {copiedThumbPrompt ? <><Check size={12} /> Copied!</> : <><Copy size={12} /> Copy Prompt Visual</>}
+                    </button>
+                  </div>
+                </details>
               </div>
 
               <details className="rounded-xl border border-amber-200 bg-amber-50/50">
@@ -4011,11 +3929,9 @@ export default function AdminViralFrameWorkspacePage() {
               <div className="flex items-center gap-4 flex-wrap text-xs text-[#64748B]">
                 <span>Estimasi ~{estimateTokens(masterPrompt).toLocaleString('id-ID')} token</span>
                 <span>·</span>
-                <span>{s1.sceneCount} scene</span>
+                <span>{s1.parts.length} Part</span>
                 <span>·</span>
-                {/* Jumlahkan `durations` — satu-satunya sumber yang sudah benar
-                    untuk KETIGA mode (termasuk pembagian durasi per Part). */}
-                <span>Total {durations.reduce((a, b) => a + (b || 0), 0)} detik</span>
+                <span>Total {totalDurationSec} detik</span>
                 <span>·</span>
                 <span className="flex items-center gap-1">
                   {saving
@@ -4034,7 +3950,7 @@ export default function AdminViralFrameWorkspacePage() {
               propertyId={prop.id}
               propertyTitle={prop.title}
               kodeListingStr={prop.kode_listing}
-              jumlahScene={s1.sceneCount}
+              partSpecs={partSpecsForAI}
               platform={platformForAI}
               platforms={s1.platforms}
               aiTool={s1.aiTool}
@@ -4047,10 +3963,6 @@ export default function AdminViralFrameWorkspacePage() {
               archetype={s1.archetype}
               register={s1.register}
               cutawayExcluded={s1.cutawayExcluded}
-              sceneRoles={sceneRolesForAI}
-              scenePhotos={scenePhotosForAI}
-              sceneDurations={durations}
-              parts={s1.parts}
               selectedKarakter={selectedKarakterForAI}
               onEditStep={setStep}
             />
@@ -4076,7 +3988,7 @@ export default function AdminViralFrameWorkspacePage() {
           {step4Tab === 'validate' && (
             <div className="space-y-4">
               <p className="text-sm text-[#64748B]">
-                Tempel hasil JSON dari AI eksternal di sini, lalu klik Validasi. Scene Cards &amp; tombol unduh ZIP akan muncul jika JSON valid.
+                Tempel hasil JSON dari AI eksternal di sini, lalu klik Validasi. Part Cards &amp; tombol unduh ZIP akan muncul jika JSON valid.
               </p>
 
               <textarea value={pasteRaw} onChange={e => setPasteRaw(e.target.value)}
@@ -4130,13 +4042,13 @@ export default function AdminViralFrameWorkspacePage() {
                 <div className="bg-red-50 border border-red-100 rounded-xl p-3 text-sm text-red-600">{zipError}</div>
               )}
 
-              {/* Scene Cards */}
+              {/* Part Cards */}
               {validData && (
                 <div className="pt-1">
                   <div className="flex items-center gap-1.5 text-sm font-semibold text-emerald-600 mb-3">
-                    <Check size={15} /> JSON valid — {validData.scenes?.length ?? 0} scene
+                    <Check size={15} /> JSON valid — {validData.parts?.length ?? 0} Part
                   </div>
-                  <SceneCards data={validData} scenes={scenes} durations={durations} />
+                  <PartCards data={validData} />
                 </div>
               )}
             </div>

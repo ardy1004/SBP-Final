@@ -1,15 +1,28 @@
-// POST /api/admin/viralframe/ai-generate — Jalur C: generate N video prompt via DeepSeek
-// Body: { property_id, jumlah_scene, platform, ai_tool, bahasa, tone, visual_style, hook_type,
-//         cta_type, scene_roles, musik_value, musik_prompt, karakter_id, foto_assignments,
-//         supports_ref_image, expression }
-// foto_assignments: [{ scene: 1, foto_url: '...', foto_label: '...' }, ...] — dipilih manual oleh user, bukan auto-pick.
-// tone/visual_style/hook_type/cta_type: label sudah diresolve di frontend dari Step 1
-// (options.ts TONES/VISUAL_STYLES/HOOK_TYPES/CTA_TYPES) — "Auto" berarti tidak ada instruksi tambahan.
-// scene_roles: [{ scene: 1, role: 'Hook'|'Body'|'CTA' }, ...] — dari sceneRole() (options.ts), sama dengan Jalur A.
-// parts (opsional): [{ role, sceneCount, label }] — batas babak dari Part designer Step 1.
-//   Hanya dipakai bila jumlah sceneCount = jumlah_scene; selain itu diabaikan (bukan error).
-// Opsional REGENERATE SATU SCENE: { regenerate_scene: N, existing_scenes: [{scene,kamera,dialog_karakter}] }
-//   → AI hanya membuat ulang scene N (variasi baru) dengan konteks scene lain agar narasi nyambung.
+// POST /api/admin/viralframe/ai-generate — Jalur C: generate 1 video prompt PER PART.
+//
+// Model Part-as-Generate-Unit (refactor 2026-08-01): SATU Part = SATU panggilan
+// generate video di Google Flow, dengan maks MAX_REF_IMAGES_PER_PART foto referensi
+// dilampirkan bersamaan. `cuts[]` = potongan visual DI DALAM satu generate itu —
+// menggantikan `sequences[]` lama, dan berbeda dari `sequences` foto/lokasi BOLEH
+// berganti antar cut karena semua fotonya memang dilampirkan sekaligus.
+//
+// Body: { property_id, jumlah_part, platform, ai_tool, bahasa, tone, visual_style,
+//         hook_type, cta_type, part_roles, part_durations, part_assignments,
+//         musik_value, musik_prompt, karakter_id, supports_ref_image, expression }
+// part_assignments: [{ part: 1, role, durasi, vo_durasi, label?,
+//                      cuts: [{ foto_url, foto_label, foto_file, durasi }] }, ...]
+//   `foto_file` = nama file DI DALAM ZIP (buildZipNames() di options.ts, mis.
+//   "kamar_mandi1.webp"). Nama yang disebut prompt WAJIB identik dengan nama file
+//   di ZIP — user melampirkannya manual di Google Flow, salah nama = salah ruangan.
+//   Beberapa cut BOLEH berbagi satu foto; kuota dihitung dari foto BERBEDA.
+// part_roles: [{ part: 1, role: 'Hook'|'Body'|'CTA' }, ...]
+// part_durations: [{ part: 1, durasi: N }, ...] — durasi Part (≤ getClipMaxSec(ai_tool)).
+//   Budget kata narasi dihitung dari `vo_durasi` per Part, BUKAN durasi penuh —
+//   sisa waktunya milik hook text, transisi, dan end card.
+// tone/visual_style/hook_type/cta_type: label sudah diresolve di frontend
+// (options.ts TONES/VISUAL_STYLES/HOOK_TYPES/CTA_TYPES) — "Auto" = tanpa instruksi tambahan.
+// Opsional REGENERATE SATU PART: { regenerate_part: N, existing_parts: [{part,kamera,dialog_karakter}] }
+//   → AI hanya membuat ulang Part N (variasi baru) dengan konteks Part lain agar narasi nyambung.
 // Respons SUKSES = streaming NDJSON (heartbeat 2s + baris {done,data|error}) — latensi
 // Gemini dari dalam Worker bisa >22s bahkan untuk output kecil, pola "tunggu lalu balas"
 // menabrak wall-clock 30s → 502 (lihat youtube-long.js). Error validasi awal tetap JSON.
@@ -21,7 +34,7 @@ import {
   getMaxWords, EXPRESSION_EN,
   isNativeAudioTool, getClipMaxSec, NEGATIVE_PROMPT_VIDEO,
   REALISM_QUALITY_CUES, REALISM_BANNED_QUALITY_PHRASES, RULEBOOK_VERSION,
-  namaFileKarakter,
+  namaFileKarakter, MAX_REF_IMAGES_PER_PART,
 } from '../../../_lib/viralframe-shared.js';
 import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
 
@@ -96,7 +109,7 @@ function isAutoValue(label) {
   return !label || label.trim().toLowerCase().startsWith('auto');
 }
 
-function buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, excludedHooks, excludedCtas, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec }) {
+function buildSystemPrompt({ jumlahPart, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, excludedHooks, excludedCtas, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotPart, cutawayExcludedParts, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec }) {
   // Budget kata kini PER SCENE (audit 2026-07-26). Bila semua scene berdurasi
   // sama, sebut angkanya langsung supaya instruksinya sekonkret dulu; bila
   // berbeda-beda, arahkan ke kolom 'Maks kata' milik masing-masing scene.
@@ -276,14 +289,14 @@ WAJIB identik — yang boleh berbeda hanya kamera, angle, dan aksi karakter.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Setiap scene HARUS berbeda dalam: gerakan kamera, posisi karakter, angle, pencahayaan.
 JANGAN copy-paste struktur prompt yang sama antar scene.
-Jika ada ${jumlahScene} scene → ${jumlahScene} suasana berbeda (misal: golden hour, natural daylight, warm ambient, dramatic sunset).
+Jika ada ${jumlahPart} scene → ${jumlahPart} suasana berbeda (misal: golden hour, natural daylight, warm ambient, dramatic sunset).
 
 `;
 
   // Struktur retensi psikologis: versi simplified (scene sedikit, tidak ada ruang
   // untuk open loop penuh) vs versi lengkap (open loop di scene 1, rehook di scene
   // tengah, payoff sebelum CTA di scene terakhir).
-  const retensiBlock = jumlahScene <= 3
+  const retensiBlock = jumlahPart <= 3
     ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [6b] STRUKTUR RETENSI PSIKOLOGIS — WAJIB
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -350,7 +363,7 @@ ${targetBaris.join('\n')}
 `
     : '';
 
-  return `Kamu adalah direktur kreatif video properti profesional Indonesia dengan keahlian sinematografi, copywriting, dan digital marketing. Tugasmu: buat ${jumlahScene} video prompt terpisah untuk AI video generator.
+  return `Kamu adalah direktur kreatif video properti profesional Indonesia dengan keahlian sinematografi, copywriting, dan digital marketing. Tugasmu: buat ${jumlahPart} video prompt terpisah untuk AI video generator.
 
 ${targetBlock}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [1] ANTI-HALUSINASI — WAJIB DIPATUHI
@@ -428,118 +441,128 @@ ${musikSection}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Respond HANYA dengan JSON array murni.
 TIDAK ADA teks, komentar, penjelasan, atau markdown (\`\`\`) di luar JSON.
+Satu elemen array = SATU PART = SATU panggilan generate video.
 Format yang diharapkan:
 [
   {
-    "scene": 1,
+    "part": 1,
     "kamera": "nama singkat gerakan kamera dalam 3-5 kata",
-    "prompt": "teks prompt lengkap bahasa Inggris minimum 50 kata",
+    "prompt": "teks prompt lengkap bahasa Inggris minimum 50 kata, mencakup SELURUH cut di Part ini secara berurutan",
     "dialog_karakter": "klausa delivery + dialog karakter dalam ${bahasa}, sesuai pola wajib di [4], maksimal ${batasKata} untuk bagian dialog",
-    "on_screen_text": "teks overlay singkat untuk scene ini — kosongkan string \\"\\" jika arketipe/gaya tidak menekankan teks on-screen"${nativeAudio ? `,
-    "sequences": [{ "sequence": 1, "timestamp": "00:00-00:0Xs", "action": "aksi/kamera beat ini (Inggris)", "audio": "opsional" }]` : ''}
+    "on_screen_text": "teks overlay singkat untuk Part ini — kosongkan string \\"\\" jika arketipe/gaya tidak menekankan teks on-screen",
+    "cuts": [{ "t": "00:00-00:0Xs", "photo": "nama_file.webp persis seperti di DAFTAR CUT", "action": "aksi/gerakan kamera cut ini (Inggris)" }]
   }
 ]
-Field WAJIB ada dan non-empty: scene (integer), kamera (string), prompt (string min 50 kata), dialog_karakter (string, format sesuai [4]). on_screen_text WAJIB ada di setiap object tapi BOLEH string kosong "" jika tidak relevan untuk gaya video ini.
-${nativeAudio ? `
-FIELD OPSIONAL 'sequences' — HANYA untuk scene berdurasi > 6 detik (cek "Durasi" di user prompt):
-  • Array beat bertimecode, environment/subjek/karakter WAJIB SAMA di semua elemen — HANYA aksi/gerakan kamera yang berubah per beat (JANGAN ganti lokasi/foto antar beat, tool video-gen tidak mendukung itu dalam satu generate).
-  • Timecode berurutan tanpa celah, total menutup penuh durasi scene.
-  • Scene ≤ 6 detik: field ini BOLEH dikosongkan/diisi 1 elemen saja, TIDAK wajib dipecah.
-  • 'dialog_karakter' TETAP 1 nilai untuk keseluruhan scene, TIDAK ikut dipecah per sequence.` : ''}
+Field WAJIB ada dan non-empty: part (integer), kamera (string), prompt (string min 50 kata), dialog_karakter (string, format sesuai [4]), cuts (array, minimal 1 elemen). on_screen_text WAJIB ada tapi BOLEH string kosong "".
+
+ATURAN 'cuts' — INTI MODEL PART, WAJIB:
+  • Satu PART dihasilkan dalam SATU panggilan generate video. 'cuts' adalah POTONGAN VISUAL DI DALAM satu generate itu, bukan generate terpisah.
+  • Jumlah & urutan 'cuts' WAJIB SAMA PERSIS dengan DAFTAR CUT Part itu di user prompt — jangan menambah, mengurangi, atau menukar urutannya.
+  • Field 'photo' WAJIB memakai nama file PERSIS seperti tertulis di DAFTAR CUT (mis. "fasad.webp"). Dilarang mengarang nama file baru.
+  • Timecode 't' berurutan tanpa celah/tumpang tindih, total menutup penuh durasi Part.
+  • Berbeda dari aturan lama: foto/lokasi BOLEH berganti antar cut, karena semua foto referensi Part ini dilampirkan bersamaan (maks ${MAX_REF_IMAGES_PER_PART} gambar per generate). Tulis pergantiannya sebagai HARD CUT yang tegas di dalam 'prompt'.
+  • 'dialog_karakter' TETAP 1 nilai untuk keseluruhan Part, TIDAK dipecah per cut.
 
 ATURAN TAMBAHAN FIELD 'prompt' — WAJIB, PELANGGARAN = OUTPUT DITOLAK:
   ${nativeAudio
     ? `• 'prompt' WAJIB bahasa Inggris di SEMUA scene TERMASUK scene terakhir/CTA, KECUALI teks di dalam TANDA KUTIP GANDA — kutipan dialog itu justru WAJIB tetap dalam ${bahasa} sesuai [4b]. Di luar tanda kutip: Inggris seluruhnya.`
     : `• 'prompt' WAJIB 100% bahasa Inggris di SEMUA scene TERMASUK scene terakhir/CTA — jangan terbawa bahasa dialog_karakter (hanya 'dialog_karakter' yang memakai bahasa dialog).`}
   ${nativeAudio ? `• 'prompt' WAJIB memuat tepat satu kutipan dialog dalam tanda kutip ganda (lihat [4b]). Prompt tanpa kutipan = video bisu = DITOLAK.` : ''}
-  ${multiShotScene
-    ? `• Untuk SEMUA scene${cutawayExcludedScenes?.length ? ` KECUALI Scene ${cutawayExcludedScenes.join(', ')} (lihat pengecualian di bawah)` : ''}: 'prompt' WAJIB mendeskripsikan TEPAT DUA shot berurutan dalam SATU scene ini (arketipe hybrid A-roll/B-roll — ikuti ARAHAN GAYA VIDEO di atas): Shot 1 = talking head presenter; HARD CUT (bukan gerakan kamera menerus, potongan visual tegas) ke Shot 2 = cutaway penuh area yang sama TANPA presenter, memakai koreografi kamera yang diberikan. Tulis KEDUA shot secara eksplisit dan berurutan di dalam SATU field 'prompt' (mis. 'Shot 1: [presenter talking head] ...; hard cut to; Shot 2: [full b-roll cutaway, no presenter] ...'). Pengecualian ini MENGGANTIKAN aturan "satu shot utuh" yang berlaku untuk arketipe lain.`
+  ${multiShotPart
+    ? `• Untuk SEMUA scene${cutawayExcludedParts?.length ? ` KECUALI Scene ${cutawayExcludedParts.join(', ')} (lihat pengecualian di bawah)` : ''}: 'prompt' WAJIB mendeskripsikan TEPAT DUA shot berurutan dalam SATU scene ini (arketipe hybrid A-roll/B-roll — ikuti ARAHAN GAYA VIDEO di atas): Shot 1 = talking head presenter; HARD CUT (bukan gerakan kamera menerus, potongan visual tegas) ke Shot 2 = cutaway penuh area yang sama TANPA presenter, memakai koreografi kamera yang diberikan. Tulis KEDUA shot secara eksplisit dan berurutan di dalam SATU field 'prompt' (mis. 'Shot 1: [presenter talking head] ...; hard cut to; Shot 2: [full b-roll cutaway, no presenter] ...'). Pengecualian ini MENGGANTIKAN aturan "satu shot utuh" yang berlaku untuk arketipe lain.`
     : `• 'prompt' WAJIB mendeskripsikan SATU shot utuh yang bisa berdiri sendiri dari foto referensi. Jika koreografi kamera menyebut transisi (whip-pan, whip cut, dsb), tulis sebagai gabungan, mis. 'fast whip-pan settling into a steady selfie-stick shot of ...' — DILARANG menulis hanya nama transisinya tanpa shot stabil yang bisa ditahan sepanjang durasi.`}
-  ${cutawayExcludedScenes?.length
-    ? `• PENGECUALIAN — KHUSUS Scene ${cutawayExcludedScenes.join(', ')}: 'prompt' WAJIB mendeskripsikan SATU shot talking-head/selfie utuh SAJA sepanjang durasi scene (kamera stabil/steady mengikuti presenter) — TIDAK ADA hard cut, TIDAK ADA cutaway b-roll di scene ini, meskipun arketipe hybrid berlaku di scene lain. Perlakukan scene ini seperti penutup/closing personal.`
+  ${cutawayExcludedParts?.length
+    ? `• PENGECUALIAN — KHUSUS Scene ${cutawayExcludedParts.join(', ')}: 'prompt' WAJIB mendeskripsikan SATU shot talking-head/selfie utuh SAJA sepanjang durasi scene (kamera stabil/steady mengikuti presenter) — TIDAK ADA hard cut, TIDAK ADA cutaway b-roll di scene ini, meskipun arketipe hybrid berlaku di scene lain. Perlakukan scene ini seperti penutup/closing personal.`
     : ''}`;
 }
 
-// Batas babak (PART) — dirancang user di Step 1, dikirim client apa adanya.
-// Tujuannya supaya narasi menyambung DI DALAM satu babak dan pergantian nada
-// hanya terjadi di batas antar-PART (dulu AI hanya melihat scene lepas-lepas).
-function buildPartBlock(parts, sceneDurations, durasiFallback) {
-  if (!Array.isArray(parts) || parts.length === 0) return '';
-  const durasiByScene = new Map((sceneDurations ?? []).map(d => [Number(d.scene), Number(d.durasi)]));
-  const baris = [];
-  let acc = 0;
-  for (let i = 0; i < parts.length; i++) {
-    const n = parseInt(parts[i]?.sceneCount, 10);
-    if (!Number.isInteger(n) || n <= 0) return '';
-    const mulai = acc + 1;
-    const akhir = acc + n;
-    let total = 0;
-    // Client lama tidak mengirim scene_durations → jatuh ke durasi platform,
-    // supaya blok ini tidak pernah menulis "0 detik" ke prompt.
-    for (let s = mulai; s <= akhir; s++) total += durasiByScene.get(s) ?? durasiFallback ?? 0;
-    const label = typeof parts[i].label === 'string' && parts[i].label ? `: ${parts[i].label}` : '';
-    baris.push(`- PART ${i + 1} — ${parts[i].role}${label} (${total} detik, Scene ${mulai === akhir ? mulai : `${mulai}-${akhir}`})`);
-    acc = akhir;
-  }
-  return `STRUKTUR BABAK (PART) — satu PART = satu babak naratif yang UTUH:
+// Ringkasan alur naratif antar-Part. Rincian per-Part (durasi, kamera, DAFTAR
+// CUT, reference image) sudah ditulis buildUserPrompt() — blok ini HANYA memberi
+// gambaran busur cerita keseluruhan supaya dialog antar-Part menyambung.
+function buildPartBlock(partAssignments, partRoles) {
+  if (!Array.isArray(partAssignments) || partAssignments.length === 0) return '';
+  const roleByPart = new Map((partRoles ?? []).map(r => [Number(r.part), r.role]));
+  const baris = partAssignments
+    .slice()
+    .sort((a, b) => a.part - b.part)
+    .map(a => {
+      const role = roleByPart.get(a.part) ?? 'Body';
+      const label = typeof a.label === 'string' && a.label ? `: ${a.label}` : '';
+      const nCut = (a.cuts ?? []).length;
+      return `- PART ${a.part} — ${role}${label} (${a.durasi ?? '?'} detik, ${nCut} cut)`;
+    });
+  return `BUSUR CERITA — satu PART = satu babak naratif UTUH sekaligus SATU panggilan generate:
 ${baris.join('\n')}
-Dialog scene-scene dalam SATU part harus menyambung (kalimat berlanjut, jangan mengulang pembuka tiap scene). Pergantian nada/topik hanya di batas antar-PART.
+Dialog antar-Part WAJIB menyambung sebagai satu narasi berkelanjutan — jangan mengulang pembuka/salam di tiap Part. Pergantian nada/topik hanya terjadi di batas antar-PART.
 
 `;
 }
 
-function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneDurations, sceneRoles, cameraDirectives, archetypeNote, parts, regenerateScene, existingScenes }) {
-  const durasiByScene = new Map((sceneDurations ?? []).map(d => [Number(d.scene), Number(d.durasi)]));
+function buildUserPrompt({ property, karakterDesc, jumlahPart, partAssignments, durasiDetik, partDurations, partRoles, cameraDirectives, archetypeNote, regeneratePart, existingParts }) {
+  const durasiByPart = new Map((partDurations ?? []).map(d => [Number(d.part), Number(d.durasi)]));
   const fasilitas = 'tidak disebutkan';
   const deskripsi = (property.deskripsi ?? '').slice(0, 200);
   const hargaLabel = `${formatRupiah(property.harga)}${property.nego ? ' (nego)' : property.nett ? ' (nett)' : ''}`;
 
-  const roleByScene = new Map((sceneRoles ?? []).map(r => [Number(r.scene), r.role]));
-  // Koreografi kamera arketipe (dihitung di client) — string siap-pakai per scene.
-  const cameraByScene = new Map((cameraDirectives ?? []).map(c => [Number(c.scene), String(c.camera ?? '')]));
+  const roleByPart = new Map((partRoles ?? []).map(r => [Number(r.part), r.role]));
+  // Koreografi kamera arketipe (dihitung di client) — string siap-pakai per Part.
+  const cameraByPart = new Map((cameraDirectives ?? []).map(c => [Number(c.part), String(c.camera ?? '')]));
 
-  const sceneLines = fotoAssignments
+  // Satu blok per PART = satu panggilan generate. DAFTAR CUT di dalamnya adalah
+  // kontrak keras: AI wajib mengembalikan `cuts` dengan jumlah, urutan, dan nama
+  // file yang SAMA PERSIS — itulah yang menjaga prompt tetap sinkron dengan foto
+  // yang dilampirkan user di Google Flow.
+  const partLines = partAssignments
     .slice()
-    .sort((a, b) => a.scene - b.scene)
+    .sort((a, b) => a.part - b.part)
     .map(a => {
-      const fotoDeskripsi = LABEL_MAP[a.foto_label] ?? LABEL_MAP.lainnya;
-      // Bila arketipe menyediakan koreografi kamera untuk scene ini, pakai itu
-      // (lebih koheren dgn gaya video). Kalau tidak, fallback ke hint per-label.
-      const kameraHint = cameraByScene.get(a.scene) || KAMERA_PER_LABEL[a.foto_label] || KAMERA_PER_LABEL.lainnya;
-      const role = roleByScene.get(a.scene) ?? 'Body';
-      // Durasi & budget kata PER SCENE. Sebelum audit 2026-07-26 keduanya dipaku
-      // ke satu angka per platform, sehingga pengaturan durasi di Step 1 tidak
-      // pernah berpengaruh apa pun di jalur ini.
-      const d = durasiByScene.get(a.scene) ?? durasiDetik;
-      return `Scene ${a.scene}:\n  Foto      : ${fotoDeskripsi} (${a.foto_label})\n  Kamera    : ${kameraHint}\n  Durasi    : ${d} detik\n  Maks kata : ${getMaxWords(d)} kata untuk bagian dialog\n  Role      : ${role}`;
+      const kameraHint = cameraByPart.get(a.part) || KAMERA_PER_LABEL[a.cuts?.[0]?.foto_label] || KAMERA_PER_LABEL.lainnya;
+      const role = roleByPart.get(a.part) ?? 'Body';
+      const d = durasiByPart.get(a.part) ?? durasiDetik;
+      // Budget kata narasi dihitung dari durasi VOICEOVER (bukan durasi Part
+      // penuh) — sisa waktunya milik hook text, transisi, dan end card.
+      const durVo = Number.isFinite(a.vo_durasi) && a.vo_durasi > 0 ? a.vo_durasi : d;
+      const daftarCut = (a.cuts ?? [])
+        .map((c, i) => {
+          const desk = LABEL_MAP[c.foto_label] ?? LABEL_MAP.lainnya;
+          return `    ${i + 1}. [${c.durasi}s] ${c.foto_file} — ${desk} (${c.foto_label})`;
+        })
+        .join('\n');
+      const refFiles = [...new Set((a.cuts ?? []).map(c => c.foto_file))];
+      return `PART ${a.part} (${role}) — durasi ${d} detik, voiceover ${durVo} detik:
+  Kamera    : ${kameraHint}
+  Maks kata : ${getMaxWords(durVo)} kata untuk bagian dialog (dihitung dari durasi VOICEOVER)
+  Reference image yang dilampirkan (${refFiles.length}${refFiles.length > MAX_REF_IMAGES_PER_PART ? ` — MELEBIHI batas ${MAX_REF_IMAGES_PER_PART}` : ''}): ${refFiles.join(', ')}
+  DAFTAR CUT (WAJIB dikembalikan persis segini, urutan sama, nama file sama):
+${daftarCut || '    (tidak ada cut — perlakukan sebagai satu shot utuh sepanjang Part)'}`;
     })
     .join('\n\n');
 
   const archetypeBlock = archetypeNote
-    ? `ARAHAN GAYA VIDEO (ARKETIPE) — WAJIB dipatuhi di semua scene:\n${archetypeNote}\n\n`
+    ? `ARAHAN GAYA VIDEO (ARKETIPE) — WAJIB dipatuhi di semua Part:\n${archetypeNote}\n\n`
     : '';
-  const partBlock = buildPartBlock(parts, sceneDurations, durasiDetik);
+  const partBlock = buildPartBlock(partAssignments, partRoles);
 
   // Mode regenerate satu scene: AI hanya membuat ulang scene N dengan variasi baru,
   // sambil menjaga kesinambungan dengan dialog scene lain yang sudah final.
-  let closingInstruction = `Buat ${jumlahScene} video prompt sesuai aturan system prompt.`;
+  let closingInstruction = `Buat ${jumlahPart} video prompt sesuai aturan system prompt.`;
   let regenBlock = '';
-  if (regenerateScene) {
-    const prev = (existingScenes ?? []).find(s => Number(s.scene) === regenerateScene);
-    const others = (existingScenes ?? [])
-      .filter(s => Number(s.scene) !== regenerateScene && s.dialog_karakter)
-      .map(s => `  Scene ${s.scene}: "${String(s.dialog_karakter).slice(0, 200)}"`)
+  if (regeneratePart) {
+    const prev = (existingParts ?? []).find(s => Number(s.part) === regeneratePart);
+    const others = (existingParts ?? [])
+      .filter(s => Number(s.part) !== regeneratePart && s.dialog_karakter)
+      .map(s => `  Part ${s.part}: "${String(s.dialog_karakter).slice(0, 200)}"`)
       .join('\n');
     regenBlock = `
 PERINTAH KHUSUS — REGENERATE SATU SCENE:
-User meminta HANYA Scene ${regenerateScene} dibuat ulang dengan VARIASI BARU yang segar.
-${prev ? `Versi sebelumnya Scene ${regenerateScene} (JANGAN mengulangi pendekatan yang sama — buat gerakan kamera, angle, dan kalimat dialog yang BERBEDA):
+User meminta HANYA Scene ${regeneratePart} dibuat ulang dengan VARIASI BARU yang segar.
+${prev ? `Versi sebelumnya Scene ${regeneratePart} (JANGAN mengulangi pendekatan yang sama — buat gerakan kamera, angle, dan kalimat dialog yang BERBEDA):
   kamera sebelumnya : ${String(prev.kamera ?? '').slice(0, 150)}
   dialog sebelumnya : "${String(prev.dialog_karakter ?? '').slice(0, 250)}"
 ` : ''}${others ? `Scene lain SUDAH FINAL dan TIDAK diubah — jaga kesinambungan narasi (jangan buat dialog yang bertabrakan/duplikat dengan ini):
 ${others}
 ` : ''}`;
-    closingInstruction = `Buat ulang HANYA Scene ${regenerateScene}. Output: JSON array berisi TEPAT 1 objek scene dengan field "scene" = ${regenerateScene}, mengikuti semua aturan system prompt (kamera & foto sesuai instruksi Scene ${regenerateScene} di atas, peran scene tetap sama).`;
+    closingInstruction = `Buat ulang HANYA Scene ${regeneratePart}. Output: JSON array berisi TEPAT 1 objek scene dengan field "scene" = ${regeneratePart}, mengikuti semua aturan system prompt (kamera & foto sesuai instruksi Scene ${regeneratePart} di atas, peran scene tetap sama).`;
   }
 
   return `${archetypeBlock}${partBlock}Data properti:
@@ -556,7 +579,7 @@ ${others}
 Karakter: ${karakterDesc}
 
 Instruksi per scene (kamera & durasi sudah ditentukan, WAJIB diikuti):
-${sceneLines}
+${partLines}
 ${regenBlock}
 ${closingInstruction}`;
 }
@@ -586,36 +609,52 @@ function describeKarakterUntukPrompt(k, expression) {
   ].filter(Boolean).join(', ');
 }
 
-function validateFotoAssignments(fotoAssignments, jumlahScene) {
-  if (!Array.isArray(fotoAssignments) || fotoAssignments.length !== jumlahScene) {
-    return { ok: false, error: `foto_assignments harus berisi tepat ${jumlahScene} item` };
+function validatePartAssignments(partAssignments, jumlahPart) {
+  if (!Array.isArray(partAssignments) || partAssignments.length !== jumlahPart) {
+    return { ok: false, error: `part_assignments harus berisi tepat ${jumlahPart} Part` };
   }
-  const scenesSeen = new Set();
-  for (const a of fotoAssignments) {
-    const sceneNum = Number(a?.scene);
-    if (!Number.isInteger(sceneNum) || sceneNum < 1 || sceneNum > jumlahScene) {
-      return { ok: false, error: 'foto_assignments punya nomor scene tidak valid' };
+  const partsSeen = new Set();
+  for (const a of partAssignments) {
+    const partNum = Number(a?.part);
+    if (!Number.isInteger(partNum) || partNum < 1 || partNum > jumlahPart) {
+      return { ok: false, error: 'part_assignments punya nomor Part tidak valid' };
     }
-    if (typeof a?.foto_url !== 'string' || !a.foto_url.trim()) {
-      return { ok: false, error: `Scene ${sceneNum} belum punya foto terpilih` };
+    if (!Array.isArray(a?.cuts) || a.cuts.length === 0) {
+      return { ok: false, error: `Part ${partNum} belum punya cut/foto` };
     }
-    if (typeof a?.foto_label !== 'string' || !a.foto_label.trim()) {
-      return { ok: false, error: `Scene ${sceneNum} belum punya label foto` };
+    for (const c of a.cuts) {
+      if (typeof c?.foto_url !== 'string' || !c.foto_url.trim()) {
+        return { ok: false, error: `Part ${partNum}: ada cut tanpa foto` };
+      }
+      if (typeof c?.foto_label !== 'string' || !c.foto_label.trim()) {
+        return { ok: false, error: `Part ${partNum}: ada cut tanpa label foto` };
+      }
+      if (typeof c?.foto_file !== 'string' || !c.foto_file.trim()) {
+        return { ok: false, error: `Part ${partNum}: ada cut tanpa nama file referensi` };
+      }
     }
-    scenesSeen.add(sceneNum);
+    // Kuota reference image per generate — dihitung dari foto BERBEDA, karena
+    // beberapa cut boleh berbagi satu gambar yang sama.
+    const unik = new Set(a.cuts.map(c => c.foto_file));
+    if (unik.size > MAX_REF_IMAGES_PER_PART) {
+      return { ok: false, error: `Part ${partNum} memakai ${unik.size} foto referensi berbeda, melebihi batas ${MAX_REF_IMAGES_PER_PART} per sekali generate` };
+    }
+    partsSeen.add(partNum);
   }
-  if (scenesSeen.size !== jumlahScene) {
-    return { ok: false, error: 'Semua scene harus punya foto terpilih' };
+  if (partsSeen.size !== jumlahPart) {
+    return { ok: false, error: 'Setiap Part harus punya cut/foto' };
   }
   return { ok: true };
 }
 
-function isValidScene(s) {
+function isValidPart(s) {
   return typeof s === 'object' && s !== null &&
-    Number.isInteger(s.scene) &&
+    Number.isInteger(s.part) &&
     typeof s.kamera === 'string' && s.kamera.trim().length >= 3 &&
     typeof s.prompt === 'string' && s.prompt.trim().split(/\s+/).length >= 50 &&
-    typeof s.dialog_karakter === 'string' && s.dialog_karakter.trim().length >= 10;
+    typeof s.dialog_karakter === 'string' && s.dialog_karakter.trim().length >= 10 &&
+    Array.isArray(s.cuts) && s.cuts.length > 0 &&
+    s.cuts.every(c => c && typeof c.photo === 'string' && c.photo.trim() && typeof c.action === 'string' && c.action.trim());
 }
 
 // Heuristik deteksi field 'prompt' yang keluar dalam Bahasa Indonesia (model kadang
@@ -635,7 +674,7 @@ function looksIndonesian(text, abaikanKutipan = false) {
   return false;
 }
 
-function parseSceneJson(raw, expectedCount, requireRefAnchor = false, nativeAudio = false) {
+function parsePartJson(raw, expectedCount, requireRefAnchor = false, nativeAudio = false) {
   let text = raw.trim();
   text = text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
   // Ekstraksi tahan-banting: '[' pertama sampai ']' terakhir (model kadang menambah teks).
@@ -649,31 +688,31 @@ function parseSceneJson(raw, expectedCount, requireRefAnchor = false, nativeAudi
     return { ok: false, error: 'Respons AI bukan JSON valid' };
   }
 
-  if (!Array.isArray(parsed) || parsed.length !== expectedCount || !parsed.every(isValidScene)) {
+  if (!Array.isArray(parsed) || parsed.length !== expectedCount || !parsed.every(isValidPart)) {
     return {
       ok: false,
-      error: `Output AI tidak valid. Dapat ${Array.isArray(parsed) ? parsed.length : 'non-array'} scene, butuh ${expectedCount}. Setiap scene wajib: scene (int), kamera (≥3 karakter), prompt (≥50 kata), dialog_karakter (≥10 karakter).`,
+      error: `Output AI tidak valid. Dapat ${Array.isArray(parsed) ? parsed.length : 'non-array'} Part, butuh ${expectedCount}. Setiap Part wajib: part (int), kamera (≥3 karakter), prompt (≥50 kata), dialog_karakter (≥10 karakter), cuts (array non-kosong berisi {photo, action}).`,
     };
   }
-  // Cegah nomor scene duplikat/di luar rentang — sebelumnya lolos validasi lalu membuat
+  // Cegah nomor Part duplikat/di luar rentang — sebelumnya lolos validasi lalu membuat
   // referensi foto & nama file ZIP salah sasaran (audit 2026-07-28). Rentang 1..expectedCount
   // HANYA ditegakkan untuk generate penuh (expectedCount>1) — mode regenerate (expectedCount=1)
-  // sengaja dilewati karena nomor scene DIPAKSA ulang ke nilai yang diminta setelah fungsi ini
-  // return (lihat `sceneData[0].scene = regenerateScene` di pemanggil), jadi validasi rentang
+  // sengaja dilewati karena nomor Part DIPAKSA ulang ke nilai yang diminta setelah fungsi ini
+  // return (lihat `partData[0].part = regeneratePart` di pemanggil), jadi validasi rentang
   // di sini justru bisa menolak output yang benar.
-  const sceneNums = parsed.map(s => s.scene);
-  if (new Set(sceneNums).size !== sceneNums.length) {
-    return { ok: false, error: `Output AI memuat nomor scene duplikat: ${sceneNums.join(', ')}.` };
+  const partNums = parsed.map(s => s.part);
+  if (new Set(partNums).size !== partNums.length) {
+    return { ok: false, error: `Output AI memuat nomor Part duplikat: ${partNums.join(', ')}.` };
   }
   if (expectedCount > 1) {
-    const outOfRange = sceneNums.filter(n => n < 1 || n > expectedCount);
+    const outOfRange = partNums.filter(n => n < 1 || n > expectedCount);
     if (outOfRange.length > 0) {
-      return { ok: false, error: `Output AI memuat nomor scene di luar rentang 1-${expectedCount}: ${outOfRange.join(', ')}.` };
+      return { ok: false, error: `Output AI memuat nomor Part di luar rentang 1-${expectedCount}: ${outOfRange.join(', ')}.` };
     }
   }
-  const idScene = parsed.find(s => looksIndonesian(s.prompt, nativeAudio));
-  if (idScene) {
-    return { ok: false, error: `Scene ${idScene.scene}: field prompt keluar dalam Bahasa Indonesia (wajib Inggris untuk AI video generator)` };
+  const idPart = parsed.find(s => looksIndonesian(s.prompt, nativeAudio));
+  if (idPart) {
+    return { ok: false, error: `Part ${idPart.part}: field prompt keluar dalam Bahasa Indonesia (wajib Inggris untuk AI video generator)` };
   }
   // Audio native: tanpa kutipan dialog di dalam 'prompt', Veo/Flow menghasilkan
   // video BISU walau dialog_karakter terisi rapi. Perlakukan sebagai kegagalan
@@ -681,13 +720,13 @@ function parseSceneJson(raw, expectedCount, requireRefAnchor = false, nativeAudi
   if (nativeAudio) {
     const tanpaKutipan = parsed.find(s => !/"[^"]{4,}"|“[^”]{4,}”/.test(String(s.prompt)));
     if (tanpaKutipan) {
-      return { ok: false, error: `Scene ${tanpaKutipan.scene}: prompt tidak memuat dialog dalam tanda kutip (video akan bisu di Veo/Flow)` };
+      return { ok: false, error: `Part ${tanpaKutipan.part}: prompt tidak memuat dialog dalam tanda kutip (video akan bisu di Veo/Flow)` };
     }
   }
   if (requireRefAnchor) {
     const noAnchor = parsed.find(s => !/reference/i.test(s.prompt));
     if (noAnchor) {
-      return { ok: false, error: `Scene ${noAnchor.scene}: prompt tidak meng-anchor ke reference image (wajib untuk tool ber-reference image)` };
+      return { ok: false, error: `Part ${noAnchor.part}: prompt tidak meng-anchor ke reference image (wajib untuk tool ber-reference image)` };
     }
   }
   return { ok: true, data: parsed };
@@ -701,29 +740,15 @@ export async function onRequestPost(context) {
   catch { return jsonError('Body JSON tidak valid', 400); }
 
   const propertyId = parseInt(body.property_id, 10);
-  const jumlahScene = parseInt(body.jumlah_scene, 10);
+  const jumlahPart = parseInt(body.jumlah_part, 10);
   const {
     platform, ai_tool: aiTool, bahasa, musik_value: musikValue,
     tone, visual_style: visualStyle, hook_type: hookType, cta_type: ctaType,
   } = body;
-  const sceneRoles = Array.isArray(body.scene_roles) ? body.scene_roles : [];
-  // Batas babak (opsional). Client hanya mengirimnya bila rancangan Part konsisten
-  // dengan jumlah scene; di sini tetap divalidasi ulang (sum harus = jumlahScene)
-  // supaya pembagian timpang tidak pernah sampai ke teks prompt.
-  const partsRaw = Array.isArray(body.parts) ? body.parts : [];
-  const partsSum = partsRaw.reduce((s, p) => s + (parseInt(p?.sceneCount, 10) || 0), 0);
-  const parts = partsRaw.length > 0 && partsSum === jumlahScene
-    ? partsRaw
-        .filter(p => ['Hook', 'Body', 'CTA'].includes(p?.role))
-        .map(p => ({
-          role: p.role,
-          sceneCount: parseInt(p.sceneCount, 10),
-          label: typeof p.label === 'string' ? p.label.slice(0, 80) : '',
-        }))
-    : [];
+  const partRoles = Array.isArray(body.part_roles) ? body.part_roles : [];
   const musikPrompt = typeof body.musik_prompt === 'string' ? body.musik_prompt : '';
   const karakterId = parseInt(body.karakter_id, 10);
-  const fotoAssignments = body.foto_assignments;
+  const partAssignments = body.part_assignments;
   const supportsRefImage = body.supports_ref_image === true;
   const expression = typeof body.expression === 'string' ? body.expression : 'auto';
   // Arketipe (opsional) — string siap-pakai dari client (client compute, backend consume).
@@ -736,11 +761,11 @@ export async function onRequestPost(context) {
   const presenterMode = PRESENTER_VALID.includes(body.presenter_mode) ? body.presenter_mode : 'on_camera';
   // Arketipe hybrid A-roll/B-roll (agent_broll_hybrid, selfie_luxury_hybrid) butuh
   // 2 shot dalam 1 scene — merelaksasi aturan default "satu shot utuh" (buildSystemPrompt).
-  const multiShotScene = body.multi_shot_scene === true;
+  const multiShotPart = body.multi_shot_scene === true;
   // Scene (1-based) dikecualikan dari cutaway hybrid — jadi talking-head/selfie
-  // murni (mis. scene CTA/penutup). Divalidasi terhadap rentang jumlahScene di bawah.
-  const cutawayExcludedScenes = Array.isArray(body.cutaway_excluded_scenes)
-    ? [...new Set(body.cutaway_excluded_scenes.map(n => parseInt(n, 10)).filter(n => Number.isInteger(n) && n >= 1 && n <= jumlahScene))].sort((a, b) => a - b).slice(0, 12)
+  // murni (mis. scene CTA/penutup). Divalidasi terhadap rentang jumlahPart di bawah.
+  const cutawayExcludedParts = Array.isArray(body.cutaway_excluded_scenes)
+    ? [...new Set(body.cutaway_excluded_scenes.map(n => parseInt(n, 10)).filter(n => Number.isInteger(n) && n >= 1 && n <= jumlahPart))].sort((a, b) => a - b).slice(0, 12)
     : [];
   const registerInstruction = typeof body.register_instruction === 'string' ? body.register_instruction.slice(0, 400) : '';
   // Tiga parameter Step 1 yang sebelumnya TIDAK PERNAH masuk prompt (audit 2026-07-28):
@@ -754,19 +779,19 @@ export async function onRequestPost(context) {
   const chosenModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
   const cameraDirectives = Array.isArray(body.camera_directives)
     ? body.camera_directives
-        .filter(c => c && Number.isInteger(Number(c.scene)) && typeof c.camera === 'string')
-        .map(c => ({ scene: Number(c.scene), camera: c.camera.slice(0, 400) }))
+        .filter(c => c && Number.isInteger(Number(c.part)) && typeof c.camera === 'string')
+        .map(c => ({ part: Number(c.part), camera: c.camera.slice(0, 400) }))
     : [];
 
   // Mode regenerate satu scene (opsional)
-  const regenerateScene = Number.isInteger(parseInt(body.regenerate_scene, 10)) && parseInt(body.regenerate_scene, 10) > 0
-    ? parseInt(body.regenerate_scene, 10)
+  const regeneratePart = Number.isInteger(parseInt(body.regenerate_part, 10)) && parseInt(body.regenerate_part, 10) > 0
+    ? parseInt(body.regenerate_part, 10)
     : null;
-  const existingScenes = Array.isArray(body.existing_scenes)
-    ? body.existing_scenes
-        .filter(s => s && Number.isInteger(Number(s.scene)))
+  const existingParts = Array.isArray(body.existing_parts)
+    ? body.existing_parts
+        .filter(s => s && Number.isInteger(Number(s.part)))
         .map(s => ({
-          scene: Number(s.scene),
+          part: Number(s.part),
           kamera: typeof s.kamera === 'string' ? s.kamera.slice(0, 200) : '',
           dialog_karakter: typeof s.dialog_karakter === 'string' ? s.dialog_karakter.slice(0, 300) : '',
         }))
@@ -774,14 +799,14 @@ export async function onRequestPost(context) {
     : [];
 
   if (!Number.isInteger(propertyId) || propertyId <= 0) return jsonError('property_id wajib diisi', 422);
-  if (!Number.isInteger(jumlahScene) || jumlahScene < 2 || jumlahScene > 12) return jsonError('jumlah_scene harus 2-12', 422);
-  if (regenerateScene != null && regenerateScene > jumlahScene) return jsonError('regenerate_scene di luar rentang jumlah scene', 422);
+  if (!Number.isInteger(jumlahPart) || jumlahPart < 1 || jumlahPart > 12) return jsonError('jumlah_part harus 1-12', 422);
+  if (regeneratePart != null && regeneratePart > jumlahPart) return jsonError('regenerate_part di luar rentang jumlah Part', 422);
   if (!platform || typeof platform !== 'string') return jsonError('platform wajib diisi', 422);
   if (!aiTool || typeof aiTool !== 'string') return jsonError('ai_tool wajib diisi', 422);
   if (!bahasa || typeof bahasa !== 'string') return jsonError('bahasa wajib diisi', 422);
   if (!Number.isInteger(karakterId) || karakterId <= 0) return jsonError('karakter_id wajib diisi', 422);
 
-  const fotoCheck = validateFotoAssignments(fotoAssignments, jumlahScene);
+  const fotoCheck = validatePartAssignments(partAssignments, jumlahPart);
   if (!fotoCheck.ok) return jsonError(fotoCheck.error, 422);
 
   let property;
@@ -815,14 +840,14 @@ export async function onRequestPost(context) {
   // ke PLATFORM_DURASI, sehingga pengaturan durasi Step 1 tidak berpengaruh apa pun:
   // budget kata selalu dihitung dari 8 detik walau user menyetel 20 detik.
   // Tetap toleran bila client lama tidak mengirimnya → jatuh ke perilaku lama.
-  const sceneDurations = Array.isArray(body.scene_durations)
-    ? body.scene_durations
-        .map(d => ({ scene: parseInt(d?.scene, 10), durasi: parseInt(d?.durasi, 10) }))
-        .filter(d => Number.isInteger(d.scene) && d.scene >= 1 && d.scene <= jumlahScene
+  const partDurations = Array.isArray(body.part_durations)
+    ? body.part_durations
+        .map(d => ({ part: parseInt(d?.part, 10), durasi: parseInt(d?.durasi, 10) }))
+        .filter(d => Number.isInteger(d.part) && d.part >= 1 && d.part <= jumlahPart
                   && Number.isInteger(d.durasi) && d.durasi >= 2 && d.durasi <= 30)
     : [];
-  const daftarDurasi = sceneDurations.length > 0
-    ? sceneDurations.map(d => d.durasi)
+  const daftarDurasi = partDurations.length > 0
+    ? partDurations.map(d => d.durasi)
     : [durasiDetik];
   const durasiSeragam = new Set(daftarDurasi).size <= 1;
   // Batas kata yang disebut di system prompt = yang TERBESAR, supaya angka global
@@ -865,21 +890,21 @@ export async function onRequestPost(context) {
     }
   }
 
-  const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, excludedHooks, excludedCtas, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec });
-  const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneDurations, sceneRoles, cameraDirectives, archetypeNote, parts, regenerateScene, existingScenes });
+  const systemPrompt = buildSystemPrompt({ jumlahPart, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, excludedHooks, excludedCtas, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotPart, cutawayExcludedParts, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec });
+  const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahPart, partAssignments, durasiDetik, partDurations, partRoles, cameraDirectives, archetypeNote, regeneratePart, existingParts });
 
   // ── Panggil AI dengan fallback berantai, respons streaming NDJSON ──────────
   // Urutan: provider pilihan user dulu, lalu sisanya (yang punya key). Heartbeat
   // tiap 2s membuat response "mengalir" sejak awal sehingga bebas wall-clock 30s;
   // tiap provider dapat waktu penuh (55s) tanpa anggaran 26s lagi.
-  const expectedCount = regenerateScene != null ? 1 : jumlahScene;
+  const expectedCount = regeneratePart != null ? 1 : jumlahPart;
   // Mode multi-shot (agent_broll_hybrid): field 'prompt' mendeskripsikan 2 shot per
   // scene (~2× lebih panjang) — beri budget token per scene lebih besar agar output
   // 10-12 scene tidak terpotong di tengah JSON (parse gagal → semua provider "gagal").
-  const perSceneTokens = multiShotScene ? 520 : 350;
-  const maxTokens = regenerateScene != null
-    ? (multiShotScene ? 1300 : 900)
-    : Math.min(6000, 500 + jumlahScene * perSceneTokens);
+  const perSceneTokens = multiShotPart ? 520 : 350;
+  const maxTokens = regeneratePart != null
+    ? (multiShotPart ? 1300 : 900)
+    : Math.min(6000, 500 + jumlahPart * perSceneTokens);
   const tryOrder = [chosenProvider, ...PROVIDER_ORDER.filter(p => p !== chosenProvider)];
 
   const enc = new TextEncoder();
@@ -890,7 +915,7 @@ export async function onRequestPost(context) {
   const work = (async () => {
     const heartbeat = setInterval(() => send({ status: 'progress' }), 2000);
     try {
-      let sceneData = null;
+      let partData = null;
       let usedProvider = null;
       let usedModel = null;
       const attempts = [];
@@ -914,19 +939,19 @@ export async function onRequestPost(context) {
         // Output tidak valid (JSON rusak / jumlah scene salah / prompt berbahasa
         // Indonesia / tanpa anchoring reference) = kegagalan provider juga →
         // coba provider berikutnya, jangan langsung menyerah dengan error ke user.
-        const parsed = parseSceneJson(result.content, expectedCount, supportsRefImage, nativeAudio);
+        const parsed = parsePartJson(result.content, expectedCount, supportsRefImage, nativeAudio);
         if (!parsed.ok) {
           attempts.push({ provider, error: parsed.error.slice(0, 140) });
           console.error(`[ai-generate] ${provider} output tidak valid:`, parsed.error.slice(0, 160));
           continue;
         }
-        sceneData = parsed.data;
+        partData = parsed.data;
         usedProvider = provider;
         usedModel = model;
         break;
       }
 
-      if (!sceneData) {
+      if (!partData) {
         const allNoKey = attempts.length > 0 && attempts.every(a => a.skipped === 'no_key');
         if (allNoKey) {
           send({ done: true, error: 'Belum ada API key AI yang diatur. Buka menu Pengaturan → AI Providers dan simpan minimal satu API key.' });
@@ -940,40 +965,62 @@ export async function onRequestPost(context) {
       }
 
       // Mode regenerate: paksa nomor scene = yang diminta (model kadang salah nomor).
-      if (regenerateScene != null) sceneData[0].scene = regenerateScene;
+      if (regeneratePart != null) partData[0].part = regeneratePart;
 
-      const fotoByScene = new Map(fotoAssignments.map(a => [Number(a.scene), a]));
-      // Nama file referensi mengikuti isi ZIP (handleDownloadZip di frontend):
-      // foto scene = sceneN_foto.webp, foto karakter = <Nama_Karakter>.webp —
-      // supaya user/tool tahu persis gambar mana milik scene mana.
+      const fotoByPart = new Map(partAssignments.map(a => [Number(a.part), a]));
+      // Nama file referensi = nama file DI DALAM ZIP (buildZipNames() di options.ts,
+      // mis. "kamar_mandi1.webp") — client yang menghitungnya dan mengirimnya lewat
+      // cuts[].foto_file. Nama di prompt WAJIB identik dengan nama di ZIP, karena
+      // user melampirkan file itu manual di Google Flow.
       const karakterFile = namaFileKarakter(karakter.nama);
-      const enrichedScenes = sceneData.map(s => {
-        const assignment = fotoByScene.get(s.scene);
+      const enrichedParts = partData.map(s => {
+        const assignment = fotoByPart.get(s.part);
+        // Reference image Part ini = foto BERBEDA dari cuts-nya (beberapa cut boleh
+        // berbagi satu gambar), ditambah foto karakter bila tool mendukungnya.
+        const fotoUnik = [...new Set((assignment?.cuts ?? []).map(c => c.foto_file))];
+        const refImages = supportsRefImage
+          ? [...fotoUnik, ...(karakterFile && !fotoUnik.includes(karakterFile) ? [karakterFile] : [])]
+          : [];
         return {
           ...s,
-          // Sanitasi tipe — on_screen_text tidak divalidasi ketat oleh isValidScene()
+          // Sanitasi tipe — on_screen_text tidak divalidasi ketat oleh isValidPart()
           // (opsional/best-effort), pastikan selalu string agar tidak bocor undefined/tipe lain ke frontend/ZIP.
           on_screen_text: typeof s.on_screen_text === 'string' ? s.on_screen_text.trim() : '',
-          foto_label: assignment?.foto_label ?? null,
-          foto_deskripsi: assignment ? (LABEL_MAP[assignment.foto_label] ?? LABEL_MAP.lainnya) : null,
+          role: assignment?.role ?? null,
+          durasi_detik: assignment?.durasi ?? null,
+          vo_durasi_detik: assignment?.vo_durasi ?? null,
+          // Cut yang BENAR-BENAR dipakai = milik assignment (sumber kebenaran client),
+          // diperkaya dengan action/timecode dari AI. Mencegah AI mengarang nama file.
+          cuts: (assignment?.cuts ?? []).map((c, i) => ({
+            t: s.cuts?.[i]?.t ?? '',
+            photo: c.foto_file,
+            foto_label: c.foto_label,
+            durasi: c.durasi,
+            action: s.cuts?.[i]?.action ?? '',
+          })),
           // negative_prompt disuntik SERVER, bukan diminta ke AI — nilainya tetap dan
           // deterministik, jadi tidak ada gunanya membakar token & risiko model lupa.
           ...(nativeAudio
             ? { negative_prompt: NEGATIVE_PROMPT_VIDEO, max_clip_sec: clipMaxSec }
             : {}),
-          ...(supportsRefImage ? { reference_image: `scene${s.scene}_foto.webp`, character_reference: karakterFile } : {}),
+          ...(supportsRefImage ? { reference_images: refImages, character_reference: karakterFile } : {}),
         };
       });
 
-      const fotoUrls = fotoAssignments
-        .slice()
-        .sort((a, b) => a.scene - b.scene)
-        .map(a => a.foto_url);
+      // URL foto untuk diunduh frontend ke ZIP — unik lintas seluruh Part, urut Part
+      // lalu urut cut, supaya satu foto yang dipakai beberapa Part tidak diunduh ganda.
+      const fotoUrls = [];
+      const urlSeen = new Set();
+      for (const a of [...partAssignments].sort((x, y) => x.part - y.part)) {
+        for (const c of a.cuts ?? []) {
+          if (c.foto_url && !urlSeen.has(c.foto_url)) { urlSeen.add(c.foto_url); fotoUrls.push(c.foto_url); }
+        }
+      }
 
       send({
         done: true,
         data: {
-          scenes: enrichedScenes,
+          parts: enrichedParts,
           foto_urls: fotoUrls,
           karakter: { nama: karakter.nama, deskripsi: deskripsiKarakter, foto_url: karakter.foto_url },
           metadata: {
@@ -985,7 +1032,7 @@ export async function onRequestPost(context) {
             // rulebook_version (Stage 3) — traceability aturan realisme/anti-halusinasi
             // yang berlaku saat generate ini dibuat, lihat viralframe-shared.js.
             rulebook_version: RULEBOOK_VERSION,
-            regenerated_scene: regenerateScene,
+            regenerated_scene: regeneratePart,
             // Info provider yang benar-benar dipakai (untuk indikator fallback di UI)
             provider_used: usedProvider,
             model_used: usedModel,

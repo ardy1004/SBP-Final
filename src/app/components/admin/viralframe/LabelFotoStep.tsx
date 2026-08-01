@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { PHOTO_LABELS, slugifyLabel } from './options';
+import { PHOTO_LABELS, buildZipNames } from './options';
 import { cfImg } from '../../../../lib/img';
 
 export interface LabelFotoImage {
@@ -12,26 +12,9 @@ function thumbSrc(url: string, width: number): string {
   return cfImg(`/api/media?key=${encodeURIComponent(url)}`, width);
 }
 
-/** Nama file ZIP per foto: label unik → "fasad.webp"; label dengan >1 foto →
- *  "fasad1.webp", "fasad2.webp" (urutan sesuai urutan foto). */
-function buildZipNames(images: LabelFotoImage[]): Map<number, string> {
-  const groups = new Map<string, LabelFotoImage[]>();
-  for (const im of images) {
-    const label = (im.label_ruangan ?? '').trim();
-    if (!label) continue;
-    const arr = groups.get(label) ?? [];
-    arr.push(im);
-    groups.set(label, arr);
-  }
-  const names = new Map<number, string>();
-  for (const [label, arr] of groups) {
-    const slug = slugifyLabel(label);
-    arr.forEach((im, i) => {
-      names.set(im.id, arr.length > 1 ? `${slug}${i + 1}.webp` : `${slug}.webp`);
-    });
-  }
-  return names;
-}
+// buildZipNames() dipindah ke options.ts (Tahap 1, refactor 2026-08-01) supaya
+// semua jalur ZIP (di sini dan Storyboard per-Part Tahap 4) memakai satu sumber
+// penamaan yang sama persis. Logikanya TIDAK diubah, hanya dipindah.
 
 interface Props {
   images: LabelFotoImage[];

@@ -126,6 +126,17 @@ export function getClipMaxSec(toolId) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// MODEL PART-AS-GENERATE-UNIT (refactor 2026-08-01) — 1 Part = 1 generate call
+// ════════════════════════════════════════════════════════════════════════════
+
+// Batas foto referensi (reference image) per Part. Google Flow menerima maksimal
+// 7 reference image per generate call; disisakan margin jadi 5. Foto KARAKTER
+// IKUT TERHITUNG dalam kuota ini — bukan kuota terpisah. SATU sumber kebenaran:
+// backend (suggest-storyboard.js, ai-generate.js) mengimpor ini secara natif,
+// frontend (options.ts) me-re-export dengan tipe. JANGAN duplikasi angkanya.
+export const MAX_REF_IMAGES_PER_PART = 5;
+
+// ════════════════════════════════════════════════════════════════════════════
 // KOSAKATA REALISME TEKNIS (audit kualitas video 2026-07-29)
 // ════════════════════════════════════════════════════════════════════════════
 // Ditemukan: instruksi kualitas lama (Jalur C, ai-generate.js) menyuruh AI

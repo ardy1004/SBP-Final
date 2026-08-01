@@ -1,88 +1,98 @@
-// POST /api/admin/viralframe/suggest-storyboard — AI merancang isi tiap Part
-// (BERAPA scene + foto apa saja) dari label_ruangan yang SUDAH TERSIMPAN (migrasi
-// 0026), tanpa vision AI (AI hanya bernalar dari teks label, tidak pernah lihat
-// foto). Deteksi otomatis "ini foto apa" dari gambar mentah adalah fitur
-// TERPISAH yang sengaja tidak dibangun di sini.
+// POST /api/admin/viralframe/suggest-storyboard — Sutradara AI BERVISI
+// (refactor Tahap 2, 2026-08-01): AI melihat langsung foto berlabel properti
+// (URL publik /api/media?key=..., BUKAN base64 — hemat CPU Worker) dan merancang
+// isi tiap Part (1 Part = 1 generate call, lihat PartDef di options.ts):
+// berapa CUT di dalamnya, foto referensi mana, dan alasan singkatnya.
 //
-// Model Part (Fase 2): yang DIKUNCI user = daftar Part + durasi tiap Part.
-// Yang ditentukan AI = jumlah scene per Part dan foto mana yang dipakai.
-// Sebelumnya sebaliknya (user mengunci scene_count total, AI cuma membagi) —
-// itu yang membuat Part terasa kosmetik.
-// Body: { property_id, parts: [{role, durationSec, label?}], archetype?, register? }
+// Model Part-as-Generate-Unit (kontrak baru Agent 1 Gelombang 1):
+//   PartDef { role, durationSec, voDurationSec, refPhotoIds[], cuts[], label?, rationale? }
+//   CutDef  { photoId, label, durasiDetik, aksi? }
+// User MENGUNCI: jumlah Part, role, durationSec, voDurationSec tiap Part.
+// AI MENENTUKAN: cuts (potongan) di dalam tiap Part + foto referensi + rationale.
+//
+// Body: { property_id, parts:[{role,durationSec,voDurationSec,label?}], archetype?,
+//         register?, character_photo_url?, ai_tool?, provider? }
 // Respons SUKSES = streaming NDJSON (pola sama seperti captions.js — heartbeat
 // 2s + baris terakhir {done,data|error}, anti wall-clock 30s Workers).
 // Error validasi awal (property_id, parts, foto berlabel kurang) tetap
 // JSON biasa sebelum stream dibuka.
 // Auth: _middleware.js
+//
+// Vision-first dengan degradasi teks-saja (WAJIB, lihat instruksi Tahap 2):
+// coba provider ber-`supportsVision` dulu dengan foto terlampir; kalau tak ada
+// yang punya key/gagal, turun ke provider teks-saja TANPA foto (kuota Gemini
+// habis TIDAK BOLEH mematikan fitur ini).
 
 import { jsonError, handleOptions } from '../../_shared/response.js';
 import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
+import { MAX_REF_IMAGES_PER_PART, getClipMaxSec } from '../../../_lib/viralframe-shared.js';
 
 const PROVIDER_ORDER = ['gemini', 'groq', 'openrouter', 'deepseek'];
-
-// Batas struktural. SCENE_MIN/MAKS = rentang yang didukung wizard; DUR_SCENE_*
-// = rentang durasi satu scene yang benar-benar didukung getLipsync() (2-30 detik),
-// dipakai untuk menurunkan "berapa scene yang muat" dari durasi sebuah Part.
 const MAKS_PART = 8;
-const SCENE_MIN = 2;
-const SCENE_MAKS = 12;
-const DUR_SCENE_MIN = 2;
-const DUR_SCENE_MAKS = 30;
-const DUR_SCENE_IDEAL = 7;
+const DUR_PART_FALLBACK_MAKS = 300; // dipakai hanya bila ai_tool tak dikenal/kosong
+
+// Anggaran waktu TOTAL untuk seluruh rantai fallback (vision + teks), di bawah
+// wall-clock 30s Workers. Request bervisi ke Gemini bisa lebih lambat dari
+// teks-saja (payload foto lebih besar) — anggaran per-percobaan diturunkan dari
+// sisa waktu global, bukan konstanta tetap, supaya percobaan terakhir tidak
+// dipotong pas di tengah oleh Worker.
+const BUDGET_MS = 26000;
+const MIN_SISA_UNTUK_COBA_MS = 4000;
 
 export async function onRequestPost(context) {
   const { request, env } = context;
+  const mulai = Date.now();
   let body;
   try { body = await request.json(); } catch { return jsonError('Body JSON tidak valid', 400); }
 
   const propertyId = parseInt(body.property_id, 10);
   if (!Number.isInteger(propertyId) || propertyId <= 0) return jsonError('property_id wajib', 422);
 
-  // Part yang dirancang user. durationSec = sumber kebenaran durasi babak;
-  // dari sinilah anggaran jumlah scene per Part dihitung.
+  const aiTool = typeof body.ai_tool === 'string' ? body.ai_tool.slice(0, 40) : '';
+  const clipMax = getClipMaxSec(aiTool) ?? DUR_PART_FALLBACK_MAKS;
+
+  // Part yang dirancang & DIKUNCI user — AI tidak boleh mengubah jumlah, role,
+  // durationSec, atau voDurationSec-nya, hanya mengisi cuts/ref/rationale.
   const partsInput = Array.isArray(body.parts)
     ? body.parts
         .filter(p => ['Hook', 'Body', 'CTA'].includes(p?.role))
         .map(p => ({
           role: p.role,
           durationSec: parseInt(p.durationSec, 10),
+          voDurationSec: parseInt(p.voDurationSec, 10),
           label: typeof p.label === 'string' ? p.label.slice(0, 80) : undefined,
         }))
         .slice(0, MAKS_PART)
     : [];
   if (partsInput.length === 0) return jsonError('parts wajib berisi minimal 1 Part', 422);
-  const partDurasiTidakSah = partsInput.find(p => !Number.isInteger(p.durationSec) || p.durationSec < DUR_SCENE_MIN || p.durationSec > 300);
-  if (partDurasiTidakSah) return jsonError(`Durasi tiap Part harus ${DUR_SCENE_MIN}-300 detik`, 422);
 
-  // Anggaran scene per Part dari durasinya (target ±DUR_SCENE_IDEAL detik/scene),
-  // dijaga agar hasil bagi tetap di rentang yang didukung getLipsync() (2-30 detik).
-  const anggaran = partsInput.map(p => {
-    const min = Math.max(1, Math.ceil(p.durationSec / DUR_SCENE_MAKS));
-    const max = Math.max(min, Math.floor(p.durationSec / DUR_SCENE_MIN));
-    const saran = Math.max(min, Math.min(max, Math.round(p.durationSec / DUR_SCENE_IDEAL)));
-    return { min, max, saran };
-  });
-  let totalMin = anggaran.reduce((s, a) => s + a.min, 0);
-  if (totalMin > SCENE_MAKS) {
-    return jsonError(`Total durasi Part terlalu panjang — minimal butuh ${totalMin} scene, batasnya ${SCENE_MAKS}. Kurangi durasi Part atau jumlah Part.`, 422);
-  }
-  // Wizard mensyaratkan minimal SCENE_MIN scene. Rancangan yang sangat pendek
-  // (mis. 1 Part 8 detik) minimalnya cuma 1 scene — naikkan min Part yang masih
-  // punya headroom sampai totalnya sah, supaya AI tidak dituntun ke jawaban yang
-  // pasti ditolak validator di bawah (dead-end "coba lagi" tanpa jalan keluar).
-  for (let i = 0; totalMin < SCENE_MIN && i < anggaran.length; i++) {
-    while (totalMin < SCENE_MIN && anggaran[i].min < anggaran[i].max) {
-      anggaran[i].min += 1;
-      totalMin += 1;
+  for (const p of partsInput) {
+    if (!Number.isInteger(p.durationSec) || p.durationSec <= 0 || p.durationSec > clipMax) {
+      return jsonError(`Durasi tiap Part harus 1-${clipMax} detik${aiTool ? ` (batas ${aiTool})` : ''}`, 422);
     }
-  }
-  if (totalMin < SCENE_MIN) {
-    return jsonError(`Durasi Part terlalu pendek untuk dipecah jadi minimal ${SCENE_MIN} scene. Tambah durasi Part atau tambah Part baru.`, 422);
+    if (!Number.isInteger(p.voDurationSec) || p.voDurationSec < 0 || p.voDurationSec > p.durationSec) {
+      return jsonError('voDurationSec tiap Part harus 0..durationSec Part itu', 422);
+    }
   }
 
   const archetype = typeof body.archetype === 'string' ? body.archetype.slice(0, 60) : '';
   const register = typeof body.register === 'string' ? body.register.slice(0, 40) : '';
   const chosenProvider = PROVIDER_ORDER.includes(body.provider) ? body.provider : 'gemini';
+
+  // URL publik untuk dikirim ke vision AI. Foto sudah publik lewat
+  // /api/media?key=... (PUBLIC_PREFIXES mencakup property-photos/ &
+  // viralframe-characters/, lihat functions/api/media.js) — JANGAN base64 di
+  // Worker, boros CPU dalam anggaran 10ms/request Cloudflare FREE tier.
+  const origin = new URL(request.url).origin;
+  function publicMediaUrl(rawKeyOrUrl) {
+    if (!rawKeyOrUrl) return null;
+    const s = String(rawKeyOrUrl).trim();
+    if (!s) return null;
+    if (/^https?:\/\//i.test(s)) return s;
+    if (s.startsWith('/')) return origin + s; // sudah bentuk "/api/media?key=..."
+    return `${origin}/api/media?key=${encodeURIComponent(s)}`;
+  }
+  const characterUrl = publicMediaUrl(typeof body.character_photo_url === 'string' ? body.character_photo_url : null);
 
   let rows;
   try {
@@ -98,8 +108,9 @@ export async function onRequestPost(context) {
   }
 
   // Kelompokkan per label, urut preferensi bawaan (is_cover dulu, lalu urutan
-  // terkecil). AI TIDAK PERNAH melihat foto_id individual — backend yang memilih
-  // di antara foto yang berbagi label, jadi AI tidak bisa jadi penentunya.
+  // terkecil). Kalau 2+ foto berbagi label sama, backend yang memilih satu
+  // (rotasi di bawah) — AI melihat SATU foto representatif per label, bukan
+  // memilih sendiri di antara duplikat (mencegah AI menyebut foto_id yang tak pernah ia lihat).
   const candidatesByLabel = new Map();
   for (const r of rows) {
     const label = String(r.label_ruangan).trim();
@@ -110,11 +121,10 @@ export async function onRequestPost(context) {
   const skor = (x) => (x.is_cover ? 1000 : 0) - (x.urutan ?? 0);
   for (const arr of candidatesByLabel.values()) arr.sort((a, b) => skor(b) - skor(a));
 
-  // Tahap 8b — rotasi foto dalam label yang sama. Tanpa ini, label "Kamar Tidur"
-  // yang punya 3 foto akan SELALU memakai foto yang sama tiap regenerate, dan
-  // video untuk properti yang sama terlihat identik di mata algoritma medsos.
-  // Urutan pemakaian diambil dari riwayat generate properti ini: foto yang belum
-  // pernah dipakai menang duluan, sisanya yang paling lama tidak dipakai.
+  // Rotasi foto dalam label yang sama antar generate — tanpa ini label yang
+  // punya beberapa foto akan selalu memakai foto yang sama tiap regenerate.
+  // Bentuk params_json BARU menyimpan photoId di parts[].cuts[] (bukan lagi
+  // scenes[] flat); tetap toleran membaca bentuk lama untuk riwayat pra-refactor.
   const lastUsedIdx = new Map();
   try {
     const gens = await env.DB.prepare(
@@ -124,20 +134,23 @@ export async function onRequestPost(context) {
     for (const g of gens.results ?? []) {
       let parsedGen;
       try { parsedGen = JSON.parse(g.params_json); } catch { continue; }
-      for (const sc of parsedGen?.scenes ?? []) {
+      const partsLama = parsedGen?.parts ?? parsedGen?.s1?.parts ?? [];
+      for (const pt of partsLama) {
+        for (const cut of pt?.cuts ?? []) {
+          if (cut?.photoId != null && !lastUsedIdx.has(cut.photoId)) lastUsedIdx.set(cut.photoId, idx);
+        }
+      }
+      for (const sc of parsedGen?.scenes ?? []) { // bentuk pra-Part-model (kompatibilitas)
         if (sc?.photoId != null && !lastUsedIdx.has(sc.photoId)) lastUsedIdx.set(sc.photoId, idx);
       }
       idx += 1;
     }
   } catch (err) {
-    // Riwayat gagal dibaca → jatuh ke preferensi bawaan, bukan error fatal.
     console.error('[suggest-storyboard] riwayat rotasi foto', err.message);
   }
 
   const byLabel = new Map();
   for (const [label, arr] of candidatesByLabel) {
-    // arr sudah urut preferensi; pilih yang paling lama tidak dipakai.
-    // Infinity = belum pernah dipakai sama sekali → prioritas tertinggi.
     let pilih = arr[0];
     let pilihIdx = lastUsedIdx.has(arr[0].id) ? lastUsedIdx.get(arr[0].id) : Infinity;
     for (const cand of arr.slice(1)) {
@@ -148,56 +161,56 @@ export async function onRequestPost(context) {
   }
   const uniqueLabels = [...byLabel.keys()];
 
-  // Tiap scene memakai label berbeda, jadi jumlah label unik = plafon keras jumlah
-  // scene. Plafon ini dikirim ke AI DAN divalidasi ulang setelah AI menjawab.
-  if (uniqueLabels.length < Math.max(SCENE_MIN, totalMin)) {
-    return jsonError(
-      `Baru ${uniqueLabels.length} foto berlabel, butuh minimal ${Math.max(SCENE_MIN, totalMin)} untuk rancangan Part ini. Pilih foto + Label Foto dulu di Step 0 (tersimpan otomatis), atau di Detail Properti.`,
-      422
-    );
-  }
-  const sceneMaksEfektif = Math.min(SCENE_MAKS, uniqueLabels.length);
-  // Persempit rentang tiap Part agar SATU Part tidak bisa sendirian melampaui
-  // plafon total — tanpa ini AI bisa menjawab "sah per Part" tapi totalnya
-  // melanggar, dan user cuma dapat pesan "coba lagi" berulang tanpa sebab jelas.
-  const slack = sceneMaksEfektif - totalMin;
-  for (const a of anggaran) {
-    a.max = Math.max(a.min, Math.min(a.max, a.min + slack));
-    a.saran = Math.max(a.min, Math.min(a.max, a.saran));
-  }
-  // Angka "saran" per Part dihitung independen, jadi JUMLAHnya bisa melewati
-  // plafon total (mis. 8 Part × 30 detik → saran 32 scene padahal batasnya 12).
-  // Tanpa koreksi ini kita menuntun AI ke jawaban yang pasti ditolak validator.
-  // Kurangi dari Part bersaran terbesar dulu agar pemangkasan terasa proporsional.
-  let totalSaran = anggaran.reduce((s, a) => s + a.saran, 0);
-  while (totalSaran > sceneMaksEfektif) {
-    let target = -1;
-    for (let i = 0; i < anggaran.length; i++) {
-      if (anggaran[i].saran > anggaran[i].min && (target < 0 || anggaran[i].saran > anggaran[target].saran)) target = i;
-    }
-    if (target < 0) break; // semua sudah di min — validator total di bawah yang menangkap
-    anggaran[target].saran -= 1;
-    totalSaran -= 1;
+  if (uniqueLabels.length === 0) {
+    return jsonError('Belum ada foto berlabel untuk properti ini. Beri Label Foto dulu (Step 0 atau Detail Properti).', 422);
   }
 
-  const system = `Kamu sutradara storyboard video properti Indonesia. Kamu HANYA menerima daftar LABEL RUANGAN (teks), bukan foto — jangan pernah mengarang label baru di luar daftar yang diberikan. Output HANYA JSON valid, mulai { akhiri }, tanpa markdown.`;
-  const user = `Rancang isi tiap babak (PART) video properti dari daftar label ruangan berikut (properti sudah difoto per ruangan/aspek ini):
-${uniqueLabels.map((l, i) => `${i + 1}. ${l}`).join('\n')}
+  const refQuota = characterUrl ? MAX_REF_IMAGES_PER_PART - 1 : MAX_REF_IMAGES_PER_PART;
+  if (refQuota < 1) {
+    return jsonError(`MAX_REF_IMAGES_PER_PART (${MAX_REF_IMAGES_PER_PART}) terlalu kecil untuk menyisakan slot foto ruangan setelah foto karakter.`, 422);
+  }
 
-Struktur PART sudah DITETAPKAN user dan TIDAK BOLEH diubah (jumlah part, urutan, role, dan durasinya tetap):
-${partsInput.map((p, i) => `PART ${i + 1} — role ${p.role}, durasi ${p.durationSec} detik${p.label ? `, tema "${p.label}"` : ''} → isi dengan ${anggaran[i].min}-${anggaran[i].max} scene (paling pas sekitar ${anggaran[i].saran} scene).`).join('\n')}
+  const imageUrls = [
+    ...(characterUrl ? [characterUrl] : []),
+    ...uniqueLabels.map(l => publicMediaUrl(byLabel.get(l).url_webp)).filter(Boolean),
+  ];
+
+  const daftarLabelTeks = uniqueLabels.map((l, i) => `${i + 1}. ${l}`).join('\n');
+  const partsSpecTeks = partsInput.map((p, i) => {
+    const sisaVo = p.durationSec - p.voDurationSec;
+    return `PART ${i + 1} — role ${p.role}, durasi TOTAL ${p.durationSec} detik, voiceover ${p.voDurationSec} detik (sisa ${sisaVo} detik tanpa VO untuk hook text/transisi/end card)${p.label ? `, tema "${p.label}"` : ''}.`;
+  }).join('\n');
+  const kuotaRefTeks = characterUrl
+    ? `Foto KARAKTER (talent, gambar pertama) ikut dihitung dalam kuota referensi — tiap Part maksimal ${refQuota} foto RUANGAN berbeda + 1 foto karakter = ${MAX_REF_IMAGES_PER_PART} total.`
+    : `Tiap Part maksimal ${refQuota} foto ruangan berbeda sebagai referensi.`;
+
+  function buatPrompt(usingVision) {
+    const system = usingVision
+      ? `Kamu sutradara video pendek properti Indonesia yang MELIHAT foto-foto berikut secara visual (gambar dilampirkan sesuai urutan: ${characterUrl ? 'gambar pertama = foto KARAKTER/talent, gambar setelahnya berurutan sama dengan daftar label ruangan' : 'urutan sama dengan daftar label ruangan'} di bawah). Rancang storyboard berdasarkan apa yang BENAR-BENAR kamu lihat (pencahayaan, suasana, ukuran ruang, furnitur, detail nyata) — jangan mengarang detail yang tidak ada di foto. Jangan pernah menyebut label ruangan di luar daftar yang diberikan. Jangan pernah mengklaim tahu data algoritma/tren medsos terkini. Output HANYA JSON valid, tanpa markdown, tanpa teks lain.`
+      : `Kamu sutradara video pendek properti Indonesia. Kamu HANYA menerima daftar LABEL RUANGAN (teks), bukan foto — jangan pernah mengarang label baru di luar daftar. Jangan pernah mengklaim tahu data algoritma/tren medsos terkini. Output HANYA JSON valid, tanpa markdown, tanpa teks lain.`;
+
+    const user = `Rancang storyboard tiap PART (babak) video properti ini. Properti sudah difoto per ruangan/aspek berikut:
+${daftarLabelTeks}
+
+Struktur PART sudah DITETAPKAN user dan TIDAK BOLEH diubah (jumlah part, urutan, role, durasi total, durasi VO tetap):
+${partsSpecTeks}
 ${archetype ? `Gaya video: ${archetype}.` : ''}
 ${register ? `Register bahasa: ${register}.` : ''}
 
-Tugas:
-1. Tentukan BERAPA scene untuk tiap PART, dalam rentang yang disebut di atas. Pertimbangkan durasi part: satu scene enak ditonton sekitar ${DUR_SCENE_IDEAL} detik, jadi part yang panjang butuh lebih banyak scene, bukan satu scene yang bertele-tele.
-2. Total scene semua PART digabung HARUS antara ${SCENE_MIN} dan ${sceneMaksEfektif}.
-3. Untuk tiap PART, pilih foto yang dipakai lewat "photo_labels": daftar label, PERSIS sebanyak scene_count part itu, urut sesuai urutan tampil. Pilih yang paling mendukung role part-nya (Hook = paling menarik/fasad; Body = tur isi ruangan utama; CTA = penutup/lingkungan). Prioritaskan ruangan utama (fasad/ruang tamu/kamar/dapur/kamar mandi) di atas ruangan minor.
-4. SATU label hanya boleh dipakai SEKALI di seluruh video (lintas semua part) — jangan ada label kembar.
+Tugas untuk TIAP Part:
+1. Rancang beberapa "cut" (potongan shot) yang totalnya PERSIS sama dengan durasi TOTAL Part itu (dalam detik). Cut boleh berdurasi berapa saja yang masuk akal untuk video pendek (umumnya 1-6 detik per cut) asal jumlahnya pas.
+2. Boleh memakai SATU label lebih dari sekali dalam satu Part (montase cepat: ruangan yang sama dengan framing/aksi berbeda) — ini VALID dan didorong untuk Part yang butuh banyak cut singkat, bukan bug.
+3. ${kuotaRefTeks} Kumpulkan foto UNIK (tanpa duplikat) yang benar-benar dipakai Part ini ke dalam "ref_photo_labels" (urutan = urutan dilampirkan sebagai reference image).
+4. Pilih foto yang paling mendukung role Part (Hook = paling menarik/fasad/first impression kuat; Body = tur isi ruangan utama; CTA = penutup/kesan tinggal/lingkungan sekitar).
 5. Semua label WAJIB persis salah satu string dari daftar 1-${uniqueLabels.length} di atas — JANGAN mengarang label baru, jangan ubah ejaan.
+6. Beri "rationale" singkat (1-2 kalimat, jujur & spesifik) alasan susunan Part ini — supaya keputusanmu bisa dikoreksi manual oleh user, bukan kotak hitam.
+7. Fokus alasan pada craft naratif/pacing/framing sinematik SAJA — jangan mengklaim mengetahui data algoritma atau tren medsos real-time (kamu tidak punya akses itu).
 
-Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama seperti di atas):
-{"parts":[{"role":"${partsInput[0].role}","scene_count":N,"label":"judul babak singkat","photo_labels":["...","..."]}]}`;
+Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama seperti struktur di atas):
+{"parts":[{"role":"${partsInput[0].role}","cuts":[{"photo_label":"...","durasi":N,"aksi":"deskripsi aksi/kamera singkat"}],"ref_photo_labels":["..."],"rationale":"..."}]}`;
+
+    return { system, user };
+  }
 
   const tryOrder = [chosenProvider, ...PROVIDER_ORDER.filter(x => x !== chosenProvider)];
 
@@ -209,20 +222,56 @@ Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama s
   const work = (async () => {
     const heartbeat = setInterval(() => send({ status: 'progress' }), 2000);
     try {
-      let raw = null, used = null, lastErr = null;
+      let raw = null, used = null, lastErr = null, usedVision = false;
+
+      // Fase 1 — coba provider ber-visi dulu (kirim imageUrls), dalam urutan
+      // preferensi user. Kalau tak satupun provider bervisi punya key
+      // ter-konfigurasi, fase ini tidak menghasilkan apa-apa (bukan error) —
+      // lanjut ke Fase 2 (degradasi teks-saja).
+      const { system: sysVision, user: userVision } = buatPrompt(true);
       for (const prov of tryOrder) {
+        if (!PROVIDERS[prov].supportsVision) continue;
+        const sisa = BUDGET_MS - (Date.now() - mulai);
+        if (sisa < MIN_SISA_UNTUK_COBA_MS) break;
         const key = await getProviderKey(env, prov);
         if (!key) continue;
         const r = await callChatCompletion({
           provider: prov, apiKey: key, model: PROVIDERS[prov].defaultModel,
-          systemPrompt: system, userPrompt: user, maxTokens: 1200, temperature: 0.6,
+          systemPrompt: sysVision, userPrompt: userVision, imageUrls,
+          maxTokens: 1600, temperature: 0.6,
           reasoningEffort: prov === 'gemini' ? 'none' : undefined,
-          timeoutMs: 55000,
+          timeoutMs: Math.max(3000, Math.min(sisa - 1000, 18000)),
         });
-        if (r.ok) { raw = r.content; used = prov; break; }
+        if (r.ok) { raw = r.content; used = prov; usedVision = true; break; }
         lastErr = r.error;
-        console.error(`[suggest-storyboard] ${prov} gagal:`, r.error?.slice(0, 120));
+        console.error(`[suggest-storyboard] vision ${prov} gagal:`, r.error?.slice(0, 120));
       }
+
+      // Fase 2 — degradasi teks-saja (label saja, TANPA foto). Kuota/keyless
+      // provider bervisi TIDAK BOLEH mematikan fitur ini; provider apa pun
+      // yang punya key dicoba, termasuk yang sudah gagal di Fase 1 dengan
+      // imageUrls dilewati (mis. Gemini kuota habis khusus permintaan bervisi
+      // yang lebih berat — percobaan teks-saja bisa saja masih berhasil).
+      if (!raw) {
+        const { system: sysTeks, user: userTeks } = buatPrompt(false);
+        for (const prov of tryOrder) {
+          const sisa = BUDGET_MS - (Date.now() - mulai);
+          if (sisa < MIN_SISA_UNTUK_COBA_MS) break;
+          const key = await getProviderKey(env, prov);
+          if (!key) continue;
+          const r = await callChatCompletion({
+            provider: prov, apiKey: key, model: PROVIDERS[prov].defaultModel,
+            systemPrompt: sysTeks, userPrompt: userTeks,
+            maxTokens: 1600, temperature: 0.6,
+            reasoningEffort: prov === 'gemini' ? 'none' : undefined,
+            timeoutMs: Math.max(3000, Math.min(sisa - 1000, 12000)),
+          });
+          if (r.ok) { raw = r.content; used = prov; usedVision = false; break; }
+          lastErr = r.error;
+          console.error(`[suggest-storyboard] teks ${prov} gagal:`, r.error?.slice(0, 120));
+        }
+      }
+
       if (!raw) {
         send({ done: true, error: `Gagal rancang storyboard: ${(lastErr || 'semua provider gagal/kehabisan kuota').slice(0, 180)}. Pastikan API key AI diatur di Pengaturan.` });
         return;
@@ -239,9 +288,9 @@ Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama s
         return;
       }
 
-      // Struktur Part milik USER — AI hanya boleh mengisi scene_count/photo_labels,
-      // bukan menambah/menghapus/menukar Part. Karena itu iterasi dilakukan atas
-      // partsInput (bukan atas jawaban AI), dan role/durationSec diambil dari input.
+      // Struktur Part milik USER — AI hanya boleh mengisi cuts/ref_photo_labels/
+      // rationale, bukan menambah/menghapus/menukar Part. Iterasi dilakukan atas
+      // partsInput (bukan jawaban AI), role/durationSec/voDurationSec dari input.
       const jawabanPart = Array.isArray(parsed.parts) ? parsed.parts : [];
       if (jawabanPart.length !== partsInput.length) {
         send({ done: true, error: `AI mengembalikan ${jawabanPart.length} Part, seharusnya ${partsInput.length}. Coba lagi.` });
@@ -249,54 +298,89 @@ Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama s
       }
 
       const parts = [];
-      const scenePhotoOrder = [];
-      const labelTerpakai = new Set();
       for (let i = 0; i < partsInput.length; i++) {
         const src = jawabanPart[i];
-        const n = parseInt(src?.scene_count, 10);
-        if (!Number.isInteger(n) || n < anggaran[i].min || n > anggaran[i].max) {
-          send({ done: true, error: `AI memberi ${src?.scene_count} scene untuk Part ${i + 1} (${partsInput[i].role}), di luar rentang ${anggaran[i].min}-${anggaran[i].max} yang muat di ${partsInput[i].durationSec} detik. Coba lagi.` });
-          return;
-        }
-        const labels = Array.isArray(src.photo_labels) ? src.photo_labels : [];
-        if (labels.length !== n) {
-          send({ done: true, error: `Part ${i + 1} (${partsInput[i].role}): AI menyebut ${n} scene tapi memberi ${labels.length} foto. Coba lagi.` });
+        const cutsRaw = Array.isArray(src?.cuts) ? src.cuts : [];
+        if (cutsRaw.length === 0) {
+          send({ done: true, error: `Part ${i + 1} (${partsInput[i].role}): AI tidak memberi cut sama sekali. Coba lagi.` });
           return;
         }
 
-        const photoIds = [];
-        for (const raw of labels) {
-          const label = typeof raw === 'string' ? raw.trim() : '';
+        const cuts = [];
+        let sumDurasi = 0;
+        let gagal = false;
+        for (const c of cutsRaw) {
+          const label = typeof c?.photo_label === 'string' ? c.photo_label.trim() : '';
           const img = byLabel.get(label);
           if (!img) {
-            send({ done: true, error: `AI mengembalikan label "${label}" yang tidak ada di daftar foto berlabel. Coba lagi.` });
+            send({ done: true, error: `Part ${i + 1}: AI mengembalikan label "${label}" yang tidak ada di daftar foto berlabel. Coba lagi.` });
+            gagal = true; break;
+          }
+          const durasi = Number(c?.durasi);
+          if (!Number.isFinite(durasi) || durasi <= 0) {
+            send({ done: true, error: `Part ${i + 1}: durasi cut untuk "${label}" tidak valid. Coba lagi.` });
+            gagal = true; break;
+          }
+          cuts.push({
+            photoId: img.id,
+            label,
+            durasiDetik: durasi,
+            aksi: typeof c?.aksi === 'string' && c.aksi.trim() ? c.aksi.trim().slice(0, 200) : undefined,
+          });
+          sumDurasi += durasi;
+        }
+        if (gagal) return;
+
+        // Invarian keras: Σ durasi cuts = durationSec Part (toleransi kecil untuk
+        // pembulatan angka desimal dari AI).
+        if (Math.abs(sumDurasi - partsInput[i].durationSec) > 0.5) {
+          send({ done: true, error: `Part ${i + 1} (${partsInput[i].role}): total durasi cut AI = ${sumDurasi}s, seharusnya ${partsInput[i].durationSec}s. Coba lagi.` });
+          return;
+        }
+
+        const refLabelsRaw = Array.isArray(src?.ref_photo_labels)
+          ? src.ref_photo_labels.map(x => (typeof x === 'string' ? x.trim() : '')).filter(Boolean)
+          : [];
+        for (const l of refLabelsRaw) {
+          if (!byLabel.has(l)) {
+            send({ done: true, error: `Part ${i + 1}: ref_photo_labels menyebut "${l}" yang tidak ada di daftar foto. Coba lagi.` });
             return;
           }
-          if (labelTerpakai.has(label)) {
-            send({ done: true, error: `AI memakai label "${label}" lebih dari sekali. Coba lagi.` });
-            return;
-          }
-          labelTerpakai.add(label);
-          photoIds.push(img.id);
-          scenePhotoOrder.push({ scene: scenePhotoOrder.length + 1, label, photo_id: img.id, url_webp: img.url_webp });
+        }
+        const refLabelSet = new Set(refLabelsRaw);
+        if (refLabelSet.size !== refLabelsRaw.length) {
+          send({ done: true, error: `Part ${i + 1}: ref_photo_labels berisi duplikat. Coba lagi.` });
+          return;
+        }
+        // ref_photo_labels wajib unik ≤ MAX_REF_IMAGES_PER_PART per Part (foto
+        // karakter ikut dihitung lewat refQuota bila character_photo_url diisi) —
+        // ini invarian KERAS, tidak boleh dilonggarkan.
+        if (refLabelsRaw.length > refQuota) {
+          send({ done: true, error: `Part ${i + 1}: AI memakai ${refLabelsRaw.length} foto referensi, melebihi kuota ${refQuota}${characterUrl ? ' (setelah dikurangi 1 slot foto karakter)' : ''}. Coba lagi.` });
+          return;
+        }
+        // ref_photo_labels wajib mencakup semua label unik yang benar-benar
+        // dipakai di cuts — kalau tidak, konsumen ZIP/prompt akan melampirkan
+        // foto yang tidak lengkap untuk cut yang disebut.
+        const cutLabelsUnique = [...new Set(cuts.map(c => c.label))];
+        const kurangDiRef = cutLabelsUnique.filter(l => !refLabelSet.has(l));
+        if (kurangDiRef.length > 0) {
+          send({ done: true, error: `Part ${i + 1}: ref_photo_labels tidak mencakup label yang dipakai di cuts ("${kurangDiRef[0]}"). Coba lagi.` });
+          return;
         }
 
         parts.push({
           role: partsInput[i].role,
-          sceneCount: n,
           durationSec: partsInput[i].durationSec,
-          label: typeof src.label === 'string' && src.label.trim() ? src.label.slice(0, 80) : partsInput[i].label,
-          photoIds,
+          voDurationSec: partsInput[i].voDurationSec,
+          label: typeof src?.label === 'string' && src.label.trim() ? src.label.slice(0, 80) : partsInput[i].label,
+          refPhotoIds: refLabelsRaw.map(l => byLabel.get(l).id),
+          cuts,
+          rationale: typeof src?.rationale === 'string' ? src.rationale.trim().slice(0, 500) : '',
         });
       }
 
-      const totalScene = scenePhotoOrder.length;
-      if (totalScene < SCENE_MIN || totalScene > sceneMaksEfektif) {
-        send({ done: true, error: `Total scene hasil AI = ${totalScene}, di luar batas ${SCENE_MIN}-${sceneMaksEfektif}. Coba lagi atau sesuaikan durasi Part.` });
-        return;
-      }
-
-      send({ done: true, data: { parts, scene_photo_order: scenePhotoOrder, provider_used: used } });
+      send({ done: true, data: { parts, provider_used: used, used_vision: usedVision } });
     } catch (err) {
       console.error('[suggest-storyboard] stream', err.message);
       send({ done: true, error: 'Terjadi kesalahan internal saat rancang storyboard. Coba lagi.' });

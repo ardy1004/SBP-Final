@@ -5,6 +5,15 @@
 // Key dibaca dari tabel settings D1 (key: <provider>_api_key). DeepSeek/Groq
 // punya fallback ke Cloudflare Secret lama bila belum diisi via UI.
 
+// `supportsVision`: model DEFAULT provider ini menerima content multimodal
+// (array [{type:'text'},{type:'image_url'}]) lewat endpoint chat/completions
+// OpenAI-compatible-nya. HANYA Gemini yang `true` (model default
+// `gemini-3-flash-preview` multimodal) — Groq/OpenRouter/DeepSeek model DEFAULT-nya
+// teks saja (provider itu mungkin PUNYA model lain yang bervisi, tapi model
+// default yang dipakai ViralFrame bukan itu; jangan overengineer per-model).
+// Dipakai oleh suggest-storyboard.js untuk memilih provider yang dicoba duluan
+// saat mengirim `imageUrls`, dengan degradasi ke teks-saja bila tak ada yang
+// bervisi/punya key (lihat callChatCompletion di bawah).
 export const PROVIDERS = {
   gemini: {
     label: 'Gemini',
@@ -14,6 +23,7 @@ export const PROVIDERS = {
     // meng-GA / mengganti nama model ini, cukup ubah string di sini.
     defaultModel: 'gemini-3-flash-preview',
     quota: null, // tidak ada endpoint kuota — status dari cek models
+    supportsVision: true,
   },
   groq: {
     label: 'Groq',
@@ -22,6 +32,7 @@ export const PROVIDERS = {
     base: 'https://api.groq.com/openai/v1',
     defaultModel: 'llama-3.3-70b-versatile',
     quota: null,
+    supportsVision: false,
   },
   openrouter: {
     label: 'OpenRouter',
@@ -29,6 +40,7 @@ export const PROVIDERS = {
     base: 'https://openrouter.ai/api/v1',
     defaultModel: 'deepseek/deepseek-chat',
     quota: 'https://openrouter.ai/api/v1/auth/key',
+    supportsVision: false,
   },
   deepseek: {
     label: 'DeepSeek',
@@ -37,6 +49,7 @@ export const PROVIDERS = {
     base: 'https://api.deepseek.com',
     defaultModel: 'deepseek-chat',
     quota: 'https://api.deepseek.com/user/balance',
+    supportsVision: false,
   },
 };
 
@@ -71,12 +84,28 @@ function isQuotaError(status, bodyText) {
 
 /**
  * Panggil chat completion OpenAI-compat.
+ *
+ * `imageUrls` (opsional): array URL foto publik. Bila diisi (non-kosong), pesan
+ * user dikirim sebagai content MULTIMODAL bergaya OpenAI:
+ *   [{type:'text', text: userPrompt}, {type:'image_url', image_url:{url}}, ...]
+ * Bila tidak diisi/kosong, `content` TETAP string biasa seperti sebelumnya —
+ * WAJIB backward-compatible, seluruh caller lain (ai-generate.js, youtube-long.js,
+ * captions.js, generate-naskah.js, dll) tidak pernah mengirim `imageUrls` dan
+ * perilakunya sama sekali tidak berubah.
  * @returns {Promise<{ ok:boolean, content?:string, status:number, error?:string, quotaExhausted?:boolean }>}
  */
-export async function callChatCompletion({ provider, apiKey, model, systemPrompt, userPrompt, maxTokens = 4000, temperature = 0.7, timeoutMs = 24000, reasoningEffort }) {
+export async function callChatCompletion({ provider, apiKey, model, systemPrompt, userPrompt, imageUrls, maxTokens = 4000, temperature = 0.7, timeoutMs = 24000, reasoningEffort }) {
   const cfg = PROVIDERS[provider];
   if (!cfg) return { ok: false, status: 0, error: 'provider tidak dikenal' };
   if (!apiKey) return { ok: false, status: 0, error: `API key ${cfg.label} belum diatur`, quotaExhausted: false };
+
+  const hasImages = Array.isArray(imageUrls) && imageUrls.length > 0;
+  const userContent = hasImages
+    ? [
+        { type: 'text', text: userPrompt },
+        ...imageUrls.map(url => ({ type: 'image_url', image_url: { url } })),
+      ]
+    : userPrompt;
 
   let res;
   try {
@@ -94,7 +123,7 @@ export async function callChatCompletion({ provider, apiKey, model, systemPrompt
         ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
+          { role: 'user', content: userContent },
         ],
       }),
       signal: AbortSignal.timeout(timeoutMs),

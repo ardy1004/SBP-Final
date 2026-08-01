@@ -101,13 +101,33 @@ for (const [file, names] of Object.entries(REQUIRED_IMPORTS)) {
 // WAJIB juga ditambahkan ke daftar SCENE_FIELD_PARITY kalau field itu perlu
 // terlihat user di exporter/renderer terkait.
 const SCENE_FIELD_PARITY = [
+  // 'sequences' (beat bertimecode per-scene, Fase 6) digantikan `cuts[]` saat
+  // refactor Part-as-Generate-Unit (2026-08-01): unit generate berubah dari
+  // "1 scene = 1 foto" jadi "1 Part = 1 generate call", dan berbeda dari
+  // `sequences`, foto BOLEH berganti antar cut karena semua referensinya
+  // dilampirkan sekaligus (maks MAX_REF_IMAGES_PER_PART).
+  //
+  // CATATAN: entri lama sempat dihapus dengan alasan "sequences tidak ada lagi
+  // di skema manapun" — itu KELIRU saat ditulis, karena `ai-generate.js` masih
+  // memintanya dan workspace masih menulisnya ke ZIP. Penjaganya dipulihkan di
+  // sini dengan field pengganti supaya kelalaian yang sama tidak terulang:
+  // `cuts` WAJIB tersambung ke exporter/renderer, bukan cuma diminta ke AI.
   {
-    field: 'sequences',
-    note: 'beat bertimecode Fase 6 — wajib tersambung ke ZIP & tampilan, bukan cuma diminta ke AI',
+    field: 'cuts',
+    note: 'potongan visual dalam 1 generate call — wajib tersambung ke ZIP, tampilan, & validator, bukan cuma diminta ke AI',
     files: [
       'src/app/components/admin/AdminViralFrameWorkspacePage.tsx',
       'src/app/components/admin/viralframe/SceneCards.tsx',
       'src/app/components/admin/viralframe/jsonValidator.ts',
+      'functions/api/admin/viralframe/ai-generate.js',
+    ],
+  },
+  {
+    field: 'reference_images',
+    note: 'daftar foto yang WAJIB dilampirkan user di Google Flow — kalau tidak sampai ke ZIP/tampilan, user tidak tahu file mana yang dilampirkan',
+    files: [
+      'src/app/components/admin/AdminViralFrameWorkspacePage.tsx',
+      'functions/api/admin/viralframe/ai-generate.js',
     ],
   },
   {
