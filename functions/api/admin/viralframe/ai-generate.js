@@ -6,6 +6,8 @@
 // tone/visual_style/hook_type/cta_type: label sudah diresolve di frontend dari Step 1
 // (options.ts TONES/VISUAL_STYLES/HOOK_TYPES/CTA_TYPES) — "Auto" berarti tidak ada instruksi tambahan.
 // scene_roles: [{ scene: 1, role: 'Hook'|'Body'|'CTA' }, ...] — dari sceneRole() (options.ts), sama dengan Jalur A.
+// parts (opsional): [{ role, sceneCount, label }] — batas babak dari Part designer Step 1.
+//   Hanya dipakai bila jumlah sceneCount = jumlah_scene; selain itu diabaikan (bukan error).
 // Opsional REGENERATE SATU SCENE: { regenerate_scene: N, existing_scenes: [{scene,kamera,dialog_karakter}] }
 //   → AI hanya membuat ulang scene N (variasi baru) dengan konteks scene lain agar narasi nyambung.
 // Respons SUKSES = streaming NDJSON (heartbeat 2s + baris {done,data|error}) — latensi
@@ -458,7 +460,35 @@ ATURAN TAMBAHAN FIELD 'prompt' — WAJIB, PELANGGARAN = OUTPUT DITOLAK:
     : ''}`;
 }
 
-function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneDurations, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes }) {
+// Batas babak (PART) — dirancang user di Step 1, dikirim client apa adanya.
+// Tujuannya supaya narasi menyambung DI DALAM satu babak dan pergantian nada
+// hanya terjadi di batas antar-PART (dulu AI hanya melihat scene lepas-lepas).
+function buildPartBlock(parts, sceneDurations, durasiFallback) {
+  if (!Array.isArray(parts) || parts.length === 0) return '';
+  const durasiByScene = new Map((sceneDurations ?? []).map(d => [Number(d.scene), Number(d.durasi)]));
+  const baris = [];
+  let acc = 0;
+  for (let i = 0; i < parts.length; i++) {
+    const n = parseInt(parts[i]?.sceneCount, 10);
+    if (!Number.isInteger(n) || n <= 0) return '';
+    const mulai = acc + 1;
+    const akhir = acc + n;
+    let total = 0;
+    // Client lama tidak mengirim scene_durations → jatuh ke durasi platform,
+    // supaya blok ini tidak pernah menulis "0 detik" ke prompt.
+    for (let s = mulai; s <= akhir; s++) total += durasiByScene.get(s) ?? durasiFallback ?? 0;
+    const label = typeof parts[i].label === 'string' && parts[i].label ? `: ${parts[i].label}` : '';
+    baris.push(`- PART ${i + 1} — ${parts[i].role}${label} (${total} detik, Scene ${mulai === akhir ? mulai : `${mulai}-${akhir}`})`);
+    acc = akhir;
+  }
+  return `STRUKTUR BABAK (PART) — satu PART = satu babak naratif yang UTUH:
+${baris.join('\n')}
+Dialog scene-scene dalam SATU part harus menyambung (kalimat berlanjut, jangan mengulang pembuka tiap scene). Pergantian nada/topik hanya di batas antar-PART.
+
+`;
+}
+
+function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneDurations, sceneRoles, cameraDirectives, archetypeNote, parts, regenerateScene, existingScenes }) {
   const durasiByScene = new Map((sceneDurations ?? []).map(d => [Number(d.scene), Number(d.durasi)]));
   const fasilitas = 'tidak disebutkan';
   const deskripsi = (property.deskripsi ?? '').slice(0, 200);
@@ -488,6 +518,7 @@ function buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments,
   const archetypeBlock = archetypeNote
     ? `ARAHAN GAYA VIDEO (ARKETIPE) — WAJIB dipatuhi di semua scene:\n${archetypeNote}\n\n`
     : '';
+  const partBlock = buildPartBlock(parts, sceneDurations, durasiDetik);
 
   // Mode regenerate satu scene: AI hanya membuat ulang scene N dengan variasi baru,
   // sambil menjaga kesinambungan dengan dialog scene lain yang sudah final.
@@ -511,7 +542,7 @@ ${others}
     closingInstruction = `Buat ulang HANYA Scene ${regenerateScene}. Output: JSON array berisi TEPAT 1 objek scene dengan field "scene" = ${regenerateScene}, mengikuti semua aturan system prompt (kamera & foto sesuai instruksi Scene ${regenerateScene} di atas, peran scene tetap sama).`;
   }
 
-  return `${archetypeBlock}Data properti:
+  return `${archetypeBlock}${partBlock}Data properti:
 - Jenis: ${property.jenis_properti}
 - Judul: ${property.title}
 - Lokasi: ${property.kecamatan}, ${property.kabupaten}
@@ -676,6 +707,20 @@ export async function onRequestPost(context) {
     tone, visual_style: visualStyle, hook_type: hookType, cta_type: ctaType,
   } = body;
   const sceneRoles = Array.isArray(body.scene_roles) ? body.scene_roles : [];
+  // Batas babak (opsional). Client hanya mengirimnya bila rancangan Part konsisten
+  // dengan jumlah scene; di sini tetap divalidasi ulang (sum harus = jumlahScene)
+  // supaya pembagian timpang tidak pernah sampai ke teks prompt.
+  const partsRaw = Array.isArray(body.parts) ? body.parts : [];
+  const partsSum = partsRaw.reduce((s, p) => s + (parseInt(p?.sceneCount, 10) || 0), 0);
+  const parts = partsRaw.length > 0 && partsSum === jumlahScene
+    ? partsRaw
+        .filter(p => ['Hook', 'Body', 'CTA'].includes(p?.role))
+        .map(p => ({
+          role: p.role,
+          sceneCount: parseInt(p.sceneCount, 10),
+          label: typeof p.label === 'string' ? p.label.slice(0, 80) : '',
+        }))
+    : [];
   const musikPrompt = typeof body.musik_prompt === 'string' ? body.musik_prompt : '';
   const karakterId = parseInt(body.karakter_id, 10);
   const fotoAssignments = body.foto_assignments;
@@ -821,7 +866,7 @@ export async function onRequestPost(context) {
   }
 
   const systemPrompt = buildSystemPrompt({ jumlahScene, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, excludedHooks, excludedCtas, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotScene, cutawayExcludedScenes, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec });
-  const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneDurations, sceneRoles, cameraDirectives, archetypeNote, regenerateScene, existingScenes });
+  const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahScene, fotoAssignments, durasiDetik, sceneDurations, sceneRoles, cameraDirectives, archetypeNote, parts, regenerateScene, existingScenes });
 
   // ── Panggil AI dengan fallback berantai, respons streaming NDJSON ──────────
   // Urutan: provider pilihan user dulu, lalu sisanya (yang punya key). Heartbeat

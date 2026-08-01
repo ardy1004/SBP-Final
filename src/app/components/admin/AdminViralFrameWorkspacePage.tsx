@@ -13,6 +13,7 @@ import {
   sceneFileName, characterFileName, AI_TOOL_FORMAT_SPEC,
   isNativeAudioTool, getClipMaxSec, namaFileKarakter, PLATFORM_BEHAVIOR,
   sceneRoleFromParts, partIndexForScene, partsValidForTotal, type PartDef,
+  partDurationsToScenes, totalSceneCountOfParts,
   RULEBOOK_VERSION,
 } from './viralframe/options';
 import CharacterStepBase, { type Step3State } from './viralframe/CharacterStep';
@@ -71,8 +72,14 @@ interface PropertyDetail {
 }
 
 interface Step1State {
+  /** Jumlah scene total. Di mode durasi 'part' field ini DERIVED — ditulis oleh
+   * Part designer (= jumlah sceneCount semua Part), bukan diketik user. Tetap
+   * dipertahankan sebagai satu-satunya angka yang dibaca semua konsumen hilir
+   * (validasi, ZIP, SRT, ketiga jalur prompt-engine). */
   sceneCount: number;
-  durationMode: 'uniform' | 'manual';
+  /** 'part' (Fase 2) = durasi disetel per Part, durasi scene diturunkan.
+   * 'uniform'/'manual' dipertahankan agar draft/riwayat/preset lama tetap jalan. */
+  durationMode: 'uniform' | 'manual' | 'part';
   uniformDuration: number;
   manualDurations: number[];
   platforms: string[];          // urut; index 0 = primer
@@ -384,6 +391,9 @@ interface AIGenerateTabProps {
   sceneRoles: Record<number, 'Hook' | 'Body' | 'CTA'>;
   /** Durasi per scene (detik) dari Step 3 (Parameter Video), index 0 = scene 1. */
   sceneDurations: number[];
+  /** Rancangan Part (Fase 2) — dikirim ke backend supaya narasi koheren DALAM satu
+   * babak, bukan melompat tiap scene. Undefined/kosong = backend jalan seperti biasa. */
+  parts?: PartDef[];
   // Data dari Step 1 (Pilih Foto per Scene)
   scenePhotos: Record<number, ScenePhoto>;
   // Data dari Step 2 (Pilih Karakter)
@@ -395,7 +405,7 @@ interface AIGenerateTabProps {
 function AIGenerateTab({
   propertyId, propertyTitle, kodeListingStr, jumlahScene, platform, platforms, aiTool, bahasa,
   ratio, tone, visualStyle, hookType, ctaType, archetype, register, cutawayExcluded, sceneRoles,
-  sceneDurations, scenePhotos, selectedKarakter, onEditStep,
+  sceneDurations, parts, scenePhotos, selectedKarakter, onEditStep,
 }: AIGenerateTabProps) {
   const [musik, setMusik] = useState('corporate');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -525,6 +535,11 @@ function AIGenerateTab({
       cta_type: ctaTypeLabel,
       scene_roles,
       scene_durations,
+      // Batas babak (Fase 2) — hanya dikirim bila rancangan Part konsisten dengan
+      // jumlah scene, supaya backend tidak pernah menerima pembagian yang timpang.
+      parts: partsValidForTotal(parts, jumlahScene)
+        ? parts!.map(p => ({ role: p.role, sceneCount: p.sceneCount, label: p.label }))
+        : undefined,
       musik_value: musik,
       musik_prompt: musikOpt.prompt,
       karakter_id: selectedKarakter.id,
@@ -2355,9 +2370,19 @@ export default function AdminViralFrameWorkspacePage() {
     });
   };
 
+  // Default sesi BARU = mode 'part' (Fase 2): user merancang Part + durasinya,
+  // AI yang menentukan berapa scene tiap Part. Part awal mencerminkan struktur
+  // Hook/Body/CTA klasik dengan sceneCount 1/2/1 sebagai titik mulai — akan
+  // ditimpa begitu "AI Rancang Storyboard" dijalankan. Draft/riwayat LAMA tetap
+  // rehydrate ke 'uniform'/'manual' lewat applyConfig() dan tidak tersentuh.
   const [s1, setS1] = useState<Step1State>({
     sceneCount: 4,
-    durationMode: 'uniform',
+    durationMode: 'part',
+    parts: [
+      { role: 'Hook', sceneCount: 1, durationSec: 8 },
+      { role: 'Body', sceneCount: 2, durationSec: 20 },
+      { role: 'CTA',  sceneCount: 1, durationSec: 8 },
+    ],
     uniformDuration: 10,
     manualDurations: [10, 10, 10, 10],
     platforms: ['tiktok', 'ig_reels', 'yt_shorts', 'fb_reels'],
@@ -2502,7 +2527,17 @@ export default function AdminViralFrameWorkspacePage() {
     // Buang field struktur dari preset (lama maupun baru) — jangan sentuh scenes[],
     // sceneCount, parts, atau manualDurations milik Step 1.
     const { sceneCount: _sc, parts: _pt, manualDurations: _md, ...visualParams } = p.params;
-    setS1(prev => ({ ...prev, ...visualParams }));
+    setS1(prev => {
+      const next = { ...prev, ...visualParams };
+      // Preset ber-durationMode 'part' hanya masuk akal kalau sesi ini PUNYA Part
+      // (parts sengaja tidak ikut preset — lihat komentar di atas). Tanpa guard ini
+      // preset lama bisa memindahkan user ke mode Part tanpa satu Part pun, yang
+      // membuat durasi jatuh ke fallback diam-diam.
+      if (next.durationMode === 'part' && (prev.parts ?? []).length === 0) {
+        next.durationMode = prev.durationMode;
+      }
+      return next;
+    });
   };
 
   // ─── Jalur C: derivasi props AIGenerateTab dari state Step 1–3 (bukan form independen lagi) ──
@@ -2582,7 +2617,11 @@ export default function AdminViralFrameWorkspacePage() {
   // cutawayExcluded: bila sebelumnya persis default "hanya scene terakhir" (CTA),
   // geser mengikuti scene terakhir yang baru; selain itu cukup buang nomor scene
   // yang sudah tidak ada lagi (di atas n).
+  // Mode 'part': sceneCount adalah TURUNAN dari rancangan Part (lihat commitParts).
+  // Input manual "Jumlah Scene" tidak dirender di mode itu; guard di sini menjaga
+  // agar tidak ada jalur lain yang diam-diam menimpa sceneCount turunan.
   const setSceneCount = useCallback((raw: number) => {
+    if (s1.durationMode === 'part') return;
     const n = Math.max(2, Math.min(12, raw || 0));
     setS1(prev => {
       const wasDefaultCtaOnly = prev.cutawayExcluded.length === 1 && prev.cutawayExcluded[0] === prev.sceneCount;
@@ -2601,44 +2640,63 @@ export default function AdminViralFrameWorkspacePage() {
       };
     });
     setScenes(prev => resize(prev, n, () => ({ photoId: null, label: '' })));
-  }, []);
+  }, [s1.durationMode]);
 
   const update1 = <K extends keyof Step1State>(key: K, val: Step1State[K]) =>
     setS1(prev => ({ ...prev, [key]: val }));
 
-  // ─── Part designer (Fase 6) ─────────────────────────────────────────────────
-  const addPart = useCallback(() => {
+  // ─── Part designer (Fase 6 → Part model Fase 2) ─────────────────────────────
+  // commitParts = SATU-SATUNYA jalan menulis s1.parts. Di mode 'part' ia sekaligus
+  // menurunkan sceneCount (= jumlah sceneCount semua Part) lalu me-resize scenes[]
+  // dan manualDurations agar tetap sepanjang sceneCount. Ini yang membuat seluruh
+  // konsumen hilir (validasi, ZIP, SRT, 3 jalur prompt-engine) tidak perlu tahu
+  // apa pun soal Part — mereka cukup baca sceneCount & durations seperti biasa.
+  const commitParts = useCallback((buat: (prev: PartDef[]) => PartDef[]) => {
+    const parts = buat(s1.parts ?? []);
+    if (s1.durationMode !== 'part') { setS1(prev => ({ ...prev, parts })); return; }
+
+    const total = Math.max(0, Math.min(12, totalSceneCountOfParts(parts)));
     setS1(prev => {
+      const wasDefaultCtaOnly = prev.cutawayExcluded.length === 1 && prev.cutawayExcluded[0] === prev.sceneCount;
+      return {
+        ...prev,
+        parts,
+        sceneCount: total,
+        manualDurations: resize(prev.manualDurations, total, () => prev.uniformDuration || 6),
+        cutawayExcluded: wasDefaultCtaOnly ? [total] : prev.cutawayExcluded.filter(x => x <= total),
+      };
+    });
+    // scenes[] tetap penyimpanan kanonik per scene — resize mengikuti total Part,
+    // mempertahankan foto/label yang sudah dipilih di scene-scene awal.
+    setScenes(prev => resize(prev, total, () => ({ photoId: null, label: '' })));
+  }, [s1.parts, s1.durationMode]);
+
+  const addPart = useCallback(() => {
+    commitParts(prev => {
       // Klik pertama (belum ada Part sama sekali): seed 3 part yang MENCERMINKAN
       // distribusi role legacy (Hook scene pertama, CTA scene terakhir, sisanya
       // Body) — supaya mengaktifkan fitur Part TIDAK diam-diam mengubah role
       // scene yang sudah ada jadi "Body" semua (footgun kalau langsung 1 part).
-      if (!prev.parts || prev.parts.length === 0) {
-        const n = prev.sceneCount;
+      if (prev.length === 0) {
+        const n = s1.sceneCount;
         const bodyCount = Math.max(0, n - 2);
-        const seeded: PartDef[] = n >= 2
+        return n >= 2
           ? [
-              { role: 'Hook', sceneCount: 1 },
-              ...(bodyCount > 0 ? [{ role: 'Body' as const, sceneCount: bodyCount }] : []),
-              { role: 'CTA', sceneCount: 1 },
+              { role: 'Hook' as const, sceneCount: 1, durationSec: 8 },
+              ...(bodyCount > 0 ? [{ role: 'Body' as const, sceneCount: bodyCount, durationSec: bodyCount * 8 }] : []),
+              { role: 'CTA' as const, sceneCount: 1, durationSec: 8 },
             ]
-          : [{ role: 'Body', sceneCount: n }];
-        return { ...prev, parts: seeded };
+          : [{ role: 'Body' as const, sceneCount: n, durationSec: n * 8 }];
       }
-      const used = prev.parts.reduce((s, p) => s + p.sceneCount, 0);
-      const sisa = Math.max(1, prev.sceneCount - used);
-      return { ...prev, parts: [...prev.parts, { role: 'Body', sceneCount: sisa }] };
+      return [...prev, { role: 'Body', sceneCount: 1, durationSec: 8 }];
     });
-  }, []);
+  }, [commitParts, s1.sceneCount]);
   const removePart = useCallback((idx: number) => {
-    setS1(prev => ({ ...prev, parts: (prev.parts ?? []).filter((_, i) => i !== idx) }));
-  }, []);
+    commitParts(prev => prev.filter((_, i) => i !== idx));
+  }, [commitParts]);
   const updatePart = useCallback((idx: number, patch: Partial<PartDef>) => {
-    setS1(prev => ({
-      ...prev,
-      parts: (prev.parts ?? []).map((p, i) => (i === idx ? { ...p, ...patch } : p)),
-    }));
-  }, []);
+    commitParts(prev => prev.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
+  }, [commitParts]);
 
   // ─── AI Rancang Storyboard ──────────────────────────────────────────────────
   // Sekali klik: AI bernalar dari label_ruangan yang sudah tersimpan (TANPA vision
@@ -2650,22 +2708,33 @@ export default function AdminViralFrameWorkspacePage() {
     if (!prop) return;
     setSuggestLoading(true); setSuggestError('');
     try {
+      // Part model: yang dikirim adalah rancangan Part + durasinya. AI yang
+      // menentukan BERAPA scene tiap Part dan foto mana saja yang dipakai —
+      // itulah inti Fase 2 (dulu scene_count dikunci user di sini).
       const r = await fetch('/api/admin/viralframe/suggest-storyboard', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ property_id: prop.id, scene_count: s1.sceneCount, archetype: s1.archetype, register: s1.register }),
+        body: JSON.stringify({
+          property_id: prop.id,
+          parts: (s1.parts ?? []).map(p => ({ role: p.role, durationSec: p.durationSec, label: p.label })),
+          archetype: s1.archetype,
+          register: s1.register,
+        }),
       });
       const data = await readNdjsonFinal<{
         parts: PartDef[];
         scene_photo_order: { scene: number; label: string; photo_id: number; url_webp: string }[];
       }>(r);
-      setS1(prev => ({ ...prev, parts: data.parts }));
+      // scenes[] diisi DULU (penyimpanan kanonik), lalu commitParts menurunkan
+      // sceneCount dari parts hasil AI. commitParts juga me-resize scenes[], jadi
+      // panjang keduanya dijamin konsisten walau AI mengembalikan jumlah berbeda.
       setScenes(data.scene_photo_order.map(x => ({ photoId: x.photo_id, label: x.label })));
+      commitParts(() => data.parts);
     } catch (e: unknown) {
       setSuggestError(e instanceof Error ? e.message : 'Gagal rancang storyboard');
     } finally {
       setSuggestLoading(false);
     }
-  }, [prop, s1.sceneCount, s1.archetype, s1.register]);
+  }, [prop, s1.parts, s1.archetype, s1.register, commitParts]);
 
   // Pilih arketipe → prefill visualStyle/tone/register/cutaway (parameter Step 3 saja).
   // Nilai tetap bisa di-override manual setelahnya (memilih 'custom' tidak mereset).
@@ -2767,13 +2836,37 @@ export default function AdminViralFrameWorkspacePage() {
   // Urutan wizard: 1 Foto per Scene → 2 Karakter → 3 Pilih Mode → 4 Parameter Video → 5 Generate.
   const fotoErrors = useMemo(() => {
     const e: string[] = [];
-    if (s1.sceneCount < 2 || s1.sceneCount > 12) e.push('Jumlah scene harus 2–12.');
+    if (s1.durationMode === 'part') {
+      // Mode Part: sceneCount turunan, jadi pesan errornya harus menunjuk ke Part
+      // (bukan ke input "Jumlah Scene" yang memang tidak ada di layar ini).
+      const parts = s1.parts ?? [];
+      if (parts.length === 0) {
+        e.push('Rancang minimal 1 Part terlebih dahulu.');
+      } else {
+        parts.forEach((p, i) => {
+          const d = p.durationSec;
+          if (!Number.isFinite(d) || (d as number) <= 0) {
+            e.push(`Part ${i + 1} (${p.role}): durasi belum diisi.`);
+          } else if (p.sceneCount > 0) {
+            const perScene = (d as number) / p.sceneCount;
+            if (perScene < 2 || perScene > 30) {
+              e.push(`Part ${i + 1} (${p.role}): ${d} detik dibagi ${p.sceneCount} scene = ${perScene.toFixed(1)} detik/scene, di luar rentang 2–30 detik. Ubah durasi Part atau jumlah scene-nya.`);
+            }
+          }
+        });
+        if (s1.sceneCount < 2 || s1.sceneCount > 12) {
+          e.push(`Total scene dari semua Part = ${s1.sceneCount}, harus 2–12. Jalankan "AI Rancang Storyboard" atau sesuaikan Part.`);
+        }
+      }
+    } else if (s1.sceneCount < 2 || s1.sceneCount > 12) {
+      e.push('Jumlah scene harus 2–12.');
+    }
     scenes.slice(0, s1.sceneCount).forEach((sc, i) => {
       if (sc.photoId == null) e.push(`Scene ${i + 1}: belum memilih foto.`);
       if (!sc.label) e.push(`Scene ${i + 1}: belum memilih label foto.`);
     });
     return e;
-  }, [scenes, s1.sceneCount]);
+  }, [scenes, s1.sceneCount, s1.durationMode, s1.parts]);
 
   const karakterErrors = useMemo(() => {
     const e: string[] = [];
@@ -2795,7 +2888,11 @@ export default function AdminViralFrameWorkspacePage() {
     // Rentang 2–30 detik = rentang yang benar-benar didukung getLipsync().
     // Di luar itu nilainya di-clamp diam-diam, jadi lebih baik ditolak terang-terangan.
     const durasiSah = (d: number) => Number.isFinite(d) && d >= 2 && d <= 30;
-    if (s1.durationMode === 'uniform') {
+    if (s1.durationMode === 'part') {
+      // Durasi mode Part sudah divalidasi di Step 1 (fotoErrors) tempat Part
+      // dirancang — tidak diulang di sini agar user tidak diblokir di layar yang
+      // tidak punya kontrolnya.
+    } else if (s1.durationMode === 'uniform') {
       if (!durasiSah(s1.uniformDuration)) e.push('Durasi per scene harus antara 2–30 detik.');
     } else {
       const bad = s1.manualDurations.slice(0, s1.sceneCount).some(d => !durasiSah(d));
@@ -2960,10 +3057,12 @@ export default function AdminViralFrameWorkspacePage() {
 
   // ─── Step 4b: durasi per scene (untuk validasi & scene cards) ─────────────
   const durations = useMemo(
-    () => (s1.durationMode === 'uniform'
-      ? Array.from({ length: s1.sceneCount }, () => s1.uniformDuration)
-      : s1.manualDurations.slice(0, s1.sceneCount)),
-    [s1.durationMode, s1.sceneCount, s1.uniformDuration, s1.manualDurations],
+    () => (s1.durationMode === 'part'
+      ? partDurationsToScenes(s1.parts, s1.sceneCount, s1.uniformDuration || 8)
+      : s1.durationMode === 'uniform'
+        ? Array.from({ length: s1.sceneCount }, () => s1.uniformDuration)
+        : s1.manualDurations.slice(0, s1.sceneCount)),
+    [s1.durationMode, s1.sceneCount, s1.uniformDuration, s1.manualDurations, s1.parts],
   );
 
   // Reset hasil validasi bila PARAMETER (s1/scenes/s3) benar-benar berubah agar
@@ -3319,21 +3418,47 @@ export default function AdminViralFrameWorkspacePage() {
               Step 1 (Pilih Foto per Scene) — struktur scene dirancang bersama foto. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Mode Durasi */}
-            <Field label="Mode Durasi">
+            <Field label="Mode Durasi" hint={s1.durationMode === 'part' ? 'Durasi diatur per Part di Step 1.' : undefined}>
               <div className="flex gap-2">
-                {(['uniform', 'manual'] as const).map(m => (
+                {(['part', 'uniform', 'manual'] as const).map(m => (
                   <button key={m} type="button" onClick={() => update1('durationMode', m)}
                     className={`flex-1 px-3 py-2 rounded-xl text-sm font-medium border transition-colors ${
                       s1.durationMode === m
                         ? 'bg-[#1565C0] text-white border-[#1565C0]'
                         : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'
                     }`}>
-                    {m === 'uniform' ? 'Seragam' : 'Manual per Scene'}
+                    {m === 'part' ? 'Per Part' : m === 'uniform' ? 'Seragam' : 'Manual per Scene'}
                   </button>
                 ))}
               </div>
             </Field>
           </div>
+
+          {/* Mode Part: durasi dirancang di Step 1, di sini hanya rincian read-only
+              supaya user tetap bisa memeriksa hasil pembagiannya sebelum generate. */}
+          {s1.durationMode === 'part' && (
+            <Field label="Durasi per Part" hint="Diatur di Step 1 — Rancang Part. Durasi tiap scene dibagi rata dari durasi Part-nya.">
+              <div className="border border-gray-100 rounded-xl divide-y divide-gray-50">
+                {(s1.parts ?? []).length === 0 ? (
+                  <p className="text-xs text-[#94A3B8] px-3 py-2">Belum ada Part. Kembali ke Step 1 untuk merancangnya.</p>
+                ) : (s1.parts ?? []).map((p, idx) => {
+                  const mulai = (s1.parts ?? []).slice(0, idx).reduce((s, x) => s + x.sceneCount, 0);
+                  const nums = Array.from({ length: p.sceneCount }, (_, k) => mulai + k + 1);
+                  return (
+                    <div key={idx} className="flex items-center justify-between px-3 py-2 text-sm">
+                      <span className="text-[#0F172A]">
+                        Part {idx + 1} — {p.role}{p.label ? `: ${p.label}` : ''}
+                        <span className="text-[#94A3B8] text-xs"> (Scene {nums.join(', ') || '—'})</span>
+                      </span>
+                      <span className="text-[#64748B] text-xs shrink-0 ml-3">
+                        {p.durationSec ?? 0} detik → {nums.map(n => `${durations[n - 1] ?? 0}s`).join(' + ') || '—'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </Field>
+          )}
 
           {/* Durasi seragam */}
           {s1.durationMode === 'uniform' && (
@@ -3471,55 +3596,129 @@ export default function AdminViralFrameWorkspacePage() {
           blok parameter): struktur scene dan pengisian fotonya dirancang di satu layar. */}
       {labelFotoDone && step === 1 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-5">
-          <h2 className="font-display font-bold text-[#0F172A]">Step 1 — Pilih Foto per Scene</h2>
+          <h2 className="font-display font-bold text-[#0F172A]">Step 1 — Rancang Part & Foto</h2>
           <p className="text-sm text-[#64748B] -mt-3">
-            Tentukan jumlah scene, lalu pilih 1 foto untuk tiap scene. Foto yang sama boleh dipakai di beberapa scene.
+            {s1.durationMode === 'part'
+              ? 'Tentukan babak (Part) video dan durasi tiap Part, lalu jalankan AI Rancang Storyboard — AI yang menentukan berapa scene tiap Part dan foto mana saja yang dipakai. Semua hasilnya tetap bisa diedit manual.'
+              : 'Tentukan jumlah scene, lalu pilih 1 foto untuk tiap scene. Foto yang sama boleh dipakai di beberapa scene.'}
           </p>
 
-          <Field label="Jumlah Scene" hint="Antara 2–12 scene">
-            <input type="number" min={2} max={12} value={s1.sceneCount}
-              onChange={e => setSceneCount(parseInt(e.target.value, 10))}
-              className={`${selectCls} sm:w-40`} />
-          </Field>
+          {s1.durationMode === 'part' ? (
+            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-[#F0F7FF] border border-[#1565C0]/20">
+              <span className="text-xs text-[#1565C0]">
+                Total <strong>{s1.sceneCount} scene</strong> · <strong>{durations.reduce((a, b) => a + b, 0)} detik</strong> — dihitung otomatis dari Part di bawah.
+              </span>
+              <button type="button"
+                onClick={() => update1('durationMode', 'uniform')}
+                className="text-[11px] text-[#64748B] hover:text-[#0F172A] underline shrink-0 ml-3">
+                Atur durasi per scene saja
+              </button>
+            </div>
+          ) : (
+            <Field label="Jumlah Scene" hint="Antara 2–12 scene">
+              <div className="flex items-center gap-3">
+                <input type="number" min={2} max={12} value={s1.sceneCount}
+                  onChange={e => setSceneCount(parseInt(e.target.value, 10))}
+                  className={`${selectCls} sm:w-40`} />
+                <button type="button"
+                  onClick={() => update1('durationMode', 'part')}
+                  className="text-[11px] text-[#1565C0] hover:text-[#0F4C9E] underline shrink-0">
+                  Pakai durasi per Part
+                </button>
+              </div>
+            </Field>
+          )}
 
           {/* Rancang Part (Fase 6, opsional) — pengelompokan naratif di atas Scene.
               Part TIDAK mengubah mekanisme Scene (tetap 1 foto = 1 generate call);
               hanya membawa role di level lebih tinggi + label naratif. Kosong = fallback
               role otomatis berdasar posisi (Hook scene pertama, CTA scene terakhir). */}
-          <Field label="Rancang Part (opsional)" hint="Kelompokkan scene jadi babak naratif (Hook/Body/CTA) — kosongkan untuk perilaku otomatis berdasar posisi seperti biasa.">
+          <Field
+            label={s1.durationMode === 'part' ? 'Rancang Part' : 'Rancang Part (opsional)'}
+            hint={s1.durationMode === 'part'
+              ? 'Tiap Part = satu babak naratif dengan durasi sendiri. Jumlah scene & foto per Part diisi AI.'
+              : 'Kelompokkan scene jadi babak naratif (Hook/Body/CTA) — kosongkan untuk perilaku otomatis berdasar posisi seperti biasa.'}>
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <button type="button" onClick={suggestStoryboard} disabled={suggestLoading}
                   className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-[#1565C0]/30 text-[#1565C0] hover:bg-[#F0F7FF] disabled:opacity-50 disabled:cursor-not-allowed">
                   {suggestLoading ? 'Merancang…' : '🤖 AI Rancang Storyboard'}
                 </button>
-                <span className="text-[11px] text-[#94A3B8]">Isi Part + foto per scene otomatis dari label ruangan yang sudah tersimpan — tetap bisa diedit manual.</span>
+                <span className="text-[11px] text-[#94A3B8]">
+                  {s1.durationMode === 'part'
+                    ? 'AI menentukan jumlah scene & foto tiap Part dari durasi yang kamu set + label ruangan tersimpan.'
+                    : 'Isi Part + foto per scene otomatis dari label ruangan yang sudah tersimpan — tetap bisa diedit manual.'}
+                </span>
               </div>
               {suggestError && <p className="text-xs text-red-500">{suggestError}</p>}
-              {(s1.parts ?? []).map((p, idx) => (
-                <div key={idx} className="flex items-center gap-2 px-3 py-2 border border-gray-100 rounded-xl">
-                  <span className="text-xs font-semibold text-[#94A3B8] w-14 shrink-0">Part {idx + 1}</span>
-                  <select value={p.role} onChange={e => updatePart(idx, { role: e.target.value as PartDef['role'] })}
-                    className="text-sm border border-gray-200 rounded-lg px-2 py-1">
-                    <option value="Hook">Hook</option>
-                    <option value="Body">Body</option>
-                    <option value="CTA">CTA</option>
-                  </select>
-                  <input type="number" min={1} max={s1.sceneCount} value={p.sceneCount}
-                    onChange={e => updatePart(idx, { sceneCount: Math.max(1, parseInt(e.target.value, 10) || 1) })}
-                    className="w-16 text-sm border border-gray-200 rounded-lg px-2 py-1" title="Jumlah scene" />
-                  <span className="text-xs text-[#94A3B8]">scene</span>
-                  <input type="text" value={p.label ?? ''} placeholder="Label (opsional)"
-                    onChange={e => updatePart(idx, { label: e.target.value })}
-                    className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1 min-w-0" />
-                  <button type="button" onClick={() => removePart(idx)}
-                    className="text-xs text-red-500 hover:text-red-700 shrink-0">Hapus</button>
-                </div>
-              ))}
+              {(s1.parts ?? []).map((p, idx) => {
+                // Scene yang dimiliki Part ini (nomor 1-based) — untuk menampilkan
+                // foto yang benar-benar terpasang, bukan sekadar kolam photoIds.
+                const mulai = (s1.parts ?? []).slice(0, idx).reduce((s, x) => s + x.sceneCount, 0);
+                const sceneNums = Array.from({ length: p.sceneCount }, (_, k) => mulai + k + 1);
+                const perScene = p.durationSec && p.sceneCount > 0 ? p.durationSec / p.sceneCount : 0;
+                return (
+                  <div key={idx} className="px-3 py-2 border border-gray-100 rounded-xl space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-[#94A3B8] w-14 shrink-0">Part {idx + 1}</span>
+                      <select value={p.role} onChange={e => updatePart(idx, { role: e.target.value as PartDef['role'] })}
+                        className="text-sm border border-gray-200 rounded-lg px-2 py-1">
+                        <option value="Hook">Hook</option>
+                        <option value="Body">Body</option>
+                        <option value="CTA">CTA</option>
+                      </select>
+
+                      {s1.durationMode === 'part' ? (
+                        <>
+                          <input type="number" min={2} max={120} value={p.durationSec ?? ''}
+                            onChange={e => updatePart(idx, { durationSec: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                            className="w-16 text-sm border border-gray-200 rounded-lg px-2 py-1" title="Durasi Part (detik)" />
+                          <span className="text-xs text-[#94A3B8] shrink-0">detik</span>
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#EFF6FF] text-[#1565C0] shrink-0" title="Ditentukan AI Rancang Storyboard">
+                            {p.sceneCount} scene{perScene > 0 ? ` · ~${perScene.toFixed(perScene % 1 ? 1 : 0)}s/scene` : ''}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <input type="number" min={1} max={s1.sceneCount} value={p.sceneCount}
+                            onChange={e => updatePart(idx, { sceneCount: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+                            className="w-16 text-sm border border-gray-200 rounded-lg px-2 py-1" title="Jumlah scene" />
+                          <span className="text-xs text-[#94A3B8]">scene</span>
+                        </>
+                      )}
+
+                      <input type="text" value={p.label ?? ''} placeholder="Label (opsional)"
+                        onChange={e => updatePart(idx, { label: e.target.value })}
+                        className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1 min-w-0" />
+                      <button type="button" onClick={() => removePart(idx)}
+                        className="text-xs text-red-500 hover:text-red-700 shrink-0">Hapus</button>
+                    </div>
+
+                    {/* Foto milik Part ini — dibaca dari scenes[] (penyimpanan kanonik),
+                        bukan dari p.photoIds, supaya edit manual per scene langsung terlihat. */}
+                    {s1.durationMode === 'part' && sceneNums.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap pl-14">
+                        {sceneNums.map(num => {
+                          const sc = scenes[num - 1];
+                          const img = sc?.photoId != null ? prop.images.find(im => im.id === sc.photoId) : null;
+                          return img ? (
+                            <img key={num} src={thumbSrc(img.url_webp, 64)} alt={sc?.label ?? ''}
+                              title={`Scene ${num}${sc?.label ? ` — ${sc.label}` : ''}`}
+                              className="w-8 h-8 rounded object-cover border border-gray-200" loading="lazy" decoding="async" />
+                          ) : (
+                            <span key={num} title={`Scene ${num} — belum ada foto`}
+                              className="w-8 h-8 rounded border border-dashed border-gray-300 flex items-center justify-center text-[9px] text-[#94A3B8]">{num}</span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               <div className="flex items-center justify-between">
                 <button type="button" onClick={addPart}
                   className="text-xs font-semibold text-[#1565C0] hover:text-[#0F4C9E]">+ Tambah Part</button>
-                {(s1.parts ?? []).length > 0 && (() => {
+                {s1.durationMode !== 'part' && (s1.parts ?? []).length > 0 && (() => {
                   const sum = s1.parts!.reduce((s, p) => s + p.sceneCount, 0);
                   return sum !== s1.sceneCount ? (
                     <span className="text-xs text-amber-600">
@@ -3794,9 +3993,9 @@ export default function AdminViralFrameWorkspacePage() {
                 <span>·</span>
                 <span>{s1.sceneCount} scene</span>
                 <span>·</span>
-                <span>Total {s1.durationMode === 'uniform'
-                  ? s1.uniformDuration * s1.sceneCount
-                  : s1.manualDurations.slice(0, s1.sceneCount).reduce((a, b) => a + (b || 0), 0)} detik</span>
+                {/* Jumlahkan `durations` — satu-satunya sumber yang sudah benar
+                    untuk KETIGA mode (termasuk pembagian durasi per Part). */}
+                <span>Total {durations.reduce((a, b) => a + (b || 0), 0)} detik</span>
                 <span>·</span>
                 <span className="flex items-center gap-1">
                   {saving
@@ -3831,6 +4030,7 @@ export default function AdminViralFrameWorkspacePage() {
               sceneRoles={sceneRolesForAI}
               scenePhotos={scenePhotosForAI}
               sceneDurations={durations}
+              parts={s1.parts}
               selectedKarakter={selectedKarakterForAI}
               onEditStep={setStep}
             />

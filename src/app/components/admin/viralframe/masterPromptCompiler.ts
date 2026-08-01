@@ -11,6 +11,7 @@ import {
   isNativeAudioTool, getClipMaxSec, NEGATIVE_PROMPT_VIDEO,
   REALISM_QUALITY_CUES, REALISM_BANNED_QUALITY_PHRASES,
   sceneRoleFromParts, partIndexForScene, partsValidForTotal, type PartDef,
+  partDurationsToScenes,
 } from './options';
 import { findArchetype, compileCameraChoreography } from './archetypes';
 
@@ -27,7 +28,7 @@ export interface CompilerCharacter {
   etnik: string | null; style: string | null; ciri_fisik: string | null;
 }
 export interface CompilerS1 {
-  sceneCount: number; durationMode: 'uniform' | 'manual';
+  sceneCount: number; durationMode: 'uniform' | 'manual' | 'part';
   uniformDuration: number; manualDurations: number[];
   platforms: string[]; aiTool: string; ratio: string; language: string;
   hookType: string; ctaType: string; ctaKeyword: string;
@@ -59,7 +60,24 @@ function formatRupiah(n: number): string {
   return `Rp ${n.toLocaleString('id-ID')}`;
 }
 
+// Fase 2 — durasi per Part. durationOf() dipanggil berkali-kali di banyak blok
+// (BLOK 1/2/3/5), jadi array turunannya di-cache per objek s1 supaya pembagian
+// durasi tidak dihitung ulang tiap panggilan. WeakMap = otomatis lepas begitu
+// objek s1 (baru tiap render) tidak dirujuk lagi.
+const cacheDurasiPart = new WeakMap<CompilerS1, number[]>();
+function durasiPartArray(s1: CompilerS1): number[] {
+  let arr = cacheDurasiPart.get(s1);
+  if (!arr) {
+    arr = partDurationsToScenes(s1.parts, s1.sceneCount, s1.uniformDuration || 8);
+    cacheDurasiPart.set(s1, arr);
+  }
+  return arr;
+}
+
 function durationOf(s1: CompilerS1, idx: number): number {
+  if (s1.durationMode === 'part') {
+    return durasiPartArray(s1)[idx] ?? s1.uniformDuration;
+  }
   return s1.durationMode === 'uniform'
     ? s1.uniformDuration
     : (s1.manualDurations[idx] ?? s1.uniformDuration);
@@ -231,12 +249,17 @@ export function compileMasterPrompt(
   const usesParts = partsValidForTotal(s1.parts, n);
   if (usesParts) {
     L.push('PART (pengelompokan naratif — role & konsistensi mengikuti Part, bukan per-scene):');
+    const durasiScenePart = durasiPartArray(s1);
     let acc = 0;
     s1.parts!.forEach((p, pi) => {
       const partScenes = Array.from({ length: p.sceneCount }, (_, k) => acc + k + 1);
-      L.push(`  PART ${pi + 1} — ${p.role}${p.label ? `: ${p.label}` : ''} (Scene ${partScenes.join(', ')})`);
+      // Durasi Part = sumber kebenaran di mode 'part'; di mode lain tetap
+      // informatif (jumlah durasi scene yang tergabung di Part ini).
+      const durasiPart = partScenes.reduce((t, num) => t + (durasiScenePart[num - 1] ?? 0), 0);
+      L.push(`  PART ${pi + 1} — ${p.role}${p.label ? `: ${p.label}` : ''} (${durasiPart} detik, ${p.sceneCount} scene → Scene ${partScenes.join(', ')})`);
       acc += p.sceneCount;
     });
+    L.push('  Satu PART = satu babak naratif yang UTUH: scene-scene di dalamnya harus terasa menyambung (kalimat berlanjut, bukan mengulang pembuka), dan pergantian babak hanya terjadi di batas antar-PART.');
     L.push('');
   }
   L.push('STRUKTUR SCENE:');

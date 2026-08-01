@@ -166,6 +166,63 @@ export interface PartDef {
   role: 'Hook' | 'Body' | 'CTA';
   sceneCount: number;   // jumlah scene berurutan (dari scenes[]) milik part ini
   label?: string;       // label naratif opsional, mis. "Interior Tour"
+  /** Fase 2 — durasi TOTAL part ini (detik). Sumber kebenaran durasi saat
+   * durationMode === 'part'; durasi tiap scene di dalamnya diturunkan dari sini
+   * lewat partDurationsToScenes(). Opsional agar Part lama (tanpa durasi) tetap
+   * valid di mode 'uniform'/'manual'. */
+  durationSec?: number;
+  /** Fase 2 — kolam foto milik part ini (id property_images), diisi AI Rancang
+   * Storyboard. Tiap scene di dalam part TETAP memakai 1 foto (batas teknis
+   * 1 foto = 1 generate call); ini hanya menyatakan foto mana saja yang
+   * "milik" part. Penyimpanan kanonik per scene tetap scenes[].photoId. */
+  photoIds?: number[];
+}
+
+/** Jumlah scene total yang diminta oleh rancangan Part (0 bila tidak ada Part). */
+export function totalSceneCountOfParts(parts?: PartDef[]): number {
+  if (!Array.isArray(parts)) return 0;
+  return parts.reduce((s, p) => s + (Number.isInteger(p.sceneCount) && p.sceneCount > 0 ? p.sceneCount : 0), 0);
+}
+
+/** Batas durasi satu scene yang benar-benar didukung getLipsync() — di luar ini
+ * nilainya di-clamp diam-diam, jadi lebih baik di-clamp terang-terangan di sini. */
+const SCENE_DUR_MIN = 2;
+const SCENE_DUR_MAX = 30;
+
+/**
+ * Fase 2 — turunkan durasi PER SCENE dari durasi per Part.
+ * durationSec tiap Part dibagi rata ke sceneCount-nya; sisa pembagian
+ * dibagikan satu-satu ke scene-scene AWAL part itu (14s / 3 scene → 5,5,4).
+ * Part tanpa durationSec memakai `fallbackPerScene` per scene-nya.
+ * Selalu mengembalikan array sepanjang `total` — scene di luar jangkauan Part
+ * (parts belum sinkron dengan total) diisi fallback, bukan undefined.
+ */
+export function partDurationsToScenes(
+  parts: PartDef[] | undefined,
+  total: number,
+  fallbackPerScene = 8,
+): number[] {
+  const clamp = (n: number) => Math.max(SCENE_DUR_MIN, Math.min(SCENE_DUR_MAX, Math.round(n)));
+  const out: number[] = Array.from({ length: Math.max(0, total) }, () => clamp(fallbackPerScene));
+  if (!Array.isArray(parts)) return out;
+
+  let cursor = 0;
+  for (const p of parts) {
+    const n = Number.isInteger(p.sceneCount) && p.sceneCount > 0 ? p.sceneCount : 0;
+    if (n === 0) continue;
+    const totalPart = Number.isFinite(p.durationSec) && (p.durationSec as number) > 0
+      ? (p.durationSec as number)
+      : fallbackPerScene * n;
+    const dasar = Math.floor(totalPart / n);
+    const sisa = totalPart - dasar * n;
+    for (let i = 0; i < n; i++) {
+      const idx = cursor + i;
+      if (idx >= out.length) break;
+      out[idx] = clamp(dasar + (i < sisa ? 1 : 0));
+    }
+    cursor += n;
+  }
+  return out;
 }
 
 /** true bila `parts` valid dipakai untuk scene sejumlah `total` (jumlah sceneCount cocok). */
