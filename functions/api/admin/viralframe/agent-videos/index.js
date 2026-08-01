@@ -16,6 +16,7 @@ const SELECT_COLS = `
   v.duration_sec, v.bytes, v.format, v.width, v.height,
   v.status, v.scheduled_at, v.posted_at,
   v.post_url, v.platform_targets, v.trashed_at, v.created_at,
+  v.views, v.likes, v.gaya, v.metrics_updated_at,
   c.nama AS character_nama, c.foto_url AS character_foto_url,
   p.kode_listing, p.title AS property_title,
   p.status_sold, p.badge_premium, p.badge_featured, p.badge_hot, p.properti_pilihan
@@ -136,6 +137,10 @@ export async function onRequestPost(context) {
   const format = typeof body.format === 'string' ? body.format.slice(0, 20) : null;
   const width = body.width != null ? (parseInt(body.width, 10) || null) : null;
   const height = body.height != null ? (parseInt(body.height, 10) || null) : null;
+  // Arketipe/gaya video yang dipakai saat prompt-nya digenerate — dikirim otomatis
+  // oleh workspace, bukan diketik admin. Ini sumbu yang dibandingkan di Analitik;
+  // kalau kosong, video tetap tercatat tapi masuk kelompok '(tanpa gaya)'.
+  const gaya = typeof body.gaya === 'string' ? body.gaya.slice(0, 100) || null : null;
 
   const character = await env.DB.prepare('SELECT id FROM viralframe_characters WHERE id = ?').bind(characterId).first().catch(() => null);
   if (!character) return jsonError('Karakter tidak ditemukan', 404);
@@ -145,9 +150,9 @@ export async function onRequestPost(context) {
   try {
     const res = await env.DB.prepare(
       `INSERT INTO viralframe_agent_videos
-        (character_id, property_id, caption, hashtags, cloudinary_public_id, cloudinary_url, resource_type, duration_sec, bytes, format, width, height)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).bind(characterId, propertyId, caption, hashtags, cloudinaryPublicId, cloudinaryUrl, resourceType, durationSec, bytes, format, width, height).run();
+        (character_id, property_id, caption, hashtags, cloudinary_public_id, cloudinary_url, resource_type, duration_sec, bytes, format, width, height, gaya)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(characterId, propertyId, caption, hashtags, cloudinaryPublicId, cloudinaryUrl, resourceType, durationSec, bytes, format, width, height, gaya).run();
     return jsonOk({ id: res.meta?.last_row_id }, 201);
   } catch (err) {
     console.error('[vf agent-videos] insert', err.message);

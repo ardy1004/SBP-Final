@@ -3,9 +3,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router';
 import {
   Users, Loader2, Download, Trash2, Pencil, Check, X, Copy, Layers, ChevronDown, ChevronUp,
-  Archive, RotateCcw, CheckCircle2, Circle, Send,
+  Archive, RotateCcw, CheckCircle2, Circle, Send, BarChart3,
 } from 'lucide-react';
 import { buildOverlayVideoUrl, composeOverlaysForProperty, pickStatusBadgeType, toAttachmentUrl, toImageThumbnailUrl, type BadgeAsset, type BadgeType } from '../../lib/cloudinaryOverlay';
+import { findArchetype } from './viralframe/archetypes';
 import BadgeLogoSettings from './viralframe/BadgeLogoSettings';
 import SlotIndicatorStrip from './viralframe/SlotIndicatorStrip';
 
@@ -17,6 +18,22 @@ interface CharacterOption {
   id: number;
   nama: string;
   foto_url: string;
+}
+
+interface AnalyticsRow {
+  gaya: string;
+  jumlah: number;
+  avg_views: number;
+  avg_likes: number;
+  total_views: number;
+}
+
+// `gaya` disimpan sebagai ID arketipe (stabil), bukan labelnya — supaya data
+// historis tidak ikut bergeser kalau suatu saat labelnya diubah. Diterjemahkan
+// ke label hanya saat ditampilkan; ID tak dikenal (arketipe lama yang sudah
+// dihapus) ditampilkan apa adanya, bukan disembunyikan.
+function labelGaya(id: string): string {
+  return findArchetype(id)?.label ?? id;
 }
 
 interface AgentVideo {
@@ -34,6 +51,11 @@ interface AgentVideo {
   height: number | null;
   status: string;
   post_url: string | null;
+  // Metrik performa — diisi manual dari dashboard sosmed. NULL = belum diisi,
+  // dan itu BUKAN sama dengan 0 (analitik hanya menghitung yang sudah diisi).
+  views: number | null;
+  likes: number | null;
+  gaya: string | null;
   trashed_at: string | null;
   created_at: string;
   character_nama: string;
@@ -94,6 +116,12 @@ export default function AdminViralFrameAgentVideosPage() {
   const [loadingVideos, setLoadingVideos] = useState(false);
   const [edits, setEdits] = useState<Record<number, { caption: string; hashtags: string }>>({});
   const [editingId, setEditingId] = useState<number | null>(null);
+  // Input metrik terpisah dari edit caption: alurnya beda: caption diedit sekali
+  // sebelum posting, metrik diisi berulang beberapa hari SESUDAH posting.
+  const [metricEdits, setMetricEdits] = useState<Record<number, { post_url: string; views: string; likes: string }>>({});
+  const [metricOpenId, setMetricOpenId] = useState<number | null>(null);
+  const [savingMetricId, setSavingMetricId] = useState<number | null>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsRow[]>([]);
   const [savingId, setSavingId] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [ratioFilter, setRatioFilter] = useState<RatioClass | 'semua'>('semua');
@@ -163,11 +191,25 @@ export default function AdminViralFrameAgentVideosPage() {
         const items: AgentVideo[] = j.data?.items ?? [];
         setVideos(items);
         setEdits(Object.fromEntries(items.map(v => [v.id, { caption: v.caption ?? '', hashtags: v.hashtags ?? '' }])));
+        setMetricEdits(Object.fromEntries(items.map(v => [v.id, {
+          post_url: v.post_url ?? '',
+          views: v.views != null ? String(v.views) : '',
+          likes: v.likes != null ? String(v.likes) : '',
+        }])));
       }
     } catch { /* noop */ } finally { setLoadingVideos(false); }
   }, []);
 
-  useEffect(() => { loadCharacters(); }, [loadCharacters]);
+  // Analitik best-effort — kalau gagal, halaman tetap berfungsi penuh.
+  const loadAnalytics = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/viralframe/analytics', { credentials: 'include' });
+      const j = await bacaJson(r);
+      if (j.success) setAnalytics(j.data?.items ?? []);
+    } catch { /* noop */ }
+  }, []);
+
+  useEffect(() => { loadCharacters(); loadAnalytics(); }, [loadCharacters, loadAnalytics]);
   useEffect(() => {
     if (selectedCharId != null) {
       setRatioFilter('semua'); setSelectedIds(new Set()); setContextMenu(null);
@@ -281,6 +323,26 @@ export default function AdminViralFrameAgentVideosPage() {
   const setEdit = (id: number, k: 'caption' | 'hashtags', val: string) =>
     setEdits(prev => ({ ...prev, [id]: { ...(prev[id] ?? { caption: '', hashtags: '' }), [k]: val } }));
 
+  const setMetric = (id: number, k: 'post_url' | 'views' | 'likes', val: string) =>
+    setMetricEdits(prev => ({ ...prev, [id]: { ...(prev[id] ?? { post_url: '', views: '', likes: '' }), [k]: val } }));
+
+  const saveMetrics = async (id: number) => {
+    const m = metricEdits[id]; if (!m) return;
+    setSavingMetricId(id);
+    try {
+      // String kosong dikirim apa adanya — backend menerjemahkannya jadi NULL
+      // (kembali ke "belum diisi"), berbeda dari angka 0.
+      await fetch(`/api/admin/viralframe/agent-videos/${id}`, {
+        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_url: m.post_url, views: m.views, likes: m.likes }),
+      });
+    } catch { /* noop */ } finally {
+      setSavingMetricId(null); setMetricOpenId(null);
+      if (selectedCharId != null) loadVideos(selectedCharId, view);
+      loadAnalytics();
+    }
+  };
+
   const copyCaption = async (v: AgentVideo) => {
     const prefix = pickStatusBadgeType(v) === 'sold' ? '[SOLD] ' : '';
     const text = `${prefix}${v.caption ?? ''}${v.hashtags ? `\n\n${v.hashtags}` : ''}`;
@@ -300,6 +362,34 @@ export default function AdminViralFrameAgentVideosPage() {
         <p className="text-sm text-[#64748B] mt-0.5">
           Video hasil upload manual (Cloudinary), dikelompokkan per karakter/agent — lintas semua properti.
         </p>
+      </div>
+
+      {/* Performa per gaya — hanya dari video yang metriknya sudah diisi.
+          Sengaja ditaruh di halaman ini, bukan di tab Library workspace: di sinilah
+          video yang benar-benar diposting berada, jadi di sini pula metriknya diisi. */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-4">
+        <div className="text-sm font-semibold text-[#0F172A] mb-2 flex items-center gap-1.5">
+          <BarChart3 size={15} className="text-[#1565C0]" /> Performa per Gaya
+        </div>
+        {analytics.length === 0 ? (
+          <p className="text-xs text-[#94A3B8]">
+            Belum ada video yang metriknya diisi. Isi <strong>views</strong> &amp; <strong>likes</strong> lewat tombol 📊 di kartu video
+            (beberapa hari setelah posting), lalu gaya mana yang paling berhasil akan muncul di sini.
+          </p>
+        ) : (
+          <div className="space-y-1">
+            {analytics.map((a, i) => (
+              <div key={a.gaya} className="flex items-center justify-between gap-3 text-xs">
+                <span className={`font-medium truncate ${i === 0 ? 'text-emerald-600' : 'text-[#64748B]'}`}>
+                  {i === 0 ? '🏆 ' : ''}{labelGaya(a.gaya)}
+                </span>
+                <span className="text-[#94A3B8] flex-shrink-0">
+                  rata-rata {a.avg_views.toLocaleString('id-ID')} views · {a.avg_likes.toLocaleString('id-ID')} likes · {a.jumlah} video
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex gap-5 items-start">
@@ -428,6 +518,7 @@ export default function AdminViralFrameAgentVideosPage() {
               <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${CARD_SIZE_PX[cardSize]}px, ${CARD_SIZE_PX[cardSize]}px))` }}>
               {filteredVideos.map(v => {
                 const e = edits[v.id] ?? { caption: '', hashtags: '' };
+                const m = metricEdits[v.id] ?? { post_url: '', views: '', likes: '' };
                 const editing = editingId === v.id;
                 const ratio = classifyRatio(v.width, v.height);
                 const statusBadgeType = pickStatusBadgeType(v);
@@ -471,6 +562,13 @@ export default function AdminViralFrameAgentVideosPage() {
                           </div>
                         </Link>
                         <div className="flex gap-1 flex-shrink-0">
+                          {view === 'active' && (
+                            <button onClick={() => setMetricOpenId(id2 => (id2 === v.id ? null : v.id))}
+                              className={`p-1.5 rounded-lg hover:bg-[#F0F7FF] ${v.views != null ? 'text-emerald-600' : 'text-[#94A3B8]'}`}
+                              title={v.views != null ? `Sudah diisi: ${v.views.toLocaleString('id-ID')} views` : 'Isi metrik performa (views/likes)'}>
+                              <BarChart3 size={14} />
+                            </button>
+                          )}
                           <a href={toAttachmentUrl(displayUrl)} className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download (versi siap-post)"><Download size={14} /></a>
                           {view === 'active' ? (
                             <button onClick={() => trashOne(v.id)} className="p-1.5 rounded-lg text-[#64748B] hover:bg-gray-100" title="Pindahkan ke Sampah"><Archive size={14} /></button>
@@ -511,6 +609,37 @@ export default function AdminViralFrameAgentVideosPage() {
                             </div>
                           </div>
                           {v.hashtags && <p className="text-[11px] text-[#1565C0] font-medium mt-1 line-clamp-1">{v.hashtags}</p>}
+                        </div>
+                      )}
+
+                      {metricOpenId === v.id && (
+                        <div className="space-y-1.5 pt-2 border-t border-gray-50">
+                          <div className="text-[11px] font-semibold text-[#0F172A] flex items-center gap-1.5">
+                            <BarChart3 size={12} className="text-[#1565C0]" /> Metrik performa
+                            {v.gaya && <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-[#64748B] font-medium">{labelGaya(v.gaya)}</span>}
+                          </div>
+                          <input value={m.post_url} onChange={ev => setMetric(v.id, 'post_url', ev.target.value)} placeholder="Link post (opsional)"
+                            className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-[#1565C0]" />
+                          <div className="flex gap-1.5">
+                            <input value={m.views} onChange={ev => setMetric(v.id, 'views', ev.target.value.replace(/\D/g, ''))}
+                              inputMode="numeric" placeholder="Views"
+                              className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-[#1565C0]" />
+                            <input value={m.likes} onChange={ev => setMetric(v.id, 'likes', ev.target.value.replace(/\D/g, ''))}
+                              inputMode="numeric" placeholder="Likes"
+                              className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-[#1565C0]" />
+                          </div>
+                          {!v.gaya && (
+                            <p className="text-[10px] text-[#94A3B8]">
+                              Video ini belum punya catatan gaya (diupload sebelum fitur ini ada) — tetap tersimpan, tapi masuk kelompok “tanpa gaya” di ringkasan.
+                            </p>
+                          )}
+                          <div className="flex justify-end gap-1.5">
+                            <button onClick={() => setMetricOpenId(null)} className="p-1.5 rounded-lg text-[#94A3B8] hover:bg-gray-50"><X size={14} /></button>
+                            <button onClick={() => saveMetrics(v.id)} disabled={savingMetricId === v.id}
+                              className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 disabled:opacity-50">
+                              {savingMetricId === v.id ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                            </button>
+                          </div>
                         </div>
                       )}
 

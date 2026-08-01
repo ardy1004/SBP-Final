@@ -38,10 +38,25 @@ export async function onRequestPatch(context) {
   const post_url = typeof body.post_url === 'string' ? body.post_url.slice(0, 500) || null : undefined;
   const trash = typeof body.trash === 'boolean' ? body.trash : undefined;
 
+  // Metrik performa, diisi manual dari dashboard sosmed. Dibedakan tegas antara
+  // "tidak dikirim" (undefined → jangan sentuh kolom), "dikosongkan" (null →
+  // kembali ke belum-diisi) dan angka. Analitik memperlakukan NULL ≠ 0.
+  const angkaMetrik = (v) => {
+    if (v === undefined) return undefined;
+    if (v === null || v === '') return null;
+    const n = parseInt(v, 10);
+    return Number.isInteger(n) && n >= 0 ? n : undefined; // nilai ngawur diabaikan, bukan disimpan
+  };
+  const views = angkaMetrik(body.views);
+  const likes = angkaMetrik(body.likes);
+
   const sets = [], binds = [];
   if (caption !== undefined) { sets.push('caption = ?'); binds.push(caption); }
   if (hashtags !== undefined) { sets.push('hashtags = ?'); binds.push(hashtags); }
   if (post_url !== undefined) { sets.push('post_url = ?'); binds.push(post_url); }
+  if (views !== undefined) { sets.push('views = ?'); binds.push(views); }
+  if (likes !== undefined) { sets.push('likes = ?'); binds.push(likes); }
+  if (views !== undefined || likes !== undefined) sets.push("metrics_updated_at = datetime('now')");
   // trash: true -> pindah ke Sampah (soft-delete, dihapus permanen otomatis 30 hari
   // kemudian oleh worker cron); false -> pulihkan ke Aktif.
   if (trash === true) { sets.push("trashed_at = datetime('now')"); }

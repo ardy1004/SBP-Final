@@ -1537,8 +1537,11 @@ interface CloudinaryUploadResult {
   width?: number; height?: number;
   error?: { message: string };
 }
-function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platform, registerInstruction }: {
+function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platform, registerInstruction, gaya }: {
   propertyId: number; kodeListing: string; defaultCharacterId: number | null; platform: string; registerInstruction: string;
+  // Arketipe yang sedang dipilih di Parameter Video. Ikut tersimpan bersama video
+  // supaya Analitik bisa membandingkan performa antar gaya tanpa admin mengetik apa pun.
+  gaya: string;
 }) {
   const [characters, setCharacters] = useState<CharacterOption[]>([]);
   const [characterId, setCharacterId] = useState<number | ''>('');
@@ -1824,6 +1827,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
           resource_type: cloudinaryResult.resource_type ?? 'video', duration_sec: cloudinaryResult.duration ?? null,
           bytes: cloudinaryResult.bytes ?? null, format: cloudinaryResult.format ?? null,
           width: cloudinaryResult.width ?? null, height: cloudinaryResult.height ?? null,
+          gaya: gaya || null,
         }),
       });
       const saveJson = await bacaJson(saveRes);
@@ -4250,6 +4254,7 @@ export default function AdminViralFrameWorkspacePage() {
               defaultCharacterId={s3.character?.id ?? null}
               platform={platformForAI}
               registerInstruction={REGISTER_INSTRUCTION[s1.register] ?? ''}
+              gaya={s1.archetype}
             />
           )}
 
