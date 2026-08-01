@@ -13,10 +13,19 @@ export async function onRequestGet(context) {
   const pid = parseInt(url.searchParams.get('property_id') ?? '', 10);
 
   try {
+    // ⚠️ LIMIT WAJIB ADA di kedua cabang. Cabang per-properti dulu TANPA LIMIT,
+    // padahal ia menarik params_json + master_prompt + result_json UTUH dan
+    // dipanggil workspace setiap halaman dibuka. Rata-rata ~15 KB per baris, jadi
+    // properti yang sering di-generate akan mengunduh payload yang membengkak terus.
+    // Sejak 2026-08-02 Jalur C ikut menulis riwayat tiap generate, sehingga
+    // pertumbuhannya jauh lebih cepat dari sebelumnya — batas ini dipasang sebelum
+    // jadi masalah, bukan sesudah.
+    // 50 cukup untuk SEMUA konsumen riwayat: panel Riwayat, badge rotasi arketipe
+    // (5 terakhir), dan rotasi musik LRU (kolam 8).
     const stmt = Number.isInteger(pid) && pid > 0
       ? env.DB.prepare(`SELECT id, property_id, params_json, master_prompt, result_json, created_at
                         FROM viralframe_generations WHERE property_id = ?
-                        ORDER BY created_at DESC, id DESC`).bind(pid)
+                        ORDER BY created_at DESC, id DESC LIMIT 50`).bind(pid)
       : env.DB.prepare(`SELECT id, property_id, params_json, master_prompt, result_json, created_at
                         FROM viralframe_generations ORDER BY created_at DESC, id DESC LIMIT 100`);
     const res = await stmt.all();

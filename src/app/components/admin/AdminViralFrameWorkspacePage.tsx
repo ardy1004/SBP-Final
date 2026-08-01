@@ -2753,7 +2753,22 @@ export default function AdminViralFrameWorkspacePage() {
     // tidak ikut preset: preset hanya parameter visual, Part dirancang per sesi.
     const { sceneCount: _sc, parts: _pt, manualDurations: _md, durationMode: _dmode, uniformDuration: _ud, ...visualParams } =
       p.params as Partial<Step1State> & Record<string, unknown>;
-    setS1(prev => ({ ...prev, ...(visualParams as Partial<Step1State>) }));
+    setS1(prev => {
+      const next = { ...prev, ...(visualParams as Partial<Step1State>) };
+      // Preset IKUT menyimpan `aiTool` (lihat savePreset), sehingga memuat preset
+      // bisa mengganti tool tanpa lewat gantiAiTool() — dan Part yang sudah ada
+      // tertinggal melebihi batas tool baru (mis. preset Veo3 maks 8s sementara
+      // Part masih 10s), lalu ditolak backend 422. Clamp yang sama diterapkan di
+      // sini. Jangan menghapus ini tanpa juga menghapus aiTool dari savePreset.
+      const maks = getClipMaxSec(next.aiTool) ?? 10;
+      return {
+        ...next,
+        parts: next.parts.map(pt => {
+          const dur = Math.min(pt.durationSec, maks);
+          return { ...pt, durationSec: dur, voDurationSec: Math.min(pt.voDurationSec, dur) };
+        }),
+      };
+    });
   };
 
   // ─── Jalur C: derivasi props AIGenerateTab dari state Step 1–3 ───────────────
@@ -2934,7 +2949,15 @@ export default function AdminViralFrameWorkspacePage() {
         }),
       });
       const data = await readNdjsonFinal<{ parts: PartDef[]; provider_used: string; used_vision: boolean }>(r);
-      setS1(prev => ({ ...prev, parts: data.parts }));
+      // Penjaga runtime — readNdjsonFinal<T>() hanya meng-CAST, tidak memvalidasi.
+      // Tanpa ini, backend yang mengganti nama field membuat `s1.parts` jadi
+      // undefined lalu render meledak di `s1.parts.map` → LAYAR PUTIH. Persis pola
+      // insiden `parts`/`scenes` di ai-generate (2026-08-01); call site ini satu-
+      // satunya yang saat itu belum ikut dijaga.
+      if (!Array.isArray(data?.parts)) {
+        throw new Error('Respons AI tidak sesuai kontrak: field "parts" tidak ditemukan. Ini bug integrasi frontend↔backend, bukan kesalahan input — laporkan ke pengembang.');
+      }
+      setS1(prev => ({ ...prev, parts: normalisasiParts(data.parts, prev.aiTool) }));
       setSuggestUsedVision(data.used_vision);
       setSuggestProviderUsed(data.provider_used);
     } catch (e: unknown) {
