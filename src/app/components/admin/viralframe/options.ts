@@ -599,10 +599,16 @@ export const RULEBOOK_VERSION: string = SHARED_RULEBOOK_VERSION;
 /** Nama berkas foto karakter di ZIP Jalur C — sinkron dengan ai-generate.js. */
 export const namaFileKarakter: (nama: string) => string = sharedNamaFileKarakter;
 
-// ─── Penamaan file aset (dipakai Master Prompt + ZIP export Fase V4b) ─────────
-// PENTING (requirement Fase V4b): ZIP generation WAJIB memakai sceneFileName() &
-// characterFileName() yang SAMA PERSIS dengan compiler agar nama file di prompt
-// selaras dengan file yang ada di ZIP. Jangan duplikasi logika penamaan di tempat lain.
+// ─── Penamaan file aset (dipakai Master Prompt + ZIP export) ─────────────────
+// PENTING: ZIP generation WAJIB memakai buildZipNames() (foto properti) &
+// characterFileName() (foto karakter) yang SAMA PERSIS dengan compiler, agar nama
+// file yang DISEBUT di PROMPT.txt identik dengan file yang ADA di folder LAMPIRKAN/.
+// Salah nama = user melampirkan ruangan yang keliru ke Google Flow.
+// Jangan duplikasi logika penamaan di tempat lain.
+// ⚠️ JANGAN hidupkan lagi penamaan bergaya `scene01_fasad.webp`. Format itu dibuang
+// pada refactor 2026-08-01 justru atas keluhan user: saat melampirkan foto referensi
+// secara manual di Google Flow, nomor scene tidak memberi tahu ruangan apa isinya.
+// Penamaan kanonik sekarang deskriptif: `fasad.webp`, `kamar_mandi1.webp`.
 // ⚠️ Pemisah GARIS BAWAH (bukan strip) — keputusan refactor 2026-08-01 (rencana
 // "Part-as-Generate-Unit"). Nama file ZIP dilampirkan manual oleh user ke Google
 // Flow; garis bawah terbaca lebih jelas sebagai satu nama utuh (`kamar_tidur.webp`)
@@ -616,11 +622,6 @@ export function slugifyLabel(label: string): string {
     .replace(/_+/g, '_')            // rapikan '_' beruntun
     .replace(/^_+|_+$/g, '')        // trim '_' di tepi
     || 'untitled';
-}
-
-// scene01_fasad.webp, scene02_kamar_tidur.webp
-export function sceneFileName(sceneIndex: number, label: string): string {
-  return `scene${String(sceneIndex + 1).padStart(2, '0')}_${slugifyLabel(label)}.webp`;
 }
 
 // character_vina.webp

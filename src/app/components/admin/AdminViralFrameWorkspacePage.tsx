@@ -3169,6 +3169,17 @@ export default function AdminViralFrameWorkspacePage() {
   // README.txt. Nama file di LAMPIRKAN/ WAJIB identik dengan yang disebut di
   // PROMPT.txt — keduanya dibangun dari `zipImages` + `buildZipNames()` yang SAMA,
   // itulah yang menjamin invariannya (lihat validasi di laporan akhir agent).
+  //
+  // ⚠️ ADA DUA PEMBANGUN ZIP DI FILE INI, dan keduanya WAJIB sepakat soal penamaan:
+  //   1. `handleDownloadZip()`      — jalur HASIL AI (`generatedResult`). Nama foto
+  //      diambil dari `part.cuts[].photo`, yang di-backend (`ai-generate.js`)
+  //      dibangun ulang dari `assignment.cuts[].foto_file` — juga asal buildZipNames().
+  //   2. `handleDownloadZipPerPart()` (di bawah) — jalur MASTER PROMPT. Memanggil
+  //      buildZipNames() langsung.
+  // Keduanya bermuara ke buildZipNames() sehingga saat ini konsisten. Sengaja TIDAK
+  // digabung: merger di file sebesar ini lebih berisiko daripada duplikasinya. Kalau
+  // salah satu diubah, ubah yang lain juga — kalau tidak, user melampirkan foto yang
+  // keliru ke Google Flow dan tidak ada gate build yang akan menangkapnya.
   const [zipPerPartBusy, setZipPerPartBusy] = useState(false);
   const [zipPerPartError, setZipPerPartError] = useState('');
   const handleDownloadZipPerPart = async () => {
