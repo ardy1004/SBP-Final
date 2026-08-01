@@ -247,12 +247,32 @@ for (const { backend, frontend, fields, tipeFrontend, note } of NDJSON_CONTRACT)
         problems.push(`${fileArc}: arketipe "${idM[1]}" punya allowMultiShotPerScene:true tapi TIDAK punya leadInCamera — bagian presenter (BAGIAN 1) akan kehilangan arahan kamera konkret dan model akan mengabaikannya (insiden "tongsis hilang" 2026-08-02).`);
       }
     }
-    // (2) Arketipe selfie WAJIB menyebut frasa yang benar-benar mengikat model.
-    if (/id:\s*'selfie_luxury_hybrid'/.test(srcArc)) {
-      const blok = srcArc.slice(srcArc.indexOf("id: 'selfie_luxury_hybrid'"), srcArc.indexOf("id: 'selfie_luxury_hybrid'") + 3000);
-      if (!/selfie-stick/i.test(blok)) {
-        problems.push(`${fileArc}: selfie_luxury_hybrid tidak menyebut "selfie-stick" di leadInCamera — inilah frasa konkret yang membuat model merender gaya vlogger bertongsis.`);
+    // (2) Framing selfie WAJIB dirumuskan sebagai POSISI KAMERA, bukan aksi subjek.
+    //     Insiden 2026-08-02 (lanjutan): setelah beat selfie berhasil masuk prompt,
+    //     hasilnya justru talent MENENTENG perangkat — model menerjemahkan
+    //     "holding a camera at arm's length" secara harfiah, dan karena foto
+    //     referensi talent memang memegang GoPro+tongsis, muncul DUA alat di dua
+    //     tangan. Cek ini menjaga rumusannya tetap "posisi kamera + tangan kosong".
+    //
+    //     CATATAN: versi pertama cek ini mencari string "selfie-stick" di sekitar
+    //     blok arketipe dan HIJAU PALSU — yang cocok ternyata komentar kode, bukan
+    //     nilai leadInCamera. Sekarang yang diperiksa NILAI leadInCamera-nya saja.
+    const leadIns = [...srcArc.matchAll(/leadInCamera:\s*'((?:[^'\\]|\\.)*)'/g)].map(m => m[1]);
+    for (const li of leadIns) {
+      if (/holding (a |the )?(camera|phone|smartphone|gimbal|selfie stick|tripod)/i.test(li)) {
+        problems.push(`${fileArc}: leadInCamera memuat frasa "holding a camera/..." — framing selfie WAJIB ditulis sebagai POSISI KAMERA ("camera positioned at arm's length ... selfie perspective"), BUKAN aksi subjek. Frasa itu membuat model merender talent yang menenteng perangkat.`);
       }
+    }
+    const liSelfie = leadIns.find(l => /selfie perspective/i.test(l));
+    if (leadIns.length > 0 && !liSelfie) {
+      problems.push(`${fileArc}: tidak ada leadInCamera yang memakai frasa "selfie perspective" — rumusan posisi-kamera inilah pengganti "holding a camera" yang aman.`);
+    }
+    if (liSelfie && !/hands are empty|hands empty/i.test(liSelfie)) {
+      problems.push(`${fileArc}: leadInCamera selfie tidak menegaskan tangan presenter KOSONG — tanpa itu model cenderung menambahkan kamera/tongsis di tangan talent.`);
+    }
+    // (2b) Vokabuler gerakan kamera tidak boleh mengembalikan frasa alat-di-tangan.
+    if (/selfie_hold:\s*'[^']*selfie-stick shot/i.test(srcArc)) {
+      problems.push(`${fileArc}: MOVE_PHRASE.selfie_hold kembali memakai "selfie-stick shot" — rumuskan sebagai posisi kamera ("camera held at arm's length ... selfie perspective"), bukan alat yang dipegang subjek.`);
     }
   }
 

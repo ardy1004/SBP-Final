@@ -43,8 +43,11 @@ const MOVE_PHRASE: Record<CameraMove, string> = {
   static_locked:   'locked static frame',
   tilt_up:         'tilt-up revealing full height',
   lateral_track:   'lateral tracking shot',
-  selfie_hold:     'handheld selfie-stick shot, arm-extended, subject facing the lens with natural micro-shake',
-  selfie_walk:     'handheld selfie walk-and-talk, arm-extended, subject leads the camera through the space',
+  // ⚠️ Dirumuskan sebagai POSISI KAMERA, bukan alat yang dipegang subjek. Versi lama
+  // ("handheld selfie-stick shot") membuat model merender orang yang menenteng
+  // tongsis/gimbal — lihat catatan panjang di leadInCamera selfie_luxury_hybrid.
+  selfie_hold:     'camera held at arm\'s length facing back at the subject (selfie perspective), subject looks into the lens, natural micro-shake, subject\'s hands empty',
+  selfie_walk:     'camera at arm\'s length facing back at the subject (selfie perspective) while they walk through the space, natural micro-shake, subject\'s hands empty',
 };
 
 const SPEED_PHRASE: Record<CameraSpeed, string> = {
@@ -349,7 +352,7 @@ export const ARCHETYPES: VideoArchetype[] = [
       { move: 'whip_pan',    speed: 'fast',   ease: 'ease-in', motivation: 'flip the camera to reveal a highlight' },
     ],
     pacing: 'punchy',
-    shotGrammarNote: 'Gaya selfie vlog REALISTIS: kamera dipegang tangan sendiri via tongsis/gimbal (arm-extended selfie framing), presenter mengisi ~40% frame menghadap lensa LANGSUNG sambil berjalan menjelajah properti; ruangan/properti bergerak natural di belakangnya. Ada sedikit goyangan tangan yang wajar agar terasa autentik/UGC — BUKAN sinematik super-mulus. DILARANG menggambarkan tongsis/tangan pemegang di dalam frame — cukup perspektifnya saja. Energi tinggi, hangat, seperti teman yang sedang me-review rumah.',
+    shotGrammarNote: 'Gaya selfie vlog REALISTIS: POSISI KAMERA berada sejauh lengan di depan presenter dan sedikit menunduk ke wajahnya (perspektif selfie), presenter mengisi ~40% frame menghadap lensa LANGSUNG sambil berjalan menjelajah properti; ruangan/properti bergerak natural di belakangnya. Ada sedikit goyangan tangan yang wajar agar terasa autentik/UGC — BUKAN sinematik super-mulus. ⚠️ TANGAN PRESENTER KOSONG dan bergerak natural saat bicara: ia TIDAK memegang/mengoperasikan kamera, HP, gimbal, tripod, atau tongsis, dan perangkat semacam itu TIDAK BOLEH terlihat di frame. Tulis sebagai POSISI KAMERA ("camera at arm\'s length, selfie perspective"), JANGAN sebagai aksi subjek ("holding a camera") — frasa terakhir membuat model menggambarkan orang yang menenteng perangkat. Energi tinggi, hangat, seperti teman yang sedang me-review rumah.',
   },
   {
     id: 'pov_walkthrough',
@@ -445,10 +448,18 @@ export const ARCHETYPES: VideoArchetype[] = [
     // KONKRET per-Part yang membuat model benar-benar merender gaya vlogger
     // bertongsis. Tetap patuh larangan lama di shotGrammarNote: perspektifnya saja,
     // tongsis/tangan pemegang JANGAN digambarkan di dalam frame.
-    leadInCamera: 'SELFIE/TONGSIS: arm-extended selfie-stick framing, presenter holds the camera at arm\'s length and looks straight into the lens while talking, presenter fills roughly 40% of the frame, the area from the reference image visible behind them, natural handheld micro-jitter (do NOT show the selfie stick or the holding arm in frame — only the perspective it creates)',
+    // ⚠️ DITULIS SEBAGAI POSISI KAMERA, BUKAN AKSI SUBJEK (koreksi 2026-08-02).
+    // Versi sebelumnya berbunyi "presenter holds the camera at arm's length" —
+    // itu menyuruh model MENGGAMBARKAN orang yang sedang memegang kamera, dan
+    // hasilnya persis begitu: talent tampak menenteng perangkat (diperparah karena
+    // foto referensi talent memang memegang GoPro+tongsis, sehingga dua alat muncul
+    // di dua tangan). Larangan yang dulu ditaruh dalam kurung ikut hilang saat AI
+    // memparafrase. Framing selfie adalah properti POSISI KAMERA; tangan talent
+    // harus BEBAS. Jangan tulis ulang jadi kalimat beraksi "memegang kamera".
+    leadInCamera: 'SELFIE PERSPECTIVE: the camera itself is positioned at arm\'s length in front of the presenter and angled slightly downward toward her face, as if she were filming herself; she looks straight into the lens while talking and fills roughly 40% of the frame, with the area from the reference image visible behind her; natural handheld micro-jitter. Her hands are EMPTY and gesture naturally as she speaks — she is NOT holding or operating any camera, phone, gimbal, tripod or stick, and no such equipment is visible anywhere in frame',
     pacing: 'relaxed',
     allowMultiShotPerScene: true,
-    shotGrammarNote: 'SETIAP scene WAJIB dibagi 2 bagian VISUAL berurutan dengan durasi kurang-lebih sama: BAGIAN 1 = SELFIE/TONGSIS — agen memegang tongsis/gimbal (arm-extended selfie framing), menghadap lensa langsung sambil bicara dengan energi vlog yang hangat dan personal, latar belakang sesuai area foto referensi scene ini (bagian ini SELALU tampil lebih dulu, tidak pernah dibalik). BAGIAN 2 = B-ROLL CUTAWAY MEWAH — potongan VISUAL (hard cut, BUKAN gerakan kamera menerus dari bagian 1) ke rekaman PENUH area yang sama TANPA agen tampil DI FRAME, dengan gerakan kamera LAMBAT, ELEGAN, dan MEGAH (crane/orbit/slow push — BUKAN whip-pan atau gerakan cepat ala vlog) sesuai KOREOGRAFI KAMERA PER SCENE di bawah — kesan yang diinginkan adalah properti terlihat mewah/eksklusif/mahal, seperti cuplikan iklan properti high-end, kontras dengan energi santai di Bagian 1. PENTING — AUDIO TIDAK IKUT TERPOTONG: narasi/suara agen (script_narration/dialog_karakter) mengalir TERUS-MENERUS tanpa jeda melintasi kedua bagian visual tersebut (agen tetap TERDENGAR bicara selama cutaway berlangsung) — HANYA gambarnya yang cut ke b-roll, suaranya TIDAK berhenti. Word count narasi TETAP mengikuti budget durasi PENUH scene ini. Pola selfie→cutaway-mewah INI WAJIB berulang di SETIAP scene tanpa kecuali. Tuliskan pembagian dua bagian VISUAL ini secara eksplisit di dalam teks prompt video tiap scene (mis. "first half: selfie-stick handheld shot ...; hard cut to; second half: slow elegant crane/orbit b-roll ..."), sementara narasi/dialog tetap satu kesatuan utuh untuk keseluruhan durasi scene.',
+    shotGrammarNote: 'SETIAP scene WAJIB dibagi 2 bagian VISUAL berurutan dengan durasi kurang-lebih sama: BAGIAN 1 = PERSPEKTIF SELFIE — POSISI KAMERA sejauh lengan di depan agen dan sedikit menunduk ke wajahnya (seolah ia merekam dirinya sendiri), agen menghadap lensa langsung sambil bicara dengan energi vlog yang hangat dan personal, latar belakang sesuai area foto referensi scene ini (bagian ini SELALU tampil lebih dulu, tidak pernah dibalik). ⚠️ TANGAN AGEN KOSONG dan bergerak natural — ia TIDAK memegang kamera/HP/gimbal/tripod/tongsis dan perangkat semacam itu TIDAK BOLEH terlihat di frame. Tulis sebagai posisi kamera, JANGAN sebagai aksi "holding a camera". BAGIAN 2 = B-ROLL CUTAWAY MEWAH — potongan VISUAL (hard cut, BUKAN gerakan kamera menerus dari bagian 1) ke rekaman PENUH area yang sama TANPA agen tampil DI FRAME, dengan gerakan kamera LAMBAT, ELEGAN, dan MEGAH (crane/orbit/slow push — BUKAN whip-pan atau gerakan cepat ala vlog) sesuai KOREOGRAFI KAMERA PER SCENE di bawah — kesan yang diinginkan adalah properti terlihat mewah/eksklusif/mahal, seperti cuplikan iklan properti high-end, kontras dengan energi santai di Bagian 1. PENTING — AUDIO TIDAK IKUT TERPOTONG: narasi/suara agen (script_narration/dialog_karakter) mengalir TERUS-MENERUS tanpa jeda melintasi kedua bagian visual tersebut (agen tetap TERDENGAR bicara selama cutaway berlangsung) — HANYA gambarnya yang cut ke b-roll, suaranya TIDAK berhenti. Word count narasi TETAP mengikuti budget durasi PENUH scene ini. Pola selfie→cutaway-mewah INI WAJIB berulang di SETIAP scene tanpa kecuali. Tuliskan pembagian dua bagian VISUAL ini secara eksplisit di dalam teks prompt video tiap scene (mis. "first half: camera at arm\'s length in selfie perspective, presenter faces the lens, her hands empty and gesturing ...; hard cut to; second half: slow elegant crane/orbit b-roll ..."), sementara narasi/dialog tetap satu kesatuan utuh untuk keseluruhan durasi scene.',
   },
   {
     id: 'kinetic_typography',

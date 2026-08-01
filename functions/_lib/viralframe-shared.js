@@ -176,9 +176,20 @@ const REALISM_NEGATIVE_TERMS = [
 //      di atas) justru menghasilkan video berteks acak yang tidak bisa dihapus.
 //   2. artefak umum yang merusak kesan profesional.
 //   3. REALISM_NEGATIVE_TERMS — menekan hasil yang terlihat CGI/plastic/render.
+// Perangkat rekam di tangan/frame (2026-08-02). Gaya selfie vlog menyebut
+// "arm's length / selfie perspective", dan model gemar menerjemahkannya jadi orang
+// yang MENENTENG kamera. Diperparah bila foto referensi talent kebetulan memegang
+// GoPro/tongsis — hasilnya talent tampak membawa dua alat sekaligus di dua tangan
+// (dilaporkan user). Framing selfie itu POSISI KAMERA, alatnya tidak boleh terlihat.
+const EQUIPMENT_NEGATIVE_TERMS = [
+  'selfie stick', 'gimbal', 'tripod', 'camera in hand', 'phone in hand',
+  'holding a camera', 'holding a smartphone', 'visible camera rig', 'action camera in frame',
+];
+
 export const NEGATIVE_PROMPT_VIDEO = [
   'subtitles, captions, burned-in text, on-screen text, watermark, logo, distorted hands, extra fingers, morphing, warping, deformed face, flickering, blurry, low quality, extra people',
   ...REALISM_NEGATIVE_TERMS,
+  ...EQUIPMENT_NEGATIVE_TERMS,
 ].join(', ');
 
 /**

@@ -213,6 +213,12 @@ Setiap scene akan dieksekusi dengan DUA gambar terlampir: foto ruangan/area scen
     ⚠️ TULIS 'hair or head covering' (ATAU sebut penutup kepala yang benar-benar terlihat, mis. 'hijab'), JANGAN 'hair' saja. Banyak talent memakai hijab/peci/topi; menyuruh model menyamakan "rambut" yang tidak terlihat di foto referensi adalah instruksi yang BERTENTANGAN dengan gambar, dan mendorong model mengarang rambut terurai → wajah/kepala morphing.
   • DILARANG mengarang kata sifat skala/arsitektur yang tidak terverifikasi dari foto: massive, huge, grand, towering, spacious, multi-story, modern facade, dsb. Cukup sebut jenis area sesuai label + rujuk ke reference image.
   • Aksi/gerak karakter dan kamera = satu-satunya hal yang kamu tambahkan di atas foto referensi.
+  • ⚠️ PERANGKAT REKAM — DILARANG KERAS. Framing selfie/vlog adalah POSISI KAMERA, BUKAN aksi subjek.
+    JANGAN PERNAH menulis karakter sedang memegang/mengoperasikan kamera, HP, GoPro, gimbal, tripod, atau tongsis.
+    ✗ SALAH: 'holding a camera at arm's length', 'holding a selfie stick', 'she films herself with a gimbal'
+    ✓ BENAR: 'the camera is positioned at arm's length in front of her, angled slightly down (selfie perspective), her hands are empty and gesture naturally as she speaks'
+    Alasan: frasa "holding a camera" membuat model merender orang yang menenteng alat — dan bila foto
+    referensi talent kebetulan sudah memegang perangkat, hasilnya talent membawa DUA alat di dua tangan.
 ✗ SALAH: 'Lisa stands in front of a massive 16-room boarding house facade'
 ✓ BENAR: 'Lisa — the exact same person as the attached character reference image (identical face, hair or head covering, and outfit) — already standing in the exact front area shown in the attached scene reference image, greeting the viewer selfie-style'
 
@@ -429,6 +435,22 @@ ${supportsRefImage
 [4] BAHASA & TEMPO DIALOG KARAKTER — WAJIB
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Field 'dialog_karakter' WAJIB dalam ${bahasa}.${registerLine}
+
+⚠️ ATURAN KEAMANAN KEBIJAKAN — DIALOG YANG DIUCAPKAN (berlaku SEMUA scene, terutama CTA):
+Video ini menampilkan orang fotorealistis yang bicara langsung ke kamera. Kombinasi
+"orang nyata + menyebut nominal harga + ajakan menghubungi + tekanan waktu" berulang kali
+DITOLAK filter kebijakan generator video (dilaporkan nyata pada Part CTA, 2026-08-02).
+Karena itu, di dalam 'dialog_karakter' dan dialog yang tertanam di 'prompt':
+  ✗ JANGAN menyebut NOMINAL HARGA ("6,2 miliar", "Rp500 juta", "harganya sekian").
+  ✗ JANGAN memakai ajakan transaksional langsung ("hubungi kami/saya sekarang",
+    "DM saya", "beli sekarang", "amankan unit ini").
+  ✗ JANGAN memakai tekanan kelangkaan/urgensi ("sebelum keduluan orang lain",
+    "jangan sampai terlewat", "tinggal 1 unit", "buruan").
+  ✓ BOLEH: ajakan lunak & informatif yang sesuai tipe CTA — mis. "yuk jadwalkan waktu
+    buat lihat langsung", "aku tunggu kamu mampir ke sini", "cek detailnya ya".
+Harga, kontak, dan urgensi TETAP boleh ditampilkan — tapi lewat 'on_screen_text'
+dan caption, BUKAN diucapkan. Ini juga lebih baik secara praktik: harga berubah,
+dan video dengan harga terucap jadi tidak bisa dipakai lagi.
 Bagian dialog (setelah klausa delivery di bawah) WAJIB MAKSIMAL sebanyak "Maks kata" yang tertera pada instruksi scene tersebut di user prompt — ini BATAS KETAT, bukan saran, dan BERBEDA-BEDA per scene mengikuti durasinya. Klip video pendek; dialog kepanjangan akan terlihat dipercepat/tidak sinkron dengan gerak bibir.
 ${durasiSeragam
     ? `Semua scene di permintaan ini berdurasi sama, jadi batasnya ${maxWords} kata untuk setiap scene.`
