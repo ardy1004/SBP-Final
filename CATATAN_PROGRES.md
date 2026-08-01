@@ -5,6 +5,38 @@
 
 ---
 
+## SESI 1–2 AGUSTUS 2026 — Workers Paid + ViralFrame: kepatuhan parameter & anti-pengulangan (LIVE)
+
+21 commit, semuanya live production. Dua tema besar: **menghapus batas CPU yang selama ini menyandera arsitektur**, dan **memperbaiki fitur ViralFrame yang ternyata tidak pernah bekerja sesuai klaimnya**.
+
+### 1. Upgrade Workers Paid — akar tiga masalah terpisah
+Pemicunya login gagal 503. Diukur: `bcryptjs` cost 12 = **233 ms CPU = 23× batas 10 ms** paket FREE. Alternatifnya juga tidak muat — cost 10 = 58 ms, PBKDF2 native 210k = 71 ms, 100k = 35 ms. Kesimpulan: **tidak ada algoritma hashing password yang aman muat di 10 ms**; hashing password memang dirancang lambat. Menurunkan cost factor = melemahkan keamanan sistem yang menyimpan NIK.
+
+Upgrade $5/bln, **nol perubahan kode**. Sekali jalan menutup tiga masalah yang selama dua sesi digarap terpisah: Error 1102 di halaman publik, 503 di login, dan sesak anggaran bundle.
+
+Verifikasi: smoke default **0/320**, `--cached` **0/320**, dan login (jalur bcrypt 233 ms) tuntas 401 dalam ~0,8 s — bukti POSITIF, bukan sekadar "tidak terlihat gagal".
+
+**Migrasi ke Vercel/Next.js DITOLAK dengan angka**: 124 file/13.754 baris di `functions/`, 269 titik `.prepare()`, 29 tabel, ~29 titik `datetime()` SQLite yang pecah di Postgres. Vercel Hobby melarang penggunaan komersial → butuh Pro $20/bln = **4× lebih mahal** setelah 2–4 minggu kerja. Kalau suatu saat benar-benar perlu, jalur murahnya sudah dipetakan: **jangan ke Next.js** — hanya 6 file `src/app/` menyentuh binding Cloudflare, 220 handler sudah Web-standard `Request`/`Response` (port ke Hono nyaris mekanis), pakai **Turso** (SQLite, SQL tak berubah) bukan Neon, R2 tetap lewat API S3.
+
+### 2. ViralFrame — 3 bug yang membuat fitur diam-diam tidak berfungsi
+- **Kontrak `parts` vs `scenes` putus** (`11b883e`). Refactor mengganti field hasil `ai-generate.js` jadi `parts`, frontend tetap membaca `scenes` → `undefined.length` saat render → **layar putih**. Regenerate satu Part juga mati diam-diam. Ditemukan lewat **sourcemap**, setelah dua ronde tebakan gagal.
+- **Anti-pengulangan hook/CTA TIDAK PERNAH BERJALAN** (`c2b4ff9`). Backend membaca `p.hookType`, penulis menyimpan `p.s1.hookType` — diverifikasi ke D1: **0 dari 8** baris vs **8 dari 8**. Ditambah gate `isAutoValue` yang mematikannya begitu user memilih manual. Dua bug saling menutupi.
+- **Arketipe "Vlog Tongsis" tidak dipatuhi** (`0bfd585`). `cameraGrammar` hybrid sengaja hanya berisi beat b-roll, jadi bagian selfie cuma hidup di prosa global — dan model mengikuti arahan per-Part yang konkret. Diperparah: cap `camera.slice(0,400)` sudah **memotong 17 dari 18 kombinasi** di tengah kata, memangkas justru instruksi kesetiaan-ke-foto.
+
+### 3. Perbaikan lain yang menyertai
+Alur sutradara AI dipindah ke **paling bawah** Parameter Video + dikirimi brief lengkap (dulu hanya `archetype`/`register`/`ai_tool`, sehingga tipe hook/CTA/platform/tone **tidak pernah sampai** → hasil generik) · Part terakhir kini selalu berfungsi sebagai penutup meski role-nya bukan CTA · titik potong BAGIAN 1/2 mengikuti cut pertama, bukan setengah durasi · rotasi musik LRU (kolam 4→8 + opsi `auto`) · badge rotasi arketipe · Jalur C mulai **menyimpan** riwayat (dulu hanya membaca) · migrasi 0033 index `(property_id, created_at DESC)` · default Rancang Part 3×10s/VO8s (default lama `Body 20s` **melanggar batas 10s** yang dipaksakan UI-nya sendiri) · clamp durasi saat ganti AI tool & muat preset · celah lead Meta Ads ditutup (AboutPage).
+
+### 4. Pelajaran yang mahal
+- **`readNdjsonFinal<T>()` itu CAST, bukan validasi.** Ketidakcocokan nama field lolos typecheck dan muncul sebagai layar putih. Sekarang dijaga penjaga runtime + BAGIAN 3 `check-viralframe-rulebook.mjs`.
+- **Gate otomatis tidak menangkap satu pun bug perilaku di sesi ini.** Semuanya ketahuan dari pengukuran manual, sourcemap, atau laporan user.
+- **Gate pun bisa hijau palsu.** Gate arketipe versi pertama lolos karena mencocokkan **komentar kode sendiri**, bukan nilai yang dimaksud. Sejak itu tiap gate baru diuji negatif: kembalikan bug-nya, pastikan GAGAL, pulihkan, pastikan LULUS.
+- **Beberapa perbaikan saya sendiri tidak lengkap** — clamp durasi cuma menutup jalur dropdown (preset lolos), normalisasi draft ditagih sebagai penyelesai layar putih padahal bukan penyebabnya, dan saran "variasikan pencahayaan antar video" ternyata KELIRU (melanggar kesetiaan foto referensi). Diperbaiki setelah audit ulang.
+
+### Sisa yang belum dikerjakan
+Thumbnail (sudah didiskusikan: ikut panggilan `suggest-storyboard`, bukan endpoint baru) · prompt Part terakhir kadang ditolak Google Flow (tidak deterministik — regenerate sering berhasil) · foto referensi talent masih memegang GoPro+tongsis (faktor dominan "menenteng perangkat", di luar jangkauan kode) · Portfolio & Media masih placeholder · 8 temuan audit Low · Titip Jual reorder · dua pembangun ZIP masih terduplikasi · `[C]` di **99,6%** (sisa ~23 KB).
+
+---
+
 ## SESI 29 JULI 2026 — ViralFrame: Auto-Scheduling Sosmed via Buffer + Zernio (baru, LIVE)
 
 Fitur baru: tombol "Jadwalkan ke Sosmed" di Content Library (video R2) DAN Konten Agent (video Cloudinary) — 1 klik fan-out video ke 5 akun sekaligus (Buffer: YT Shorts/TikTok/Threads; Zernio: FB Pages/Instagram), otomatis pakai slot primetime berikutnya yang masih kosong hari ini. Migrasi 0028-0031, commit berurutan `master` (terakhir `d5a3996`), semua live production dan **diverifikasi dengan post nyata ke ke-5 platform** (bukan cuma review kode).
