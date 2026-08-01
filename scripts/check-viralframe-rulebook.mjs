@@ -150,6 +150,68 @@ for (const { field, note, files } of SCENE_FIELD_PARITY) {
   }
 }
 
+// ─── BAGIAN 3: PARITAS KONTRAK NDJSON frontend ↔ backend ─────────────────────
+// LATAR BELAKANG (insiden 2026-08-01, layar putih di /admin/viralframe/<id>):
+// refactor Part-as-Generate-Unit mengganti field hasil ai-generate.js dari
+// `scenes` menjadi `parts`, tapi frontend masih membaca `generatedResult.scenes`.
+// TIDAK ADA gate yang menangkapnya:
+//   - typecheck LULUS, karena readNdjsonFinal<T>() adalah CAST tanpa validasi —
+//     TypeScript mempercayai bentuk JSON yang tidak pernah diperiksa;
+//   - check:bundle & smoke LULUS, karena halamannya tetap 200;
+//   - harness offline LULUS, karena ini ketidakcocokan ANTAR DUA FILE.
+// Akibatnya: user menekan "Generate", backend sukses, lalu `data.parts` dibaca
+// sebagai `data.scenes` → undefined → `undefined.length` saat render → seluruh
+// halaman diganti error boundary. Regenerate satu Part juga ikut mati diam-diam.
+//
+// Cek di bawah bersifat tekstual (bukan parser), tapi cukup: ia memastikan nama
+// field yang DIKIRIM backend benar-benar muncul di tipe/pembacaan frontend.
+// KALAU MENGGANTI NAMA FIELD DI SALAH SATU SISI, ganti juga di sisi lain — dan
+// perbarui entri di sini.
+const NDJSON_CONTRACT = [
+  {
+    backend: 'functions/api/admin/viralframe/ai-generate.js',
+    frontend: 'src/app/components/admin/AdminViralFrameWorkspacePage.tsx',
+    // Nama field di dalam `send({ done:true, data:{ ... } })`.
+    fields: ['parts', 'foto_urls', 'karakter', 'metadata'],
+    tipeFrontend: 'AIGeneratedResult',
+    note: 'hasil AI Generate (Jalur C)',
+  },
+  {
+    backend: 'functions/api/admin/viralframe/suggest-storyboard.js',
+    frontend: 'src/app/components/admin/AdminViralFrameWorkspacePage.tsx',
+    fields: ['parts', 'provider_used', 'used_vision'],
+    tipeFrontend: null,
+    note: 'AI Rancang Storyboard (sutradara bervisi)',
+  },
+];
+
+for (const { backend, frontend, fields, tipeFrontend, note } of NDJSON_CONTRACT) {
+  let srcB, srcF;
+  try { srcB = readFileSync(backend, 'utf8'); } catch { continue; }
+  try { srcF = readFileSync(frontend, 'utf8'); } catch { continue; }
+
+  for (const f of fields) {
+    // Backend harus benar-benar mengirim field ini.
+    if (!new RegExp(`\\b${f}\\s*[,:]`).test(srcB)) {
+      problems.push(`${backend}: field kontrak "${f}" (${note}) tidak ditemukan di payload — kalau memang dihapus, perbarui NDJSON_CONTRACT di script ini DAN sisi frontend.`);
+    }
+    // Frontend harus membacanya dengan nama yang sama.
+    if (!new RegExp(`\\b${f}\\b`).test(srcF)) {
+      problems.push(`${frontend}: field kontrak "${f}" dari ${backend} (${note}) tidak disebut sama sekali — nama field frontend/backend TIDAK SINKRON. Inilah pola bug layar-putih 2026-08-01.`);
+    }
+  }
+
+  // Tipe hasil wajib mendeklarasikan field utama (elemen pertama daftar).
+  if (tipeFrontend) {
+    const m = srcF.match(new RegExp(`interface\\s+${tipeFrontend}\\s*\\{[^}]*\\}`));
+    if (!m) {
+      problems.push(`${frontend}: interface ${tipeFrontend} tidak ditemukan — tidak bisa memverifikasi kontrak ${note}.`);
+    } else if (!new RegExp(`\\b${fields[0]}\\s*:`).test(m[0])) {
+      problems.push(`${frontend}: interface ${tipeFrontend} tidak mendeklarasikan "${fields[0]}" padahal ${backend} mengirimnya. readNdjsonFinal<T>() TIDAK memvalidasi bentuk — ketidakcocokan ini akan muncul sebagai layar putih saat runtime, bukan error build.`);
+    }
+  }
+}
+
 console.log('Penjaga kelengkapan Prompt Rulebook & field Scene ViralFrame');
 console.log('='.repeat(60));
 

@@ -382,7 +382,29 @@ interface AIMetadata {
   judul_properti: string; kode_listing: string; generated_at: string;
   provider_used?: string; model_used?: string; provider_requested?: string; fell_back?: boolean;
 }
-interface AIGeneratedResult { scenes: AIScene[]; foto_urls: string[]; karakter: AIKarakter; metadata: AIMetadata }
+// ⚠️ Nama field WAJIB cocok dengan yang dikirim functions/api/admin/viralframe/
+// ai-generate.js → `send({done:true, data:{ parts, foto_urls, karakter, metadata }})`.
+// Field ini pernah bernama `scenes` di sini sementara backend sudah mengirim
+// `parts` (refactor Part-as-Generate-Unit) — typecheck TIDAK menangkapnya karena
+// readNdjsonFinal<T>() adalah cast tanpa validasi, dan akibatnya seluruh halaman
+// jadi layar putih begitu user menekan Generate (insiden 2026-08-01).
+// Kalau mengubah nama di salah satu sisi, ubah SEKARANG JUGA di sisi lain.
+interface AIGeneratedResult { parts: AIScene[]; foto_urls: string[]; karakter: AIKarakter; metadata: AIMetadata }
+
+/** Penjaga runtime untuk batas NDJSON — readNdjsonFinal<T>() hanya meng-cast,
+ *  tidak memverifikasi. Tanpa ini, ketidakcocokan kontrak muncul sebagai
+ *  "Cannot read properties of undefined" saat render (layar putih), bukan sebagai
+ *  pesan error yang bisa dimengerti. */
+function pastikanHasilGenerate(data: unknown): AIGeneratedResult {
+  const d = data as Partial<AIGeneratedResult> | null;
+  if (!d || !Array.isArray(d.parts)) {
+    throw new Error(
+      'Respons AI tidak sesuai kontrak: field "parts" tidak ditemukan. '
+      + 'Ini bug integrasi frontend↔backend, bukan kesalahan input — laporkan ke pengembang.'
+    );
+  }
+  return d as AIGeneratedResult;
+}
 
 // Bridge step Foto (PHOTO_LABELS, Title Case) → FOTO_LABEL_OPTIONS (snake_case)
 // agar step Foto tidak perlu diubah tapi tetap bisa dipakai AIGenerateTab.
@@ -639,7 +661,7 @@ function AIGenerateTab({
         signal: ac.signal,
       });
       // Sukses = stream NDJSON (anti wall-clock 30s); error validasi = JSON biasa.
-      const data = await readNdjsonFinal<AIGeneratedResult>(res, { signal: ac.signal });
+      const data = pastikanHasilGenerate(await readNdjsonFinal<unknown>(res, { signal: ac.signal }));
       setProgress(100);
       setProgressLabel(data.metadata?.fell_back
         ? `Selesai (fallback ke ${data.metadata.provider_used})`
@@ -689,13 +711,13 @@ function AIGenerateTab({
         body: JSON.stringify({
           ...payload,
           regenerate_part: sceneNum,
-          existing_parts: generatedResult.scenes.map(s => ({
+          existing_parts: generatedResult.parts.map(s => ({
             part: s.part, kamera: s.kamera, dialog_karakter: s.dialog_karakter,
           })),
         }),
       });
-      const data = await readNdjsonFinal<AIGeneratedResult>(res, { signal: ac.signal });
-      const newScene = data.scenes?.[0];
+      const data = pastikanHasilGenerate(await readNdjsonFinal<unknown>(res, { signal: ac.signal }));
+      const newScene = data.parts[0];
       if (!newScene) throw new Error('AI tidak mengembalikan scene baru');
       // Backend sudah memaksa scene = regenerateScene di mode ini (lihat ai-generate.js
       // "Mode regenerate: paksa nomor scene"), tapi tetap divalidasi ulang di sini —
@@ -704,7 +726,7 @@ function AIGenerateTab({
         throw new Error(`AI mengembalikan Part ${newScene.part}, bukan Part ${sceneNum} yang diminta — tidak disimpan.`);
       }
       setGeneratedResult(prev => prev
-        ? { ...prev, scenes: prev.scenes.map(s => (s.part === sceneNum ? newScene : s)) }
+        ? { ...prev, parts: prev.parts.map(s => (s.part === sceneNum ? newScene : s)) }
         : prev);
       getAiStatus().then(r => { if (r.success && r.data) setAiStatus(r.data); });
     } catch (e: unknown) {
@@ -724,7 +746,7 @@ function AIGenerateTab({
     try {
       const { default: JSZip } = await import('jszip');
       const zip = new JSZip();
-      const { scenes, foto_urls, karakter, metadata } = generatedResult;
+      const { parts: scenes, foto_urls, karakter, metadata } = generatedResult;
       const platform = PLATFORM_OPTIONS.find(p => p.value === metadata.platform);
       const musik = MUSIK_OPTIONS.find(m => m.value === metadata.musik_value);
       const musikLabel = musik?.label ?? metadata.musik_value;
@@ -1056,7 +1078,7 @@ function AIGenerateTab({
       {generatedResult && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-emerald-600">✅ {generatedResult.scenes.length} prompt scene berhasil dibuat untuk {propertyTitle}!</p>
+            <p className="text-sm font-semibold text-emerald-600">✅ {generatedResult.parts.length} prompt Part berhasil dibuat untuk {propertyTitle}!</p>
             <button onClick={() => { setGeneratedResult(null); setError(null); }} className="text-xs text-[#1565C0] underline">Buat ulang</button>
           </div>
           {generatedResult.metadata.provider_used && (
@@ -1070,7 +1092,7 @@ function AIGenerateTab({
           )}
 
           <div className="space-y-3">
-            {generatedResult.scenes.map(s => (
+            {generatedResult.parts.map(s => (
               <div key={s.part} className={`p-3 border rounded-xl bg-[#F8FAFC] transition-colors ${regenScene === s.part ? 'border-[#1565C0]/40' : 'border-gray-100'}`}>
                 <div className="flex items-center gap-2 mb-1">
                   <span className="w-6 h-6 rounded-full bg-[#1565C0] text-white text-xs font-bold flex items-center justify-center">{s.part}</span>
@@ -1108,7 +1130,10 @@ function AIGenerateTab({
             style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
             {zipBusy ? <><Loader2 size={16} className="animate-spin" /> Membuat ZIP...</> : <>⬇️ Download ZIP</>}
           </button>
-          <p className="text-xs text-[#94A3B8] text-center">ZIP berisi scene1.txt…scene{generatedResult.scenes.length}.txt + foto + karakter + README</p>
+          {/* Struktur ZIP sebenarnya = folder per Part (part1_hook/PROMPT.txt +
+              LAMPIRKAN/), lihat handleDownloadZip(). Teks lama "scene1.txt" sudah
+              tidak menggambarkan isi ZIP sejak refactor Part-as-Generate-Unit. */}
+          <p className="text-xs text-[#94A3B8] text-center">ZIP berisi {generatedResult.parts.length} folder Part (PROMPT.txt + LAMPIRKAN/) + karakter + README</p>
         </div>
       )}
     </div>
