@@ -61,6 +61,9 @@ export async function onRequestPost(context) {
           durationSec: parseInt(p.durationSec, 10),
           voDurationSec: parseInt(p.voDurationSec, 10),
           label: typeof p.label === 'string' ? p.label.slice(0, 80) : undefined,
+          // Part yang di-set "Talking-Head Saja" di UI (cutawayExcluded): presenter
+          // tetap di frame sepanjang Part, tanpa disela cutaway b-roll.
+          talkingHead: p.talkingHead === true,
         }))
         .slice(0, MAKS_PART)
     : [];
@@ -178,10 +181,20 @@ export async function onRequestPost(context) {
   const daftarLabelTeks = uniqueLabels.map((l, i) => `${i + 1}. ${l}`).join('\n');
   const partsSpecTeks = partsInput.map((p, i) => {
     const sisaVo = p.durationSec - p.voDurationSec;
-    return `PART ${i + 1} — role ${p.role}, durasi TOTAL ${p.durationSec} detik, voiceover ${p.voDurationSec} detik (sisa ${sisaVo} detik tanpa VO untuk hook text/transisi/end card)${p.label ? `, tema "${p.label}"` : ''}.`;
+    const th = p.talkingHead
+      ? ` [TALKING-HEAD SAJA: presenter tetap di frame sepanjang Part, TANPA cutaway b-roll. Pakai TEPAT SATU cut sepanjang ${p.durationSec} detik, dengan SATU label ruangan sebagai LATAR tempat presenter berdiri/berbicara.]`
+      : '';
+    return `PART ${i + 1} — role ${p.role}, durasi TOTAL ${p.durationSec} detik, voiceover ${p.voDurationSec} detik (sisa ${sisaVo} detik tanpa VO untuk hook text/transisi/end card)${p.label ? `, tema "${p.label}"` : ''}.${th}`;
   }).join('\n');
+  // ⚠️ Foto karakter TIDAK boleh disebut sebagai label. Ia dilampirkan OTOMATIS ke
+  // setiap Part oleh konsumen (ZIP memakai characterFileName() terpisah), dan
+  // `byLabel` hanya berisi label RUANGAN sehingga label karakter apa pun akan
+  // ditolak validator (422). Versi lama teks ini bilang karakter "ikut dihitung
+  // dalam kuota referensi" tanpa menyebut larangan menamainya — AI wajar
+  // menyimpulkan boleh memakainya sebagai photo_label, lalu selalu gagal pada Part
+  // talking-head (insiden 2026-08-01). Kuotanya tetap dikurangi 1 lewat refQuota.
   const kuotaRefTeks = characterUrl
-    ? `Foto KARAKTER (talent, gambar pertama) ikut dihitung dalam kuota referensi — tiap Part maksimal ${refQuota} foto RUANGAN berbeda + 1 foto karakter = ${MAX_REF_IMAGES_PER_PART} total.`
+    ? `Foto KARAKTER (talent, gambar pertama) sudah otomatis dilampirkan ke SETIAP Part — slotnya sudah dipotong dari kuota, jadi tiap Part maksimal ${refQuota} foto RUANGAN berbeda (total ${MAX_REF_IMAGES_PER_PART} dengan karakter). JANGAN PERNAH menulis karakter/talent/orang sebagai "photo_label" atau di "ref_photo_labels" — kedua field itu HANYA untuk label ruangan dari daftar di atas.`
     : `Tiap Part maksimal ${refQuota} foto ruangan berbeda sebagai referensi.`;
 
   function buatPrompt(usingVision) {
@@ -313,7 +326,18 @@ Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama s
           const label = typeof c?.photo_label === 'string' ? c.photo_label.trim() : '';
           const img = byLabel.get(label);
           if (!img) {
-            send({ done: true, error: `Part ${i + 1}: AI mengembalikan label "${label}" yang tidak ada di daftar foto berlabel. Coba lagi.` });
+            // Pesan harus bisa ditindaklanjuti: sebut label yang sah, dan jelaskan
+            // kasus paling sering (AI menyebut foto karakter — ia dilampirkan
+            // otomatis, bukan dipilih lewat label).
+            const miripKarakter = /karakter|talent|presenter|agen|orang|host|model/i.test(label);
+            send({
+              done: true,
+              error: `Part ${i + 1}: AI mengembalikan label "${label}" yang bukan label foto properti.`
+                + (miripKarakter
+                  ? ' Foto karakter dilampirkan otomatis ke setiap Part dan tidak boleh dipilih sebagai label cut.'
+                  : '')
+                + ` Label yang sah: ${uniqueLabels.join(', ')}. Coba jalankan lagi.`,
+            });
             gagal = true; break;
           }
           const durasi = Number(c?.durasi);

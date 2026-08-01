@@ -2740,7 +2740,15 @@ export default function AdminViralFrameWorkspacePage() {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           property_id: prop.id,
-          parts: s1.parts.map(p => ({ role: p.role, durationSec: p.durationSec, voDurationSec: p.voDurationSec, label: p.label })),
+          // `talkingHead` WAJIB ikut terkirim. Tanpa ini sutradara AI tidak tahu
+          // Part mana yang diset "Talking-Head Saja" di UI, lalu merancang cutaway
+          // b-roll untuk Part yang seharusnya presenter murni — dan pada kasus
+          // terburuk menyebut foto karakter sebagai label cut, yang ditolak
+          // validator (422). Nomor Part di cutawayExcluded 1-based.
+          parts: s1.parts.map((p, i) => ({
+            role: p.role, durationSec: p.durationSec, voDurationSec: p.voDurationSec, label: p.label,
+            talkingHead: s1.cutawayExcluded.includes(i + 1),
+          })),
           archetype: s1.archetype,
           register: s1.register,
           character_photo_url: s3.useCharacter ? (s3.character?.foto_url ?? undefined) : undefined,
@@ -2756,7 +2764,7 @@ export default function AdminViralFrameWorkspacePage() {
     } finally {
       setSuggestLoading(false);
     }
-  }, [prop, s1.parts, s1.archetype, s1.register, s1.aiTool, s3.useCharacter, s3.character]);
+  }, [prop, s1.parts, s1.archetype, s1.register, s1.aiTool, s1.cutawayExcluded, s3.useCharacter, s3.character]);
 
   // Pilih arketipe → prefill visualStyle/tone/register/cutaway (parameter Step 3 saja).
   // Nilai tetap bisa di-override manual setelahnya (memilih 'custom' tidak mereset).
