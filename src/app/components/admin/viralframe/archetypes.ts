@@ -162,15 +162,37 @@ function beatCountForDuration(durationSec: number): number {
  * @param toolId    value AI tool (opsional) → memilih dialek frasa kamera
  * @param frameSafe tool memakai foto referensi → gerakan ditahan di dalam bingkai
  *                  (lihat MOVE_PHRASE_FRAMESAFE)
+ * @param leadIn    OPSIONAL — arahan kamera BAGIAN 1 untuk arketipe 2-bagian
+ *                  (`archetype.leadInCamera`). Lihat catatan di bawah.
+ *
+ * ─── KENAPA `leadIn` TERPISAH DARI `grammar` (jangan digabung!) ───────────────
+ * Arketipe hybrid (agent_broll_hybrid, selfie_luxury_hybrid) membagi tiap Part
+ * jadi BAGIAN 1 (presenter: selfie/tongsis atau talking-head) lalu BAGIAN 2
+ * (b-roll cutaway). `cameraGrammar` mereka SENGAJA hanya berisi beat B-ROLL,
+ * karena rotasi `ordered[(sceneIndex+i) % len]` di bawah bisa menaruh beat mana
+ * pun di posisi pertama — kalau beat presenter ikut masuk array, Part tertentu
+ * akan mendapat urutan terbalik (b-roll dulu, presenter belakangan) dan
+ * bertentangan dengan shotGrammarNote yang menetapkan urutan TETAP.
+ *
+ * Kekhawatiran itu SAH, tapi solusi lamanya (menghilangkan beat presenter sama
+ * sekali) membuat bagian selfie tidak punya arahan kamera konkret — hanya
+ * disebut di prosa `shotGrammarNote` yang global. Terbukti 2026-08-02: model
+ * mengikuti arahan per-Part yang konkret dan mengabaikan prosa global, sehingga
+ * "Vlog Tongsis Mewah" menghasilkan "stands... gesturing" tanpa tongsis.
+ *
+ * `leadIn` menyelesaikan keduanya: ia SELALU di posisi pertama dan TIDAK PERNAH
+ * ikut dirotasi, jadi urutan mustahil terbalik, sekaligus punya bobot konkret
+ * yang setara dengan beat b-roll.
  */
 export function compileCameraChoreography(
   grammar: CameraBeat[], role: 'Hook' | 'Body' | 'CTA', durationSec: number, sceneIndex: number,
-  toolId?: string, frameSafe = false,
+  toolId?: string, frameSafe = false, leadIn?: string,
 ): string {
   const dialect: ToolDialect = (toolId && TOOL_DIALECT[toolId]) || 'cinematic';
 
   if (!grammar || grammar.length === 0) {
-    return dialect === 'structured' ? '[camera: static]' : 'steady locked frame with subtle motion';
+    const kosong = dialect === 'structured' ? '[camera: static]' : 'steady locked frame with subtle motion';
+    return leadIn ? gabungDuaBagian(leadIn, kosong, durationSec) : kosong;
   }
   const nBeats = beatCountForDuration(durationSec);
 
@@ -189,7 +211,19 @@ export function compileCameraChoreography(
     picked.push(ordered[(sceneIndex + i) % ordered.length]);
   }
 
-  return assembleDialect(dialect, picked, frameSafe);
+  const brollPart = assembleDialect(dialect, picked, frameSafe);
+  return leadIn ? gabungDuaBagian(leadIn, brollPart, durationSec) : brollPart;
+}
+
+/**
+ * Rakit arahan 2-bagian: BAGIAN 1 (presenter, tetap) → HARD CUT → BAGIAN 2 (b-roll).
+ * Titik potong = tengah durasi Part, dibulatkan, minimal 1 detik di tiap bagian
+ * supaya tidak pernah menghasilkan rentang "0-0s" pada Part yang sangat pendek.
+ */
+function gabungDuaBagian(leadIn: string, broll: string, durationSec: number): string {
+  const total = Number.isFinite(durationSec) && durationSec > 1 ? Math.round(durationSec) : 2;
+  const potong = Math.max(1, Math.min(total - 1, Math.round(total / 2)));
+  return `BAGIAN 1 (0-${potong}s): ${leadIn}; HARD CUT; BAGIAN 2 (${potong}-${total}s): ${broll}`;
 }
 
 // Rakit beat menjadi string sesuai dialek tool.
@@ -251,6 +285,12 @@ export interface VideoArchetype {
     register?: string;             // value LANGUAGE_REGISTERS (opsional prefill gaya bahasa)
   };
   cameraGrammar: CameraBeat[];     // vokabuler gerakan kamera signature
+  /** Arahan kamera BAGIAN 1 (presenter) untuk arketipe 2-bagian — SELALU di posisi
+   * pertama dan TIDAK PERNAH ikut dirotasi `compileCameraChoreography`. Isi HANYA
+   * untuk arketipe ber-`allowMultiShotPerScene`; arketipe 1-bagian biarkan kosong.
+   * Tanpa ini, bagian presenter cuma hidup di prosa `shotGrammarNote` yang global
+   * dan kalah oleh arahan per-Part yang konkret (insiden "tongsis hilang" 2026-08-02). */
+  leadInCamera?: string;
   pacing: 'punchy' | 'flowing' | 'relaxed';
   shotGrammarNote: string;         // instruksi diinjeksi ke compiler (BLOK 0)
   /** Arketipe yang butuh 2 shot berbeda dalam 1 scene (mis. A-roll/B-roll cutaway).
@@ -354,22 +394,28 @@ export const ARCHETYPES: VideoArchetype[] = [
     narrationPOV: 'agent_to_camera',
     defaults: { visualStyle: 'modern_sleek', tone: 'professional_formal', expression: 'confident_auth', useCharacter: true, register: 'formal' },
     // Semua beat di sini HANYA merepresentasikan gerakan kamera untuk bagian
-    // B-ROLL CUTAWAY (bagian kedua tiap scene) — bagian A-ROLL/talking head
-    // (bagian pertama) selalu static/steady sehingga tidak perlu direpresentasikan
-    // di sini. Desain ini SENGAJA menghindari pola A/B bergantian dalam array
-    // (mis. [A,B,A,B]) karena rotasi compileCameraChoreography (ordered[(sceneIndex+i)%len])
-    // bisa mengubah beat pertama yang terpilih tergantung sceneIndex — kalau sebagian
-    // beat berlabel "A-ROLL" dan sebagian "B-ROLL", scene tertentu bisa kebagian
-    // urutan terbalik (B dulu baru A) dan bertentangan dengan shotGrammarNote yang
-    // menetapkan urutan TETAP (A-roll selalu duluan). Dengan seluruh beat berlabel
-    // sama (B-roll), urutan yang dihasilkan rotasi TIDAK PERNAH bertentangan dengan
-    // urutan tekstual yang mengikat.
+    // B-ROLL CUTAWAY (bagian kedua tiap scene). Desain ini SENGAJA menghindari pola
+    // A/B bergantian dalam array (mis. [A,B,A,B]) karena rotasi
+    // compileCameraChoreography (ordered[(sceneIndex+i)%len]) bisa mengubah beat
+    // pertama yang terpilih tergantung sceneIndex — kalau sebagian beat berlabel
+    // "A-ROLL" dan sebagian "B-ROLL", scene tertentu bisa kebagian urutan terbalik
+    // (B dulu baru A) dan bertentangan dengan shotGrammarNote yang menetapkan
+    // urutan TETAP (A-roll selalu duluan).
+    //
+    // KOREKSI 2026-08-02: dulu bagian A-ROLL tidak direpresentasikan SAMA SEKALI,
+    // dengan alasan "selalu static/steady jadi tidak perlu". Itu keliru — akibatnya
+    // bagian presenter hanya hidup di prosa shotGrammarNote yang global, dan model
+    // mengabaikannya karena kalah konkret dari arahan kamera per-Part. Sekarang
+    // bagian A-ROLL ada di `leadInCamera` di bawah: SELALU posisi pertama, TIDAK
+    // PERNAH ikut dirotasi — jadi kekhawatiran urutan-terbalik di atas tetap
+    // teratasi tanpa mengorbankan kejelasan bagian presenter.
     cameraGrammar: [
       { move: 'slow_push',     speed: 'slow',   ease: 'ease-in-out', motivation: 'B-ROLL CUTAWAY: aesthetic push-in on the scene area, no presenter' },
       { move: 'orbit',         speed: 'slow',   ease: 'ease-in-out', motivation: 'B-ROLL CUTAWAY: aesthetic orbit around the scene area, no presenter' },
       { move: 'pull_back',     speed: 'medium', ease: 'ease-out',    motivation: 'B-ROLL CUTAWAY: aesthetic pull-back reveal of the scene area, no presenter' },
       { move: 'lateral_track', speed: 'slow',   ease: 'ease-in-out', motivation: 'B-ROLL CUTAWAY: aesthetic lateral track across the scene area, no presenter' },
     ],
+    leadInCamera: 'A-ROLL TALKING HEAD: steady near-static medium shot, presenter speaks straight to camera and fills roughly one third of the frame, the area from the reference image clearly visible behind, only subtle natural breathing motion',
     pacing: 'flowing',
     allowMultiShotPerScene: true,
     shotGrammarNote: 'SETIAP scene WAJIB dibagi 2 bagian VISUAL berurutan dengan durasi kurang-lebih sama: BAGIAN 1 = A-ROLL/TALKING HEAD — agen tampil menghadap kamera dengan framing static/steady, latar belakang sesuai area foto referensi scene ini (bagian ini SELALU tampil lebih dulu, tidak pernah dibalik). BAGIAN 2 = B-ROLL CUTAWAY — potongan VISUAL (hard cut, BUKAN gerakan kamera menerus dari bagian 1) ke rekaman PENUH area yang sama TANPA agen tampil DI FRAME, dengan gerakan kamera sinematik/estetik sesuai KOREOGRAFI KAMERA PER SCENE di bawah (koreografi itu KHUSUS untuk Bagian 2 — Bagian 1 tidak perlu gerakan kamera, cukup frame diam). PENTING — AUDIO TIDAK IKUT TERPOTONG: narasi/suara agen (script_narration/dialog_karakter) mengalir TERUS-MENERUS tanpa jeda melintasi kedua bagian visual tersebut (agen tetap TERDENGAR bicara selama cutaway berlangsung, seperti VO yang menjembatani potongan gambar) — HANYA gambarnya yang cut ke b-roll, suaranya TIDAK berhenti. Word count narasi TETAP mengikuti budget durasi PENUH scene ini (jangan dipotong setengah). Pola talking-head→cutaway-VISUAL INI WAJIB berulang di SETIAP scene tanpa kecuali, bukan cuma sebagian. Tuliskan pembagian dua bagian VISUAL ini secara eksplisit di dalam teks prompt video tiap scene (mis. "first half: ...; hard cut to (visual only, audio continues); second half: ..."), sementara narasi/dialog tetap satu kesatuan utuh untuk keseluruhan durasi scene.',
@@ -395,6 +441,11 @@ export const ARCHETYPES: VideoArchetype[] = [
       { move: 'orbit',         speed: 'slow',   ease: 'ease-in-out', motivation: 'B-ROLL CUTAWAY: hero-shot orbit around the scene area, no presenter' },
       { move: 'pull_back',     speed: 'slow',   ease: 'ease-out',    motivation: 'B-ROLL CUTAWAY: majestic pull-back reveal of the scene area, no presenter' },
     ],
+    // Frasa "selfie-stick" WAJIB eksplisit di sini — inilah satu-satunya arahan
+    // KONKRET per-Part yang membuat model benar-benar merender gaya vlogger
+    // bertongsis. Tetap patuh larangan lama di shotGrammarNote: perspektifnya saja,
+    // tongsis/tangan pemegang JANGAN digambarkan di dalam frame.
+    leadInCamera: 'SELFIE/TONGSIS: arm-extended selfie-stick framing, presenter holds the camera at arm\'s length and looks straight into the lens while talking, presenter fills roughly 40% of the frame, the area from the reference image visible behind them, natural handheld micro-jitter (do NOT show the selfie stick or the holding arm in frame — only the perspective it creates)',
     pacing: 'relaxed',
     allowMultiShotPerScene: true,
     shotGrammarNote: 'SETIAP scene WAJIB dibagi 2 bagian VISUAL berurutan dengan durasi kurang-lebih sama: BAGIAN 1 = SELFIE/TONGSIS — agen memegang tongsis/gimbal (arm-extended selfie framing), menghadap lensa langsung sambil bicara dengan energi vlog yang hangat dan personal, latar belakang sesuai area foto referensi scene ini (bagian ini SELALU tampil lebih dulu, tidak pernah dibalik). BAGIAN 2 = B-ROLL CUTAWAY MEWAH — potongan VISUAL (hard cut, BUKAN gerakan kamera menerus dari bagian 1) ke rekaman PENUH area yang sama TANPA agen tampil DI FRAME, dengan gerakan kamera LAMBAT, ELEGAN, dan MEGAH (crane/orbit/slow push — BUKAN whip-pan atau gerakan cepat ala vlog) sesuai KOREOGRAFI KAMERA PER SCENE di bawah — kesan yang diinginkan adalah properti terlihat mewah/eksklusif/mahal, seperti cuplikan iklan properti high-end, kontras dengan energi santai di Bagian 1. PENTING — AUDIO TIDAK IKUT TERPOTONG: narasi/suara agen (script_narration/dialog_karakter) mengalir TERUS-MENERUS tanpa jeda melintasi kedua bagian visual tersebut (agen tetap TERDENGAR bicara selama cutaway berlangsung) — HANYA gambarnya yang cut ke b-roll, suaranya TIDAK berhenti. Word count narasi TETAP mengikuti budget durasi PENUH scene ini. Pola selfie→cutaway-mewah INI WAJIB berulang di SETIAP scene tanpa kecuali. Tuliskan pembagian dua bagian VISUAL ini secara eksplisit di dalam teks prompt video tiap scene (mis. "first half: selfie-stick handheld shot ...; hard cut to; second half: slow elegant crane/orbit b-roll ..."), sementara narasi/dialog tetap satu kesatuan utuh untuk keseluruhan durasi scene.',

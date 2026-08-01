@@ -757,7 +757,10 @@ export async function onRequestPost(context) {
   // client_testimonial) punya shotGrammarNote lebih detail (hingga ~1480 char) — 600 char
   // memotong instruksi krusial di tengah kalimat (mis. klarifikasi audio-tidak-terpotong
   // pada agent_broll_hybrid jatuh SETELAH byte ke-600, jadi tidak pernah sampai ke LLM).
-  const archetypeNote = typeof body.archetype_note === 'string' ? body.archetype_note.slice(0, 2000) : '';
+  // Cap 4000, BUKAN 2000. shotGrammarNote terpanjang (selfie_luxury_hybrid) sudah
+  // 1.661 char — hanya 339 char headroom, sehingga menambah satu-dua kalimat ke
+  // arahan arketipe akan memotongnya DIAM-DIAM tanpa error apa pun.
+  const archetypeNote = typeof body.archetype_note === 'string' ? body.archetype_note.slice(0, 4000) : '';
   const PRESENTER_VALID = ['on_camera', 'voiceover_only', 'faceless_broll'];
   const presenterMode = PRESENTER_VALID.includes(body.presenter_mode) ? body.presenter_mode : 'on_camera';
   // Arketipe hybrid A-roll/B-roll (agent_broll_hybrid, selfie_luxury_hybrid) butuh
@@ -781,7 +784,20 @@ export async function onRequestPost(context) {
   const cameraDirectives = Array.isArray(body.camera_directives)
     ? body.camera_directives
         .filter(c => c && Number.isInteger(Number(c.part)) && typeof c.camera === 'string')
-        .map(c => ({ part: Number(c.part), camera: c.camera.slice(0, 400) }))
+        // Cap 900, BUKAN 400. Diukur 2026-08-02: koreografi arketipe hybrid
+        // (agent_broll_hybrid, selfie_luxury_hybrid) menghasilkan 397-499 char —
+        // 17 dari 18 kombinasi peran x indeks MELEBIHI cap lama 400, sehingga
+        // ekor arahan kamera terpotong di tengah kata pada hampir setiap generate.
+        // Yang hilang justru FRAMESAFE_SUFFIX ("camera stays within the framing of
+        // the reference image") — instruksi kesetiaan-ke-foto. Cap tetap ada
+        // sebagai rem penyalahgunaan, hanya dilonggarkan ke ukuran realistis.
+        //
+        // Angka 1200 dipilih dari pengukuran, bukan tebakan: kombinasi terpanjang
+        // (selfie_luxury_hybrid, leadIn BAGIAN 1 + 3 beat b-roll + FRAMESAFE_SUFFIX)
+        // = 852 char. Cap 900 sempat dipertimbangkan tapi hanya menyisakan 48 char —
+        // terlalu ketat untuk kelas bug yang baru saja diperbaiki di sini. 1200
+        // memberi ~40% headroom bila leadInCamera diperpanjang nanti.
+        .map(c => ({ part: Number(c.part), camera: c.camera.slice(0, 1200) }))
     : [];
 
   // Mode regenerate satu scene (opsional)

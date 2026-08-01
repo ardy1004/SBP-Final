@@ -335,7 +335,7 @@ export function compileMasterPrompt(
       if (cutawayExcluded.includes(partNum)) {
         L.push(`  PART ${partNum} (${p.role}, ${p.durationSec}s): [PENGECUALIAN] Talking-head/selfie PENUH durasi TANPA cutaway b-roll — kamera stabil/steady mengikuti presenter sepanjang Part, JANGAN terapkan pola 2-bagian arketipe ini di Part ini.`);
       } else {
-        const choreo = compileCameraChoreography(archetype.cameraGrammar, p.role, p.durationSec, pi, s1.aiTool, toolSpec?.supportsRefImage === true);
+        const choreo = compileCameraChoreography(archetype.cameraGrammar, p.role, p.durationSec, pi, s1.aiTool, toolSpec?.supportsRefImage === true, archetype.leadInCamera);
         L.push(`  PART ${partNum} (${p.role}, ${p.durationSec}s): ${choreo}`);
       }
     });
@@ -576,8 +576,20 @@ export function compileNaturalPrompt(
     const kuotaWarn = namaFoto.length > MAX_REF_IMAGES_PER_PART
       ? ` ⚠ MELEBIHI KUOTA ${MAX_REF_IMAGES_PER_PART} foto per Part — kurangi jumlah foto referensi.`
       : '';
+    // Pengecualian cutaway ikut dihormati di sini. Dulu cabang ini TIDAK ADA di
+    // compileNaturalPrompt (hanya di BLOK koreografi & workspace), jadi Prompt
+    // Natural bisa menampilkan pola 2-bagian untuk Part yang justru diset
+    // talking-head penuh — inkonsistensi yang baru terlihat setelah leadInCamera
+    // membuat pola 2-bagian eksplisit di teks.
+    const partNum = pi + 1;
+    const talkingHeadPenuh = archetype?.allowMultiShotPerScene === true
+      && (s1.cutawayExcluded ?? []).includes(partNum);
     const kamera = archetype
-      ? compileCameraChoreography(archetype.cameraGrammar, p.role, p.durationSec, pi, s1.aiTool, true)
+      ? (talkingHeadPenuh
+          ? (archetype.leadInCamera
+              ? `${archetype.leadInCamera}; presenter stays in frame for the whole Part, no b-roll cutaway`
+              : 'steady shot, presenter stays in frame throughout, no cutaway')
+          : compileCameraChoreography(archetype.cameraGrammar, p.role, p.durationSec, pi, s1.aiTool, true, archetype.leadInCamera))
       : 'steady cinematic frame with subtle natural motion';
     const ls = getLipsync(p.voDurationSec);
 

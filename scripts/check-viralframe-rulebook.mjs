@@ -212,6 +212,66 @@ for (const { backend, frontend, fields, tipeFrontend, note } of NDJSON_CONTRACT)
   }
 }
 
+// ─── BAGIAN 4: ARKETIPE 2-BAGIAN & CAP PEMOTONGAN ────────────────────────────
+// LATAR BELAKANG (insiden 2026-08-02): user memilih arketipe "Vlog Tongsis Mewah"
+// tapi adegan agen tidak pernah terlihat seperti vlogger bertongsis. DUA sebab:
+//   (a) `cameraGrammar` arketipe hybrid sengaja HANYA berisi beat b-roll, sehingga
+//       bagian selfie cuma hidup di prosa `shotGrammarNote` yang global — dan model
+//       mengikuti arahan per-Part yang konkret, mengabaikan prosa itu;
+//   (b) backend memotong arahan kamera di 400 char, padahal 17 dari 18 kombinasi
+//       peran x indeks pada arketipe hybrid menghasilkan 397-499 char. Ekornya —
+//       justru FRAMESAFE_SUFFIX "camera stays within the framing of the reference
+//       image" — terpotong di tengah kata pada hampir setiap generate.
+// Keduanya LOLOS semua gate: typecheck hijau (tidak ada tipe yang salah), bundle
+// hijau, smoke hijau. Hanya terlihat kalau memeriksa teks prompt akhir.
+//
+// Cek di bawah bersifat tekstual. Ia tidak menjalankan compileCameraChoreography,
+// tapi memastikan dua invarian yang cukup untuk mencegah kambuhnya insiden itu.
+{
+  const fileArc = 'src/app/components/admin/viralframe/archetypes.ts';
+  const fileGen = 'functions/api/admin/viralframe/ai-generate.js';
+  let srcArc, srcGen;
+  try { srcArc = readFileSync(fileArc, 'utf8'); } catch { srcArc = null; }
+  try { srcGen = readFileSync(fileGen, 'utf8'); } catch { srcGen = null; }
+
+  if (srcArc) {
+    // (1) Setiap arketipe ber-allowMultiShotPerScene WAJIB punya leadInCamera.
+    //     Tanpa itu, bagian presenter kembali tidak punya arahan kamera konkret.
+    const blokArketipe = srcArc.split(/\n  \{\n/).slice(1);
+    for (const blok of blokArketipe) {
+      const idM = blok.match(/id:\s*'([^']+)'/);
+      if (!idM) continue;
+      const punyaMulti = /allowMultiShotPerScene:\s*true/.test(blok);
+      const punyaLeadIn = /leadInCamera:\s*'/.test(blok);
+      if (punyaMulti && !punyaLeadIn) {
+        problems.push(`${fileArc}: arketipe "${idM[1]}" punya allowMultiShotPerScene:true tapi TIDAK punya leadInCamera — bagian presenter (BAGIAN 1) akan kehilangan arahan kamera konkret dan model akan mengabaikannya (insiden "tongsis hilang" 2026-08-02).`);
+      }
+    }
+    // (2) Arketipe selfie WAJIB menyebut frasa yang benar-benar mengikat model.
+    if (/id:\s*'selfie_luxury_hybrid'/.test(srcArc)) {
+      const blok = srcArc.slice(srcArc.indexOf("id: 'selfie_luxury_hybrid'"), srcArc.indexOf("id: 'selfie_luxury_hybrid'") + 3000);
+      if (!/selfie-stick/i.test(blok)) {
+        problems.push(`${fileArc}: selfie_luxury_hybrid tidak menyebut "selfie-stick" di leadInCamera — inilah frasa konkret yang membuat model merender gaya vlogger bertongsis.`);
+      }
+    }
+  }
+
+  if (srcGen) {
+    // (3) Cap arahan kamera tidak boleh diturunkan lagi ke ukuran yang memotong.
+    //     Terpanjang terukur 852 char; apa pun di bawah 900 = pemotongan senyap.
+    const capM = srcGen.match(/camera:\s*c\.camera\.slice\(0,\s*(\d+)\)/);
+    if (!capM) {
+      problems.push(`${fileGen}: tidak menemukan cap camera directive (c.camera.slice) — kalau dipindah, perbarui BAGIAN 4 di script ini.`);
+    } else if (Number(capM[1]) < 900) {
+      problems.push(`${fileGen}: cap camera directive = ${capM[1]}, terlalu kecil. Koreografi arketipe hybrid terpanjang terukur 852 char; cap di bawah 900 memotong ekor arahan kamera (termasuk instruksi kesetiaan-ke-foto) DI TENGAH KATA tanpa error apa pun.`);
+    }
+    const noteM = srcGen.match(/body\.archetype_note\.slice\(0,\s*(\d+)\)/);
+    if (noteM && Number(noteM[1]) < 2500) {
+      problems.push(`${fileGen}: cap archetype_note = ${noteM[1]}. shotGrammarNote terpanjang sudah 1.661 char — cap di bawah 2500 tidak menyisakan ruang aman dan akan memotong arahan arketipe diam-diam.`);
+    }
+  }
+}
+
 console.log('Penjaga kelengkapan Prompt Rulebook & field Scene ViralFrame');
 console.log('='.repeat(60));
 

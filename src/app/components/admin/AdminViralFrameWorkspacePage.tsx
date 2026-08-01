@@ -600,8 +600,13 @@ function AIGenerateTab({
       ? partSpecs.map((p, i) => ({
           part: p.part,
           camera: cutawayExcludedInRange.includes(p.part)
-            ? 'steady handheld shot, presenter stays in frame throughout, no cutaway'
-            : compileCameraChoreography(arc.cameraGrammar, p.role, durasiPart(p.part), i, aiTool, supportsRefImage),
+            // Part talking-head: pola 2-bagian tidak berlaku, TAPI gaya kameranya
+            // tetap harus sesuai arketipe — pakai leadInCamera-nya kalau ada,
+            // supaya arketipe selfie tidak berubah jadi handheld biasa di Part CTA.
+            ? (arc.leadInCamera
+                ? `${arc.leadInCamera}; presenter stays in frame for the whole Part, no b-roll cutaway`
+                : 'steady handheld shot, presenter stays in frame throughout, no cutaway')
+            : compileCameraChoreography(arc.cameraGrammar, p.role, durasiPart(p.part), i, aiTool, supportsRefImage, arc.leadInCamera),
         }))
       : [];
 
