@@ -2495,10 +2495,19 @@ export default function AdminViralFrameWorkspacePage() {
   // ({durationMode,sceneCount,scenes[],...}) dikonversi lewat konversiDraftLama()
   // di applyConfig(), TIDAK dibaca langsung di sini.
   const [s1, setS1] = useState<Step1State>({
+    // Default pilihan user (2026-08-02): 3 Part × 10 detik, VO 8 detik.
+    // Total 30 detik — panjang yang pas untuk Reels/Shorts/TikTok, dan sisa 2 detik
+    // per Part memberi ruang hook text/transisi/end card (lihat Catatan Produksi).
+    //
+    // Default LAMA (Hook 8/8, Body 20/20, CTA 8/8) punya bug: Body 20 detik
+    // MELANGGAR getClipMaxSec('google_flow') = 10 yang justru dipaksakan UI lewat
+    // atribut `max` — jadi sesi baru selalu dimulai dengan Part yang tidak valid.
+    // voDurationSec juga = durationSec, artinya VO memenuhi seluruh durasi dan
+    // tidak menyisakan ruang untuk end card.
     parts: [
-      { role: 'Hook', durationSec: 8, voDurationSec: 8, refPhotoIds: [], cuts: [] },
-      { role: 'Body', durationSec: 20, voDurationSec: 20, refPhotoIds: [], cuts: [] },
-      { role: 'CTA', durationSec: 8, voDurationSec: 8, refPhotoIds: [], cuts: [] },
+      { role: 'Hook', durationSec: 10, voDurationSec: 8, refPhotoIds: [], cuts: [] },
+      { role: 'Body', durationSec: 10, voDurationSec: 8, refPhotoIds: [], cuts: [] },
+      { role: 'CTA', durationSec: 10, voDurationSec: 8, refPhotoIds: [], cuts: [] },
     ],
     platforms: ['tiktok', 'ig_reels', 'yt_shorts', 'fb_reels'],
     aiTool: 'google_flow',
@@ -2841,11 +2850,39 @@ export default function AdminViralFrameWorkspacePage() {
   const clipMaxForTool = getClipMaxSec(s1.aiTool) ?? 10;
   const addPart = useCallback(() => {
     setS1(prev => {
-      const dur = Math.min(8, clipMaxForTool);
+      // Selaras dengan default sesi baru: durasi penuh sesuai batas tool, VO 8 detik
+      // (atau lebih pendek bila tool-nya cuma memuat < 8s) sehingga selalu tersisa
+      // ruang untuk end card. Dulu voDurationSec = durationSec — VO memenuhi seluruh
+      // durasi dan tidak menyisakan apa pun.
+      const dur = clipMaxForTool;
+      const vo = Math.min(8, dur);
       const role: PartDef['role'] = prev.parts.length === 0 ? 'Hook' : 'Body';
-      return { ...prev, parts: [...prev.parts, { role, durationSec: dur, voDurationSec: dur, refPhotoIds: [], cuts: [] }] };
+      return { ...prev, parts: [...prev.parts, { role, durationSec: dur, voDurationSec: vo, refPhotoIds: [], cuts: [] }] };
     });
   }, [clipMaxForTool]);
+  /**
+   * Ganti AI Video Tool SEKALIGUS memotong durasi Part yang melebihi batas tool baru.
+   *
+   * Tanpa ini, berpindah dari Google Flow (maks 10s) ke Veo3 (maks 8s) meninggalkan
+   * Part 10 detik yang tidak valid: UI menampilkannya seolah baik-baik saja (atribut
+   * `max` hanya membatasi input BARU, tidak memperbaiki nilai lama), lalu
+   * suggest-storyboard menolak dengan 422 "Durasi tiap Part harus 1-8 detik".
+   * Bug ini makin gampang kena sejak default sesi baru jadi 10 detik.
+   */
+  const gantiAiTool = useCallback((tool: string) => {
+    setS1(prev => {
+      const maks = getClipMaxSec(tool) ?? 10;
+      return {
+        ...prev,
+        aiTool: tool,
+        parts: prev.parts.map(p => {
+          const dur = Math.min(p.durationSec, maks);
+          return { ...p, durationSec: dur, voDurationSec: Math.min(p.voDurationSec, dur) };
+        }),
+      };
+    });
+  }, []);
+
   const removePart = useCallback((idx: number) => {
     setS1(prev => ({ ...prev, parts: prev.parts.filter((_, i) => i !== idx) }));
   }, []);
@@ -3858,7 +3895,7 @@ export default function AdminViralFrameWorkspacePage() {
             {/* (d) AI Tool */}
             <Field label="AI Video Tool"
               hint={`Batas prompt ±${AI_TOOLS.find(t => t.value === s1.aiTool)?.charLimit ?? 1000} karakter`}>
-              <Select value={s1.aiTool} onChange={v => update1('aiTool', v)} opts={AI_TOOLS} />
+              <Select value={s1.aiTool} onChange={gantiAiTool} opts={AI_TOOLS} />
             </Field>
             {/* (e) Rasio */}
             <Field label="Rasio Video">
