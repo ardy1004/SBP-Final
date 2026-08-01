@@ -249,6 +249,7 @@ Tugas untuk TIAP Part:
 2. Boleh memakai SATU label lebih dari sekali dalam satu Part (montase cepat: ruangan yang sama dengan framing/aksi berbeda) — ini VALID dan didorong untuk Part yang butuh banyak cut singkat, bukan bug.
 3. ${kuotaRefTeks} Kumpulkan foto UNIK (tanpa duplikat) yang benar-benar dipakai Part ini ke dalam "ref_photo_labels" (urutan = urutan dilampirkan sebagai reference image).
 4. Pilih foto yang paling mendukung role Part (Hook = paling menarik/fasad/first impression kuat; Body = tur isi ruangan utama; CTA = penutup/kesan tinggal/lingkungan sekitar).
+   ⚠️ PART TERAKHIR selalu berfungsi sebagai PENUTUP, apa pun role yang tertulis. Pilih latar yang enak dipandang & mengundang untuk ajakan penutup (fasad, taman, ruang tamu, balkon, area yang lapang/terang) — HINDARI ruang utilitas seperti carport/garasi, gudang, atau ruang cuci sebagai latar Part terakhir, kecuali memang tidak ada pilihan lain.
 5. Semua label WAJIB persis salah satu string dari daftar 1-${uniqueLabels.length} di atas — JANGAN mengarang label baru, jangan ubah ejaan.
 6. Beri "rationale" singkat (1-2 kalimat, jujur & spesifik) alasan susunan Part ini — supaya keputusanmu bisa dikoreksi manual oleh user, bukan kotak hitam.
 7. Fokus alasan pada craft naratif/pacing/framing sinematik SAJA — jangan mengklaim mengetahui data algoritma atau tren medsos real-time (kamu tidak punya akses itu).

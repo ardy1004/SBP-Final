@@ -617,7 +617,9 @@ function AIGenerateTab({
             ? (arc.leadInCamera
                 ? `${arc.leadInCamera}; presenter stays in frame for the whole Part, no b-roll cutaway`
                 : 'steady handheld shot, presenter stays in frame throughout, no cutaway')
-            : compileCameraChoreography(arc.cameraGrammar, p.role, durasiPart(p.part), i, aiTool, supportsRefImage, arc.leadInCamera),
+            // Durasi cut PERTAMA = batas bagian selfie/presenter. Tanpa ini titik
+            // potong jatuh ke tengah durasi dan bertentangan dengan storyboard.
+            : compileCameraChoreography(arc.cameraGrammar, p.role, durasiPart(p.part), i, aiTool, supportsRefImage, arc.leadInCamera, p.cuts?.[0]?.durasi),
         }))
       : [];
 
@@ -3887,6 +3889,19 @@ export default function AdminViralFrameWorkspacePage() {
           {/* (h) CTA + keyword */}
           <Field label="Call to Action (Scene Terakhir)">
             <Select value={s1.ctaType} onChange={v => update1('ctaType', v)} opts={CTA_TYPES} />
+            {/* Peringatan bila Part terakhir bukan CTA. Backend kini tetap memaksa
+                Part terakhir berfungsi sebagai penutup (CATATAN PENUTUP di
+                buildPartBlock), tapi role yang tepat memberi hasil lebih baik:
+                sutradara AI memilih FOTO berdasarkan role, dan role Body membuatnya
+                memperlakukan Part penutup sebagai "tur ruangan" — pernah memilih
+                carport sebagai latar ajakan penutup (2026-08-02). */}
+            {s1.parts.length > 0 && s1.parts[s1.parts.length - 1].role !== 'CTA' && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-1.5">
+                ⚠️ Part terakhir (Part {s1.parts.length}) berperan <strong>{s1.parts[s1.parts.length - 1].role}</strong>, bukan <strong>CTA</strong>.
+                {' '}Ajakan tetap dipakai di Part terakhir, tapi Sutradara AI memilih foto berdasarkan role —
+                {' '}role <strong>CTA</strong> membuatnya memilih latar penutup yang lebih pas. Ubah di <em>Rancang Part</em> di atas.
+              </p>
+            )}
           </Field>
           {s1.ctaType === 'comment_keyword' && (
             <Field label="Keyword Komentar" hint="Kata yang harus diketik penonton di kolom komentar">

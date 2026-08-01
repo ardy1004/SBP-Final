@@ -189,13 +189,13 @@ function beatCountForDuration(durationSec: number): number {
  */
 export function compileCameraChoreography(
   grammar: CameraBeat[], role: 'Hook' | 'Body' | 'CTA', durationSec: number, sceneIndex: number,
-  toolId?: string, frameSafe = false, leadIn?: string,
+  toolId?: string, frameSafe = false, leadIn?: string, cutPertamaSec?: number,
 ): string {
   const dialect: ToolDialect = (toolId && TOOL_DIALECT[toolId]) || 'cinematic';
 
   if (!grammar || grammar.length === 0) {
     const kosong = dialect === 'structured' ? '[camera: static]' : 'steady locked frame with subtle motion';
-    return leadIn ? gabungDuaBagian(leadIn, kosong, durationSec) : kosong;
+    return leadIn ? gabungDuaBagian(leadIn, kosong, durationSec, cutPertamaSec) : kosong;
   }
   const nBeats = beatCountForDuration(durationSec);
 
@@ -215,17 +215,27 @@ export function compileCameraChoreography(
   }
 
   const brollPart = assembleDialect(dialect, picked, frameSafe);
-  return leadIn ? gabungDuaBagian(leadIn, brollPart, durationSec) : brollPart;
+  return leadIn ? gabungDuaBagian(leadIn, brollPart, durationSec, cutPertamaSec) : brollPart;
 }
 
 /**
  * Rakit arahan 2-bagian: BAGIAN 1 (presenter, tetap) → HARD CUT → BAGIAN 2 (b-roll).
- * Titik potong = tengah durasi Part, dibulatkan, minimal 1 detik di tiap bagian
- * supaya tidak pernah menghasilkan rentang "0-0s" pada Part yang sangat pendek.
+ *
+ * Titik potong memakai `cutPertamaSec` bila diberikan — yaitu durasi cut PERTAMA
+ * hasil rancangan sutradara AI, karena cut pertama itulah bagian selfie/presenter.
+ * Tanpa itu, titik potong jatuh ke tengah durasi dan BERTENTANGAN dengan storyboard:
+ * pada kasus nyata 2026-08-02, arahan kamera berkata "BAGIAN 1 (0-5s)" sementara
+ * cuts-nya 3s+3s+4s — dua angka berbeda untuk batas yang sama dalam satu payload.
+ *
+ * Minimal 1 detik di tiap bagian supaya tidak pernah menghasilkan rentang "0-0s"
+ * pada Part yang sangat pendek.
  */
-function gabungDuaBagian(leadIn: string, broll: string, durationSec: number): string {
+function gabungDuaBagian(leadIn: string, broll: string, durationSec: number, cutPertamaSec?: number): string {
   const total = Number.isFinite(durationSec) && durationSec > 1 ? Math.round(durationSec) : 2;
-  const potong = Math.max(1, Math.min(total - 1, Math.round(total / 2)));
+  const dariCut = Number.isFinite(cutPertamaSec as number) && (cutPertamaSec as number) > 0
+    ? Math.round(cutPertamaSec as number)
+    : Math.round(total / 2);
+  const potong = Math.max(1, Math.min(total - 1, dariCut));
   return `BAGIAN 1 (0-${potong}s): ${leadIn}; HARD CUT; BAGIAN 2 (${potong}-${total}s): ${broll}`;
 }
 

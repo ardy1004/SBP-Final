@@ -168,7 +168,11 @@ Ekspresi/emosi karakter WAJIB konsisten '${expressionLabel}' di SEMUA scene — 
     ? (excludedCtas?.length
         ? `Scene berperan CTA: pilih gaya ajakan yang paling sesuai dengan properti ini, TAPI JANGAN memakai gaya yang baru dipakai di video-video sebelumnya: ${excludedCtas.join(', ')}. Variasikan supaya konten tidak terasa monoton/generik.\n`
         : '')
-    : `Scene berperan CTA WAJIB memakai gaya ajakan: ${ctaType}. Tipe ini WAJIB dipertahankan, TAPI kalimat ajakannya WAJIB dirumuskan berbeda dari video sebelumnya.\n`;
+    // "Scene berperan CTA ATAU Part TERAKHIR" — bukan hanya role. Parameter ini
+    // bernama "Call to Action (Scene Terakhir)" di UI, jadi ia wajib mengenai Part
+    // penutup meskipun user membiarkan role-nya Body (lihat CATATAN PENUTUP di
+    // buildPartBlock). Dulu hanya menyasar role → instruksi menggantung.
+    : `Scene berperan CTA — ATAU Part TERAKHIR bila tidak ada Part ber-role CTA — WAJIB memakai gaya ajakan: ${ctaType}. Tipe ini WAJIB dipertahankan, TAPI kalimat ajakannya WAJIB dirumuskan berbeda dari video sebelumnya.\n`;
   // Berlaku untuk KEDUA mode (auto maupun manual) — inilah sinyal anti-pengulangan
   // yang paling berguna saat user memilih tipe hook secara manual, karena tipe
   // enum-nya memang sengaja tidak berubah.
@@ -534,8 +538,23 @@ function buildPartBlock(partAssignments, partRoles) {
       const nCut = (a.cuts ?? []).length;
       return `- PART ${a.part} — ${role}${label} (${a.durasi ?? '?'} detik, ${nCut} cut)`;
     });
+
+  // Part PENUTUP ditentukan berdasarkan POSISI, bukan role. Parameter UI-nya
+  // bernama "Call to Action (Scene Terakhir)" — jadi ia HARUS mengenai Part
+  // terakhir apa pun role yang dipilih user. Sebelum 2026-08-02, instruksi CTA
+  // hanya menyasar "Scene berperan CTA"; kalau user membiarkan Part terakhir
+  // ber-role Body (kejadian nyata), instruksi itu MENGGANTUNG — tidak mengenai
+  // Part mana pun, dan sutradara memperlakukan Part penutup sebagai "tur ruangan"
+  // sehingga memilih latar yang lemah (carport) untuk ajakan penutup.
+  const urut = partAssignments.slice().sort((a, b) => a.part - b.part);
+  const partTerakhir = urut[urut.length - 1]?.part;
+  const roleTerakhir = roleByPart.get(partTerakhir) ?? 'Body';
+  const catatanPenutup = partTerakhir != null && roleTerakhir !== 'CTA'
+    ? `\nCATATAN PENUTUP: PART ${partTerakhir} adalah Part TERAKHIR video ini (role-nya "${roleTerakhir}"). Terlepas dari role itu, Part ${partTerakhir} WAJIB berfungsi sebagai PENUTUP: tutup narasinya dan bawa penonton ke ajakan sesuai tipe CTA yang ditetapkan. Jangan berhenti menggantung seolah masih ada Part berikutnya.\n`
+    : '';
+
   return `BUSUR CERITA — satu PART = satu babak naratif UTUH sekaligus SATU panggilan generate:
-${baris.join('\n')}
+${baris.join('\n')}${catatanPenutup}
 Dialog antar-Part WAJIB menyambung sebagai satu narasi berkelanjutan — jangan mengulang pembuka/salam di tiap Part. Pergantian nada/topik hanya terjadi di batas antar-PART.
 
 `;

@@ -335,7 +335,7 @@ export function compileMasterPrompt(
       if (cutawayExcluded.includes(partNum)) {
         L.push(`  PART ${partNum} (${p.role}, ${p.durationSec}s): [PENGECUALIAN] Talking-head/selfie PENUH durasi TANPA cutaway b-roll — kamera stabil/steady mengikuti presenter sepanjang Part, JANGAN terapkan pola 2-bagian arketipe ini di Part ini.`);
       } else {
-        const choreo = compileCameraChoreography(archetype.cameraGrammar, p.role, p.durationSec, pi, s1.aiTool, toolSpec?.supportsRefImage === true, archetype.leadInCamera);
+        const choreo = compileCameraChoreography(archetype.cameraGrammar, p.role, p.durationSec, pi, s1.aiTool, toolSpec?.supportsRefImage === true, archetype.leadInCamera, p.cuts?.[0]?.durasiDetik);
         L.push(`  PART ${partNum} (${p.role}, ${p.durationSec}s): ${choreo}`);
       }
     });
@@ -589,7 +589,7 @@ export function compileNaturalPrompt(
           ? (archetype.leadInCamera
               ? `${archetype.leadInCamera}; presenter stays in frame for the whole Part, no b-roll cutaway`
               : 'steady shot, presenter stays in frame throughout, no cutaway')
-          : compileCameraChoreography(archetype.cameraGrammar, p.role, p.durationSec, pi, s1.aiTool, true, archetype.leadInCamera))
+          : compileCameraChoreography(archetype.cameraGrammar, p.role, p.durationSec, pi, s1.aiTool, true, archetype.leadInCamera, p.cuts?.[0]?.durasiDetik))
       : 'steady cinematic frame with subtle natural motion';
     const ls = getLipsync(p.voDurationSec);
 
