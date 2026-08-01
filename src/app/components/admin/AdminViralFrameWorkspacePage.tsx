@@ -4,7 +4,7 @@ import { useParams, useNavigate, Link } from 'react-router';
 import {
   ArrowLeft, ArrowRight, ImageOff, Check, Film, AlertCircle,
   Copy, Download, Loader2, FileCheck2, FileArchive, X, Sparkles, History, Trash2, RefreshCw, Upload, Music, Captions,
-  Archive, RotateCcw, Send,
+  Archive, RotateCcw, Send, ChevronDown,
 } from 'lucide-react';
 // JSZip di-dynamic-import di handler (bukan static) agar tidak masuk chunk awal workspace.
 import {
@@ -12,7 +12,7 @@ import {
   TONES, PLATFORMS, PHOTO_LABELS, LANGUAGE_REGISTERS, REGISTER_INSTRUCTION,
   sceneFileName, characterFileName, AI_TOOL_FORMAT_SPEC,
   isNativeAudioTool, getClipMaxSec, namaFileKarakter, PLATFORM_BEHAVIOR,
-  sceneRoleFromParts, partIndexForScene, partsValidForTotal, type PartDef,
+  sceneRoleFromParts, partsValidForTotal, type PartDef,
   partDurationsToScenes, totalSceneCountOfParts,
   RULEBOOK_VERSION,
 } from './viralframe/options';
@@ -264,45 +264,106 @@ function Select({ value, onChange, opts }: {
   );
 }
 
-function StepIndicator({ current }: { current: number }) {
-  // current = 0 saat Step 0 (Label Foto), 1-5 saat wizard.
-  const steps = [
-    { n: 0, label: 'Label Foto', enabled: true },
-    { n: 1, label: 'Pilih Foto per Scene', enabled: true },
-    { n: 2, label: 'Pilih Karakter', enabled: true },
-    { n: 3, label: 'Pilih Mode', enabled: true },
-    { n: 4, label: 'Parameter Video', enabled: true },
-    { n: 5, label: 'Generate Prompt', enabled: true },
-  ];
+// Judul section wizard — SATU sumber, dipakai StepIndicator dan header <Section>
+// agar keduanya tidak pernah menyebut nama berbeda untuk step yang sama.
+const SECTION_TITLES = [
+  'Label Foto & Rancang Part',
+  'Pilih Karakter',
+  'Pilih Mode',
+  'Parameter Video',
+  'Generate Prompt',
+];
+
+function StepIndicator({ current, done, onJump }: {
+  current: number;
+  /** Section yang validasinya sudah lolos — dicentang di bar. */
+  done: (n: number) => boolean;
+  onJump: (n: number) => void;
+}) {
+  const steps = SECTION_TITLES.map((label, n) => ({ n, label, enabled: true }));
   return (
     <div className="flex items-center">
       {steps.map((s, i) => {
-        const done = current > s.n;
+        const selesai = done(s.n);
         const active = current === s.n;
         return (
           <div key={s.n} className="flex items-center flex-1 last:flex-none">
-            <div className="flex flex-col items-center">
+            <button type="button" onClick={() => onJump(s.n)}
+              className="flex flex-col items-center group" title={`Buka: ${s.label}`}>
               <div
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
-                  active ? 'text-white' : done ? 'text-white' : s.enabled ? 'text-[#64748B] bg-gray-100' : 'text-[#CBD5E1] bg-gray-50'
+                  active || selesai ? 'text-white' : 'text-[#64748B] bg-gray-100 group-hover:bg-gray-200'
                 }`}
-                style={active || done ? { background: ACCENT } : undefined}
+                style={active || selesai ? { background: ACCENT } : undefined}
               >
-                {done ? <Check size={15} /> : s.n}
+                {selesai && !active ? <Check size={15} /> : s.n + 1}
               </div>
               <span className={`mt-1.5 text-[11px] font-medium text-center leading-tight max-w-[80px] ${
-                active ? 'text-[#0F172A]' : 'text-[#94A3B8]'
+                active ? 'text-[#0F172A]' : 'text-[#94A3B8] group-hover:text-[#64748B]'
               }`}>
                 {s.label}
-                {!s.enabled && <span className="block text-[9px] text-[#CBD5E1]">Segera</span>}
               </span>
-            </div>
+            </button>
             {i < steps.length - 1 && (
-              <div className="flex-1 h-0.5 mx-1 mb-5 rounded" style={{ background: current > s.n ? ACCENT : '#E2E8F0' }} />
+              <div className="flex-1 h-0.5 mx-1 mb-5 rounded" style={{ background: selesai ? ACCENT : '#E2E8F0' }} />
             )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** Tombol Kembali/Lanjut di kaki tiap section accordion. */
+function SectionNav({ onBack, onNext }: { onBack: () => void; onNext: () => void }) {
+  return (
+    <div className="flex items-center justify-between pt-1">
+      <button onClick={onBack}
+        className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-[#64748B] border border-gray-200 hover:bg-gray-50 transition-colors">
+        <ArrowLeft size={15} /> Kembali
+      </button>
+      <button onClick={onNext}
+        className="flex items-center gap-1.5 px-5 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+        style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+        Lanjut <ArrowRight size={15} />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Satu langkah wizard sebagai panel accordion. Sejak 2026-08-01 wizard TIDAK lagi
+ * mengganti isi layar per step — semua section bertumpuk di satu halaman, step
+ * berikutnya muncul DI BAWAH, dan tiap section bisa dibuka/ditutup lewat header.
+ * Header selalu terlihat walau section tertutup, jadi user bisa melompat mundur
+ * tanpa kehilangan konteks step yang sudah diisi.
+ */
+function Section({ n, title, open, done, onToggle, children, footer }: {
+  n: number; title: string; open: boolean; done: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <button type="button" onClick={onToggle}
+        aria-expanded={open}
+        className={`w-full flex items-center gap-3 p-4 text-left transition-colors ${open ? 'bg-gray-50' : 'hover:bg-gray-50'}`}>
+        <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+          open || done ? 'text-white' : 'text-[#64748B] bg-gray-100'
+        }`} style={open || done ? { background: ACCENT } : undefined}>
+          {done && !open ? <Check size={14} /> : n + 1}
+        </span>
+        <span className="font-display font-bold text-[#0F172A] flex-1 min-w-0">{title}</span>
+        {done && <span className="text-[11px] font-semibold text-emerald-600 shrink-0">Lengkap</span>}
+        <ChevronDown size={18} className={`text-[#94A3B8] shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="p-5 pt-4 border-t border-gray-100 space-y-5">
+          {children}
+          {footer}
+        </div>
+      )}
     </div>
   );
 }
@@ -909,9 +970,10 @@ function AIGenerateTab({
               </div>
             </div>
             <div className="flex gap-2 mt-2">
-              <button type="button" onClick={() => onEditStep(1)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Step 1 (Foto)</button>
-              <button type="button" onClick={() => onEditStep(2)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Step 2 (Karakter)</button>
-              <button type="button" onClick={() => onEditStep(3)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Step 3 (Parameter)</button>
+              {/* Index section accordion: 0 Label/Part · 1 Karakter · 3 Parameter */}
+              <button type="button" onClick={() => onEditStep(0)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Label Foto &amp; Part</button>
+              <button type="button" onClick={() => onEditStep(1)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Karakter</button>
+              <button type="button" onClick={() => onEditStep(3)} className="text-xs font-medium text-[#1565C0] hover:underline">Edit Parameter</button>
             </div>
           </div>
 
@@ -2348,19 +2410,21 @@ export default function AdminViralFrameWorkspacePage() {
   const [prop, setProp] = useState<PropertyDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [step, setStep] = useState(1);
+  // Wizard = accordion (2026-08-01). `step` bukan lagi "halaman yang sedang
+  // ditampilkan" melainkan "section yang sedang TERBUKA"; section lain tetap
+  // ter-render sebagai header tertutup dan bisa dibuka kapan saja.
+  // Index section: 0 Label Foto & Rancang Part · 1 Karakter · 2 Mode
+  //                3 Parameter Video · 4 Generate Prompt
+  const [step, setStep] = useState(0);
   const [showErrors, setShowErrors] = useState(false);
-  const [activePhotoScene, setActivePhotoScene] = useState(1);
 
-  // YouTube Long mengganti SELURUH wizard (bukan cuma pre-select tab Step 5) —
-  // baru aktif setelah user melewati Step 3 (Mode), bukan begitu mode dipilih,
-  // supaya kartu pilihan mode itu sendiri masih sempat ter-render.
-  const isYoutubeLongMode = mode === 'youtube-long' && step > 3;
+  // YouTube Long mengganti isi section Generate (bukan cuma pre-select tab) —
+  // baru aktif setelah section Mode dilewati, supaya kartu pilihan mode itu
+  // sendiri masih sempat ter-render.
+  const isYoutubeLongMode = mode === 'youtube-long' && step > 2;
 
-  // Step 0 — Label Foto: gerbang sebelum wizard 1-4. selectedForVideo = pool foto
-  // yang dicentang "jadi bahan" — Step 1 (Pilih Foto per Scene) hanya menampilkan
-  // foto dari pool ini, bukan seluruh galeri properti.
-  const [labelFotoDone, setLabelFotoDone] = useState(false);
+  // selectedForVideo = pool foto yang dicentang "jadi bahan". AI Rancang
+  // Storyboard hanya boleh menugaskan foto dari pool ini.
   const [selectedForVideo, setSelectedForVideo] = useState<Set<number>>(new Set());
   const toggleSelectedForVideo = (photoId: number) => {
     setSelectedForVideo(prev => {
@@ -2807,10 +2871,7 @@ export default function AdminViralFrameWorkspacePage() {
     });
   };
 
-  const setScene = (idx: number, patch: Partial<SceneAssign>) =>
-    setScenes(prev => prev.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
-
-  // Simpan label ruangan foto langsung dari Step 1 — persist ke property_images.label_ruangan
+  // Simpan label ruangan foto — persist ke property_images.label_ruangan
   // (sama endpoint yang dipakai kartu foto di Detail Properti, lihat PropertyPhotosCard.tsx)
   // supaya user tidak perlu bolak-balik halaman lain, DAN AI Rancang Storyboard (yang membaca
   // label_ruangan langsung dari DB) langsung bisa dipakai tanpa langkah tambahan. Optimistic:
@@ -2861,12 +2922,20 @@ export default function AdminViralFrameWorkspacePage() {
     } else if (s1.sceneCount < 2 || s1.sceneCount > 12) {
       e.push('Jumlah scene harus 2–12.');
     }
-    scenes.slice(0, s1.sceneCount).forEach((sc, i) => {
-      if (sc.photoId == null) e.push(`Scene ${i + 1}: belum memilih foto.`);
-      if (!sc.label) e.push(`Scene ${i + 1}: belum memilih label foto.`);
-    });
+    // Gerbang yang dulu dipegang tombol "Lanjut" milik LabelFotoStep — sekarang
+    // section ini menampung label foto DAN Part, jadi syaratnya ikut ke sini.
+    if (selectedForVideo.size === 0) {
+      e.push('Centang minimal 1 foto sebagai bahan video.');
+    }
+    // Foto per scene ditugaskan AI, bukan dipilih manual lagi — arahkan user ke
+    // tombolnya alih-alih menyuruh "pilih foto" yang kontrolnya sudah tidak ada.
+    const sceneBelumLengkap = scenes.slice(0, s1.sceneCount)
+      .some(sc => sc.photoId == null || !sc.label);
+    if (sceneBelumLengkap) {
+      e.push('Foto per scene belum ditugaskan — jalankan "AI Rancang Storyboard" untuk mengisi tiap Part.');
+    }
     return e;
-  }, [scenes, s1.sceneCount, s1.durationMode, s1.parts]);
+  }, [scenes, s1.sceneCount, s1.durationMode, s1.parts, selectedForVideo]);
 
   const karakterErrors = useMemo(() => {
     const e: string[] = [];
@@ -2904,27 +2973,35 @@ export default function AdminViralFrameWorkspacePage() {
     return e;
   }, [s1]);
 
-  const errorsFor = (st: number) => (st === 1 ? fotoErrors : st === 2 ? karakterErrors : st === 3 ? modeErrors : st === 4 ? paramErrors : []);
+  const LAST_SECTION = 4;
+  const errorsFor = (st: number) => (st === 0 ? fotoErrors : st === 1 ? karakterErrors : st === 2 ? modeErrors : st === 3 ? paramErrors : []);
+  /** Section dianggap "Lengkap" bila validasinya lolos — dipakai centang header & bar. */
+  const sectionDone = useCallback((n: number) => errorsFor(n).length === 0, [fotoErrors, karakterErrors, modeErrors, paramErrors]);
 
+  // Buka section berikutnya (validasi dulu). Section yang ditinggalkan otomatis
+  // menutup — hanya satu yang terbuka agar halaman tidak jadi gulungan panjang.
   const goNext = () => {
-    const errs = errorsFor(step);
-    if (errs.length > 0) { setShowErrors(true); return; }
+    if (errorsFor(step).length > 0) { setShowErrors(true); return; }
     setShowErrors(false);
-    setStep(s => Math.min(5, s + 1));
+    setStep(s => Math.min(LAST_SECTION, s + 1));
   };
-  // Dari Step 1, "Kembali" pulang ke Step 0 (Label Foto) — bukan mentok/disabled,
-  // supaya seleksi bahan & label masih bisa dikoreksi tanpa reload halaman.
   const goBack = () => {
     setShowErrors(false);
-    if (step === 1) { setLabelFotoDone(false); return; }
-    setStep(s => Math.max(1, s - 1));
+    setStep(s => Math.max(0, s - 1));
+  };
+  // Klik header / bar indikator: toggle buka-tutup. Melompat MUNDUR selalu boleh;
+  // melompat maju juga dibiarkan (tiap section punya validasi sendiri, dan
+  // memblokirnya bikin user terjebak tanpa tahu sebabnya).
+  const toggleSection = (n: number) => {
+    setShowErrors(false);
+    setStep(cur => (cur === n ? -1 : n));
   };
 
-  // ─── Step 5: compile Master Prompt ──
-  // #1: hanya kompilasi saat benar-benar berada di Step 5 (Generate), dan pakai
-  // input yang di-debounce 300ms — supaya mengetik/memilih di Step 1-4 tidak
+  // ─── Compile Master Prompt ──
+  // #1: hanya kompilasi saat section Generate benar-benar terbuka, dan pakai
+  // input yang di-debounce 300ms — supaya mengetik/memilih di section lain tidak
   // memicu build string besar tiap ketukan (penyebab utama lag).
-  const onStep4 = step === 5;
+  const onStep4 = step === LAST_SECTION;
   const compileSrc = useMemo(() => ({ s1, scenes, s3 }), [s1, scenes, s3]);
   const debouncedSrc = useDebouncedValue(compileSrc, 300);
   const masterPrompt = useMemo(
@@ -3219,9 +3296,18 @@ export default function AdminViralFrameWorkspacePage() {
         </div>
       </div>
 
-      {/* Tahap 4: YouTube Long 1-klik menggantikan wizard */}
+      {/* Tahap 4: YouTube Long 1-klik menggantikan wizard.
+          Tombol kembali WAJIB ada di sini: sejak wizard jadi accordion, tombol
+          navigasi hidup di dalam tiap section — dan section-section itu tidak
+          ter-render di mode ini, jadi tanpa tombol ini user terjebak. */}
       {isYoutubeLongMode && prop && (
-        <YouTubeLongViewMemo propertyId={prop.id} propertyTitle={prop.title} photos={prop.images} />
+        <>
+          <button onClick={() => setStep(2)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-[#64748B] border border-gray-200 bg-white hover:bg-gray-50 transition-colors">
+            <ArrowLeft size={15} /> Kembali ke pilihan Mode
+          </button>
+          <YouTubeLongViewMemo propertyId={prop.id} propertyTitle={prop.title} photos={prop.images} />
+        </>
       )}
 
       {!isYoutubeLongMode && (<>
@@ -3268,11 +3354,11 @@ export default function AdminViralFrameWorkspacePage() {
                     </div>
                     <div className="flex gap-1.5 flex-shrink-0">
                       {h.params_json && (
-                        <button onClick={() => { try { applyConfig(JSON.parse(h.params_json!)); setStep(1); setShowHistory(false); } catch { /* ignore */ } }}
+                        <button onClick={() => { try { applyConfig(JSON.parse(h.params_json!)); setStep(0); setShowHistory(false); } catch { /* ignore */ } }}
                           className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-[#1565C0] border border-[#1565C0]/30 hover:bg-[#F0F7FF]">Muat konfigurasi</button>
                       )}
                       {hasResult && (
-                        <button onClick={() => { try { setValidData(JSON.parse(h.result_json!)); setStep(5); setStep4Tab('validate'); setShowHistory(false); } catch { /* ignore */ } }}
+                        <button onClick={() => { try { setValidData(JSON.parse(h.result_json!)); setStep(4); setStep4Tab('validate'); setShowHistory(false); } catch { /* ignore */ } }}
                           className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-emerald-700 border border-emerald-200 hover:bg-emerald-50">Lihat hasil</button>
                       )}
                       <button onClick={() => deleteHistoryItem(h.id)} disabled={deletingHistoryId === h.id}
@@ -3289,36 +3375,13 @@ export default function AdminViralFrameWorkspacePage() {
         </div>
       )}
 
-      {/* Step indicator — tampil sejak Step 0 supaya alurnya punya konteks */}
-      {!labelFotoDone && prop && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-          <StepIndicator current={0} />
-        </div>
-      )}
-
-      {/* Step 0 — Label Foto: gerbang sebelum wizard 1-4 */}
-      {!labelFotoDone && prop && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-          <LabelFotoStep
-            images={prop.images}
-            kodeListing={prop.kode_listing}
-            onSaveLabel={savePhotoLabel}
-            selectedIds={selectedForVideo}
-            onToggleSelected={toggleSelectedForVideo}
-            onContinue={() => setLabelFotoDone(true)}
-          />
-        </div>
-      )}
-
-      {/* Step indicator */}
-      {labelFotoDone && (
+      {/* Bar indikator — ringkasan progres + pintasan membuka section mana pun */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <StepIndicator current={step} />
+        <StepIndicator current={step} done={sectionDone} onJump={toggleSection} />
       </div>
-      )}
 
       {/* Daftar error */}
-      {labelFotoDone && showErrors && activeErrors.length > 0 && (
+      {showErrors && activeErrors.length > 0 && (
         <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
           <div className="flex items-center gap-2 text-red-700 font-semibold text-sm mb-1.5">
             <AlertCircle size={15} /> Lengkapi dulu:
@@ -3329,9 +3392,235 @@ export default function AdminViralFrameWorkspacePage() {
         </div>
       )}
 
-      {/* ─── STEP 3 — Parameter Video ─── */}
-      {labelFotoDone && step === 4 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-5">
+
+      {/* ─── SECTION 0 — Label Foto & Rancang Part ───
+          Gabungan Step 0 (label + centang bahan) dan Part designer. Pemilihan foto
+          per scene SENGAJA dihapus (2026-08-01): dulu foto ditanya dua kali (di
+          Label Foto lalu lagi per scene) dan itu membingungkan. Sekarang AI Rancang
+          Storyboard yang menugaskan foto; hasilnya tampil read-only per Part. */}
+      {prop && (
+        <Section
+          n={0} title={SECTION_TITLES[0]}
+          open={step === 0} done={sectionDone(0)}
+          onToggle={() => toggleSection(0)}
+          footer={
+            <div className="flex justify-end pt-1">
+              <button onClick={goNext}
+                className="flex items-center gap-1.5 px-5 py-2 rounded-xl text-sm font-semibold text-white"
+                style={{ background: ACCENT }}>
+                Lanjut <ArrowRight size={15} />
+              </button>
+            </div>
+          }>
+          <LabelFotoStep
+            images={prop.images}
+            kodeListing={prop.kode_listing}
+            onSaveLabel={savePhotoLabel}
+            selectedIds={selectedForVideo}
+            onToggleSelected={toggleSelectedForVideo}
+          />
+
+          <div className="border-t border-gray-100 pt-4 space-y-5">
+          <p className="text-sm text-[#64748B]">
+            {s1.durationMode === 'part'
+              ? 'Tentukan babak (Part) video dan durasi tiap Part, lalu jalankan AI Rancang Storyboard — AI yang menentukan berapa scene tiap Part dan foto mana saja yang dipakai.'
+              : 'Tentukan jumlah scene. Foto tiap scene ditugaskan lewat AI Rancang Storyboard.'}
+          </p>
+
+          {s1.durationMode === 'part' ? (
+            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-[#F0F7FF] border border-[#1565C0]/20">
+              <span className="text-xs text-[#1565C0]">
+                Total <strong>{s1.sceneCount} scene</strong> · <strong>{durations.reduce((a, b) => a + b, 0)} detik</strong> — dihitung otomatis dari Part di bawah.
+              </span>
+              <button type="button"
+                onClick={() => update1('durationMode', 'uniform')}
+                className="text-[11px] text-[#64748B] hover:text-[#0F172A] underline shrink-0 ml-3">
+                Atur durasi per scene saja
+              </button>
+            </div>
+          ) : (
+            <Field label="Jumlah Scene" hint="Antara 2–12 scene">
+              <div className="flex items-center gap-3">
+                <input type="number" min={2} max={12} value={s1.sceneCount}
+                  onChange={e => setSceneCount(parseInt(e.target.value, 10))}
+                  className={`${selectCls} sm:w-40`} />
+                <button type="button"
+                  onClick={() => update1('durationMode', 'part')}
+                  className="text-[11px] text-[#1565C0] hover:text-[#0F4C9E] underline shrink-0">
+                  Pakai durasi per Part
+                </button>
+              </div>
+            </Field>
+          )}
+
+          {/* Rancang Part (Fase 6, opsional) — pengelompokan naratif di atas Scene.
+              Part TIDAK mengubah mekanisme Scene (tetap 1 foto = 1 generate call);
+              hanya membawa role di level lebih tinggi + label naratif. Kosong = fallback
+              role otomatis berdasar posisi (Hook scene pertama, CTA scene terakhir). */}
+          <Field
+            label={s1.durationMode === 'part' ? 'Rancang Part' : 'Rancang Part (opsional)'}
+            hint={s1.durationMode === 'part'
+              ? 'Tiap Part = satu babak naratif dengan durasi sendiri. Jumlah scene & foto per Part diisi AI.'
+              : 'Kelompokkan scene jadi babak naratif (Hook/Body/CTA) — kosongkan untuk perilaku otomatis berdasar posisi seperti biasa.'}>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={suggestStoryboard} disabled={suggestLoading}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-[#1565C0]/30 text-[#1565C0] hover:bg-[#F0F7FF] disabled:opacity-50 disabled:cursor-not-allowed">
+                  {suggestLoading ? 'Merancang…' : '🤖 AI Rancang Storyboard'}
+                </button>
+                <span className="text-[11px] text-[#94A3B8]">
+                  {s1.durationMode === 'part'
+                    ? 'AI menentukan jumlah scene & foto tiap Part dari durasi yang kamu set + label ruangan tersimpan.'
+                    : 'Isi Part + foto per scene otomatis dari label ruangan yang sudah tersimpan — tetap bisa diedit manual.'}
+                </span>
+              </div>
+              {suggestError && <p className="text-xs text-red-500">{suggestError}</p>}
+              {(s1.parts ?? []).map((p, idx) => {
+                // Scene yang dimiliki Part ini (nomor 1-based) — untuk menampilkan
+                // foto yang benar-benar terpasang, bukan sekadar kolam photoIds.
+                const mulai = (s1.parts ?? []).slice(0, idx).reduce((s, x) => s + x.sceneCount, 0);
+                const sceneNums = Array.from({ length: p.sceneCount }, (_, k) => mulai + k + 1);
+                const perScene = p.durationSec && p.sceneCount > 0 ? p.durationSec / p.sceneCount : 0;
+                return (
+                  <div key={idx} className="px-3 py-2 border border-gray-100 rounded-xl space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-[#94A3B8] w-14 shrink-0">Part {idx + 1}</span>
+                      <select value={p.role} onChange={e => updatePart(idx, { role: e.target.value as PartDef['role'] })}
+                        className="text-sm border border-gray-200 rounded-lg px-2 py-1">
+                        <option value="Hook">Hook</option>
+                        <option value="Body">Body</option>
+                        <option value="CTA">CTA</option>
+                      </select>
+
+                      {s1.durationMode === 'part' ? (
+                        <>
+                          <input type="number" min={2} max={120} value={p.durationSec ?? ''}
+                            onChange={e => updatePart(idx, { durationSec: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                            className="w-16 text-sm border border-gray-200 rounded-lg px-2 py-1" title="Durasi Part (detik)" />
+                          <span className="text-xs text-[#94A3B8] shrink-0">detik</span>
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#EFF6FF] text-[#1565C0] shrink-0" title="Ditentukan AI Rancang Storyboard">
+                            {p.sceneCount} scene{perScene > 0 ? ` · ~${perScene.toFixed(perScene % 1 ? 1 : 0)}s/scene` : ''}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <input type="number" min={1} max={s1.sceneCount} value={p.sceneCount}
+                            onChange={e => updatePart(idx, { sceneCount: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+                            className="w-16 text-sm border border-gray-200 rounded-lg px-2 py-1" title="Jumlah scene" />
+                          <span className="text-xs text-[#94A3B8]">scene</span>
+                        </>
+                      )}
+
+                      <input type="text" value={p.label ?? ''} placeholder="Label (opsional)"
+                        onChange={e => updatePart(idx, { label: e.target.value })}
+                        className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1 min-w-0" />
+                      <button type="button" onClick={() => removePart(idx)}
+                        className="text-xs text-red-500 hover:text-red-700 shrink-0">Hapus</button>
+                    </div>
+
+                    {/* Foto milik Part ini — dibaca dari scenes[] (penyimpanan kanonik),
+                        bukan dari p.photoIds, supaya edit manual per scene langsung terlihat. */}
+                    {s1.durationMode === 'part' && sceneNums.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap pl-14">
+                        {sceneNums.map(num => {
+                          const sc = scenes[num - 1];
+                          const img = sc?.photoId != null ? prop.images.find(im => im.id === sc.photoId) : null;
+                          return img ? (
+                            <img key={num} src={thumbSrc(img.url_webp, 64)} alt={sc?.label ?? ''}
+                              title={`Scene ${num}${sc?.label ? ` — ${sc.label}` : ''}`}
+                              className="w-8 h-8 rounded object-cover border border-gray-200" loading="lazy" decoding="async" />
+                          ) : (
+                            <span key={num} title={`Scene ${num} — belum ada foto`}
+                              className="w-8 h-8 rounded border border-dashed border-gray-300 flex items-center justify-center text-[9px] text-[#94A3B8]">{num}</span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              <div className="flex items-center justify-between">
+                <button type="button" onClick={addPart}
+                  className="text-xs font-semibold text-[#1565C0] hover:text-[#0F4C9E]">+ Tambah Part</button>
+                {s1.durationMode !== 'part' && (s1.parts ?? []).length > 0 && (() => {
+                  const sum = s1.parts!.reduce((s, p) => s + p.sceneCount, 0);
+                  return sum !== s1.sceneCount ? (
+                    <span className="text-xs text-amber-600">
+                      Jumlah scene di Part ({sum}) belum sama dengan Jumlah Scene total ({s1.sceneCount}) — role fallback ke otomatis sampai cocok.
+                    </span>
+                  ) : (
+                    <span className="text-xs text-emerald-600">✓ Sum cocok, Part aktif</span>
+                  );
+                })()}
+              </div>
+            </div>
+          </Field>
+
+          {/* Ringkasan penugasan foto — READ-ONLY. Foto per scene ditentukan AI
+              Rancang Storyboard; strip thumbnail per Part di atas adalah preview
+              utamanya. Blok ini hanya menegaskan kalau belum ada yang ditugaskan. */}
+          {prop.images.length === 0 ? (
+            <div className="text-center py-10">
+              <ImageOff size={28} className="text-gray-300 mx-auto mb-2" />
+              <p className="text-sm text-[#64748B]">Properti ini belum punya foto. Tambahkan foto di menu Properti dulu.</p>
+            </div>
+          ) : scenes.slice(0, s1.sceneCount).some(sc => sc?.photoId == null) ? (
+            <p className="text-xs text-amber-600">
+              Foto per scene belum ditugaskan. Klik <strong>AI Rancang Storyboard</strong> di atas — AI akan memilih foto dari {selectedForVideo.size} foto yang kamu centang jadi bahan.
+            </p>
+          ) : (
+            <p className="text-xs text-emerald-600">
+              ✓ {s1.sceneCount} scene sudah punya foto &amp; label. Lihat pembagiannya di strip tiap Part di atas.
+            </p>
+          )}
+          </div>
+        </Section>
+      )}
+
+      {/* ─── SECTION 1 — Pilih Karakter ─── */}
+      <Section
+        n={1} title={SECTION_TITLES[1]}
+        open={step === 1} done={sectionDone(1)}
+        onToggle={() => toggleSection(1)}
+        footer={<SectionNav onBack={goBack} onNext={goNext} />}>
+        <CharacterStep value={s3} onChange={update3} />
+      </Section>
+
+      {/* ─── SECTION 2 — Pilih Mode ─── */}
+      <Section
+        n={2} title={SECTION_TITLES[2]}
+        open={step === 2} done={sectionDone(2)}
+        onToggle={() => toggleSection(2)}
+        footer={<SectionNav onBack={goBack} onNext={goNext} />}>
+        <div className="space-y-4">
+          <p className="text-sm text-[#64748B]">Pilih jalur generate yang mau dipakai untuk video ini.</p>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <button type="button" onClick={() => setMode('ai-generate')}
+              className={`text-left p-4 rounded-2xl border-2 transition-all ${mode === 'ai-generate' ? 'border-[#1565C0] bg-[#F0F7FF]' : 'border-gray-100 hover:border-gray-200'}`}>
+              <div className="text-sm font-bold text-[#0F172A] flex items-center gap-1.5">⚡ AI Generate <span className="text-[10px] font-semibold text-white bg-[#1565C0] rounded-full px-1.5 py-0.5">REKOMENDASI</span></div>
+              <p className="text-xs text-[#64748B] mt-1">AI menyusun prompt & narasi otomatis dari parameter yang kamu pilih.</p>
+            </button>
+            <button type="button" onClick={() => setMode('manual')}
+              className={`text-left p-4 rounded-2xl border-2 transition-all ${mode === 'manual' ? 'border-[#1565C0] bg-[#F0F7FF]' : 'border-gray-100 hover:border-gray-200'}`}>
+              <div className="text-sm font-bold text-[#0F172A]">Manual (4 Step)</div>
+              <p className="text-xs text-[#64748B] mt-1">Kamu susun & tulis sendiri Master Prompt-nya, AI hanya bantu compile.</p>
+            </button>
+            <button type="button" onClick={() => setMode('youtube-long')}
+              className={`text-left p-4 rounded-2xl border-2 transition-all ${mode === 'youtube-long' ? 'border-red-500 bg-red-50' : 'border-gray-100 hover:border-gray-200'}`}>
+              <div className="text-sm font-bold text-[#0F172A]">📺 YouTube Long (16:9)</div>
+              <p className="text-xs text-[#64748B] mt-1">Alur 1-klik terpisah untuk video landscape berdurasi panjang.</p>
+            </button>
+          </div>
+        </div>
+      </Section>
+
+      {/* ─── SECTION 3 — Parameter Video ─── */}
+      <Section
+        n={3} title={SECTION_TITLES[3]}
+        open={step === 3} done={sectionDone(3)}
+        onToggle={() => toggleSection(3)}
+        footer={<SectionNav onBack={goBack} onNext={goNext} />}>
+        <div className="space-y-5">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <h2 className="font-display font-bold text-[#0F172A]">Step 4 — Parameter Video</h2>
             {/* R11: Preset tim */}
@@ -3589,283 +3878,14 @@ export default function AdminViralFrameWorkspacePage() {
             </Field>
           )}
         </div>
-      )}
+      </Section>
 
-      {/* ─── STEP 1 — Pilih Foto per Scene ───
-          Termasuk Jumlah Scene + Rancang Part + AI Rancang Storyboard (pindahan dari
-          blok parameter): struktur scene dan pengisian fotonya dirancang di satu layar. */}
-      {labelFotoDone && step === 1 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-5">
-          <h2 className="font-display font-bold text-[#0F172A]">Step 1 — Rancang Part & Foto</h2>
-          <p className="text-sm text-[#64748B] -mt-3">
-            {s1.durationMode === 'part'
-              ? 'Tentukan babak (Part) video dan durasi tiap Part, lalu jalankan AI Rancang Storyboard — AI yang menentukan berapa scene tiap Part dan foto mana saja yang dipakai. Semua hasilnya tetap bisa diedit manual.'
-              : 'Tentukan jumlah scene, lalu pilih 1 foto untuk tiap scene. Foto yang sama boleh dipakai di beberapa scene.'}
-          </p>
-
-          {s1.durationMode === 'part' ? (
-            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-[#F0F7FF] border border-[#1565C0]/20">
-              <span className="text-xs text-[#1565C0]">
-                Total <strong>{s1.sceneCount} scene</strong> · <strong>{durations.reduce((a, b) => a + b, 0)} detik</strong> — dihitung otomatis dari Part di bawah.
-              </span>
-              <button type="button"
-                onClick={() => update1('durationMode', 'uniform')}
-                className="text-[11px] text-[#64748B] hover:text-[#0F172A] underline shrink-0 ml-3">
-                Atur durasi per scene saja
-              </button>
-            </div>
-          ) : (
-            <Field label="Jumlah Scene" hint="Antara 2–12 scene">
-              <div className="flex items-center gap-3">
-                <input type="number" min={2} max={12} value={s1.sceneCount}
-                  onChange={e => setSceneCount(parseInt(e.target.value, 10))}
-                  className={`${selectCls} sm:w-40`} />
-                <button type="button"
-                  onClick={() => update1('durationMode', 'part')}
-                  className="text-[11px] text-[#1565C0] hover:text-[#0F4C9E] underline shrink-0">
-                  Pakai durasi per Part
-                </button>
-              </div>
-            </Field>
-          )}
-
-          {/* Rancang Part (Fase 6, opsional) — pengelompokan naratif di atas Scene.
-              Part TIDAK mengubah mekanisme Scene (tetap 1 foto = 1 generate call);
-              hanya membawa role di level lebih tinggi + label naratif. Kosong = fallback
-              role otomatis berdasar posisi (Hook scene pertama, CTA scene terakhir). */}
-          <Field
-            label={s1.durationMode === 'part' ? 'Rancang Part' : 'Rancang Part (opsional)'}
-            hint={s1.durationMode === 'part'
-              ? 'Tiap Part = satu babak naratif dengan durasi sendiri. Jumlah scene & foto per Part diisi AI.'
-              : 'Kelompokkan scene jadi babak naratif (Hook/Body/CTA) — kosongkan untuk perilaku otomatis berdasar posisi seperti biasa.'}>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={suggestStoryboard} disabled={suggestLoading}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-[#1565C0]/30 text-[#1565C0] hover:bg-[#F0F7FF] disabled:opacity-50 disabled:cursor-not-allowed">
-                  {suggestLoading ? 'Merancang…' : '🤖 AI Rancang Storyboard'}
-                </button>
-                <span className="text-[11px] text-[#94A3B8]">
-                  {s1.durationMode === 'part'
-                    ? 'AI menentukan jumlah scene & foto tiap Part dari durasi yang kamu set + label ruangan tersimpan.'
-                    : 'Isi Part + foto per scene otomatis dari label ruangan yang sudah tersimpan — tetap bisa diedit manual.'}
-                </span>
-              </div>
-              {suggestError && <p className="text-xs text-red-500">{suggestError}</p>}
-              {(s1.parts ?? []).map((p, idx) => {
-                // Scene yang dimiliki Part ini (nomor 1-based) — untuk menampilkan
-                // foto yang benar-benar terpasang, bukan sekadar kolam photoIds.
-                const mulai = (s1.parts ?? []).slice(0, idx).reduce((s, x) => s + x.sceneCount, 0);
-                const sceneNums = Array.from({ length: p.sceneCount }, (_, k) => mulai + k + 1);
-                const perScene = p.durationSec && p.sceneCount > 0 ? p.durationSec / p.sceneCount : 0;
-                return (
-                  <div key={idx} className="px-3 py-2 border border-gray-100 rounded-xl space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-[#94A3B8] w-14 shrink-0">Part {idx + 1}</span>
-                      <select value={p.role} onChange={e => updatePart(idx, { role: e.target.value as PartDef['role'] })}
-                        className="text-sm border border-gray-200 rounded-lg px-2 py-1">
-                        <option value="Hook">Hook</option>
-                        <option value="Body">Body</option>
-                        <option value="CTA">CTA</option>
-                      </select>
-
-                      {s1.durationMode === 'part' ? (
-                        <>
-                          <input type="number" min={2} max={120} value={p.durationSec ?? ''}
-                            onChange={e => updatePart(idx, { durationSec: Math.max(0, parseInt(e.target.value, 10) || 0) })}
-                            className="w-16 text-sm border border-gray-200 rounded-lg px-2 py-1" title="Durasi Part (detik)" />
-                          <span className="text-xs text-[#94A3B8] shrink-0">detik</span>
-                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#EFF6FF] text-[#1565C0] shrink-0" title="Ditentukan AI Rancang Storyboard">
-                            {p.sceneCount} scene{perScene > 0 ? ` · ~${perScene.toFixed(perScene % 1 ? 1 : 0)}s/scene` : ''}
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <input type="number" min={1} max={s1.sceneCount} value={p.sceneCount}
-                            onChange={e => updatePart(idx, { sceneCount: Math.max(1, parseInt(e.target.value, 10) || 1) })}
-                            className="w-16 text-sm border border-gray-200 rounded-lg px-2 py-1" title="Jumlah scene" />
-                          <span className="text-xs text-[#94A3B8]">scene</span>
-                        </>
-                      )}
-
-                      <input type="text" value={p.label ?? ''} placeholder="Label (opsional)"
-                        onChange={e => updatePart(idx, { label: e.target.value })}
-                        className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1 min-w-0" />
-                      <button type="button" onClick={() => removePart(idx)}
-                        className="text-xs text-red-500 hover:text-red-700 shrink-0">Hapus</button>
-                    </div>
-
-                    {/* Foto milik Part ini — dibaca dari scenes[] (penyimpanan kanonik),
-                        bukan dari p.photoIds, supaya edit manual per scene langsung terlihat. */}
-                    {s1.durationMode === 'part' && sceneNums.length > 0 && (
-                      <div className="flex items-center gap-1.5 flex-wrap pl-14">
-                        {sceneNums.map(num => {
-                          const sc = scenes[num - 1];
-                          const img = sc?.photoId != null ? prop.images.find(im => im.id === sc.photoId) : null;
-                          return img ? (
-                            <img key={num} src={thumbSrc(img.url_webp, 64)} alt={sc?.label ?? ''}
-                              title={`Scene ${num}${sc?.label ? ` — ${sc.label}` : ''}`}
-                              className="w-8 h-8 rounded object-cover border border-gray-200" loading="lazy" decoding="async" />
-                          ) : (
-                            <span key={num} title={`Scene ${num} — belum ada foto`}
-                              className="w-8 h-8 rounded border border-dashed border-gray-300 flex items-center justify-center text-[9px] text-[#94A3B8]">{num}</span>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              <div className="flex items-center justify-between">
-                <button type="button" onClick={addPart}
-                  className="text-xs font-semibold text-[#1565C0] hover:text-[#0F4C9E]">+ Tambah Part</button>
-                {s1.durationMode !== 'part' && (s1.parts ?? []).length > 0 && (() => {
-                  const sum = s1.parts!.reduce((s, p) => s + p.sceneCount, 0);
-                  return sum !== s1.sceneCount ? (
-                    <span className="text-xs text-amber-600">
-                      Jumlah scene di Part ({sum}) belum sama dengan Jumlah Scene total ({s1.sceneCount}) — role fallback ke otomatis sampai cocok.
-                    </span>
-                  ) : (
-                    <span className="text-xs text-emerald-600">✓ Sum cocok, Part aktif</span>
-                  );
-                })()}
-              </div>
-            </div>
-          </Field>
-
-          {prop.images.length === 0 ? (
-            <div className="text-center py-10">
-              <ImageOff size={28} className="text-gray-300 mx-auto mb-2" />
-              <p className="text-sm text-[#64748B]">Properti ini belum punya foto. Tambahkan foto di menu Properti dulu.</p>
-            </div>
-          ) : (
-            Array.from({ length: s1.sceneCount }).map((_, i) => {
-              const sc = scenes[i];
-              const role = sceneRoleFromParts(i, s1.sceneCount, s1.parts);
-              const isOpen = activePhotoScene === i + 1;
-              const selectedImg = sc?.photoId != null ? prop.images.find(im => im.id === sc.photoId) : null;
-              const usesParts = partsValidForTotal(s1.parts, s1.sceneCount);
-              const partIdx = usesParts ? partIndexForScene(i, s1.parts, s1.sceneCount) : -1;
-              const isFirstOfPart = usesParts && partIdx >= 0 && (i === 0 || partIndexForScene(i - 1, s1.parts, s1.sceneCount) !== partIdx);
-              const part = isFirstOfPart ? s1.parts![partIdx] : null;
-              return (
-                <div key={i}>
-                  {part && (
-                    <div className="text-xs font-semibold text-[#1565C0] uppercase tracking-wide px-1 pt-2 pb-1">
-                      Part {partIdx + 1} — {part.role}{part.label ? `: ${part.label}` : ''}
-                    </div>
-                  )}
-                <div className="border border-gray-100 rounded-xl">
-                  <button type="button"
-                    onClick={() => setActivePhotoScene(isOpen ? 0 : i + 1)}
-                    className={`w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors ${isOpen ? 'rounded-t-xl' : 'rounded-xl'}`}>
-                    <span className="font-semibold text-[#0F172A] text-sm flex items-center gap-2">
-                      Scene {i + 1} <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-[#EFF6FF] text-[#1565C0]">{role}</span>
-                      {selectedImg && (
-                        <span className="flex items-center gap-1.5 text-xs text-emerald-600">
-                          <img src={thumbSrc(selectedImg.url_webp, 64)} alt="" className="w-6 h-6 rounded object-cover" loading="lazy" decoding="async" />
-                          <Check size={13} /> Foto dipilih
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-[#94A3B8] text-xs">{isOpen ? '▲' : '▼'}</span>
-                  </button>
-
-                  {isOpen && (
-                    <div className="p-4 space-y-3">
-                      {/* Grid foto — hanya foto yang dicentang "jadi bahan" di Step 0 (Label Foto) */}
-                      <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                        {prop.images.filter(im => selectedForVideo.has(im.id)).map(im => {
-                          const selected = sc?.photoId === im.id;
-                          const src = thumbSrc(im.url_webp, 160);
-                          // Memilih foto ikut mengisi labelnya dari label_ruangan
-                          // tersimpan (migrasi 0026) — kecuali scene ini sudah
-                          // dilabeli manual, yang tidak boleh ditimpa diam-diam.
-                          return (
-                            <button key={im.id} type="button"
-                              onClick={() => setScene(i, {
-                                photoId: im.id,
-                                ...(sc?.label ? {} : { label: im.label_ruangan?.trim() || '' }),
-                              })}
-                              style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 80px' }}
-                              className={`relative aspect-square rounded-lg overflow-hidden border-2 transition-all ${
-                                selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-transparent hover:border-gray-300'
-                              }`}>
-                              {src ? (
-                                <img src={src} alt="" className="w-full h-full object-cover" loading="lazy" decoding="async" />
-                              ) : (
-                                <div className="w-full h-full bg-gray-100 flex items-center justify-center"><ImageOff size={14} className="text-gray-300" /></div>
-                              )}
-                              {selected && (
-                                <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-[#1565C0] flex items-center justify-center">
-                                  <Check size={10} className="text-white" />
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {/* Label foto — ikut tersimpan ke database (property_images.label_ruangan)
-                          begitu foto sudah dipilih, supaya tidak perlu label ulang di Detail
-                          Properti dan AI Rancang Storyboard langsung bisa dipakai. */}
-                      <div className="sm:w-64">
-                        <label className="block text-xs font-medium text-[#64748B] mb-1">Label Foto</label>
-                        <LabelSelect value={sc?.label ?? ''} onChange={v => {
-                          setScene(i, { label: v });
-                          if (sc?.photoId != null) savePhotoLabel(sc.photoId, v);
-                        }} options={PHOTO_LABELS} />
-                        {sc?.photoId != null && (
-                          <p className="text-[10px] text-[#94A3B8] mt-1">Tersimpan otomatis ke data foto properti.</p>
-                        )}
-                      </div>
-
-                      <button type="button"
-                        onClick={() => setActivePhotoScene(i + 1 < s1.sceneCount ? i + 2 : 0)}
-                        className="w-full text-xs text-[#1565C0] hover:text-[#0F4C9E] py-1 font-medium">
-                        {i + 1 < s1.sceneCount ? `Lanjut ke Scene ${i + 2} →` : '✓ Semua scene selesai'}
-                      </button>
-                    </div>
-                  )}
-                </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      )}
-
-      {/* ─── STEP 2 — Pilih Karakter ─── */}
-      {labelFotoDone && step === 2 && <CharacterStep value={s3} onChange={update3} />}
-
-      {/* ─── STEP 3 — Pilih Mode ─── */}
-      {labelFotoDone && step === 3 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
-          <h2 className="font-display font-bold text-[#0F172A]">Step 3 — Pilih Mode</h2>
-          <p className="text-sm text-[#64748B]">Pilih jalur generate yang mau dipakai untuk video ini.</p>
-          <div className="grid sm:grid-cols-3 gap-3">
-            <button type="button" onClick={() => setMode('ai-generate')}
-              className={`text-left p-4 rounded-2xl border-2 transition-all ${mode === 'ai-generate' ? 'border-[#1565C0] bg-[#F0F7FF]' : 'border-gray-100 hover:border-gray-200'}`}>
-              <div className="text-sm font-bold text-[#0F172A] flex items-center gap-1.5">⚡ AI Generate <span className="text-[10px] font-semibold text-white bg-[#1565C0] rounded-full px-1.5 py-0.5">REKOMENDASI</span></div>
-              <p className="text-xs text-[#64748B] mt-1">AI menyusun prompt & narasi otomatis dari parameter yang kamu pilih.</p>
-            </button>
-            <button type="button" onClick={() => setMode('manual')}
-              className={`text-left p-4 rounded-2xl border-2 transition-all ${mode === 'manual' ? 'border-[#1565C0] bg-[#F0F7FF]' : 'border-gray-100 hover:border-gray-200'}`}>
-              <div className="text-sm font-bold text-[#0F172A]">Manual (4 Step)</div>
-              <p className="text-xs text-[#64748B] mt-1">Kamu susun & tulis sendiri Master Prompt-nya, AI hanya bantu compile.</p>
-            </button>
-            <button type="button" onClick={() => setMode('youtube-long')}
-              className={`text-left p-4 rounded-2xl border-2 transition-all ${mode === 'youtube-long' ? 'border-red-500 bg-red-50' : 'border-gray-100 hover:border-gray-200'}`}>
-              <div className="text-sm font-bold text-[#0F172A]">📺 YouTube Long (16:9)</div>
-              <p className="text-xs text-[#64748B] mt-1">Alur 1-klik terpisah untuk video landscape berdurasi panjang.</p>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ─── STEP 5 — Generate & Validate ─── */}
-      {labelFotoDone && step === 5 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
-          <h2 className="font-display font-bold text-[#0F172A]">Step 5 — Generate Prompt &amp; Validasi</h2>
+      {/* ─── SECTION 4 — Generate & Validate ─── */}
+      <Section
+        n={4} title={SECTION_TITLES[4]}
+        open={step === 4} done={false}
+        onToggle={() => toggleSection(4)}>
+        <div className="space-y-4">
 
           {/* Tab toggle */}
           <div className="flex gap-2 border-b border-gray-100 -mx-1 px-1">
@@ -4133,29 +4153,14 @@ export default function AdminViralFrameWorkspacePage() {
             </div>
           )}
         </div>
-      )}
-
-      {/* ─── Navigasi wizard ─── */}
-      {/* Disembunyikan di Step 0: LabelFotoStep punya tombol Lanjut sendiri yang
-          ter-gate "minimal 1 foto jadi bahan". Kalau nav ini ikut tampil, tombol
-          Lanjut-nya aktif tanpa syarat dan gerbang Step 0 bisa dilewati. */}
-      {labelFotoDone && (
-      <div className="flex items-center justify-between">
-        <button onClick={goBack}
-          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-[#64748B] border border-gray-200 hover:bg-gray-50 transition-colors">
-          <ArrowLeft size={15} /> {step === 1 ? 'Kembali ke Label Foto' : 'Kembali'}
-        </button>
-        {step < 5 ? (
-          <button onClick={goNext}
-            className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-            style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
-            Lanjut <ArrowRight size={15} />
+        {/* Section terakhir: hanya "Kembali" — tidak ada step sesudahnya. */}
+        <div className="flex pt-1">
+          <button onClick={goBack}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-[#64748B] border border-gray-200 hover:bg-gray-50 transition-colors">
+            <ArrowLeft size={15} /> Kembali
           </button>
-        ) : (
-          <span className="text-xs text-[#94A3B8]">Fase V4 — Coming Soon</span>
-        )}
-      </div>
-      )}
+        </div>
+      </Section>
       </>)}
     </div>
   );

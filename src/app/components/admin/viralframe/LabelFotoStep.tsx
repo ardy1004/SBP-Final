@@ -39,17 +39,18 @@ interface Props {
   onSaveLabel: (photoId: number, label: string) => void;
   selectedIds: Set<number>;
   onToggleSelected: (photoId: number) => void;
-  onContinue: () => void;
 }
 
-export default function LabelFotoStep({ images, kodeListing, onSaveLabel, selectedIds, onToggleSelected, onContinue }: Props) {
+// Judul & tombol navigasi SENGAJA tidak ada di sini — sejak wizard jadi accordion
+// (semua step bertumpuk di satu halaman), header bernomor dan tombol Lanjut
+// disediakan oleh <Section> pembungkus di AdminViralFrameWorkspacePage.
+export default function LabelFotoStep({ images, kodeListing, onSaveLabel, selectedIds, onToggleSelected }: Props) {
   const [zipBusy, setZipBusy] = useState(false);
   const [zipError, setZipError] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
 
   const labeledCount = images.filter(im => im.label_ruangan?.trim()).length;
   const canDownloadZip = labeledCount > 0 && !zipBusy;
-  const canContinue = selectedIds.size > 0;
 
   const handleDownloadZip = async () => {
     setZipBusy(true); setZipError('');
@@ -81,13 +82,10 @@ export default function LabelFotoStep({ images, kodeListing, onSaveLabel, select
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="font-display font-bold text-lg text-[#0F172A]">Step 0 — Label Foto</h2>
-        <p className="text-sm text-[#64748B] mt-1">
-          Identifikasi tiap foto (Fasad, Dapur, Kamar Tidur, dst). Foto belum teridentifikasi ditandai merah.
-          Setelah itu, centang foto mana saja yang jadi bahan video ini.
-        </p>
-      </div>
+      <p className="text-sm text-[#64748B]">
+        Identifikasi tiap foto (Fasad, Dapur, Kamar Tidur, dst). Foto belum teridentifikasi ditandai merah.
+        Setelah itu, centang foto mana saja yang jadi bahan video ini.
+      </p>
 
       {images.length === 0 ? (
         <div className="text-center py-10 text-[#94A3B8] text-sm">Belum ada foto untuk properti ini.</div>
@@ -148,11 +146,6 @@ export default function LabelFotoStep({ images, kodeListing, onSaveLabel, select
         {zipError && <span className="text-xs text-red-600">{zipError}</span>}
         <div className="flex-1" />
         <span className="text-xs text-[#94A3B8]">{selectedIds.size} foto terpilih jadi bahan</span>
-        <button type="button" onClick={onContinue} disabled={!canContinue}
-          className="px-5 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-40 disabled:cursor-not-allowed"
-          style={{ background: '#1565C0' }}>
-          Lanjut →
-        </button>
       </div>
     </div>
   );
