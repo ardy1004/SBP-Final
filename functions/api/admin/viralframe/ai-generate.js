@@ -197,11 +197,12 @@ ${supportsRefImage
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Setiap scene akan dieksekusi dengan DUA gambar terlampir: foto ruangan/area scene + foto karakter. Kamu TIDAK melihat foto itu, maka:
   • SETIAP field 'prompt' WAJIB memuat frasa anchoring lingkungan, mis. 'the exact ${'{'}room/area{'}'} shown in the attached scene reference image' — jangan menjabarkan arsitektur/furnitur spesifik yang tidak bisa kamu pastikan.
-  • SETIAP field 'prompt' WAJIB memuat frasa anchoring karakter: 'the exact same person as the attached character reference image — identical face, hair, and outfit' (boleh diparafrase tipis, kata 'reference' wajib ada).
+  • SETIAP field 'prompt' WAJIB memuat frasa anchoring karakter: 'the exact same person as the attached character reference image — identical face, hair or head covering, and outfit' (boleh diparafrase tipis, kata 'reference' wajib ada).
+    ⚠️ TULIS 'hair or head covering' (ATAU sebut penutup kepala yang benar-benar terlihat, mis. 'hijab'), JANGAN 'hair' saja. Banyak talent memakai hijab/peci/topi; menyuruh model menyamakan "rambut" yang tidak terlihat di foto referensi adalah instruksi yang BERTENTANGAN dengan gambar, dan mendorong model mengarang rambut terurai → wajah/kepala morphing.
   • DILARANG mengarang kata sifat skala/arsitektur yang tidak terverifikasi dari foto: massive, huge, grand, towering, spacious, multi-story, modern facade, dsb. Cukup sebut jenis area sesuai label + rujuk ke reference image.
   • Aksi/gerak karakter dan kamera = satu-satunya hal yang kamu tambahkan di atas foto referensi.
 ✗ SALAH: 'Lisa stands in front of a massive 16-room boarding house facade'
-✓ BENAR: 'Lisa — the exact same person as the attached character reference image (identical face, hair, and outfit) — already standing in the exact front area shown in the attached scene reference image, greeting the viewer selfie-style'
+✓ BENAR: 'Lisa — the exact same person as the attached character reference image (identical face, hair or head covering, and outfit) — already standing in the exact front area shown in the attached scene reference image, greeting the viewer selfie-style'
 
 GERAKAN KAMERA WAJIB TETAP DI DALAM BINGKAI FOTO:
 Foto referensi hanya memuat apa yang terlihat di dalam bingkainya. Gerakan yang membawa
@@ -401,7 +402,7 @@ ${REALISM_QUALITY_CUES.map(c => `      - ${c}`).join('\n')}
 ✗ SALAH prompt: 'A building exterior shot.' (terlalu generik, < 30 kata)
 ✗ SALAH kualitas: '...Professional real estate videography, cinematic 4K.' (frasa generik dilarang, lihat larangan KUALITAS di atas)
 ${supportsRefImage
-    ? `✓ BENAR prompt: 'Steady handheld selfie-stick shot. Ayu — the exact same person as the attached character reference image, identical face, hair, and outfit — already standing in the exact front area shown in the attached scene reference image, gesturing warmly toward it with a confident smile. Warm natural daylight with soft practical falloff, subtle handheld micro-jitter, shallow depth of field.' (spesifik pada aksi & kamera, setia ke reference image, kualitas pakai kosakata fisik bukan generik, > 50 kata)`
+    ? `✓ BENAR prompt: 'Steady handheld selfie-stick shot. Ayu — the exact same person as the attached character reference image, identical face, hair or head covering, and outfit — already standing in the exact front area shown in the attached scene reference image, gesturing warmly toward it with a confident smile. Warm natural daylight with soft practical falloff, subtle handheld micro-jitter, shallow depth of field.' (spesifik pada aksi & kamera, setia ke reference image, kualitas pakai kosakata fisik bukan generik, > 50 kata)`
     : `✓ BENAR prompt: 'Cinematic drone pull-back revealing the modern 4-story boarding house facade in Depok, Sleman. Property consultant Ayu in black SBP uniform stands at entrance, gestures warmly toward the building with a confident smile. Warm golden hour lighting, natural film grain, shot on mirrorless camera look with shallow depth of field.' (spesifik, kualitas pakai kosakata fisik bukan generik, > 50 kata)`}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
