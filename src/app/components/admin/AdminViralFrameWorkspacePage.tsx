@@ -41,7 +41,7 @@ const AI_STATUS_COLOR: Record<'green' | 'yellow' | 'red', string> = { green: '#1
 // hanya untuk menghitung jumlah beat koreografi kamera Jalur C.
 const PLATFORM_DURASI_VF: Record<string, number> = { tiktok: 8, ig_reels: 8, yt_shorts: 10, fb_reels: 8 };
 import {
-  PLATFORM_OPTIONS, MUSIK_OPTIONS, FOTO_LABEL_OPTIONS,
+  PLATFORM_OPTIONS, MUSIK_OPTIONS, MUSIK_ROTASI_VALUES, FOTO_LABEL_OPTIONS,
 } from '../../lib/viralframe-constants';
 import { compileMasterPrompt, compileNaturalPrompt, estimateTokens, buildProductionNotes, buildCharacterDescription } from './viralframe/masterPromptCompiler';
 import { validatePartJson, partPromptText, type ParsedJSON, type ValidateResult } from './viralframe/jsonValidator';
@@ -493,12 +493,15 @@ interface AIGenerateTabProps {
   selectedKarakter: AISelectedKarakter | null;
   // Navigasi balik ke step yang belum lengkap
   onEditStep: (step: number) => void;
+  /** Resolver musik mode 'auto' (least-recently-used). Dikirim dari induk karena
+   *  riwayat generate (`history`) hidup di sana, bukan di tab ini. */
+  pilihMusikRotasi: () => string;
 }
 
 function AIGenerateTab({
   propertyId, propertyTitle, kodeListingStr, partSpecs, platform, platforms, aiTool, bahasa,
   ratio, tone, visualStyle, hookType, ctaType, archetype, register, cutawayExcluded,
-  selectedKarakter, onEditStep,
+  selectedKarakter, onEditStep, pilihMusikRotasi,
 }: AIGenerateTabProps) {
   const jumlahPart = partSpecs.length;
   const [musik, setMusik] = useState('corporate');
@@ -563,7 +566,15 @@ function AIGenerateTab({
   // maupun regenerate per scene (parameter identik agar hasilnya konsisten).
   const buildGeneratePayload = () => {
     if (!selectedKarakter) return null;
-    const musikOpt = MUSIK_OPTIONS.find(m => m.value === musik)!;
+    // Mode 'auto' → rotasi least-recently-used. Diresolve DI SINI (frontend), bukan
+    // di backend, karena MUSIK_OPTIONS hidup di frontend dan riwayat sudah termuat;
+    // menyalin konstantanya ke backend akan menciptakan batas kontrak baru — persis
+    // kelas bug yang sudah beberapa kali menggigit (parts/scenes, hookType nested).
+    const musikTerpilih = musik === 'auto' ? pilihMusikRotasi() : musik;
+    const musikOpt = MUSIK_OPTIONS.find(m => m.value === musikTerpilih)
+      // Jaga-jaga bila value tersimpan tidak dikenal (mis. opsi lama dihapus):
+      // jangan biarkan `!` meledak — jatuh ke 'none' yang selalu ada.
+      ?? MUSIK_OPTIONS.find(m => m.value === 'none')!;
     const part_assignments = partSpecs.map(p => ({
       part: p.part,
       role: p.role,
@@ -622,13 +633,19 @@ function AIGenerateTab({
       cta_type: ctaTypeLabel,
       part_roles,
       part_durations,
-      musik_value: musik,
+      // Kirim value yang SUDAH diresolve, bukan 'auto' — supaya riwayat mencatat
+      // musik yang benar-benar dipakai dan rotasi berikutnya punya data yang sahih.
+      musik_value: musikOpt.value,
       musik_prompt: musikOpt.prompt,
       karakter_id: selectedKarakter.id,
       expression: selectedKarakter.expression,
       part_assignments,
       supports_ref_image: supportsRefImage,
       archetype_note,
+      // ID arketipe (bukan cuma note-nya) — dipakai backend untuk mencatat riwayat
+      // supaya badge "dipakai Nx" di picker arketipe ikut menghitung generate Jalur C,
+      // bukan hanya yang lewat alur Master Prompt.
+      archetype,
       camera_directives,
       presenter_mode: arc?.presenterMode ?? 'on_camera',
       multi_shot_scene: arc?.allowMultiShotPerScene === true,
@@ -2602,6 +2619,66 @@ export default function AdminViralFrameWorkspacePage() {
   interface GenItem { id: number; params_json: string | null; master_prompt: string | null; result_json: string | null; created_at: string }
   const [history, setHistory] = useState<GenItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+
+  // Berapa kali tiap arketipe dipakai di N generate TERAKHIR properti ini.
+  // Dipakai untuk badge "sudah dipakai N generate terakhir" di picker arketipe —
+  // MEMBERI TAHU, bukan memaksa. Rotasi gaya adalah salah satu dari sedikit sumbu
+  // yang boleh bervariasi antar video tanpa merusak kesetiaan ke foto referensi
+  // (pencahayaan/waktu/cuaca TIDAK boleh — lihat variasiBlock di ai-generate.js).
+  const RIWAYAT_ARKETIPE_N = 5;
+  const pemakaianArketipe = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const h of history.slice(0, RIWAYAT_ARKETIPE_N)) {
+      if (!h.params_json) continue;
+      try {
+        const p = JSON.parse(h.params_json) as { archetype?: string; s1?: { archetype?: string } };
+        // Toleran dua bentuk, sama seperti pembaca exclusion di ai-generate.js.
+        // Bentuk yang tidak cocok persis inilah akar bug "anti-pengulangan tidak
+        // pernah jalan" (2026-08-02) — jangan ulangi asumsi bentuk tunggal.
+        const arc = p?.s1?.archetype ?? p?.archetype;
+        if (typeof arc === 'string' && arc) map.set(arc, (map.get(arc) ?? 0) + 1);
+      } catch { /* baris rusak — abaikan */ }
+    }
+    return map;
+  }, [history]);
+
+  /**
+   * Pilih musik untuk mode 'auto' — least-recently-used dari riwayat generate.
+   *
+   * ⚠️ WAJIB dideklarasikan SETELAH state `history`. Ditaruh sebelumnya, identifier
+   * `history` diam-diam teresolve ke `window.history` (global DOM) — typecheck
+   * menangkapnya sebagai "Property 'forEach' does not exist on type 'History'",
+   * tapi kalau kebetulan lolos tipe, hasilnya TDZ error saat render.
+   *
+   * Mereplikasi pola rotasi foto di suggest-storyboard.js (lastUsedIdx):
+   *  - riwayat ditelusuri TERBARU DULU, `idx` = umur generate (0 = paling baru);
+   *  - "first write wins" → map menyimpan pemakaian TERAKHIR tiap nilai;
+   *  - belum pernah dipakai = Infinity → prioritas tertinggi;
+   *  - perbandingan `>` ketat, jadi saat seri urutan daftar jadi penentu (stabil).
+   *
+   * Kenapa rotasi ini ada: string musik BEKU per opsi dan ditempel di akhir SETIAP
+   * prompt dengan perintah "JANGAN dimodifikasi", sehingga tanpa rotasi seluruh
+   * video di akun punya karakter audio yang identik.
+   */
+  const pilihMusikRotasi = useCallback((): string => {
+    const terakhirDipakai = new Map<string, number>();
+    history.forEach((h, idx) => {
+      if (!h.params_json) return;
+      try {
+        const p = JSON.parse(h.params_json) as { musik_value?: string; s1?: { musik?: string } };
+        // Toleran dua bentuk penulis (Jalur C vs frontend), seperti pembaca lain.
+        const v = p?.musik_value ?? p?.s1?.musik;
+        if (typeof v === 'string' && v && !terakhirDipakai.has(v)) terakhirDipakai.set(v, idx);
+      } catch { /* baris rusak — abaikan */ }
+    });
+    let pilih = MUSIK_ROTASI_VALUES[0];
+    let pilihIdx = terakhirDipakai.get(pilih) ?? Infinity;
+    for (const kand of MUSIK_ROTASI_VALUES.slice(1)) {
+      const kandIdx = terakhirDipakai.get(kand) ?? Infinity;
+      if (kandIdx > pilihIdx) { pilih = kand; pilihIdx = kandIdx; }
+    }
+    return pilih;
+  }, [history]);
   const loadHistory = useCallback(async () => {
     if (!id) return;
     try {
@@ -3630,13 +3707,25 @@ export default function AdminViralFrameWorkspacePage() {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {ARCHETYPES.map(a => {
                 const active = s1.archetype === a.id;
+                const dipakai = pemakaianArketipe.get(a.id) ?? 0;
                 return (
                   <button key={a.id} type="button" onClick={() => applyArchetype(a.id)}
-                    className={`text-left p-3 rounded-xl border transition-colors ${
+                    className={`text-left p-3 rounded-xl border transition-colors relative ${
                       active ? 'bg-[#EFF6FF] border-[#1565C0] ring-1 ring-[#1565C0]/30' : 'bg-white border-gray-200 hover:bg-gray-50'
                     }`}>
+                    {/* Badge informatif — tidak menonaktifkan tombol. Gaya yang sering
+                        dipakai membuat video terasa seragam; user tetap yang memutuskan. */}
+                    {dipakai > 0 && (
+                      <span
+                        title={`Arketipe ini dipakai ${dipakai}x dari ${RIWAYAT_ARKETIPE_N} generate terakhir properti ini. Memilih gaya berbeda membuat video tidak terasa seragam — tapi ini saran, bukan larangan.`}
+                        className={`absolute top-2 right-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                          dipakai >= 2 ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-[#64748B]'
+                        }`}>
+                        {dipakai}x
+                      </span>
+                    )}
                     <div className="text-lg leading-none mb-1">{a.emoji}</div>
-                    <div className={`text-sm font-semibold ${active ? 'text-[#1565C0]' : 'text-[#0F172A]'}`}>{a.label}</div>
+                    <div className={`text-sm font-semibold pr-7 ${active ? 'text-[#1565C0]' : 'text-[#0F172A]'}`}>{a.label}</div>
                     <div className="text-[11px] text-[#64748B] leading-snug mt-0.5">{a.ringkas}</div>
                   </button>
                 );
@@ -4069,6 +4158,7 @@ export default function AdminViralFrameWorkspacePage() {
               cutawayExcluded={s1.cutawayExcluded}
               selectedKarakter={selectedKarakterForAI}
               onEditStep={setStep}
+              pilihMusikRotasi={pilihMusikRotasi}
             />
           )}
 

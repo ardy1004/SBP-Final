@@ -296,6 +296,14 @@ properti sehingga hasilnya TIDAK LAGI SESUAI foto yang dilampirkan user.
 Jika dua scene atau lebih memakai area/label foto yang SAMA, deskripsi lingkungannya
 WAJIB identik — yang boleh berbeda hanya kamera, angle, dan aksi karakter.
 
+VARIASI ANTAR VIDEO (bukan antar scene): properti ini kemungkinan sudah pernah
+dibuatkan video lain. Yang boleh — bahkan DIANJURKAN — berbeda dari video sebelumnya:
+  • FITUR/RUANGAN mana yang paling ditonjolkan dan URUTAN penyorotannya
+  • sudut cerita: investasi vs kenyamanan tinggal vs lokasi vs legalitas
+  • detail konkret mana yang diangkat dari data properti
+Pencahayaan tetap TIDAK boleh divariasikan, bahkan antar video — alasannya sama:
+foto referensinya itu-itu juga.
+
 `
     : `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [6] VARIASI ANTAR SCENE
@@ -774,6 +782,9 @@ export async function onRequestPost(context) {
   // sisa 339 char terlalu tipis, satu-dua kalimat tambahan akan memotongnya
   // DIAM-DIAM tanpa error apa pun. Dijaga gate BAGIAN 4 check-viralframe-rulebook.
   const archetypeNote = typeof body.archetype_note === 'string' ? body.archetype_note.slice(0, 4000) : '';
+  // ID arketipe — TIDAK dipakai di prompt (note-nya yang dipakai), hanya dicatat ke
+  // riwayat agar badge rotasi arketipe di UI menghitung generate Jalur C juga.
+  const archetypeId = typeof body.archetype === 'string' ? body.archetype.slice(0, 60) : null;
   const PRESENTER_VALID = ['on_camera', 'voiceover_only', 'faceless_broll'];
   const presenterMode = PRESENTER_VALID.includes(body.presenter_mode) ? body.presenter_mode : 'on_camera';
   // Arketipe hybrid A-roll/B-roll (agent_broll_hybrid, selfie_luxury_hybrid) butuh
@@ -1129,7 +1140,7 @@ export async function onRequestPost(context) {
           ).bind(
             propertyId,
             JSON.stringify({
-              s1: { hookType, ctaType, tone, visualStyle, aiTool, platform },
+              s1: { hookType, ctaType, tone, visualStyle, aiTool, platform, archetype: archetypeId },
               s3: { karakter_id: Number.isInteger(karakterId) ? karakterId : null },
               sumber: 'ai_generate',
               rulebook_version: RULEBOOK_VERSION,

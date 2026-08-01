@@ -27,13 +27,38 @@ export const BAHASA_OPTIONS: BahasaOption[] = [
 ];
 
 export interface MusikOption { value: string; label: string; prompt: string }
+
+/**
+ * ⚠️ Nilai `value` di sini TERSIMPAN di riwayat (`params_json.musik_value`) dan
+ * dipakai ZIP untuk meresolve label. JANGAN mengubah/menghapus value lama —
+ * hanya boleh MENAMBAH. Menghapus value akan membuat riwayat lama tidak bisa
+ * di-resolve labelnya.
+ *
+ * Kolamnya diperluas 2026-08-02 (4 → 8 karakter musik). Alasannya: string musik
+ * bersifat BEKU per opsi dan ditempel di akhir SETIAP prompt dengan perintah
+ * "JANGAN dimodifikasi", sehingga seluruh video di akun memakai karakter audio
+ * yang identik. Dengan `auto` (rotasi least-recently-used) kolam sekecil 4 akan
+ * terasa berulang dengan cepat.
+ */
 export const MUSIK_OPTIONS: MusikOption[] = [
+  // Rotasi otomatis — backend memilih di antara opsi non-'auto'/'none' memakai
+  // pola least-recently-used yang sama dengan rotasi foto di suggest-storyboard.js.
+  { value: 'auto', label: '🎲 Otomatis (rotasi)', prompt: '' },
   { value: 'corporate', label: '🎵 Professional Corporate', prompt: 'Background audio: subtle upbeat corporate instrumental music, confident professional atmosphere, moderate tempo, clean cinematic mix, no lyrics.' },
   { value: 'chill', label: '🌊 Chill & Elegant', prompt: 'Background audio: soft ambient piano melody, relaxed sophisticated atmosphere, slow gentle tempo, soothing, no lyrics.' },
   { value: 'energetic', label: '⚡ Energetic Modern', prompt: 'Background audio: upbeat modern pop instrumental, dynamic youthful energy, fast-paced rhythm, no lyrics.' },
   { value: 'acoustic', label: '🎸 Acoustic Warm', prompt: 'Background audio: warm acoustic guitar melody, friendly inviting home atmosphere, moderate tempo, no lyrics.' },
+  { value: 'cinematic', label: '🎬 Cinematic Strings', prompt: 'Background audio: gentle cinematic string swell, aspirational and premium atmosphere, slow build, no lyrics.' },
+  { value: 'lofi', label: '🎧 Lo-fi Santai', prompt: 'Background audio: mellow lo-fi hip hop beat, calm everyday-life atmosphere, laid-back tempo, soft vinyl texture, no lyrics.' },
+  { value: 'tropical', label: '🌴 Tropical Bright', prompt: 'Background audio: bright tropical house instrumental, fresh airy optimistic atmosphere, light percussion, moderate tempo, no lyrics.' },
+  { value: 'minimal', label: '⬜ Minimal Clean', prompt: 'Background audio: minimal ambient pad with sparse soft piano notes, clean understated atmosphere, very slow tempo, no lyrics.' },
   { value: 'none', label: '🔇 Tanpa Musik', prompt: '' },
 ];
+
+/** Opsi yang boleh dipilih rotasi `auto` — 'auto' & 'none' dikecualikan. */
+export const MUSIK_ROTASI_VALUES: string[] = MUSIK_OPTIONS
+  .filter(m => m.value !== 'auto' && m.value !== 'none')
+  .map(m => m.value);
 
 export interface FotoLabelOption { value: string; label: string; deskripsi: string }
 export const FOTO_LABEL_OPTIONS: FotoLabelOption[] = [
