@@ -1,0 +1,21 @@
+-- Migration 0035: indeks untuk query anti-pengulangan di ai-generate.js.
+--
+-- Query-nya (ai-generate.js, blok excludedHooks/excludedCtas/excludedOpenings):
+--   SELECT params_json, result_json FROM viralframe_generations
+--   ORDER BY created_at DESC LIMIT 8
+-- TANPA `WHERE property_id` — dan itu DISENGAJA. Commit 1e3c17a menyebut eksplisit
+-- riwayat dibaca "lintas katalog": tujuannya menghindari dua video BERURUTAN di feed
+-- sosmed memakai hook/CTA yang sama, terlepas propertinya. JANGAN menambahkan filter
+-- property_id ke query itu "supaya indeks 0033 kepakai" — itu merusak desainnya.
+--
+-- Indeks 0033 `(property_id, created_at DESC)` tidak bisa melayani query tanpa
+-- property_id (kolom pertama komposit tidak terikat). Diukur dengan EXPLAIN QUERY PLAN
+-- di D1 produksi sebelum migrasi ini:
+--   SCAN viralframe_generations
+--   USE TEMP B-TREE FOR ORDER BY
+-- yaitu pindai penuh 211 baris / 3,3 MB + sortir sementara, SETIAP kali generate.
+--
+-- Indeks 0033 tetap dipertahankan — terbukti dipakai endpoint daftar riwayat
+-- (SEARCH ... USING INDEX idx_vf_generations_prop_created).
+
+CREATE INDEX IF NOT EXISTS idx_vf_generations_created ON viralframe_generations(created_at DESC);

@@ -122,6 +122,9 @@ export default function AdminViralFrameAgentVideosPage() {
   const [metricOpenId, setMetricOpenId] = useState<number | null>(null);
   const [savingMetricId, setSavingMetricId] = useState<number | null>(null);
   const [analytics, setAnalytics] = useState<AnalyticsRow[]>([]);
+  // Pesan kegagalan aksi mutasi (hapus/pulihkan/simpan). Sebelumnya seluruh
+  // kegagalan ditelan diam-diam — lihat komentar di `kirimAksi`.
+  const [aksiError, setAksiError] = useState('');
   const [savingId, setSavingId] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [ratioFilter, setRatioFilter] = useState<RatioClass | 'semua'>('semua');
@@ -269,55 +272,76 @@ export default function AdminViralFrameAgentVideosPage() {
     setContextMenu({ x: e.clientX, y: e.clientY, videoId });
   };
 
+  // ⚠️ SEMUA aksi mutasi WAJIB lewat helper ini. Sampai 2026-08-02 setiap aksi di
+  // halaman ini memanggil fetch lalu `catch { /* noop */ }` TANPA memeriksa status
+  // respons sama sekali — jadi 422 (mis. >100 video per aksi massal) atau 500 apa pun
+  // menghasilkan "tidak terjadi apa-apa, tanpa pesan". Tidak bisa dibedakan dari
+  // aksi yang sukses tapi datanya memang tidak berubah.
+  // Mengembalikan true bila sukses, dan menampilkan pesan bila gagal.
+  const kirimAksi = async (url: string, init: RequestInit, konteks: string): Promise<boolean> => {
+    try {
+      const res = await fetch(url, { credentials: 'include', ...init });
+      const j = await bacaJson(res);
+      if (!j.success) {
+        setAksiError(`${konteks} gagal: ${j.error ?? `HTTP ${res.status}`}`);
+        return false;
+      }
+      return true;
+    } catch (err: unknown) {
+      setAksiError(`${konteks} gagal: ${err instanceof Error ? err.message : 'koneksi bermasalah'}`);
+      return false;
+    }
+  };
+
+  const JSON_HEADER = { 'Content-Type': 'application/json' };
+
   // ── Aksi bulk (dipakai toolbar & context menu) ──
   const bulkAction = async (action: 'trash' | 'restore' | 'delete', ids: number[]) => {
     if (ids.length === 0) return;
     if (action === 'delete' && !window.confirm(`Hapus permanen ${ids.length} video? File Cloudinary ikut terhapus, tidak bisa dipulihkan.`)) return;
+    setAksiError('');
     setBulkBusy(true);
-    try {
-      await fetch('/api/admin/viralframe/agent-videos/bulk', {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids, action }),
-      });
-    } catch { /* noop */ } finally {
-      setBulkBusy(false);
-      clearSelection();
-      setContextMenu(null);
-      refreshAfterAction();
-    }
+    const label = action === 'trash' ? 'Pindah ke Sampah' : action === 'restore' ? 'Pulihkan' : 'Hapus permanen';
+    await kirimAksi('/api/admin/viralframe/agent-videos/bulk',
+      { method: 'POST', headers: JSON_HEADER, body: JSON.stringify({ ids, action }) },
+      `${label} ${ids.length} video`);
+    setBulkBusy(false);
+    clearSelection();
+    setContextMenu(null);
+    refreshAfterAction();
   };
 
   // ── Aksi per-item (klik cepat tanpa perlu select dulu) ──
   const trashOne = async (id: number) => {
-    try { await fetch(`/api/admin/viralframe/agent-videos/${id}`, {
-      method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trash: true }),
-    }); } catch { /* noop */ }
+    setAksiError('');
+    await kirimAksi(`/api/admin/viralframe/agent-videos/${id}`,
+      { method: 'PATCH', headers: JSON_HEADER, body: JSON.stringify({ trash: true }) }, 'Pindah ke Sampah');
     refreshAfterAction();
   };
   const restoreOne = async (id: number) => {
-    try { await fetch(`/api/admin/viralframe/agent-videos/${id}`, {
-      method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trash: false }),
-    }); } catch { /* noop */ }
+    setAksiError('');
+    await kirimAksi(`/api/admin/viralframe/agent-videos/${id}`,
+      { method: 'PATCH', headers: JSON_HEADER, body: JSON.stringify({ trash: false }) }, 'Pulihkan video');
     refreshAfterAction();
   };
   const deletePermanentOne = async (id: number) => {
     if (!window.confirm('Hapus permanen video ini? File di Cloudinary juga akan dihapus, tidak bisa dipulihkan.')) return;
-    try { await fetch(`/api/admin/viralframe/agent-videos/${id}`, { method: 'DELETE', credentials: 'include' }); } catch { /* noop */ }
+    setAksiError('');
+    await kirimAksi(`/api/admin/viralframe/agent-videos/${id}`, { method: 'DELETE' }, 'Hapus permanen');
     refreshAfterAction();
   };
 
   const saveEdit = async (id: number) => {
     const e = edits[id]; if (!e) return;
+    setAksiError('');
     setSavingId(id);
-    try {
-      await fetch(`/api/admin/viralframe/agent-videos/${id}`, {
-        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ caption: e.caption, hashtags: e.hashtags }),
-      });
-    } catch { /* noop */ } finally {
-      setSavingId(null); setEditingId(null);
-      if (selectedCharId != null) loadVideos(selectedCharId, view);
-    }
+    const ok = await kirimAksi(`/api/admin/viralframe/agent-videos/${id}`,
+      { method: 'PATCH', headers: JSON_HEADER, body: JSON.stringify({ caption: e.caption, hashtags: e.hashtags }) },
+      'Simpan caption');
+    setSavingId(null);
+    // Form tetap terbuka bila gagal, supaya ketikan tidak hilang.
+    if (ok) setEditingId(null);
+    if (selectedCharId != null) loadVideos(selectedCharId, view);
   };
 
   const setEdit = (id: number, k: 'caption' | 'hashtags', val: string) =>
@@ -328,19 +352,17 @@ export default function AdminViralFrameAgentVideosPage() {
 
   const saveMetrics = async (id: number) => {
     const m = metricEdits[id]; if (!m) return;
+    setAksiError('');
     setSavingMetricId(id);
-    try {
-      // String kosong dikirim apa adanya — backend menerjemahkannya jadi NULL
-      // (kembali ke "belum diisi"), berbeda dari angka 0.
-      await fetch(`/api/admin/viralframe/agent-videos/${id}`, {
-        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ post_url: m.post_url, views: m.views, likes: m.likes }),
-      });
-    } catch { /* noop */ } finally {
-      setSavingMetricId(null); setMetricOpenId(null);
-      if (selectedCharId != null) loadVideos(selectedCharId, view);
-      loadAnalytics();
-    }
+    // String kosong dikirim apa adanya — backend menerjemahkannya jadi NULL
+    // (kembali ke "belum diisi"), berbeda dari angka 0.
+    const ok = await kirimAksi(`/api/admin/viralframe/agent-videos/${id}`,
+      { method: 'PATCH', headers: JSON_HEADER, body: JSON.stringify({ post_url: m.post_url, views: m.views, likes: m.likes }) },
+      'Simpan metrik');
+    setSavingMetricId(null);
+    if (ok) setMetricOpenId(null);
+    if (selectedCharId != null) loadVideos(selectedCharId, view);
+    loadAnalytics();
   };
 
   const copyCaption = async (v: AgentVideo) => {
@@ -363,6 +385,15 @@ export default function AdminViralFrameAgentVideosPage() {
           Video hasil upload manual (Cloudinary), dikelompokkan per karakter/agent — lintas semua properti.
         </p>
       </div>
+
+      {aksiError && (
+        <div className="flex items-start justify-between gap-3 bg-red-50 border border-red-200 rounded-2xl px-4 py-3">
+          <p className="text-sm text-red-700">{aksiError}</p>
+          <button onClick={() => setAksiError('')} className="text-red-400 hover:text-red-600 flex-shrink-0" title="Tutup">
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {/* Performa per gaya — hanya dari video yang metriknya sudah diisi.
           Sengaja ditaruh di halaman ini, bukan di tab Library workspace: di sinilah

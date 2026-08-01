@@ -5,9 +5,19 @@ import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 
 export async function onRequestGet({ env }) {
   try {
+    // ⚠️ SUMBER VIDEO = `viralframe_agent_videos`, BUKAN `viralframe_videos`.
+    // Sampai 2026-08-02 baris ini membaca `viralframe_videos` — tabel Content
+    // Library yang berisi 0 baris sejak fitur Video VO dihapus (commit 1e3c17a).
+    // Akibatnya `with_video` SELALU kosong, badge "🎬 Video" tidak pernah bisa
+    // muncul, dan 21 properti yang video-nya sudah jadi tampil sebagai "📝 Naskah".
+    // Tidak ada error apa pun — cuma cabang yang tak pernah tercapai.
+    //
+    // Video di Sampah SENGAJA ikut dihitung: `trashed_at` berarti "sudah selesai
+    // dijadwalkan" (lihat migrasi 0023), jadi propertinya memang sudah punya video.
+    // Memfilternya keluar akan mengulang bug yang sedang diperbaiki ini.
     const [gen, vid] = await Promise.all([
       env.DB.prepare('SELECT property_id, MAX(created_at) AS latest FROM viralframe_generations GROUP BY property_id').all(),
-      env.DB.prepare('SELECT property_id, MAX(created_at) AS latest FROM viralframe_videos GROUP BY property_id').all().catch(() => ({ results: [] })),
+      env.DB.prepare('SELECT property_id, MAX(created_at) AS latest FROM viralframe_agent_videos GROUP BY property_id').all().catch(() => ({ results: [] })),
     ]);
 
     // latest_content_at: timestamp konten TERBARU (naskah ATAU video) per properti —

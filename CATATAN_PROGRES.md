@@ -204,7 +204,9 @@ Semua tahap: build 0 error + Functions bundle OK + deploy + verifikasi health. E
 
 **Admin — AI:** `admin/ai/generate-description.js`
 
-**Admin — viralframe:** `admin/viralframe/characters/index.js` · `[id].js` · `generate-naskah.js` · `generate-voiceover.js` · `generations/index.js` · `[id].js` · `siliconflow-token.js` · `submit-video.js` · `video-status/[requestId].js`
+**Admin — viralframe:** `admin/viralframe/characters/index.js` · `[id].js` · `generations/index.js` · `[id].js` · `siliconflow-token.js` (tombstone 410)
+
+> Dihapus 2026-08-02 karena yatim/tak terpakai: `generate-naskah.js`, `submit-video.js`, `video-status/[requestId].js`, `videos/index.js`, `videos/[id].js`, `schedule/presign.js`, `schedule/commit.js`. (`generate-voiceover.js` sudah lebih dulu dihapus di `1e3c17a`.)
 
 **Admin — umum:** `admin/login.js` · `admin/logout.js` · `admin/me.js` · `admin/overview.js` · `admin/media.js` · `admin/_middleware.js` (auth guard)
 
