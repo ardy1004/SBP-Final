@@ -2774,6 +2774,17 @@ export default function AdminViralFrameWorkspacePage() {
           register: s1.register,
           character_photo_url: s3.useCharacter ? (s3.character?.foto_url ?? undefined) : undefined,
           ai_tool: s1.aiTool,
+          // BRIEF KREATIF — dulu tidak satu pun dari ini terkirim, sehingga sutradara
+          // AI merancang tanpa tahu tipe hook/CTA/platform/tone dan hasilnya generik.
+          // `rasio` SENGAJA TIDAK dikirim: aspect ratio adalah setelan di Google Flow,
+          // bukan sesuatu yang perlu diulang di dalam prompt.
+          hook_type: s1.hookType,
+          cta_type: s1.ctaType,
+          cta_keyword: s1.ctaKeyword || undefined,
+          platforms: s1.platforms,
+          tone: s1.tone,
+          visual_style: s1.visualStyle,
+          bahasa: s1.language,
         }),
       });
       const data = await readNdjsonFinal<{ parts: PartDef[]; provider_used: string; used_vision: boolean }>(r);
@@ -2785,7 +2796,9 @@ export default function AdminViralFrameWorkspacePage() {
     } finally {
       setSuggestLoading(false);
     }
-  }, [prop, s1.parts, s1.archetype, s1.register, s1.aiTool, s1.cutawayExcluded, s3.useCharacter, s3.character]);
+  }, [prop, s1.parts, s1.archetype, s1.register, s1.aiTool, s1.cutawayExcluded,
+      s1.hookType, s1.ctaType, s1.ctaKeyword, s1.platforms, s1.tone, s1.visualStyle, s1.language,
+      s3.useCharacter, s3.character]);
 
   // Pilih arketipe → prefill visualStyle/tone/register/cutaway (parameter Step 3 saja).
   // Nilai tetap bisa di-override manual setelahnya (memilih 'custom' tidak mereset).
@@ -3650,28 +3663,9 @@ export default function AdminViralFrameWorkspacePage() {
               berisi character_photo_url + ai_tool. 1 Part = 1 panggilan generate;
               AI ("AI Rancang Storyboard") menentukan cuts/foto referensi/rationale
               tiap Part — role/durasi/durasi VO TETAP dikunci user di sini. */}
-          <Field label="Rancang Part" hint={`Total Part, durasi (≤${clipMaxForTool}s untuk ${AI_TOOLS.find(t => t.value === s1.aiTool)?.label ?? s1.aiTool}), dan durasi VO tiap Part. AI mengisi cuts & foto referensi dari label ruangan tersimpan.`}>
+          <Field label="Rancang Part" hint={`Tentukan jumlah Part, durasi (≤${clipMaxForTool}s untuk ${AI_TOOLS.find(t => t.value === s1.aiTool)?.label ?? s1.aiTool}), dan durasi VO tiap Part. Cuts & foto referensi diisi AI di bagian "Sutradara AI" paling bawah, setelah seluruh parameter di halaman ini terisi.`}>
             <div className="space-y-2">
-              <div className="flex items-center gap-2 flex-wrap">
-                <button type="button" onClick={suggestStoryboard} disabled={suggestLoading || s1.parts.length === 0}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-[#1565C0]/30 text-[#1565C0] hover:bg-[#F0F7FF] disabled:opacity-50 disabled:cursor-not-allowed">
-                  {suggestLoading ? 'Merancang…' : '🤖 AI Rancang Storyboard'}
-                </button>
-                <span className="text-[11px] text-[#94A3B8]">
-                  AI melihat foto berlabel (bervisi bila memungkinkan) untuk menentukan cuts &amp; foto referensi tiap Part.
-                </span>
-                {suggestUsedVision != null && (
-                  <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${suggestUsedVision ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}
-                    title={suggestUsedVision ? `Dirancang dengan visi AI (${suggestProviderUsed})` : `Mode teks saja — provider bervisi tidak tersedia (${suggestProviderUsed})`}>
-                    {suggestUsedVision ? `👁️ dirancang dengan visi AI (${suggestProviderUsed})` : `📝 mode teks (${suggestProviderUsed})`}
-                  </span>
-                )}
-              </div>
-              {suggestError && <p className="text-xs text-red-500">{suggestError}</p>}
-
               {s1.parts.map((p, idx) => {
-                const refCount = p.refPhotoIds.length + (s3.useCharacter && s3.character ? 1 : 0);
-                const overQuota = refCount > MAX_REF_IMAGES_PER_PART;
                 return (
                   <div key={idx} className="px-3 py-2 border border-gray-100 rounded-xl space-y-2">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -3698,34 +3692,6 @@ export default function AdminViralFrameWorkspacePage() {
                         className="flex-1 text-sm border border-gray-200 rounded-lg px-2 py-1 min-w-[120px]" />
                       <button type="button" onClick={() => removePart(idx)}
                         className="text-xs text-red-500 hover:text-red-700 shrink-0">Hapus</button>
-                    </div>
-
-                    {p.rationale && (
-                      <p className="text-[11px] text-[#64748B] italic pl-14">💡 {p.rationale}</p>
-                    )}
-
-                    {/* Strip foto referensi (maks MAX_REF_IMAGES_PER_PART, termasuk
-                        karakter) — dari AI Rancang Storyboard. */}
-                    <div className="flex items-center gap-1.5 flex-wrap pl-14">
-                      {s3.useCharacter && s3.character && (
-                        <img src={thumbSrc(s3.character.foto_url, 64)} alt={s3.character.nama}
-                          title={`Karakter — ${s3.character.nama}`}
-                          className="w-8 h-8 rounded object-cover border-2 border-[#1565C0]" loading="lazy" decoding="async" />
-                      )}
-                      {p.refPhotoIds.map(pid => {
-                        const img = prop.images.find(im => im.id === pid);
-                        const label = p.cuts.find(c => c.photoId === pid)?.label ?? '';
-                        return img ? (
-                          <img key={pid} src={thumbSrc(img.url_webp, 64)} alt={label}
-                            title={label} className="w-8 h-8 rounded object-cover border border-gray-200" loading="lazy" decoding="async" />
-                        ) : null;
-                      })}
-                      {p.cuts.length === 0 && (
-                        <span className="text-[11px] text-[#94A3B8]">Belum ada cuts/foto — jalankan AI Rancang Storyboard.</span>
-                      )}
-                      {overQuota && (
-                        <span className="text-[11px] font-semibold text-red-600">⚠ {refCount} foto melebihi kuota {MAX_REF_IMAGES_PER_PART}</span>
-                      )}
                     </div>
                   </div>
                 );
@@ -3811,6 +3777,74 @@ export default function AdminViralFrameWorkspacePage() {
                 className={`${selectCls} sm:w-60`} />
             </Field>
           )}
+
+          {/* ── SUTRADARA AI — sengaja ditempatkan PALING BAWAH di Parameter Video.
+              Alurnya dulu terbalik: tombol ini berada di tengah section, DI ATAS
+              Platform/Bahasa/Tipe Hook/Tone/Gaya Visual/Tipe CTA — sehingga AI
+              disuruh menyutradarai pembuka (Hook) dan penutup (CTA) sebelum user
+              memilih Tipe Hook dan Tipe CTA-nya. Lebih parah lagi, payload ke
+              suggest-storyboard dulu HANYA mengirim archetype/register/ai_tool,
+              jadi brief kreatifnya memang tidak pernah sampai ke AI dan hasilnya
+              generik. Sekarang: brief diisi dulu → sutradara AI jalan terakhir.
+              JANGAN pindahkan blok ini ke atas field parameter mana pun. */}
+          <div className="rounded-xl border border-[#1565C0]/25 bg-[#F8FBFF] p-3 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button type="button" onClick={suggestStoryboard} disabled={suggestLoading || s1.parts.length === 0}
+                className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-[#1565C0]/30 bg-white text-[#1565C0] hover:bg-[#F0F7FF] disabled:opacity-50 disabled:cursor-not-allowed">
+                {suggestLoading ? 'Merancang…' : '🤖 AI Rancang Storyboard'}
+              </button>
+              {suggestUsedVision != null && (
+                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${suggestUsedVision ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}
+                  title={suggestUsedVision ? `Dirancang dengan visi AI (${suggestProviderUsed})` : `Mode teks saja — provider bervisi tidak tersedia (${suggestProviderUsed})`}>
+                  {suggestUsedVision ? `👁️ dirancang dengan visi AI (${suggestProviderUsed})` : `📝 mode teks (${suggestProviderUsed})`}
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-[#64748B]">
+              Jalankan <strong>setelah</strong> semua parameter di atas terisi — AI membaca gaya, platform,
+              tipe hook, tone, gaya bahasa, dan tipe CTA yang kamu pilih, lalu melihat foto berlabel
+              (bervisi bila tersedia) untuk menentukan cuts &amp; foto referensi tiap Part.
+            </p>
+            {suggestError && <p className="text-xs text-red-500">{suggestError}</p>}
+
+            {/* Hasil rancangan per Part — rationale + strip foto referensi. */}
+            <div className="space-y-1.5">
+              {s1.parts.map((p, idx) => {
+                const refCount = p.refPhotoIds.length + (s3.useCharacter && s3.character ? 1 : 0);
+                const overQuota = refCount > MAX_REF_IMAGES_PER_PART;
+                return (
+                  <div key={idx} className="rounded-lg bg-white border border-gray-100 px-2.5 py-2 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-semibold text-[#94A3B8] w-14 shrink-0">Part {idx + 1}</span>
+                      <span className="text-[11px] text-[#64748B]">{p.role} · {p.durationSec}s · {p.cuts.length} cut</span>
+                      {s3.useCharacter && s3.character && (
+                        <img src={thumbSrc(s3.character.foto_url, 64)} alt={s3.character.nama}
+                          title={`Karakter — ${s3.character.nama}`}
+                          className="w-8 h-8 rounded object-cover border-2 border-[#1565C0]" loading="lazy" decoding="async" />
+                      )}
+                      {p.refPhotoIds.map(pid => {
+                        const img = prop.images.find(im => im.id === pid);
+                        const label = p.cuts.find(c => c.photoId === pid)?.label ?? '';
+                        return img ? (
+                          <img key={pid} src={thumbSrc(img.url_webp, 64)} alt={label}
+                            title={label} className="w-8 h-8 rounded object-cover border border-gray-200" loading="lazy" decoding="async" />
+                        ) : null;
+                      })}
+                      {p.cuts.length === 0 && (
+                        <span className="text-[11px] text-[#94A3B8]">Belum dirancang.</span>
+                      )}
+                      {overQuota && (
+                        <span className="text-[11px] font-semibold text-red-600">⚠ {refCount} foto melebihi kuota {MAX_REF_IMAGES_PER_PART}</span>
+                      )}
+                    </div>
+                    {p.rationale && (
+                      <p className="text-[11px] text-[#64748B] italic pl-14">💡 {p.rationale}</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </Section>
 

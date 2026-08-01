@@ -82,6 +82,26 @@ export async function onRequestPost(context) {
   const register = typeof body.register === 'string' ? body.register.slice(0, 40) : '';
   const chosenProvider = PROVIDER_ORDER.includes(body.provider) ? body.provider : 'gemini';
 
+  // ── BRIEF KREATIF ──────────────────────────────────────────────────────────
+  // Sebelum 2026-08-01 endpoint ini HANYA menerima archetype/register/ai_tool,
+  // sehingga sutradara AI merancang tanpa tahu tipe hook, tipe CTA, platform,
+  // tone, gaya visual, maupun bahasa yang sudah dipilih user — hasilnya generik
+  // dan Part pembuka/penutup tidak nyambung dengan pilihan user.
+  // `rasio` SENGAJA TIDAK diterima: aspect ratio adalah setelan di Google Flow,
+  // mengulanginya di prompt hanya menambah token tanpa mengubah hasil.
+  const teks = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+  const brief = {
+    hookType: teks(body.hook_type, 40),
+    ctaType: teks(body.cta_type, 40),
+    ctaKeyword: teks(body.cta_keyword, 30),
+    tone: teks(body.tone, 40),
+    visualStyle: teks(body.visual_style, 40),
+    bahasa: teks(body.bahasa, 40),
+    platforms: Array.isArray(body.platforms)
+      ? body.platforms.filter(p => typeof p === 'string').slice(0, 6).map(p => p.slice(0, 30))
+      : [],
+  };
+
   // URL publik untuk dikirim ke vision AI. Foto sudah publik lewat
   // /api/media?key=... (PUBLIC_PREFIXES mencakup property-photos/ &
   // viralframe-characters/, lihat functions/api/media.js) — JANGAN base64 di
@@ -197,6 +217,21 @@ export async function onRequestPost(context) {
     ? `Foto KARAKTER (talent, gambar pertama) sudah otomatis dilampirkan ke SETIAP Part — slotnya sudah dipotong dari kuota, jadi tiap Part maksimal ${refQuota} foto RUANGAN berbeda (total ${MAX_REF_IMAGES_PER_PART} dengan karakter). JANGAN PERNAH menulis karakter/talent/orang sebagai "photo_label" atau di "ref_photo_labels" — kedua field itu HANYA untuk label ruangan dari daftar di atas.`
     : `Tiap Part maksimal ${refQuota} foto ruangan berbeda sebagai referensi.`;
 
+  // Brief kreatif yang disuntik ke user prompt. Baris yang kosong dibuang supaya
+  // tidak mengirim label tanpa nilai ("Tone: .") yang justru membingungkan model.
+  const briefTeks = [
+    archetype ? `Gaya video (arketipe): ${archetype}.` : '',
+    brief.platforms.length ? `Platform tujuan: ${brief.platforms.join(', ')} (platform pertama = primer; sesuaikan pacing & panjang cut dengan kebiasaan menonton di sana).` : '',
+    brief.visualStyle ? `Gaya visual: ${brief.visualStyle}.` : '',
+    brief.tone ? `Tone narasi: ${brief.tone}.` : '',
+    brief.bahasa ? `Bahasa narasi: ${brief.bahasa}.` : '',
+    register ? `Register/gaya bahasa: ${register}.` : '',
+    brief.hookType ? `Tipe HOOK yang dipilih user: ${brief.hookType}. Part pertama WAJIB dirancang untuk mendukung tipe hook ini sejak detik pertama.` : '',
+    brief.ctaType
+      ? `Tipe CTA penutup: ${brief.ctaType}${brief.ctaKeyword ? ` (kata kunci komentar: "${brief.ctaKeyword}")` : ''}. Part terakhir WAJIB dirancang agar penonton siap melakukan CTA ini.`
+      : '',
+  ].filter(Boolean).join('\n');
+
   function buatPrompt(usingVision) {
     const system = usingVision
       ? `Kamu sutradara video pendek properti Indonesia yang MELIHAT foto-foto berikut secara visual (gambar dilampirkan sesuai urutan: ${characterUrl ? 'gambar pertama = foto KARAKTER/talent, gambar setelahnya berurutan sama dengan daftar label ruangan' : 'urutan sama dengan daftar label ruangan'} di bawah). Rancang storyboard berdasarkan apa yang BENAR-BENAR kamu lihat (pencahayaan, suasana, ukuran ruang, furnitur, detail nyata) — jangan mengarang detail yang tidak ada di foto. Jangan pernah menyebut label ruangan di luar daftar yang diberikan. Jangan pernah mengklaim tahu data algoritma/tren medsos terkini. Output HANYA JSON valid, tanpa markdown, tanpa teks lain.`
@@ -207,8 +242,7 @@ ${daftarLabelTeks}
 
 Struktur PART sudah DITETAPKAN user dan TIDAK BOLEH diubah (jumlah part, urutan, role, durasi total, durasi VO tetap):
 ${partsSpecTeks}
-${archetype ? `Gaya video: ${archetype}.` : ''}
-${register ? `Register bahasa: ${register}.` : ''}
+${briefTeks}
 
 Tugas untuk TIAP Part:
 1. Rancang beberapa "cut" (potongan shot) yang totalnya PERSIS sama dengan durasi TOTAL Part itu (dalam detik). Cut boleh berdurasi berapa saja yang masuk akal untuk video pendek (umumnya 1-6 detik per cut) asal jumlahnya pas.
