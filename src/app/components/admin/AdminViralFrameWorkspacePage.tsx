@@ -13,7 +13,7 @@ import {
   characterFileName, AI_TOOL_FORMAT_SPEC,
   isNativeAudioTool, getClipMaxSec, namaFileKarakter, PLATFORM_BEHAVIOR,
   totalDurationOfParts,
-  konversiDraftLama, buildZipNames, slugifyLabel, MAX_REF_IMAGES_PER_PART,
+  konversiDraftLama, normalisasiParts, buildZipNames, slugifyLabel, MAX_REF_IMAGES_PER_PART,
   RULEBOOK_VERSION,
   type PartDef, type ZipSourceImage,
   type DraftLamaS1, type DraftLamaScene,
@@ -2497,7 +2497,16 @@ export default function AdminViralFrameWorkspacePage() {
     if (!cfg) return;
     if (cfg.s1) {
       const s1Raw = cfg.s1;
-      const isLegacy = 'durationMode' in s1Raw || Array.isArray(cfg.scenes);
+      // Deteksi bentuk lama TIDAK cukup hanya dari `durationMode`/`scenes`. Draft
+      // yang tersimpan DI TENGAH refactor punya `parts` ber-`sceneCount` tanpa
+      // `cuts`/`refPhotoIds` — dulu lolos ke cabang "baru", masuk state mentah,
+      // lalu render meledak di `p.refPhotoIds.length` (layar putih, 2026-08-01).
+      const partsRaw = (s1Raw as { parts?: unknown }).parts;
+      const partsBentukLama = Array.isArray(partsRaw) && partsRaw.some(p => {
+        const o = (p ?? {}) as Record<string, unknown>;
+        return 'sceneCount' in o || !Array.isArray(o.cuts);
+      });
+      const isLegacy = 'durationMode' in s1Raw || Array.isArray(cfg.scenes) || partsBentukLama;
       if (isLegacy) {
         const convertedParts = konversiDraftLama(s1Raw as DraftLamaS1, cfg.scenes ?? [], (s1Raw as { aiTool?: string }).aiTool);
         const {
@@ -2506,7 +2515,19 @@ export default function AdminViralFrameWorkspacePage() {
         } = s1Raw as Record<string, unknown>;
         setS1(prev => ({ ...prev, ...(rest as Partial<Step1State>), parts: convertedParts }));
       } else {
-        setS1(prev => ({ ...prev, ...(s1Raw as Partial<Step1State>) }));
+        // Bentuk baru pun TETAP dinormalisasi: state persisten adalah input tidak
+        // tepercaya (bisa dari build versi mana pun yang pernah dipakai user).
+        // `cutawayExcluded` juga dijaga agar selalu array — dibaca .includes()/.length
+        // di render dan di payload suggest-storyboard.
+        const s1Obj = s1Raw as Record<string, unknown>;
+        setS1(prev => ({
+          ...prev,
+          ...(s1Raw as Partial<Step1State>),
+          parts: normalisasiParts(s1Obj.parts, s1Obj.aiTool as string | undefined),
+          cutawayExcluded: Array.isArray(s1Obj.cutawayExcluded)
+            ? (s1Obj.cutawayExcluded as unknown[]).map(Number).filter(Number.isFinite)
+            : prev.cutawayExcluded,
+        }));
       }
     }
     if (cfg.s3) setS3(prev => ({ ...prev, ...cfg.s3 }));

@@ -289,6 +289,70 @@ export interface DraftLamaS1 {
  * 7. `voDurationSec` awal = `durationSec` (asumsi VO memenuhi seluruh durasi;
  *    user bisa mengoreksi di UI baru).
  */
+/**
+ * Paksa sembarang bentuk `parts` tersimpan menjadi `PartDef[]` yang AMAN dirender.
+ *
+ * ⚠️ WAJIB dipakai di SETIAP jalur rehidrasi (autosave localStorage `vf_draft_<id>`
+ * MAUPUN riwayat D1 `params_json`) — bukan hanya jalur yang terdeteksi "lama".
+ *
+ * Latar belakang (insiden 2026-08-01): `applyConfig()` men-spread JSON tersimpan
+ * langsung ke state tanpa normalisasi, dan deteksi legacy-nya hanya melihat
+ * `durationMode`/`scenes`. Draft yang tersimpan DI TENGAH refactor — `parts` sudah
+ * ada tapi masih ber-`sceneCount`, tanpa `cuts`/`refPhotoIds` — lolos deteksi itu,
+ * masuk state apa adanya, lalu render meledak di `p.refPhotoIds.length`
+ * ("Cannot read properties of undefined") dan seluruh halaman jadi layar putih.
+ *
+ * Aturannya: state persisten adalah input TIDAK TEPERCAYA. Bentuknya bisa berasal
+ * dari build versi mana pun yang pernah dipakai user. Jangan pernah mengasumsikan
+ * field baru sudah ada di sana.
+ */
+export function normalisasiParts(raw: unknown, aiTool?: string): PartDef[] {
+  if (!Array.isArray(raw)) return [];
+  const clipMax = (aiTool ? getClipMaxSec(aiTool) : null) ?? 10;
+
+  return raw.map((p): PartDef => {
+    const o = (p ?? {}) as Record<string, unknown>;
+    const role: PartDef['role'] =
+      o.role === 'Hook' || o.role === 'Body' || o.role === 'CTA' ? o.role : 'Body';
+
+    const durNum = Number(o.durationSec);
+    const durationSec = Number.isFinite(durNum) && durNum > 0 ? Math.min(durNum, clipMax) : clipMax;
+
+    const voNum = Number(o.voDurationSec);
+    const voDurationSec = Number.isFinite(voNum) && voNum >= 0 ? Math.min(voNum, durationSec) : durationSec;
+
+    const cuts: CutDef[] = Array.isArray(o.cuts)
+      ? (o.cuts as unknown[]).flatMap((c): CutDef[] => {
+          const co = (c ?? {}) as Record<string, unknown>;
+          const photoId = Number(co.photoId);
+          if (!Number.isFinite(photoId)) return [];   // cut tanpa foto = tidak bisa dirender
+          const d = Number(co.durasiDetik);
+          return [{
+            photoId,
+            label: typeof co.label === 'string' ? co.label : '',
+            durasiDetik: Number.isFinite(d) && d > 0 ? d : 1,
+            ...(typeof co.aksi === 'string' && co.aksi ? { aksi: co.aksi } : {}),
+          }];
+        })
+      : [];
+
+    // refPhotoIds diturunkan ulang dari cuts bila tidak tersimpan/rusak — inilah
+    // invarian yang dipegang UI (kuota) dan ZIP (daftar lampiran).
+    const refTersimpan = Array.isArray(o.refPhotoIds)
+      ? (o.refPhotoIds as unknown[]).map(Number).filter(n => Number.isFinite(n))
+      : [];
+    const refPhotoIds = refTersimpan.length > 0
+      ? [...new Set(refTersimpan)]
+      : [...new Set(cuts.map(c => c.photoId))];
+
+    return {
+      role, durationSec, voDurationSec, refPhotoIds, cuts,
+      ...(typeof o.label === 'string' && o.label ? { label: o.label } : {}),
+      ...(typeof o.rationale === 'string' && o.rationale ? { rationale: o.rationale } : {}),
+    };
+  });
+}
+
 export function konversiDraftLama(
   s1: DraftLamaS1,
   scenes: DraftLamaScene[],
