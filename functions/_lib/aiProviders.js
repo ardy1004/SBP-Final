@@ -8,7 +8,7 @@
 // `supportsVision`: model DEFAULT provider ini menerima content multimodal
 // (array [{type:'text'},{type:'image_url'}]) lewat endpoint chat/completions
 // OpenAI-compatible-nya. HANYA Gemini yang `true` (model default
-// `gemini-3-flash-preview` multimodal) — Groq/OpenRouter/DeepSeek model DEFAULT-nya
+// `gemini-3.5-flash-lite` multimodal) — Groq/OpenRouter/DeepSeek model DEFAULT-nya
 // teks saja (provider itu mungkin PUNYA model lain yang bervisi, tapi model
 // default yang dipakai ViralFrame bukan itu; jangan overengineer per-model).
 // Dipakai oleh suggest-storyboard.js untuk memilih provider yang dicoba duluan
@@ -19,9 +19,46 @@ export const PROVIDERS = {
     label: 'Gemini',
     settingKey: 'gemini_api_key',
     base: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    // Gemini 3 Flash (free-tier, kuota harian besar ~1.500 req/hari). Kalau Google
-    // meng-GA / mengganti nama model ini, cukup ubah string di sini.
-    defaultModel: 'gemini-3-flash-preview',
+    // ⚠️ JANGAN pakai model ber-suffix `-preview` sebagai default.
+    //
+    // Sampai 2026-08-02 default-nya `gemini-3-flash-preview` dengan komentar
+    // "kuota harian besar ~1.500 req/hari" — angka itu diambil dari artikel pihak
+    // ketiga dan TERBUKTI SALAH. Diukur langsung ke API key produksi, respons 429
+    // Google menyebut apa adanya:
+    //   quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier
+    //   model: gemini-3-flash, limit: 20
+    // Dua puluh permintaan per hari — habis dalam satu sesi kerja, dan itulah yang
+    // membuat "AI Rancang Storyboard" gagal.
+    //
+    // Kuotanya **per model** (baca lagi quotaId-nya: PerProjectPerModel), jadi
+    // pindah model = ember baru, bukan berbagi ember yang sama.
+    //
+    // Diukur 2026-08-02 dengan key produksi (satu request kecil per model):
+    //   gemini-3-flash-preview .... 429, limit 20/hari (HABIS)
+    //   gemini-2.0-flash .......... 429, limit 0/hari (tidak gratis lagi)
+    //   gemini-2.0-flash-lite ..... 429, limit 0/hari (tidak gratis lagi)
+    //   gemini-2.5-flash(-lite) ... 404 (sudah tidak ada di endpoint ini)
+    //   gemini-3.5-flash-lite ..... OK 703 ms  ← dipilih
+    //   gemini-3.1-flash-lite ..... OK 605 ms
+    //   gemini-3.5-flash .......... OK 901 ms
+    //   gemini-3.6-flash .......... OK 1538 ms
+    //
+    // Kenapa `gemini-3.5-flash-lite`:
+    //  (1) GA/stabil, bukan preview — model preview-lah yang dapat jatah kecil;
+    //  (2) visi TERVERIFIKASI dengan foto properti asli (mendeskripsikan pintu
+    //      garasi kayu, pilar cokelat, lantai carport berpola — cocok dengan 2
+    //      model lain, jadi ia benar-benar melihat, bukan mengarang);
+    //  (3) kelas `flash-lite` tidak membakar thinking token — `gemini-3.5-flash`
+    //      dan `3.6-flash` jawabannya terpotong di 120 token karena berpikir dulu;
+    //  (4) nama versi dipatok eksplisit, BUKAN alias `-latest`, supaya Google tidak
+    //      diam-diam menggeser perilaku model di bawah prompt yang sudah ditala.
+    //
+    // ⚠️ Angka RPD model yang BELUM habis tidak bisa dibaca dari API — Google tidak
+    // mengirim header kuota dan dokumentasinya sudah tidak memuat tabelnya. Jadi
+    // "lebih besar dari 20" itu kesimpulan dari (1), bukan angka terukur. Kalau
+    // suatu saat model ini ikut 429, pesan errornya akan menyebut limitnya —
+    // CATAT angka itu di sini, jangan diganti tebakan.
+    defaultModel: 'gemini-3.5-flash-lite',
     quota: null, // tidak ada endpoint kuota — status dari cek models
     supportsVision: true,
   },
@@ -107,29 +144,58 @@ export async function callChatCompletion({ provider, apiKey, model, systemPrompt
       ]
     : userPrompt;
 
+  const mulai = Date.now();
+  const modelDipakai = model || cfg.defaultModel;
+
+  const kirim = (pakaiReasoning, sisaMs) => fetch(`${cfg.base}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: modelDipakai,
+      temperature,
+      max_tokens: maxTokens,
+      // Kirim hanya bila caller minta — tidak semua provider kenal field ini.
+      ...(pakaiReasoning && reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent },
+      ],
+    }),
+    signal: AbortSignal.timeout(sisaMs),
+  });
+
   let res;
   try {
-    res = await fetch(`${cfg.base}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: model || cfg.defaultModel,
-        temperature,
-        max_tokens: maxTokens,
-        // Kirim hanya bila caller minta — tidak semua provider kenal field ini.
-        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent },
-        ],
-      }),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    res = await kirim(true, timeoutMs);
   } catch (err) {
     return { ok: false, status: 0, error: `Gagal menghubungi ${cfg.label}: ${err.message}`, quotaExhausted: false };
+  }
+
+  // ⚠️ Dukungan `reasoning_effort` BERBEDA-BEDA PER MODEL dan TIDAK bisa ditebak
+  // dari namanya. Diukur ke API Gemini 2026-08-02:
+  //   DITERIMA : gemini-3.1-flash-lite, gemini-3.5-flash
+  //   DITOLAK  : gemini-3.5-flash-lite, gemini-3.6-flash, gemini-flash-latest,
+  //              gemini-flash-lite-latest   → HTTP 400 "invalid argument"
+  // Perhatikan tidak ada polanya: satu `flash-lite` menerima, `flash-lite` lain
+  // menolak. Jadi daftar-putih statis pasti basi begitu Google merilis model baru.
+  //
+  // Keenam pemanggil kita mengirim `reasoning_effort:'none'` untuk Gemini secara
+  // hardcoded (tujuannya menekan thinking token, lihat insiden latensi >22 detik).
+  // Tanpa penanganan ini, mengganti model default ke mana pun yang menolak field
+  // itu akan mematikan SELURUH fitur AI dengan 400 seketika.
+  //
+  // Solusinya swa-pulih, bukan daftar: kalau 400 dan kita memang mengirim field
+  // itu, ulangi SEKALI tanpa field tersebut. Model yang tidak mengenalnya juga
+  // tidak melakukan thinking, jadi menghilangkannya tidak mengubah perilaku.
+  if (res.status === 400 && reasoningEffort) {
+    const sisa = timeoutMs - (Date.now() - mulai);
+    if (sisa > 1500) {
+      try { res = await kirim(false, sisa); }
+      catch (err) { return { ok: false, status: 0, error: `Gagal menghubungi ${cfg.label}: ${err.message}`, quotaExhausted: false }; }
+    }
   }
 
   if (!res.ok) {
