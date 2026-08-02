@@ -63,9 +63,33 @@ function d1Tulis(sql) {
 // Urutan penting: ± diperiksa LEBIH DULU, kalau tidak em-dash akan menelannya.
 const PLUSMINUS = /:\s\?\s(?=\d)/g;
 const EMDASH = /([\w)\]%²°])\s\?\s(?=[\w(])/g;
+
+// GELOMBANG 2 (2026-08-03) — ditambahkan SETELAH melihat ke-37 baris sisa utuh.
+// Waktu baru terlihat 4 contoh, kedua pola ini masih tampak menebak; dengan daftar
+// penuh, keduanya terbukti berulang dengan bentuk identik.
+//
+//   PLUSMINUS_RAPAT : '?400 m²', '?13 Kamar', '(?6 meter)'  -> '±'
+//     Lookbehind SENGAJA hanya spasi/titik-dua/bullet/dash/kurung — BUKAN digit —
+//     supaya '140?200' (ukuran kasur, seharusnya '140×200') TIDAK ikut berubah.
+//   EMOJI_HILANG : '??' / '????' -> dibuang.
+//     Emoji di luar BMP jadi SEPASANG '?' saat impor rusak, jadi runtun genap
+//     pendek = emoji hiasan. Tampil sebagai tanda tanya ganda di cuplikan Google.
+//     ⚠️ Runtun PANJANG (≥6) dibiarkan — itu KATA yang hilang, bukan hiasan
+//     (mis. #651 '???????? ????????????' = frasa utuh). Membuangnya menghapus
+//     makna, bukan memperbaiki tampilan.
+const PLUSMINUS_RAPAT = /(?<=[\s:•\-(])\?(?=\d)/g;
+// ⚠️ `(?<!\?)` dan `(?!\?)` WAJIB ada. Tanpa keduanya, runtun panjang tergigit
+// SEBAGIAN — '????????' (8) kehilangan 5 dan menyisakan '???', yang lebih buruk
+// daripada dibiarkan utuh. Batas 4 = maksimal 2 emoji; runtun lebih panjang
+// hampir pasti KATA yang hilang, jadi dibiarkan untuk koreksi manual.
+const EMOJI_HILANG = /\s*(?<!\?)\?{2,4}(?!\?)(?=\s|$|•)/g;
+
 const perbaiki = (s) => String(s ?? '')
   .replace(PLUSMINUS, ': ± ')
-  .replace(EMDASH, '$1 — ');
+  .replace(EMDASH, '$1 — ')
+  .replace(PLUSMINUS_RAPAT, '±')
+  .replace(EMOJI_HILANG, '')
+  .replace(/[ \t]{2,}/g, ' ');
 
 const rows = d1(`SELECT id, title, deskripsi FROM properties
                  WHERE title LIKE '%?%' OR deskripsi LIKE '%?%' ORDER BY id`);
@@ -103,8 +127,7 @@ for (const p of rencana.filter(x => x.ubahJudul).slice(0, 10)) {
 
 console.log(`\n=== MENCURIGAKAN — TIDAK DISENTUH, koreksi manual (${ambigu.length}) ===`);
 console.log('    (tanda tanya yang sah TIDAK didaftar di sini)');
-for (const a of ambigu.slice(0, 15)) console.log(`  #${a.id} [${a.kolom}] …${a.cuplikan}…`);
-if (ambigu.length > 15) console.log(`  … dan ${ambigu.length - 15} lagi`);
+for (const a of ambigu) console.log(`  #${a.id} [${a.kolom}] …${a.cuplikan}…`);
 
 console.log('\n=== RINGKASAN ===');
 console.log(`  baris diperbaiki : ${rencana.length}`);
