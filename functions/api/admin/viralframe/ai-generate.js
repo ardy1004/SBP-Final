@@ -539,6 +539,17 @@ ATURAN 'cuts' — INTI MODEL PART, WAJIB:
   • Timecode 't' berurutan tanpa celah/tumpang tindih, total menutup penuh durasi Part.
   • Berbeda dari aturan lama: foto/lokasi BOLEH berganti antar cut, karena semua foto referensi Part ini dilampirkan bersamaan (maks ${MAX_REF_IMAGES_PER_PART} gambar per generate). Tulis pergantiannya sebagai HARD CUT yang tegas di dalam 'prompt'.
   • 'dialog_karakter' TETAP 1 nilai untuk keseluruhan Part, TIDAK dipecah per cut.
+  ⚠️ TEKS 'prompt' DAN ISI 'cuts' WAJIB MENCERITAKAN HAL YANG SAMA. Saat menyebut
+    gerakan b-roll di dalam 'prompt', sebut nama file dalam URUTAN PERSIS seperti di
+    'cuts', dan HANYA file yang benar-benar ada di rentang detik itu.
+    ✗ SALAH (kejadian nyata 2026-08-02): 'cuts' berisi kamar_mandi(3-5s), dapur(5-8s),
+      dapur(8-10s), tapi 'prompt' menulis "Shot 2 (3-10s): push-in on kamar_tidur, arc
+      on kamar_mandi, pull-back on dapur" — kamar_tidur TIDAK ADA di rentang 3-10s
+      (ia hanya dipakai cut pertama untuk talking-head). Generator video membaca teks
+      'prompt', jadi ia akan menampilkan ruangan yang salah di waktu yang salah.
+    ✓ BENAR: "Shot 2 (3-10s): slow push-in on kamar_mandi.webp, then slow arc on
+      dapur.webp, then slow pull-back on dapur.webp" — sama persis dengan daftar cut,
+      urutan sama, tanpa file tambahan.
 
 ATURAN TAMBAHAN FIELD 'prompt' — WAJIB, PELANGGARAN = OUTPUT DITOLAK:
   ${nativeAudio
