@@ -453,8 +453,19 @@ sekadar kualitas buruk — ia menyesatkan calon pembeli dan merusak kepercayaan 
     "fully furnished", "furnished", "siap huni", "baru renovasi", "bebas banjir",
     "sudah ada penyewa". Bila baris "Fasilitas" berbunyi "tidak disebutkan", artinya
     memang TIDAK DIKETAHUI: jangan diisi tebakan, cukup jangan dibahas.
-  ✗ DILARANG menyebut ANGKA (jumlah kamar, luas, tahun) yang berbeda dari data. Bila
-    judul dan field terstruktur berbeda, PAKAI YANG DARI FIELD dan jangan mencampur.
+  ✗ DILARANG menyebut ANGKA (jumlah kamar, luas, tahun) yang tidak ada di data.
+  ⚠️ ANGKA YANG BERBEDA BELUM TENTU BERTENTANGAN — sering ia mengukur HAL YANG BERBEDA.
+    Pola yang sangat umum di katalog ini (45 dari 184 listing kost): properti kost yang
+    punya RUMAH INDUK. Judul/deskripsi menyebut jumlah KAMAR KOST saja, sedangkan field
+    "Kamar Tidur" berisi TOTAL (kamar kost + kamar rumah induk).
+    Contoh nyata: judul "13 Kost", field Kamar Tidur 16 → 13 kamar kost + 3 kamar rumah
+    induk. KEDUANYA BENAR.
+    ✓ WAJIB menyebut angka BERSAMA LABELNYA: "13 kamar kost" atau "total 16 kamar
+      termasuk rumah induk".
+    ✗ DILARANG menyebut angka telanjang tanpa label ("ada 16 kamar") — pembaca akan
+      mengira semuanya kamar sewa, dan itu menyesatkan hitungan pendapatannya.
+    ✓ Untuk properti KOST, angka KAMAR KOST lebih relevan bagi calon investor karena
+      itulah yang menghasilkan sewa — dahulukan itu bila hanya sempat menyebut satu.
   ✓ Lokasi cukup disebut sebatas yang ada: kelurahan/kecamatan/kabupaten.
   ✓ Kalau ragu sebuah fakta ada atau tidak di data — JANGAN SEBUT. Dialog tanpa
     detail itu tetap kuat; dialog dengan detail palsu merugikan.
