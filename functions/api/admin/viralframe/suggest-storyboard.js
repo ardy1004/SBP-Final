@@ -38,6 +38,12 @@ const DUR_PART_FALLBACK_MAKS = 300; // dipakai hanya bila ai_tool tak dikenal/ko
 // dipotong pas di tengah oleh Worker.
 const BUDGET_MS = 26000;
 const MIN_SISA_UNTUK_COBA_MS = 4000;
+// Jatah MAKSIMUM satu percobaan bervisi di Fase 1. Sengaja jauh di bawah
+// BUDGET_MS supaya Fase 2 (teks-saja) selalu kebagian sisa yang berarti:
+// 26 − 14 = 12 detik, cukup untuk BEBERAPA provider teks sekaligus (Groq 0,4 s,
+// OpenRouter 2,4 s — diukur 2026-08-02). Dulu 18 detik, dan satu provider yang
+// menggantung praktis menghabiskan seluruh anggaran sendirian.
+const CAP_FASE1_MS = 14000;
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -81,6 +87,10 @@ export async function onRequestPost(context) {
   const archetype = typeof body.archetype === 'string' ? body.archetype.slice(0, 60) : '';
   const register = typeof body.register === 'string' ? body.register.slice(0, 40) : '';
   const chosenProvider = PROVIDER_ORDER.includes(body.provider) ? body.provider : 'gemini';
+  // Model spesifik pilihan user — kontraknya sama persis dengan ai-generate.js:
+  // hanya berlaku untuk provider yang DIPILIH; provider fallback tetap memakai
+  // defaultModel-nya masing-masing (model milik provider A tidak valid di B).
+  const chosenModel = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
 
   // ── BRIEF KREATIF ──────────────────────────────────────────────────────────
   // Sebelum 2026-08-01 endpoint ini HANYA menerima archetype/register/ai_tool,
@@ -271,6 +281,11 @@ Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama s
     const heartbeat = setInterval(() => send({ status: 'progress' }), 2000);
     try {
       let raw = null, used = null, lastErr = null, usedVision = false;
+      // Provider yang GAGAL KARENA WAKTU di Fase 1. Dipakai menggeser urutan Fase 2 —
+      // lihat alasan lengkapnya di komentar Fase 2 di bawah.
+      const gagalKarenaWaktu = new Set();
+      // Provider yang kehabisan kuota — dipakai menyusun pesan error yang jujur.
+      const kuotaHabis = new Set();
 
       // Fase 1 — coba provider ber-visi dulu (kirim imageUrls), dalam urutan
       // preferensi user. Kalau tak satupun provider bervisi punya key
@@ -284,14 +299,23 @@ Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama s
         const key = await getProviderKey(env, prov);
         if (!key) continue;
         const r = await callChatCompletion({
-          provider: prov, apiKey: key, model: PROVIDERS[prov].defaultModel,
+          provider: prov, apiKey: key,
+          model: prov === chosenProvider && chosenModel ? chosenModel : PROVIDERS[prov].defaultModel,
           systemPrompt: sysVision, userPrompt: userVision, imageUrls,
           maxTokens: 1600, temperature: 0.6,
           reasoningEffort: prov === 'gemini' ? 'none' : undefined,
-          timeoutMs: Math.max(3000, Math.min(sisa - 1000, 18000)),
+          // ⚠️ Jatah Fase 1 dibatasi CAP_FASE1_MS, bukan hampir seluruh anggaran.
+          // Dulu 18 detik: satu provider bervisi yang menggantung memakan 18 dari 26
+          // detik, menyisakan ~7 detik untuk SEMUA provider teks. Padahal Groq balas
+          // dalam 0,4 detik dan OpenRouter 2,4 detik (diukur 2026-08-02) — mereka
+          // cuma butuh remah, asal kebagian.
+          timeoutMs: Math.max(3000, Math.min(sisa - 1000, CAP_FASE1_MS)),
         });
         if (r.ok) { raw = r.content; used = prov; usedVision = true; break; }
         lastErr = r.error;
+        if (r.quotaExhausted) kuotaHabis.add(prov);
+        // status 0 = fetch melempar (abort/jaringan), yaitu gagal karena waktu.
+        else if (r.status === 0) gagalKarenaWaktu.add(prov);
         console.error(`[suggest-storyboard] vision ${prov} gagal:`, r.error?.slice(0, 120));
       }
 
@@ -302,13 +326,36 @@ Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama s
       // yang lebih berat — percobaan teks-saja bisa saja masih berhasil).
       if (!raw) {
         const { system: sysTeks, user: userTeks } = buatPrompt(false);
-        for (const prov of tryOrder) {
+
+        // ⚠️ URUTAN FASE 2 BUKAN `tryOrder` MENTAH — ini inti perbaikan 2026-08-02.
+        //
+        // Dulu Fase 2 memakai tryOrder apa adanya, yang menaruh provider PILIHAN
+        // (biasanya Gemini) paling depan — provider yang BARU SAJA gagal di Fase 1.
+        // Saat Gemini menggantung, urutannya jadi: Fase 1 Gemini 18 s → Fase 2
+        // Gemini lagi ~7 s → sisa < 4 s → berhenti. Groq (0,4 s) dan OpenRouter
+        // (2,4 s), dua-duanya sehat dan ber-key, TIDAK PERNAH DICOBA SEKALI PUN.
+        // Gejalanya ke user: "Gagal menghubungi Gemini: aborted due to timeout",
+        // seolah tidak ada alternatif — padahal ada dua yang siap.
+        //
+        // Yang digeser ke belakang HANYA yang gagal karena WAKTU. Provider yang
+        // gagal karena KUOTA tetap di depan, karena alasan lamanya masih sah:
+        // permintaan bervisi jauh lebih berat daripada teks-saja, jadi kuota bisa
+        // menolak yang bervisi tapi meloloskan yang teks. Provider yang tidak
+        // sanggup menjawab dalam 18 detik tidak akan sanggup dalam 7 detik —
+        // itu beda yang membuat aturan ini benar, bukan sekadar "coba yang lain".
+        const urutanFase2 = [
+          ...tryOrder.filter(p => !gagalKarenaWaktu.has(p)),
+          ...tryOrder.filter(p => gagalKarenaWaktu.has(p)),
+        ];
+
+        for (const prov of urutanFase2) {
           const sisa = BUDGET_MS - (Date.now() - mulai);
           if (sisa < MIN_SISA_UNTUK_COBA_MS) break;
           const key = await getProviderKey(env, prov);
           if (!key) continue;
           const r = await callChatCompletion({
-            provider: prov, apiKey: key, model: PROVIDERS[prov].defaultModel,
+            provider: prov, apiKey: key,
+            model: prov === chosenProvider && chosenModel ? chosenModel : PROVIDERS[prov].defaultModel,
             systemPrompt: sysTeks, userPrompt: userTeks,
             maxTokens: 1600, temperature: 0.6,
             reasoningEffort: prov === 'gemini' ? 'none' : undefined,
@@ -316,12 +363,24 @@ Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama s
           });
           if (r.ok) { raw = r.content; used = prov; usedVision = false; break; }
           lastErr = r.error;
+          if (r.quotaExhausted) kuotaHabis.add(prov);
           console.error(`[suggest-storyboard] teks ${prov} gagal:`, r.error?.slice(0, 120));
         }
       }
 
       if (!raw) {
-        send({ done: true, error: `Gagal rancang storyboard: ${(lastErr || 'semua provider gagal/kehabisan kuota').slice(0, 180)}. Pastikan API key AI diatur di Pengaturan.` });
+        // Pesan yang menyebut penyebab SEBENARNYA. Dulu isinya `lastErr` mentah,
+        // sehingga kuota harian Gemini yang habis muncul ke user sebagai
+        // "aborted due to timeout" — menyesatkan total, dan tidak memberi tahu
+        // satu-satunya tindakan yang menolong (ganti provider di dropdown).
+        let pesan;
+        if (kuotaHabis.size > 0) {
+          const nama = [...kuotaHabis].map(p => PROVIDERS[p]?.label ?? p).join(', ');
+          pesan = `Kuota harian ${nama} sudah habis dan provider lain juga tidak berhasil. Pilih provider lain di dropdown "Sumber AI" tepat di atas tombol ini, atau tunggu kuota reset.`;
+        } else {
+          pesan = `Gagal rancang storyboard: ${(lastErr || 'semua provider gagal').slice(0, 180)}. Coba provider lain di dropdown "Sumber AI", atau pastikan API key diatur di Pengaturan.`;
+        }
+        send({ done: true, error: pesan });
         return;
       }
 

@@ -2630,6 +2630,28 @@ export default function AdminViralFrameWorkspacePage() {
   const [suggestError, setSuggestError] = useState('');
   const [suggestUsedVision, setSuggestUsedVision] = useState<boolean | null>(null);
   const [suggestProviderUsed, setSuggestProviderUsed] = useState<string>('');
+
+  // ── Pemilih Sumber AI khusus Sutradara AI ──
+  // Sengaja punya state SENDIRI, terpisah dari pemilih di tab "AI Generate":
+  // keduanya jalan di tahap berbeda dan sering ingin provider berbeda (mis.
+  // storyboard butuh yang BERVISI, generate naskah tidak). Menyatukannya akan
+  // membuat memilih di satu tempat diam-diam mengubah yang lain.
+  const [suggestProvider, setSuggestProvider] = useState<AiProviderId>('gemini');
+  const [suggestModel, setSuggestModel] = useState('');
+  const [suggestModels, setSuggestModels] = useState<string[]>([]);
+  const [suggestModelsLoading, setSuggestModelsLoading] = useState(false);
+  const [suggestAiStatus, setSuggestAiStatus] = useState<Record<string, AiStatusInfo> | null>(null);
+
+  useEffect(() => { getAiStatus().then(r => { if (r.success && r.data) setSuggestAiStatus(r.data); }); }, []);
+  useEffect(() => {
+    setSuggestModelsLoading(true);
+    setSuggestModels([]);
+    getAiModels(suggestProvider).then(r => {
+      const list = r.success && r.data ? r.data.models : [];
+      setSuggestModels(list);
+      setSuggestModel(list[0] ?? '');
+    }).finally(() => setSuggestModelsLoading(false));
+  }, [suggestProvider]);
   const suggestStoryboard = useCallback(async () => {
     if (!prop) return;
     setSuggestLoading(true); setSuggestError('');
@@ -2662,6 +2684,10 @@ export default function AdminViralFrameWorkspacePage() {
           tone: s1.tone,
           visual_style: s1.visualStyle,
           bahasa: s1.language,
+          // Provider & model pilihan user. Keduanya hanya PREFERENSI — backend
+          // tetap punya rantai fallback bila pilihan ini gagal/kehabisan kuota.
+          provider: suggestProvider,
+          model: suggestModel || undefined,
         }),
       });
       const data = await readNdjsonFinal<{ parts: PartDef[]; provider_used: string; used_vision: boolean }>(r);
@@ -2683,7 +2709,7 @@ export default function AdminViralFrameWorkspacePage() {
     }
   }, [prop, s1.parts, s1.archetype, s1.register, s1.aiTool, s1.cutawayExcluded,
       s1.hookType, s1.ctaType, s1.ctaKeyword, s1.platforms, s1.tone, s1.visualStyle, s1.language,
-      s3.useCharacter, s3.character]);
+      s3.useCharacter, s3.character, suggestProvider, suggestModel]);
 
   // Pilih arketipe → prefill visualStyle/tone/register/cutaway (parameter Step 3 saja).
   // Nilai tetap bisa di-override manual setelahnya (memilih 'custom' tidak mereset).
@@ -3698,6 +3724,41 @@ export default function AdminViralFrameWorkspacePage() {
               generik. Sekarang: brief diisi dulu → sutradara AI jalan terakhir.
               JANGAN pindahkan blok ini ke atas field parameter mana pun. */}
           <div className="rounded-xl border border-[#1565C0]/25 bg-[#F8FBFF] p-3 space-y-2">
+            {/* Sumber AI — pola sama dengan tab "AI Generate", tapi state-nya sendiri.
+                Titik hijau/kuning/merah = status kuota tiap provider, jadi user bisa
+                melihat mana yang masih hidup SEBELUM menekan tombol, bukan setelah gagal. */}
+            <div>
+              <label className="block text-[11px] font-semibold text-[#0F172A] mb-1">🤖 Sumber AI</label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mb-1.5">
+                {AI_PROVIDER_LIST.map(p => {
+                  const st = suggestAiStatus?.[p.id];
+                  const active = suggestProvider === p.id;
+                  return (
+                    <button key={p.id} type="button" onClick={() => setSuggestProvider(p.id)}
+                      title={st?.detail ?? 'memuat status…'}
+                      className={`flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                        active ? 'bg-[#EFF6FF] border-[#1565C0] text-[#1565C0]' : 'bg-white border-gray-200 text-[#64748B] hover:bg-gray-50'
+                      }`}>
+                      <span className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                        style={{ background: st ? AI_STATUS_COLOR[st.color] : '#CBD5E1' }} />
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <select value={suggestModel} onChange={e => setSuggestModel(e.target.value)}
+                disabled={suggestModelsLoading || suggestModels.length === 0}
+                className="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg outline-none focus:border-[#1565C0] bg-white">
+                {suggestModelsLoading && <option>Memuat model…</option>}
+                {!suggestModelsLoading && suggestModels.length === 0 && <option value="">— Key belum diatur di Pengaturan —</option>}
+                {suggestModels.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <p className="text-[10px] text-[#94A3B8] mt-1">
+                Hanya <strong>Gemini</strong> yang bisa melihat foto. Provider lain tetap bisa merancang, tapi dari label foto saja.
+                Kalau pilihanmu gagal/kehabisan kuota, sistem otomatis mencoba provider lain.
+              </p>
+            </div>
+
             <div className="flex items-center gap-2 flex-wrap">
               <button type="button" onClick={suggestStoryboard} disabled={suggestLoading || s1.parts.length === 0}
                 className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-[#1565C0]/30 bg-white text-[#1565C0] hover:bg-[#F0F7FF] disabled:opacity-50 disabled:cursor-not-allowed">
