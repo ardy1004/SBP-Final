@@ -174,6 +174,9 @@ export interface ApiPropertyDetail extends ApiPropertyListItem {
   // padahal normalizePropertyDetail() membacanya. Tipe tertinggal dari API.
   meta_title?: string | null;
   meta_description?: string | null;
+  // Endpoint DETAIL mengembalikan kelurahan (endpoint LIST tidak — lihat catatan
+  // di normalizeProperty). Opsional supaya konsumen lama tetap valid.
+  kelurahan?: string | null;
   // CATATAN: `status_legalitas` SENGAJA tidak diulang di sini — sudah opsional
   // di induknya. Dulu ia dideklarasikan ulang sebagai opsional padahal induknya
   // mewajibkannya, sehingga interface ini gagal meng-extend induk dan setiap
@@ -353,7 +356,11 @@ export function normalizePropertyDetail(p: ApiPropertyDetail) {
   return {
     ...base,
     deskripsi: p.deskripsi ?? '',
-    kelurahan: '',
+    // ⚠️ Dulu di-hardcode '' di sini, menimpa nilai dari `normalizeProperty` DAN
+    // membuang kelurahan yang dikembalikan endpoint detail. Akibatnya JSON-LD dan
+    // halaman detail tidak pernah bisa menampilkan kelurahan meskipun datanya ada
+    // di database (531 dari 533 properti terisi per 2026-08-03).
+    kelurahan: p.kelurahan ?? '',
     latitude: p.latitude ?? undefined,
     longitude: p.longitude ?? undefined,
     gmaps_link: p.gmaps_link ?? undefined,

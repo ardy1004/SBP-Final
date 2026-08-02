@@ -323,6 +323,7 @@ export default function AdminPropertyDetailPage() {
       jenis_properti: form.jenis_properti ?? '',
       tujuan: form.tujuan ?? '',
       harga: form.harga ?? 0,
+      kelurahan: form.kelurahan ?? '',
       kecamatan: form.kecamatan ?? '',
       kabupaten: form.kabupaten ?? '',
       luas_tanah: form.luas_tanah ?? null,

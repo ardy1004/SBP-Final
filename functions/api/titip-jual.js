@@ -235,6 +235,7 @@ export async function onRequestPost(context) {
     jenis_properti, tujuan,
     // Kolom `harga` = 0 untuk tujuan disewa murni — pakai harga_sewa_tahun supaya meta title/description tidak jatuh ke "Harga Nego"
     harga: tujuan === 'disewa' ? harga_sewa_tahun : harga,
+    kelurahan: kelurahan_prop || kelurahan_owner,
     kecamatan: kecamatan_prop || kecamatan_owner,
     kabupaten, luas_tanah, luas_bangunan, nego,
   });

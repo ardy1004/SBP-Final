@@ -173,6 +173,8 @@ export async function onRequestPost(context) {
   const tujuan       = sanitize(body.tujuan ?? '', 20);
   const harga        = body.harga != null ? parseInt(String(body.harga), 10) : 0;
   const kecamatan    = sanitize(body.kecamatan ?? '', 100);
+  const kelurahan    = sanitize(body.kelurahan ?? '', 100);
+  const alamat       = sanitize(body.alamat ?? '', 255);
   const kabupaten    = sanitize(body.kabupaten ?? '', 100);
   const provinsi     = sanitize(body.provinsi ?? 'DI Yogyakarta', 100) || 'DI Yogyakarta';
   const luas_tanah   = parseInt(body.luas_tanah, 10) || null;
@@ -233,7 +235,7 @@ export async function onRequestPost(context) {
   const meta = !body.meta_title
     // hrg.harga, BUKAN harga mentah: pada mode per-m² nilai mentahnya adalah
     // harga per meter, sehingga meta SEO akan mengiklankan harga yang salah.
-    ? generateMetaSeo({ jenis_properti: jenis, tujuan, harga: hrg.harga, kecamatan, kabupaten, luas_tanah, luas_bangunan, nego })
+    ? generateMetaSeo({ jenis_properti: jenis, tujuan, harga: hrg.harga, kelurahan, kecamatan, kabupaten, luas_tanah, luas_bangunan, nego })
     : { meta_title: sanitize(body.meta_title, 60), meta_description: sanitize(body.meta_description ?? '', 155) };
 
   try {
@@ -248,7 +250,11 @@ export async function onRequestPost(context) {
       VALUES (?,?,?,?,?,  ?,?,?,?,  ?,?,?,?,?,  ?,?,?,  ?,?,?,  'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     `).bind(kode_listing, title, slug, jenis, tujuan,
             hrg.harga, hrg.harga_per_m2, hrg.harga_mode, luas_tanah,
-            provinsi, kabupaten, kecamatan, '', '', gmaps_link, geo_lat, geo_lng,
+            // ⚠️ kelurahan & alamat dulu di-bind literal '' — apa pun yang dikirim form
+            // dibuang diam-diam, sehingga properti baru SELALU lahir tanpa kelurahan.
+            // Itu juga sebabnya kolomnya berisi string kosong, bukan NULL, sehingga
+            // COUNT(kelurahan) menghitungnya sebagai "terisi" dan celahnya tak terlihat.
+            provinsi, kabupaten, kecamatan, kelurahan, alamat, gmaps_link, geo_lat, geo_lng,
             detailsVal, meta.meta_title, meta.meta_description).run();
 
     // Retry saat tabrakan UNIQUE kode_listing (request paralel dapat sequence sama)

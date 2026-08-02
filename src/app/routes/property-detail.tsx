@@ -54,7 +54,7 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
         jumlah_kamar_tidur, jumlah_kamar_mandi,
         luas_tanah, luas_bangunan, lebar_depan, lantai,
         legalitas, furnished,
-        kecamatan, kabupaten, provinsi,
+        kelurahan, kecamatan, kabupaten, provinsi,
         latitude, longitude, gmaps_link,
         deskripsi, video_youtube,
         income_per_bulan, pengeluaran_per_bulan,
@@ -115,6 +115,7 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
       lantai: r.lantai as number | null,
       legalitas: r.legalitas as string,
       furnished: r.furnished as string | null,
+      kelurahan: r.kelurahan as string | null,
       kecamatan: r.kecamatan as string,
       kabupaten: r.kabupaten as string,
       provinsi: r.provinsi as string,
@@ -226,12 +227,37 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
                 ? "https://schema.org/SoldOut"
                 : "https://schema.org/InStock",
             },
+            // addressLocality = kota/kabupaten; kelurahan & kecamatan masuk
+            // addressSubLocality. Sebelumnya keduanya dijejalkan ke addressLocality
+            // ("Depok, Kabupaten Sleman") — secara schema.org itu salah, dan mesin
+            // pencari kehilangan sinyal wilayah yang lebih halus.
             address: {
               "@type": "PostalAddress",
-              addressLocality: `${p.kecamatan}, ${p.kabupaten}`,
+              ...(([p.kelurahan, p.kecamatan].filter(Boolean).join(', '))
+                ? { addressSubLocality: [p.kelurahan, p.kecamatan].filter(Boolean).join(', ') }
+                : {}),
+              addressLocality: p.kabupaten,
               addressRegion: p.provinsi,
               addressCountry: "ID",
             },
+            // ⚠️ `geo` HANYA diemit bila kedua koordinat ada. 527 dari 533 properti
+            // belum berkoordinat (entri data manual, bukan bug); memancarkan
+            // GeoCoordinates bernilai null lebih buruk daripada tidak ada sama sekali
+            // karena itu structured data yang tidak valid.
+            ...(p.latitude != null && p.longitude != null
+              ? { geo: { "@type": "GeoCoordinates", latitude: p.latitude, longitude: p.longitude } }
+              : {}),
+            // Sinyal kuat untuk pencarian properti & mesin jawaban AI — datanya sudah
+            // dimuat loader, sebelumnya tidak pernah dipancarkan.
+            // Nama field SESUDAH normalizeProperty(): jumlah_kamar_tidur -> kamar_tidur.
+            ...(p.kamar_tidur ? { numberOfRooms: p.kamar_tidur } : {}),
+            ...(p.kamar_mandi ? { numberOfBathroomsTotal: p.kamar_mandi } : {}),
+            ...(p.luas_bangunan
+              ? { floorSize: { "@type": "QuantitativeValue", value: p.luas_bangunan, unitCode: "MTK" } }
+              : {}),
+            ...(p.luas_tanah
+              ? { lotSize: { "@type": "QuantitativeValue", value: p.luas_tanah, unitCode: "MTK" } }
+              : {}),
           },
           {
             "@type": "BreadcrumbList",

@@ -30,15 +30,48 @@ function trunc(str, max) {
   return str.length > max ? str.slice(0, max - 3) + '...' : str;
 }
 
-export function generateMetaSeo({ jenis_properti, tujuan, harga, kecamatan, kabupaten, luas_tanah, luas_bangunan, nego }) {
+export function generateMetaSeo({ jenis_properti, tujuan, harga, kelurahan, kecamatan, kabupaten, luas_tanah, luas_bangunan, nego }) {
   const jenisLabel = JENIS_LABEL[jenis_properti] || 'Properti';
   const tujuanLabel = TUJUAN_LABEL[tujuan] || '';
   const lokasi = kecamatan || kabupaten || 'Yogyakarta';
   const kab = kabupaten || 'DIY';
   const hargaShort = formatHargaShort(harga);
 
-  const rawTitle = `${jenisLabel} ${tujuanLabel} di ${lokasi}, ${kab} - ${hargaShort || 'Harga Nego'} | Salam Bumi Property`;
-  const meta_title = trunc(rawTitle, 60);
+  // ⚠️ JUDUL WAJIB PUNYA PEMBEDA UNIK.
+  // Sampai 2026-08-03 judul hanya disusun dari jenis+tujuan+kecamatan+kabupaten+harga,
+  // sehingga dua properti sejenis, sekecamatan, seharga mendapat judul IDENTIK.
+  // Terukur di D1 produksi: 214 dari 533 properti (40%) memakai meta_title kembar —
+  // sinyal konten tipis/duplikat bagi mesin pencari. Diperparah trunc(...,60) yang
+  // justru memotong bagian brand di ujung.
+  //
+  // Kombinasi diuji langsung ke data nyata (GROUP BY, jumlah properti kembar):
+  //   kecamatan (lama) .................. 214
+  //   + kelurahan ....................... 148
+  //   kelurahan + KT + KM ............... 303  (lebih buruk — banyak yang sekamar sama)
+  //   kelurahan + KT + harga ............  46
+  //   kelurahan + LT + LB + harga .......   2  ← dipakai
+  //
+  // Brand disingkat 'SBP' (bukan 'Salam Bumi Property') karena selisih 17 karakter itu
+  // yang menentukan pembeda ikut terpotong atau tidak.
+  const lokasiJudul = (kelurahan && String(kelurahan).trim()) || lokasi;
+  const luasBagian = [
+    luas_tanah ? `LT${luas_tanah}` : null,
+    // `tanah` hampir selalu tanpa bangunan — jangan menulis 'LB0' yang menyesatkan.
+    luas_bangunan ? `LB${luas_bangunan}` : null,
+  ].filter(Boolean).join(' ');
+
+  // Susun dari yang paling informatif, lalu SUSUTKAN bertahap sampai muat 60 char.
+  // Memotong dengan '...' (perilaku lama) selalu membuang bagian EKOR — yaitu harga
+  // dan brand — padahal itu yang paling berguna di hasil pencarian. Lebih baik
+  // melepas komponen luas secara sadar daripada memotong buta.
+  const kepala = `${jenisLabel} ${tujuanLabel} ${lokasiJudul}`.replace(/\s+/g, ' ').trim();
+  const ekor = `- ${hargaShort || 'Harga Nego'} | SBP`;
+  const kandidat = [
+    [kepala, luasBagian, ekor],                                    // lengkap
+    [kepala, luas_tanah ? `LT${luas_tanah}` : '', ekor],           // lepas LB
+    [kepala, ekor],                                                // lepas luas
+  ].map(bagian => bagian.filter(Boolean).join(' '));
+  const meta_title = trunc(kandidat.find(t => t.length <= 60) ?? kandidat[kandidat.length - 1], 60);
 
   const parts = [`Properti ${jenisLabel.toLowerCase()} ${tujuanLabel.toLowerCase()} di ${lokasi}, ${kab}.`];
   if (luas_tanah) parts.push(`Luas tanah ${luas_tanah}m².`);

@@ -7,3 +7,7 @@ Disallow: /api/
 Disallow: /sign/
 
 Sitemap: https://salambumi.xyz/sitemap.xml
+
+# Panduan situs untuk AI crawler / generative engine (spesifikasi llmstxt.org)
+# Dilayani oleh functions/llms.txt.js, konten listing live dari D1.
+# https://salambumi.xyz/llms.txt
