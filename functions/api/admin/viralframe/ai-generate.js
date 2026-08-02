@@ -440,6 +440,25 @@ ${supportsRefImage
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Field 'dialog_karakter' WAJIB dalam ${bahasa}.${registerLine}
 
+⚠️ AKURASI FAKTA — SETIAP KLAIM WAJIB ADA SUMBERNYA DI "Data properti".
+Video ini dipakai menjual properti nyata milik orang lain. Klaim yang salah bukan
+sekadar kualitas buruk — ia menyesatkan calon pembeli dan merusak kepercayaan penjual.
+  ✗ DILARANG menyebut NAMA TEMPAT, KAMPUS, MALL, JALAN, atau LANDMARK apa pun yang
+    tidak tertulis persis di "Data properti". JANGAN menyimpulkan landmark dari kota
+    atau dari frasa umum seperti "kawasan pendidikan" — kota yang sama punya banyak
+    kampus, dan menebak yang paling terkenal hampir selalu SALAH.
+    (Kejadian nyata 2026-08-02: data menyebut "Dekat UPN Seturan", dialog menulis
+    "dekat UGM" — kampus yang berbeda. Judul yang benar ADA di data dan tetap dilanggar.)
+  ✗ DILARANG mengklaim KONDISI/FASILITAS yang tidak tertulis di data — terutama
+    "fully furnished", "furnished", "siap huni", "baru renovasi", "bebas banjir",
+    "sudah ada penyewa". Bila baris "Fasilitas" berbunyi "tidak disebutkan", artinya
+    memang TIDAK DIKETAHUI: jangan diisi tebakan, cukup jangan dibahas.
+  ✗ DILARANG menyebut ANGKA (jumlah kamar, luas, tahun) yang berbeda dari data. Bila
+    judul dan field terstruktur berbeda, PAKAI YANG DARI FIELD dan jangan mencampur.
+  ✓ Lokasi cukup disebut sebatas yang ada: kelurahan/kecamatan/kabupaten.
+  ✓ Kalau ragu sebuah fakta ada atau tidak di data — JANGAN SEBUT. Dialog tanpa
+    detail itu tetap kuat; dialog dengan detail palsu merugikan.
+
 ⚠️ ATURAN KEAMANAN KEBIJAKAN — DIALOG YANG DIUCAPKAN (berlaku SEMUA scene, terutama CTA):
 Video ini menampilkan orang fotorealistis yang bicara langsung ke kamera. Kombinasi
 "orang nyata + menyebut nominal harga + ajakan menghubungi + tekanan waktu" berulang kali
@@ -516,7 +535,13 @@ ATURAN TAMBAHAN FIELD 'prompt' — WAJIB, PELANGGARAN = OUTPUT DITOLAK:
     : `• 'prompt' WAJIB 100% bahasa Inggris di SEMUA scene TERMASUK scene terakhir/CTA — jangan terbawa bahasa dialog_karakter (hanya 'dialog_karakter' yang memakai bahasa dialog).`}
   ${nativeAudio ? `• 'prompt' WAJIB memuat tepat satu kutipan dialog dalam tanda kutip ganda (lihat [4b]). Prompt tanpa kutipan = video bisu = DITOLAK.` : ''}
   ${multiShotPart
-    ? `• Untuk SEMUA scene${cutawayExcludedParts?.length ? ` KECUALI Scene ${cutawayExcludedParts.join(', ')} (lihat pengecualian di bawah)` : ''}: 'prompt' WAJIB mendeskripsikan TEPAT DUA shot berurutan dalam SATU scene ini (arketipe hybrid A-roll/B-roll — ikuti ARAHAN GAYA VIDEO di atas): Shot 1 = talking head presenter; HARD CUT (bukan gerakan kamera menerus, potongan visual tegas) ke Shot 2 = cutaway penuh area yang sama TANPA presenter, memakai koreografi kamera yang diberikan. Tulis KEDUA shot secara eksplisit dan berurutan di dalam SATU field 'prompt' (mis. 'Shot 1: [presenter talking head] ...; hard cut to; Shot 2: [full b-roll cutaway, no presenter] ...'). Pengecualian ini MENGGANTIKAN aturan "satu shot utuh" yang berlaku untuk arketipe lain.`
+    ? `• Untuk SEMUA scene${cutawayExcludedParts?.length ? ` KECUALI Scene ${cutawayExcludedParts.join(', ')} (lihat pengecualian di bawah)` : ''}: 'prompt' WAJIB mendeskripsikan TEPAT DUA shot berurutan dalam SATU scene ini (arketipe hybrid A-roll/B-roll — ikuti ARAHAN GAYA VIDEO di atas): Shot 1 = talking head presenter; HARD CUT (bukan gerakan kamera menerus, potongan visual tegas) ke Shot 2 = cutaway penuh area yang sama TANPA presenter, memakai koreografi kamera yang diberikan. Tulis KEDUA shot secara eksplisit dan berurutan di dalam SATU field 'prompt'.
+  ⚠️ WAJIB MENYEBUT DETIK, dan detiknya WAJIB DIAMBIL DARI "DAFTAR CUT" scene itu — BUKAN dibagi dua sama rata.
+     Titik potongnya = durasi cut PERTAMA di daftar. Contoh bila cut pertama 3 detik dari Part 10 detik:
+     ✓ BENAR : 'Shot 1 (0-3s): [presenter talking head] ...; hard cut to; Shot 2 (3-10s): [full b-roll cutaway, no presenter] ...'
+     ✗ SALAH : 'First half: ... Second half: ...'  (kabur — "half" berarti 5s, padahal cut pertama 3s, sehingga prompt bertentangan dengan daftar cut yang kamu kembalikan sendiri)
+     ✗ SALAH : 'Shot 1: ... Shot 2: ...'  (tanpa detik — generator video tidak tahu kapan memotong)
+  Pengecualian ini MENGGANTIKAN aturan "satu shot utuh" yang berlaku untuk arketipe lain.`
     : `• 'prompt' WAJIB mendeskripsikan SATU shot utuh yang bisa berdiri sendiri dari foto referensi. Jika koreografi kamera menyebut transisi (whip-pan, whip cut, dsb), tulis sebagai gabungan, mis. 'fast whip-pan settling into a steady selfie-stick shot of ...' — DILARANG menulis hanya nama transisinya tanpa shot stabil yang bisa ditahan sepanjang durasi.`}
   ${cutawayExcludedParts?.length
     ? `• PENGECUALIAN — KHUSUS Scene ${cutawayExcludedParts.join(', ')}: 'prompt' WAJIB mendeskripsikan SATU shot talking-head/selfie utuh SAJA sepanjang durasi scene (kamera stabil/steady mengikuti presenter) — TIDAK ADA hard cut, TIDAK ADA cutaway b-roll di scene ini, meskipun arketipe hybrid berlaku di scene lain. Perlakukan scene ini seperti penutup/closing personal.`
@@ -562,8 +587,49 @@ Dialog antar-Part WAJIB menyambung sebagai satu narasi berkelanjutan — jangan 
 
 function buildUserPrompt({ property, karakterDesc, jumlahPart, partAssignments, durasiDetik, partDurations, partRoles, cameraDirectives, archetypeNote, regeneratePart, existingParts }) {
   const durasiByPart = new Map((partDurations ?? []).map(d => [Number(d.part), Number(d.durasi)]));
-  const fasilitas = 'tidak disebutkan';
-  const deskripsi = (property.deskripsi ?? '').slice(0, 200);
+  // ⚠️ Dulu baris ini `const fasilitas = 'tidak disebutkan';` — literal HARDCODED
+  // yang tidak pernah membaca database. Akibatnya SETIAP properti dilaporkan
+  // "fasilitas tidak diketahui" ke AI, termasuk yang datanya jelas ada. Pada
+  // properti 1002 kolom `furnished` berbunyi "unfurnished", tapi AI menerima
+  // "tidak disebutkan" lalu mengarang "fully furnished" DUA KALI (2026-08-02).
+  // Kolom `furnished` NULL di 504 dari 533 properti, jadi "tidak disebutkan" tetap
+  // jawaban yang benar untuk mayoritas — yang salah adalah tidak pernah mengecek.
+  const FURNISHED_LABEL = {
+    fully: 'fully furnished (perabot lengkap)',
+    semi: 'semi furnished (sebagian berperabot)',
+    unfurnished: 'UNFURNISHED — kosong tanpa perabot. DILARANG menyebutnya furnished/siap huni.',
+  };
+  const fasilitas = FURNISHED_LABEL[property.furnished]
+    ?? 'tidak disebutkan — JANGAN mengarang kondisi perabot, cukup tidak dibahas';
+  // Deskripsi dulu dipotong 200 karakter, dan pada properti 1002 potongan itu
+  // jatuh TEPAT sebelum kalimat "Kondisi properti tidak disebutkan furnished" —
+  // fakta penyangkal yang justru dibutuhkan. 700 masih jauh di bawah biaya token
+  // yang berarti, dan menampung paragraf pertama beserta detail lokasinya.
+  const deskripsi = (property.deskripsi ?? '').slice(0, 700);
+
+  // Daftar-putih landmark: frasa setelah "dekat/depan/samping/seberang" yang
+  // BENAR-BENAR tertulis di judul atau deskripsi. Disodorkan eksplisit supaya AI
+  // tidak perlu menyimpulkan sendiri dari nama kota — persis kesalahan yang
+  // terjadi 2026-08-02 (data "Dekat UPN Seturan" → dialog "dekat UGM").
+  // Sengaja konservatif: kalau tidak ketemu apa-apa, jawabannya "tidak ada",
+  // dan aturan di system prompt melarang menyebut landmark sama sekali.
+  const landmarkBoleh = (() => {
+    const sumber = `${property.title ?? ''} . ${property.deskripsi ?? ''}`;
+    const hasil = new Set();
+    // ⚠️ TANPA flag `i`. Kata pemicunya ditulis dua varian huruf besar/kecil, tapi
+    // bagian TANGKAPANNYA wajib case-sensitive: nama tempat selalu berhuruf kapital.
+    // Dengan flag `i`, `[A-Z]` ikut mencocokkan huruf kecil sehingga "dekat dengan
+    // berbagai kampus" masuk daftar-putih — justru frasa kabur yang memancing AI
+    // menebak kampus terkenal, persis penyebab insiden yang sedang diperbaiki.
+    const re = /\b(?:[Dd]ekat|[Dd]epan|[Ss]amping|[Ss]eberang)\s+((?:[A-Z][\w.'-]*|\d+)(?:\s+(?:[A-Z][\w.'-]*|\d+|dan|&)){0,3})/g;
+    let m;
+    while ((m = re.exec(sumber)) !== null) {
+      const frasa = m[1].replace(/\s+(dan|&)$/i, '').trim();
+      if (frasa.length >= 3) hasil.add(frasa);
+      if (hasil.size >= 6) break;
+    }
+    return hasil.size ? [...hasil].join(' | ') : 'tidak ada — DILARANG menyebut landmark/kampus/mall apa pun';
+  })();
   const hargaLabel = `${formatRupiah(property.harga)}${property.nego ? ' (nego)' : property.nett ? ' (nett)' : ''}`;
 
   const roleByPart = new Map((partRoles ?? []).map(r => [Number(r.part), r.role]));
@@ -630,7 +696,8 @@ ${others}
   return `${archetypeBlock}${partBlock}Data properti:
 - Jenis: ${property.jenis_properti}
 - Judul: ${property.title}
-- Lokasi: ${property.kecamatan}, ${property.kabupaten}
+- Lokasi: ${[property.kelurahan, property.kecamatan, property.kabupaten, property.provinsi].filter(Boolean).join(', ')}
+- Landmark/patokan yang BOLEH disebut: ${landmarkBoleh}
 - Harga: ${hargaLabel}
 - Luas Tanah: ${property.luas_tanah ?? '-'} m² | Luas Bangunan: ${property.luas_bangunan ?? '-'} m²
 - Kamar Tidur: ${property.jumlah_kamar_tidur ?? '-'} | Kamar Mandi: ${property.jumlah_kamar_mandi ?? '-'}
@@ -896,7 +963,8 @@ export async function onRequestPost(context) {
     property = await env.DB.prepare(`
       SELECT id, kode_listing, title, jenis_properti, harga, nego, nett,
              jumlah_kamar_tidur, jumlah_kamar_mandi, luas_tanah, luas_bangunan,
-             legalitas, kecamatan, kabupaten, deskripsi
+             legalitas, kelurahan, kecamatan, kabupaten, provinsi,
+             furnished, lantai, deskripsi
       FROM properties WHERE id = ?
     `).bind(propertyId).first();
   } catch (err) {
