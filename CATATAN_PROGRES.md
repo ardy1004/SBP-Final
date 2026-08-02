@@ -5,6 +5,61 @@
 
 ---
 
+## SESI 2–3 AGUSTUS 2026 — Audit ViralFrame, kuota Gemini, dan SEO katalog (LIVE)
+
+7 commit, semuanya live production. Satu benang merah menyatukan hampir semuanya: **kode yang berjalan sempurna tapi menunjuk ke tempat yang salah** — tidak ada error, semua gate hijau, fitur hanya diam-diam tidak pernah hidup.
+
+### 1. Kelas bug "tabel mati" — 4 fitur menunjuk tabel 0 baris (`e765634`, `ff67fcb`)
+Fitur **Video VO** dihapus di `1e3c17a`, tapi pembersihannya tidak tuntas. `viralframe_videos` tinggal **0 baris** dan kehilangan seluruh penulisnya, sementara kode aktif masih membacanya. Yang terkena:
+
+| Fitur | Akibat |
+|---|---|
+| Analitik "gaya pemenang" | Permanen kosong |
+| Badge **🎬 Video** | Tidak pernah bisa muncul — **34 properti** bervideo tampil "📝 Naskah" |
+| Tab Content Library | Mustahil berisi |
+| `schedule/presign.js` + `commit.js` | Tak terjangkau |
+
+Alur nyata user adalah `viralframe_agent_videos` (85 baris). Perbaikan: migrasi **0034** (`views`/`likes`/`gaya`, `gaya` diisi otomatis dari arketipe saat upload), analitik UNION dua tabel, `status.js` baca tabel yang benar, tab Library + **7 endpoint yatim** dihapus. Migrasi **0035** indeks `created_at` — query anti-pengulangan tadinya `SCAN` + `USE TEMP B-TREE` atas 211 baris/3,3 MB **setiap generate** (indeks 0033 tak bisa melayaninya karena query sengaja lintas katalog). Diverifikasi via `EXPLAIN QUERY PLAN` sebelum & sesudah. `[C]` turun 99,8% → 99,1%.
+
+### 2. Kuota Gemini — akar "AI Rancang Storyboard gagal" (`75f2507`, `275fdc6`)
+Gejalanya "aborted due to timeout", **akarnya kuota**. Diukur ke key produksi: `gemini-3-flash-preview` dibatasi **20 request/hari** — bukan ~1.500 seperti tertulis di komentar kode, yang ternyata dikutip dari artikel pihak ketiga dan **salah**. Kuota bersifat **per model**, jadi pindah model = ember baru. Default → **`gemini-3.5-flash-lite`** (GA, bukan preview — preview-lah yang dijatah kecil; visi terverifikasi dengan foto properti asli).
+
+Ganti default saja **nyaris jadi regresi total**: model baru **menolak `reasoning_effort` dengan HTTP 400**, sedangkan 6 pemanggil mengirimnya hardcoded. Dukungan field itu acak per model, tak bisa ditebak dari nama — daftar-putih statis pasti basi. Solusinya swa-pulih: 400 + field terkirim → ulangi sekali tanpa field.
+
+**Fallback yang tidak pernah kebagian giliran.** Gemini mati membuat fitur gagal TOTAL padahal Groq (**369 ms**) dan OpenRouter (**2,4 s**) sehat. Sebabnya urutan: Fase 1 Gemini 18 s → Fase 2 **Gemini lagi** 7 s → sisa < ambang → berhenti. Sekarang Fase 2 menggeser ke belakang **hanya** yang gagal karena WAKTU (yang gagal karena KUOTA tetap di depan — permintaan bervisi lebih berat daripada teks), cap Fase 1 18→14 s, pesan error menyebut kuota bukan timeout, plus **pemilih provider/model di UI**.
+
+### 3. Akurasi fakta prompt — halusinasi yang berakar di kode (`27f47c4`, `2778aae`, `4502a28`)
+Audit prompt nyata menemukan dialog menyebut **"dekat UGM"** (properti ini dekat **UPN Seturan**, dan judulnya DIKIRIM ke AI) dan **"fully furnished"** (kolom `furnished` = `unfurnished`). Keduanya bukan AI yang kurang data — **kode membuang data yang ada**: `const fasilitas = 'tidak disebutkan'` literal hardcoded, dan deskripsi dipotong 200 char tepat sebelum kalimat penyangkalnya.
+
+Perbaikan: daftar-putih landmark hasil ekstraksi dari judul+deskripsi (diuji ke 12 judul produksi, 12/12), kolom `furnished` dibaca, deskripsi 200→700, aturan `[4]` anti-halusinasi tempat.
+
+**"First half/Second half" yang bertabrakan dengan `cuts[]`** ternyata berasal dari **contoh di instruksi kita sendiri** — `shotGrammarNote` kedua arketipe hybrid mencontohkan frasa itu. Pelajarannya: kalau output AI mengulang suatu frasa, **cari frasa itu di prompt kita dulu**; model meniru contoh jauh lebih patuh daripada mengikuti aturan abstrak.
+
+Dikoreksi pemilik listing: **13 kamar kost vs 16 total bukan konflik** — 16 = kost + rumah induk. Aturan versi pertama saya ("pakai field terstruktur") justru akan membuang angka kamar kost yang paling dicari investor. 45 dari 184 listing kost berpola begini.
+
+### 4. SEO & GEO katalog (`9425d46`)
+Setelah user mengisi lokasi & meta: pengisiannya bagus (panjang meta ideal, slug unik, canonical & JSON-LD ada), tapi **214 dari 533 properti (40%) berjudul kembar** — `metaSeo.js` tak punya pembeda unik. Kombinasi diuji GROUP BY ke data nyata (kecamatan 214 → kelurahan 148 → kelurahan+KT+KM **303, lebih buruk** → kelurahan+LT+LB+harga **2**).
+
+| | Sebelum | Sesudah |
+|---|---|---|
+| meta_title kembar | 214 | **4** |
+| meta_title kosong | 16 | **0** |
+| Judul terpotong `...` | 8 | **0** |
+| `?` rusak (judul/deskripsi) | 48 / 88 | **0 / 0** |
+
+Karakter rusak dibedakan **dua pola**: `) / m² / kata + ' ? ' + kata` → em-dash, tapi `Luas Bangunan: ? 600 m²` → **`±`**. Menyamaratakan akan mengubah `±600 m²` jadi `—600 m²`. **37 baris yang benar-benar mencurigakan sengaja tidak disentuh**, didaftar untuk koreksi manual.
+
+JSON-LD diperkaya: `geo` (hanya bila koordinat ada), `addressSubLocality`, `numberOfRooms`, `floorSize`/`lotSize`. Diverifikasi dengan mengambil **dua halaman produksi nyata** — satu berkoordinat, satu tidak.
+
+### 5. Pelajaran yang mahal
+- **Pola PLACEHOLDER HARDCODED ditemukan 3× dalam satu sesi** (`fasilitas`, INSERT `kelurahan`/`alamat` = `''`, `normalizePropertyDetail` `kelurahan: ''`). Kalau sebuah field "selalu kosong", curigai penulisnya — bukan usernya yang lupa.
+- **`COUNT(kolom)` menipu**: banyak kolom berisi string kosong, bukan NULL. Wajib `TRIM(COALESCE(x,''))=''`.
+- **Sebelum menyarankan fitur berbasis data, hitung dulu barisnya di D1.** Tabel yang dibaca kode belum tentu tabel yang diisi manusia — pola ini memakan 4 fitur sekaligus.
+- **Skrip saya sendiri sempat membaca 1 baris dari 533** karena `--file` wrangler hanya mengembalikan ringkasan; dry-run tampak hijau di atas data sampah. Empat jebakan wrangler D1 kini didokumentasikan di CLAUDE.md.
+- **Kegagalan jadwal sosmed yang saya laporkan sebagai bug ternyata historis** — semuanya dibuat 29 Juli 03:29–04:33, perbaikannya mendarat 10:33 hari yang sama. Periksa timestamp sebelum menuduh.
+
+---
+
 ## SESI 1–2 AGUSTUS 2026 — Workers Paid + ViralFrame: kepatuhan parameter & anti-pengulangan (LIVE)
 
 21 commit, semuanya live production. Dua tema besar: **menghapus batas CPU yang selama ini menyandera arsitektur**, dan **memperbaiki fitur ViralFrame yang ternyata tidak pernah bekerja sesuai klaimnya**.
