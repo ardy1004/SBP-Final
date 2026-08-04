@@ -42,12 +42,24 @@ import { readFileSync } from 'node:fs';
 const REQUIRED_IMPORTS = {
   'src/app/components/admin/viralframe/masterPromptCompiler.ts': [
     'REALISM_QUALITY_CUES', 'REALISM_BANNED_QUALITY_PHRASES', 'NEGATIVE_PROMPT_VIDEO',
+    // Ditambahkan audit 2026-08-04 (delivery clause terhitung dari durasi, bukan
+    // string "cepat" tetap) — lihat komentar BAGIAN 5 di bawah untuk latar penuh.
+    // Diimpor lewat re-export './options' (frontend), bukan langsung dari
+    // viralframe-shared.js — VERIFIKASI ke masterPromptCompiler.ts kalau nama
+    // re-export berubah.
+    'getEmotionForRole', 'PERFORMANCE_INTENT_BY_ROLE', 'VOICE_PERSONA_HINT',
   ],
   'functions/api/admin/viralframe/ai-generate.js': [
     'REALISM_QUALITY_CUES', 'REALISM_BANNED_QUALITY_PHRASES', 'NEGATIVE_PROMPT_VIDEO', 'RULEBOOK_VERSION',
+    'getEmotionForRole', 'PERFORMANCE_INTENT_BY_ROLE', 'buildDeliveryClause',
+    'VOICE_PERSONA_HINT', 'VOICE_PRIORITY_NOTE',
   ],
   'functions/api/admin/viralframe/youtube-long.js': [
     'REALISM_QUALITY_CUES', 'REALISM_BANNED_QUALITY_PHRASES', 'NEGATIVE_PROMPT_VIDEO', 'RULEBOOK_VERSION',
+    // Jalur ini TIDAK butuh getEmotionForRole/PERFORMANCE_INTENT_BY_ROLE/
+    // buildDeliveryClause (skema dialogue-nya beda, tidak berbasis Part/peran) —
+    // yang wajib disamakan hanya karakter suara & prioritas mixing audio.
+    'VOICE_PERSONA_HINT', 'VOICE_PRIORITY_NOTE',
   ],
 };
 
@@ -134,6 +146,32 @@ const SCENE_FIELD_PARITY = [
     field: 'negative_prompt',
     note: 'wajib terlihat/tervalidasi, bukan cuma disuntik server lalu diam-diam diabaikan UI',
     files: [
+      'src/app/components/admin/AdminViralFrameWorkspacePage.tsx',
+      'src/app/components/admin/viralframe/SceneCards.tsx',
+    ],
+  },
+  // 'presentation' & 'gesture' (skema [9] ai-generate.js, audit 2026-08-04):
+  // diminta ke AI sebagai "intent akting Part" (presentation) dan "gerak
+  // tangan/tubuh karakter saat bicara" (gesture, per-cut) — persis kelas bug
+  // `sequences` hilang senyap dari ZIP: field diminta ke AI, divalidasi longgar
+  // di jsonValidator.ts, tapi kalau lupa disambungkan ke tampilan (SceneCards.tsx
+  // / AdminViralFrameWorkspacePage.tsx) user tidak pernah melihatnya sama sekali
+  // walau AI sudah repot-repot menghasilkannya.
+  {
+    field: 'presentation',
+    note: 'intent akting per-Part (kenapa karakter bicara begini) — wajib tersambung ke tampilan Part, bukan cuma diminta ke AI & divalidasi',
+    files: [
+      'functions/api/admin/viralframe/ai-generate.js',
+      'src/app/components/admin/viralframe/jsonValidator.ts',
+      'src/app/components/admin/AdminViralFrameWorkspacePage.tsx',
+    ],
+  },
+  {
+    field: 'gesture',
+    note: 'gerak tangan/tubuh per-cut saat bicara ("tangan diam saat bicara adalah penanda AI paling kentara") — wajib tersambung ke tampilan cut, bukan cuma diminta ke AI',
+    files: [
+      'functions/api/admin/viralframe/ai-generate.js',
+      'src/app/components/admin/viralframe/jsonValidator.ts',
       'src/app/components/admin/AdminViralFrameWorkspacePage.tsx',
       'src/app/components/admin/viralframe/SceneCards.tsx',
     ],
@@ -288,6 +326,123 @@ for (const { backend, frontend, fields, tipeFrontend, note } of NDJSON_CONTRACT)
     const noteM = srcGen.match(/body\.archetype_note\.slice\(0,\s*(\d+)\)/);
     if (noteM && Number(noteM[1]) < 2500) {
       problems.push(`${fileGen}: cap archetype_note = ${noteM[1]}. shotGrammarNote terpanjang sudah 1.661 char — cap di bawah 2500 tidak menyisakan ruang aman dan akan memotong arahan arketipe diam-diam.`);
+    }
+  }
+}
+
+// ─── BAGIAN 5: RATCHET ANTI-REGRESI — FRASA DELIVERY YANG DILARANG ───────────
+// LATAR BELAKANG (audit 2026-08-04): ai-generate.js dulu menghardcode klausa
+// delivery TETAP — "berbicara cepat, artikulasi jelas, tanpa jeda atau gagap" —
+// di SETIAP dialog, apa pun durasi Part-nya. Ini kontradiksi langsung dengan
+// getLipsync() (viralframe-shared.js): untuk Part 9-12 detik, tabel itu memberi
+// pace 'medium' dengan instruksi "Tempo sedang, ada penekanan kata kunci" —
+// BUKAN cepat tanpa jeda. Menyuruh AI video audio-native (Veo/Google Flow)
+// "bicara cepat tanpa jeda" menghasilkan suara terburu-buru/robotik, dan makin
+// parah untuk Part yang lipsync-nya sendiri menuntut jeda wajar antar frasa.
+// Perbaikan (Agent 1+2, 2026-08-04): klausa delivery kini DIHITUNG per Part
+// lewat buildDeliveryClause()/getLipsync(), bukan string tetap.
+//
+// BANNED_DELIVERY_PHRASES adalah SUMBER TUNGGAL di viralframe-shared.js — dibaca
+// DINAMIS di bawah (regex atas isi file), BUKAN disalin ulang ke sini, supaya
+// daftar larangan di script ini tidak pernah drift dari definisi aslinya.
+//
+// ⚠️ FALSE POSITIVE YANG SUDAH DIPERIKSA: LIPSYNC_ROWS di viralframe-shared.js
+// sah memuat frasa "tanpa jeda." untuk baris ultra_fast (klip 2-3 detik) — itu
+// DATA tabel lipsync yang genuinely mendeskripsikan klip ultra-pendek, BUKAN
+// hardcode delivery. Ini AMAN karena dua alasan sekaligus: (1) viralframe-shared.js
+// bukan salah satu dari 3 file yang di-scan loop ini; (2) frasa yang dicari
+// persis "tanpa jeda atau gagap" (4 kata), sedangkan data tabel hanya berbunyi
+// "tanpa jeda." (2 kata + titik) — tidak pernah cocok sebagai substring persis.
+// Loop di bawah HANYA membaca source code 3 file jalur prompt-engine secara
+// tekstual; ia tidak mengeksekusi buildDeliveryClause(), jadi teks HASIL RUNTIME
+// fungsi itu (yang bisa saja memuat kata "jeda" dari tabel) tidak pernah masuk
+// ke pemeriksaan ini sama sekali — yang diperiksa cuma source code statis.
+{
+  const filesBanned = [
+    'src/app/components/admin/viralframe/masterPromptCompiler.ts',
+    'functions/api/admin/viralframe/ai-generate.js',
+    'functions/api/admin/viralframe/youtube-long.js',
+  ];
+  let bannedPhrases = null;
+  try {
+    const sharedSrc = readFileSync('functions/_lib/viralframe-shared.js', 'utf8');
+    const m = sharedSrc.match(/export const BANNED_DELIVERY_PHRASES\s*=\s*\[([\s\S]*?)\];/);
+    if (m) bannedPhrases = [...m[1].matchAll(/'((?:[^'\\]|\\.)*)'/g)].map(x => x[1]);
+  } catch { /* ditangani di bawah lewat bannedPhrases tetap null */ }
+
+  if (!bannedPhrases || bannedPhrases.length === 0) {
+    problems.push('functions/_lib/viralframe-shared.js: gagal membaca BANNED_DELIVERY_PHRASES (array kosong/format berubah) — perbarui regex BAGIAN 5 di script ini kalau definisinya dipindah/direformat.');
+  } else {
+    for (const file of filesBanned) {
+      let src;
+      try { src = readFileSync(file, 'utf8'); } catch { continue; } // sudah tertangani Bagian 1 kalau relevan
+      const lines = src.split('\n');
+      for (const phrase of bannedPhrases) {
+        for (const l of lines) {
+          if (!l.includes(phrase)) continue;
+          // Sah dipertahankan: (a) CONTOH NEGATIF eksplisit ("JANGAN ... seperti
+          // 'berbicara cepat, tanpa jeda'") yang justru MENGAJARI model untuk TIDAK
+          // memakainya — kebalikan dari regresi; (b) komentar kode (baris diawali
+          // '//') yang menjelaskan HISTORI bug lama, bukan teks yang dikirim ke AI.
+          const trimmed = l.trim();
+          if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
+          if (/JANGAN|✗\s*SALAH|dilarang/i.test(l)) continue;
+          problems.push(`${file}: memuat frasa terlarang "${phrase}" (BANNED_DELIVERY_PHRASES, viralframe-shared.js) di luar konteks contoh-negatif/komentar — instruksi "bicara cepat/tanpa jeda" tetap menghasilkan suara robotik DAN bertentangan dengan getLipsync() yang untuk Part panjang justru meminta jeda wajar antar frasa. Pakai buildDeliveryClause()/getLipsync() untuk klausa delivery per Part, jangan hardcode string ini lagi (regresi ke bug audit 2026-08-04). Baris: ${l.trim().slice(0, 160)}`);
+        }
+      }
+    }
+  }
+}
+
+// ─── BAGIAN 6: GUARD KONTRADIKSI REGISTER (ai-generate.js) ───────────────────
+// LATAR BELAKANG (audit 2026-08-04): ai-generate.js dulu punya baris TETAP
+// "JIKA bahasa = Indonesia: WAJIB Bahasa Indonesia formal, sopan..." yang SELALU
+// dikirim ke model terlepas dari registerInstruction (gaya bahasa pilihan user
+// di Step 2 — santai/gaul/jawa/formal). Karena baris itu ditulis BELAKANGAN di
+// system prompt (setelah registerLine menyuntik gaya pilihan user), model
+// mengikuti instruksi TERAKHIR dan register non-formal yang dipilih user dibuang
+// diam-diam. Ini kelas bug "nilai hardcoded membuang pilihan user" yang SUDAH
+// 3x terjadi di project ini (lihat CLAUDE.md) — makanya di-ratchet, bukan cuma
+// diperbaiki sekali.
+//
+// Perbaikan Agent 2: baris default (bahasaLine) sekarang di-kondisikan pada
+// registerInstruction (ternary) — kalau ADA registerInstruction, baris itu
+// EKSPLISIT bilang "JANGAN default ke formal, register pilihan user menang
+// mutlak"; kalau TIDAK ADA, baru fallback ke "hangat dan sopan" (bukan "formal"
+// lagi apa pun keadaannya).
+//
+// Guard di bawah TIDAK melarang kata "formal" sama sekali — itu justru dipakai
+// sah di teks CONTOH few-shot ("✓ CONTOH register formal: ...") dan di deskripsi
+// fallback penampilan/pakaian karakter ("professional ..., formal attire" /
+// "pakaian formal gelap", tidak ada hubungannya dengan register BAHASA). Guard
+// ini hanya menyalakan alarm untuk baris yang menyebut "formal" TANPA merujuk
+// registerInstruction ATAU frasa "JANGAN default" — pola paling mungkin dipakai
+// kalau hardcode lama itu kembali ditulis ulang.
+{
+  const file = 'functions/api/admin/viralframe/ai-generate.js';
+  let src;
+  try { src = readFileSync(file, 'utf8'); } catch { src = null; }
+  if (src) {
+    const barisFormal = src.split('\n')
+      .filter(l => /formal/i.test(l))
+      // Komentar kode (baris diawali '//' atau '*') — menjelaskan HISTORI bug lama
+      // ke pembaca manusia, bukan teks yang benar-benar dikirim ke AI sebagai
+      // instruksi. Tanpa pengecualian ini, komentar yang mendokumentasikan bug
+      // "dulu SELALU memaksa formal" akan salah dikira REGRESI dari bug itu sendiri.
+      .filter(l => !/^\s*(\/\/|\*)/.test(l))
+      // Contoh few-shot sah — bukan instruksi yang dikirim sebagai perintah tetap.
+      .filter(l => !/CONTOH/i.test(l))
+      // Deskripsi penampilan/pakaian karakter — soal wardrobe, bukan register bahasa.
+      .filter(l => !/(attire|pakaian|penampilan|ciri_fisik)/i.test(l));
+
+    if (barisFormal.length === 0) {
+      problems.push(`${file}: tidak ada satu pun baris menyebut "formal" terkait register bahasa — kalau bahasaLine/registerLine sudah dihapus/di-refactor total, VERIFIKASI MANUAL bahwa kontradiksi register (audit 2026-08-04) tidak diam-diam kembali dalam bentuk lain, lalu perbarui/nonaktifkan BAGIAN 6 di script ini secara sadar.`);
+    }
+    for (const l of barisFormal) {
+      const terjaga = /registerInstruction/.test(l) || /JANGAN default/i.test(l);
+      if (!terjaga) {
+        problems.push(`${file}: baris menyebut "formal" tanpa merujuk registerInstruction atau frasa "JANGAN default" — kemungkinan REGRESI kontradiksi register (audit 2026-08-04): baris ini akan memaksa "formal" walau user memilih register santai/gaul/jawa. Baris: ${l.trim().slice(0, 160)}`);
+      }
     }
   }
 }

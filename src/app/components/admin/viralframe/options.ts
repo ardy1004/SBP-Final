@@ -16,6 +16,11 @@ import {
   RULEBOOK_VERSION as SHARED_RULEBOOK_VERSION,
   namaFileKarakter as sharedNamaFileKarakter,
   MAX_REF_IMAGES_PER_PART as SHARED_MAX_REF_IMAGES_PER_PART,
+  EMOTION_ARC_BY_ROLE as SHARED_EMOTION_ARC_BY_ROLE,
+  getEmotionForRole as sharedGetEmotionForRole,
+  PERFORMANCE_INTENT_BY_ROLE as SHARED_PERFORMANCE_INTENT_BY_ROLE,
+  VOICE_PERSONA_HINT as SHARED_VOICE_PERSONA_HINT,
+  VOICE_PRIORITY_NOTE as SHARED_VOICE_PRIORITY_NOTE,
 } from '../../../../../functions/_lib/viralframe-shared.js';
 
 export interface Opt { value: string; label: string }
@@ -662,6 +667,14 @@ export const REALISM_BANNED_QUALITY_PHRASES: string[] = SHARED_REALISM_BANNED_QU
 export const RULEBOOK_VERSION: string = SHARED_RULEBOOK_VERSION;
 /** Nama berkas foto karakter di ZIP Jalur C — sinkron dengan ai-generate.js. */
 export const namaFileKarakter: (nama: string) => string = sharedNamaFileKarakter;
+
+// Busur emosi & intent akting per peran Part (Hook/Body/CTA) + hint suara —
+// sumber tunggal di viralframe-shared.js. Di sini hanya di-re-export bertipe.
+export const EMOTION_ARC_BY_ROLE: Record<string, string> = SHARED_EMOTION_ARC_BY_ROLE;
+export const getEmotionForRole: (role: string, baseExpressionEn?: string) => string | undefined = sharedGetEmotionForRole;
+export const PERFORMANCE_INTENT_BY_ROLE: Record<string, string> = SHARED_PERFORMANCE_INTENT_BY_ROLE;
+export const VOICE_PERSONA_HINT: string = SHARED_VOICE_PERSONA_HINT;
+export const VOICE_PRIORITY_NOTE: string = SHARED_VOICE_PRIORITY_NOTE;
 
 // ─── Penamaan file aset (dipakai Master Prompt + ZIP export) ─────────────────
 // PENTING: ZIP generation WAJIB memakai buildZipNames() (foto properti) &

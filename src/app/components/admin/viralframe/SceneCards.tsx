@@ -54,6 +54,9 @@ export default function PartCards({ data }: { data: ParsedJSON }) {
                   Part {p.part ?? i + 1} · {role || '—'}
                 </span>
                 <span className="text-xs text-[#64748B]">{p.duration_sec ?? '—'}s (VO {voDur}s)</span>
+                {p.presentation && (
+                  <span className="text-xs text-[#64748B] italic">· {p.presentation}</span>
+                )}
                 <span className={`text-xs flex items-center gap-1 ${wcOk ? 'text-emerald-600' : 'text-amber-600'}`}>
                   {wcOk ? '✅' : '⚠️'} {wc}/{maxWords} kata
                 </span>
@@ -111,9 +114,18 @@ export default function PartCards({ data }: { data: ParsedJSON }) {
                 <div className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wide mb-1">Cuts</div>
                 <div className="space-y-1">
                   {p.cuts.map((c, ci) => (
-                    <div key={ci} className="flex gap-2 text-xs p-2 border border-gray-100 rounded-lg bg-[#F8FAFC]">
-                      <span className="font-mono text-[#1565C0] shrink-0">{c.t ?? `cut ${ci + 1}`}</span>
-                      <span className="text-[#0F172A]">{c.photo ? `[${c.photo}] ` : ''}{c.action || <span className="text-red-500">(action kosong)</span>}</span>
+                    <div key={ci} className="flex flex-col gap-0.5 text-xs p-2 border border-gray-100 rounded-lg bg-[#F8FAFC]">
+                      <div className="flex gap-2">
+                        <span className="font-mono text-[#1565C0] shrink-0">{c.t ?? `cut ${ci + 1}`}</span>
+                        <span className="text-[#0F172A]">{c.photo ? `[${c.photo}] ` : ''}{c.action || <span className="text-red-500">(action kosong)</span>}</span>
+                      </div>
+                      {(c.gesture || c.emotion) && (
+                        <div className="text-[11px] text-[#64748B] pl-8">
+                          {c.gesture && <span>Gesture: {c.gesture}</span>}
+                          {c.gesture && c.emotion && <span> · </span>}
+                          {c.emotion && <span>Emosi: {c.emotion}</span>}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

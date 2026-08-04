@@ -17,6 +17,8 @@ export interface ParsedCut {
   t?: string;
   photo?: string;
   action?: string;
+  gesture?: string;
+  emotion?: string;
   camera?: string;
 }
 export interface ParsedDialogue { speaker?: string; language?: string; line?: string; voice?: string; delivery?: string }
@@ -26,6 +28,9 @@ export interface ParsedPart {
   role?: string;
   duration_sec?: number;
   vo_duration_sec?: number;
+  /** Intent akting Part ini ("kenapa dia bicara begini"), BUKAN mode presenter —
+   * lihat catatan di masterPromptCompiler BLOK 5. */
+  presentation?: string;
   reference_images?: string[];
   cuts?: ParsedCut[];
   dialog?: string;
@@ -81,9 +86,15 @@ export function partPromptText(p: ParsedPart): string {
     p.reference_images.forEach((f, i) => L.push(`${i + 1}. ${f}`));
     L.push('');
   }
+  if (p.presentation) L.push(`Presentasi: ${p.presentation}`);
   if (Array.isArray(p.cuts) && p.cuts.length > 0) {
     for (const c of p.cuts) {
-      L.push(`${c.t ?? ''} — ${c.photo ?? ''}: ${c.action ?? ''}${c.camera ? ` (camera: ${c.camera})` : ''}`.trim());
+      const extra = [
+        c.gesture ? `gesture: ${c.gesture}` : '',
+        c.emotion ? `emotion: ${c.emotion}` : '',
+        c.camera ? `camera: ${c.camera}` : '',
+      ].filter(Boolean).join(', ');
+      L.push(`${c.t ?? ''} — ${c.photo ?? ''}: ${c.action ?? ''}${extra ? ` (${extra})` : ''}`.trim());
     }
     L.push('');
   }
@@ -171,6 +182,12 @@ export function validatePartJson(raw: string, expected: ValidateExpected): Valid
     }
     if (!p.dialog?.toString().trim()) warnings.push(`Part ${n}: dialog kosong.`);
     if (!p.transition_to_next?.toString().trim()) warnings.push(`Part ${n}: transition_to_next kosong.`);
+
+    // ── Step D2 — CTA WAJIB punya on_screen_text (kanal satu-satunya utk harga/spec) ──
+    const role = exp?.role ?? p.role;
+    if (role === 'CTA' && (!Array.isArray(p.on_screen_text) || p.on_screen_text.filter(t => t?.toString().trim()).length === 0)) {
+      warnings.push(`Part ${n} (CTA): on_screen_text kosong — ini satu-satunya kanal untuk menampilkan harga/spec sesuai aturan CLAUDE.md.`);
+    }
 
     // ── Step E — word_count (dialog) vs lipsync dari voDurationSec (toleransi +10%) ──
     const voDurasi = exp?.voDurationSec ?? Number(p.vo_duration_sec) ?? 8;

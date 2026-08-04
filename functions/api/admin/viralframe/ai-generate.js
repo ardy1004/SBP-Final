@@ -35,6 +35,8 @@ import {
   isNativeAudioTool, getClipMaxSec, NEGATIVE_PROMPT_VIDEO,
   REALISM_QUALITY_CUES, REALISM_BANNED_QUALITY_PHRASES, RULEBOOK_VERSION,
   namaFileKarakter, MAX_REF_IMAGES_PER_PART,
+  getEmotionForRole, PERFORMANCE_INTENT_BY_ROLE, buildDeliveryClause,
+  VOICE_PERSONA_HINT, VOICE_PRIORITY_NOTE,
 } from '../../../_lib/viralframe-shared.js';
 import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
 
@@ -115,6 +117,12 @@ function buildSystemPrompt({ jumlahPart, bahasa, musikValue, musikPrompt, tone, 
   // berbeda-beda, arahkan ke kolom 'Maks kata' milik masing-masing scene.
   const batasKata = durasiSeragam ? `${maxWords} kata` : `batas "Maks kata" scene tersebut`;
   const registerLine = registerInstruction ? `\nGAYA BAHASA WAJIB: ${registerInstruction}\n` : '';
+  // Perbaikan kontradiksi register (audit 2026-08-04): dulu baris "bahasa = Indonesia"
+  // di bawah SELALU memaksa "formal" walau registerLine sudah menyuntik gaya gaul —
+  // instruksi belakangan menang, jadi pilihan register user praktis dibuang.
+  const bahasaLine = registerInstruction
+    ? `JIKA bahasa = Indonesia: WAJIB ikuti GAYA BAHASA di atas — JANGAN default ke "formal", register pilihan user menang mutlak.`
+    : `JIKA bahasa = Indonesia: register auto → gunakan Bahasa Indonesia hangat dan sopan.`;
   // Mode voiceover/faceless: karakter = NARATOR yang terdengar tapi TIDAK tampil
   // di frame. Video prompt fokus pada visual properti POV/sinematik tanpa orang.
   const isVoiceover = presenterMode === 'voiceover_only' || presenterMode === 'faceless_broll';
@@ -135,14 +143,15 @@ Karakter HARUS muncul di SETIAP scene dengan identitas yang KONSISTEN:
   • Pakaian yang sama di setiap scene (jika tidak disebutkan: 'baju profesional gelap')
   • Aksi berbeda per scene sesuai jenis foto (berdiri di fasad, duduk di ruang tamu, dll)
 Gunakan deskripsi fisik karakter yang diberikan di data. Jika NULL → 'professional property consultant, formal attire'.
-Ekspresi/emosi karakter WAJIB konsisten '${expressionLabel}' di SEMUA scene — pengaruhi juga pemilihan kata dan energi pada dialog_karakter (bukan cuma deskripsi visual di prompt), supaya nada bicara terasa sesuai ekspresi yang dipilih, bukan datar/formal.`;
+WAJIB konsisten di SEMUA scene: wajah, pakaian, dan timbre suara (${VOICE_PERSONA_HINT}). EMOSI TIDAK wajib konsisten — ekspresi dasar '${expressionLabel}' dimodulasi per peran Part (lihat "Emosi"/"Intent akting" di instruksi tiap Part): Hook lebih antusias, Body lebih terkesan, CTA lebih meyakinkan — eskalasi ini WAJIB terlihat di kata & energi dialog_karakter, bukan cuma deskripsi visual.`;
   // Bagian [8] MUSIK: rule abstrak di bawah butuh teks musik konkret disisipkan
   // agar bisa benar-benar dieksekusi DeepSeek — tanpa ini instruksi "tambahkan
   // tepat seperti yang diberikan" tidak merujuk ke apapun.
   const musikSection = musikValue === 'none'
     ? `Jika musik = none → JANGAN tambahkan instruksi audio apapun.`
     : `Jika musik tersedia, tambahkan di AKHIR setiap prompt, tepat seperti berikut ini (JANGAN dimodifikasi):
-    ${musikPrompt}`;
+    ${musikPrompt}
+${VOICE_PRIORITY_NOTE} — sisipkan sebagai instruksi mixing di prompt agar VO tidak tenggelam.`;
 
   // Tone/Gaya Visual: label sudah diresolve di frontend dari TONES/VISUAL_STYLES
   // (options.ts) — backend cuma menyisipkan teks, tidak perlu daftar terjemahan baru.
@@ -211,8 +220,8 @@ ${supportsRefImage
     ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [2d] ANCHORING KE REFERENCE IMAGE — WAJIB, PELANGGARAN = OUTPUT DITOLAK
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Setiap scene akan dieksekusi dengan DUA gambar terlampir: foto ruangan/area scene + foto karakter. Kamu TIDAK melihat foto itu, maka:
-  • SETIAP field 'prompt' WAJIB memuat frasa anchoring lingkungan, mis. 'the exact ${'{'}room/area{'}'} shown in the attached scene reference image' — jangan menjabarkan arsitektur/furnitur spesifik yang tidak bisa kamu pastikan.
+Setiap Part dieksekusi dengan BEBERAPA gambar terlampir sekaligus (maks ${MAX_REF_IMAGES_PER_PART}: foto tiap cut di DAFTAR CUT + foto karakter). Kamu TIDAK melihat foto itu, maka:
+  • SETIAP field 'prompt' WAJIB merujuk NAMA FILE dari DAFTAR CUT saat berpindah area, mis. 'the exact area shown in fasad.webp' — jangan menjabarkan arsitektur/furnitur spesifik yang tidak bisa kamu pastikan, dan jangan menulis 'the attached scene reference image' tanpa nama file saat Part punya lebih dari satu foto.
   • SETIAP field 'prompt' WAJIB memuat frasa anchoring karakter: 'the exact same person as the attached character reference image — identical face, hair or head covering, and outfit' (boleh diparafrase tipis, kata 'reference' wajib ada).
     ⚠️ TULIS 'hair or head covering' (ATAU sebut penutup kepala yang benar-benar terlihat, mis. 'hijab'), JANGAN 'hair' saja. Banyak talent memakai hijab/peci/topi; menyuruh model menyamakan "rambut" yang tidak terlihat di foto referensi adalah instruksi yang BERTENTANGAN dengan gambar, dan mendorong model mengarang rambut terurai → wajah/kepala morphing.
   • DILARANG mengarang kata sifat skala/arsitektur yang tidak terverifikasi dari foto: massive, huge, grand, towering, spacious, multi-story, modern facade, dsb. Cukup sebut jenis area sesuai label + rujuk ke reference image.
@@ -224,7 +233,7 @@ Setiap scene akan dieksekusi dengan DUA gambar terlampir: foto ruangan/area scen
     Alasan: frasa "holding a camera" membuat model merender orang yang menenteng alat — dan bila foto
     referensi talent kebetulan sudah memegang perangkat, hasilnya talent membawa DUA alat di dua tangan.
 ✗ SALAH: 'Lisa stands in front of a massive 16-room boarding house facade'
-✓ BENAR: 'Lisa — the exact same person as the attached character reference image (identical face, hair or head covering, and outfit) — already standing in the exact front area shown in the attached scene reference image, greeting the viewer selfie-style'
+✓ BENAR: 'Lisa — the exact same person as the attached character reference image (identical face, hair or head covering, and outfit) — already standing in the exact area shown in fasad.webp, greeting the viewer selfie-style'
 
 GERAKAN KAMERA WAJIB TETAP DI DALAM BINGKAI FOTO:
 Foto referensi hanya memuat apa yang terlihat di dalam bingkainya. Gerakan yang membawa
@@ -432,7 +441,7 @@ ${REALISM_QUALITY_CUES.map(c => `      - ${c}`).join('\n')}
 ✗ SALAH prompt: 'A building exterior shot.' (terlalu generik, < 30 kata)
 ✗ SALAH kualitas: '...Professional real estate videography, cinematic 4K.' (frasa generik dilarang, lihat larangan KUALITAS di atas)
 ${supportsRefImage
-    ? `✓ BENAR prompt: 'Steady handheld selfie-stick shot. Ayu — the exact same person as the attached character reference image, identical face, hair or head covering, and outfit — already standing in the exact front area shown in the attached scene reference image, gesturing warmly toward it with a confident smile. Warm natural daylight with soft practical falloff, subtle handheld micro-jitter, shallow depth of field.' (spesifik pada aksi & kamera, setia ke reference image, kualitas pakai kosakata fisik bukan generik, > 50 kata)`
+    ? `✓ BENAR prompt: 'Steady handheld selfie-stick shot. Ayu — the exact same person as the attached character reference image, identical face, hair or head covering, and outfit — already standing in the exact area shown in fasad.webp, gesturing warmly toward it with a confident smile. Warm natural daylight with soft practical falloff, subtle handheld micro-jitter, shallow depth of field.' (spesifik pada aksi & kamera, rujuk NAMA FILE, kualitas pakai kosakata fisik bukan generik, > 50 kata)`
     : `✓ BENAR prompt: 'Cinematic drone pull-back revealing the modern 4-story boarding house facade in Depok, Sleman. Property consultant Ayu in black SBP uniform stands at entrance, gestures warmly toward the building with a confident smile. Warm golden hour lighting, natural film grain, shot on mirrorless camera look with shallow depth of field.' (spesifik, kualitas pakai kosakata fisik bukan generik, > 50 kata)`}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -489,15 +498,15 @@ Bagian dialog (setelah klausa delivery di bawah) WAJIB MAKSIMAL sebanyak "Maks k
 ${durasiSeragam
     ? `Semua scene di permintaan ini berdurasi sama, jadi batasnya ${maxWords} kata untuk setiap scene.`
     : `PERHATIAN: durasi scene BERBEDA-BEDA di permintaan ini. Baca "Maks kata" pada tiap scene satu per satu — JANGAN memakai satu angka yang sama untuk semua scene. Batas terbesar yang muncul adalah ${maxWords} kata.`}
-Field 'dialog_karakter' WAJIB berupa SATU KESATUAN TEKS (klausa delivery + dialog digabung, BUKAN dialog polos saja) dengan pola persis:
-  "[Nama karakter] berbicara cepat, artikulasi jelas, tanpa jeda atau gagap, mengatakan: [dialog]"
-Klausa delivery ("[Nama karakter] berbicara cepat...") WAJIB selalu ada di depan — hanya bagian [dialog] setelah "mengatakan:" yang dihitung ke batas ${batasKata}.
-✗ SALAH: 'Selamat datang di hunian impian Anda, rumah nyaman dengan tiga kamar tidur yang luas dan taman yang asri di belakang.' (dialog polos tanpa klausa delivery, tidak ada instruksi tempo, melebihi batas kata scene itu)
+Field 'dialog_karakter' WAJIB berupa SATU KESATUAN TEKS: salin UTUH klausa "Delivery" dari instruksi Part tersebut (di user prompt) lalu sambung dialog setelah "mengatakan:" — JANGAN mengganti klausa delivery dengan tempo buatan sendiri seperti "berbicara cepat, tanpa jeda" (pace SUDAH dihitung per durasi Part, beda Part beda tempo).
+Hanya bagian [dialog] setelah "mengatakan:" yang dihitung ke batas ${batasKata}.
+✗ SALAH: dialog polos tanpa klausa delivery, atau klausa delivery "cepat" yang sama untuk semua Part.
 ✗ SALAH (jika bahasa = Indonesia): 'Welcome to our property'
-✓ BENAR: 'Ayu berbicara cepat, artikulasi jelas, tanpa jeda atau gagap, mengatakan: Selamat datang di hunian impian Anda.'
+✓ CONTOH register gaul: '..., mengatakan: Gaes, aku nemu hidden gem nih! Properti ini lokasinya strategis banget dan bikin betah.'
+✓ CONTOH register formal: '..., mengatakan: Selamat datang, saya ingin menunjukkan properti yang lokasinya sangat strategis dan terawat dengan baik.'
 Dialog harus: natural diucapkan, menyebut 1 fitur properti nyata, maksimal ${batasKata}.
-JIKA bahasa = Indonesia: gunakan Bahasa Indonesia formal yang hangat.
-JIKA bahasa = English: gunakan English professional (klausa delivery tetap wajib, diterjemahkan proporsional, mis. "[Name] speaks quickly, clear articulation, no pauses or stutters, saying:").
+${bahasaLine}
+JIKA bahasa = English: gunakan English professional, delivery clause diterjemahkan proporsional (nama, voice, pace, lalu "saying:").
 JIKA bahasa = Jawa: gunakan Bahasa Jawa Krama yang sopan.
 
 ${nativeAudioBlock}${karakterBlock}
@@ -524,13 +533,14 @@ Format yang diharapkan:
   {
     "part": 1,
     "kamera": "nama singkat gerakan kamera dalam 3-5 kata",
+    "presentation": "intent akting Part ini (Inggris, 1 kalimat) — lihat 'Intent akting' di instruksi Part",
     "prompt": "teks prompt lengkap bahasa Inggris minimum 50 kata, mencakup SELURUH cut di Part ini secara berurutan",
     "dialog_karakter": "klausa delivery + dialog karakter dalam ${bahasa}, sesuai pola wajib di [4], maksimal ${batasKata} untuk bagian dialog",
-    "on_screen_text": "teks overlay singkat untuk Part ini — kosongkan string \\"\\" jika arketipe/gaya tidak menekankan teks on-screen",
-    "cuts": [{ "t": "00:00-00:0Xs", "photo": "nama_file.webp persis seperti di DAFTAR CUT", "action": "aksi/gerakan kamera cut ini (Inggris)" }]
+    "on_screen_text": ["array teks overlay — Part CTA WAJIB isi daftar spec properti (LT/LB/KM/lantai/legalitas/harga) yang ADA di data; array kosong [] kalau tidak ditekankan"],
+    "cuts": [{ "t": "00:00-00:0Xs", "photo": "nama_file.webp persis seperti di DAFTAR CUT", "action": "gerak FISIK/kamera cut ini (Inggris)", "gesture": "gerak tangan/tubuh karakter saat bicara (Inggris) — tangan diam saat bicara adalah penanda AI paling kentara, WAJIB diisi", "emotion": "emosi cut ini (Inggris, dari busur peran Part)" }]
   }
 ]
-Field WAJIB ada dan non-empty: part (integer), kamera (string), prompt (string min 50 kata), dialog_karakter (string, format sesuai [4]), cuts (array, minimal 1 elemen). on_screen_text WAJIB ada tapi BOLEH string kosong "".
+Field WAJIB ada dan non-empty: part (integer), kamera (string), presentation (string), prompt (string min 50 kata), dialog_karakter (string, format sesuai [4]), cuts (array, minimal 1 elemen berisi action+gesture+emotion). on_screen_text WAJIB ada berupa array (BOLEH []).
 
 ATURAN 'cuts' — INTI MODEL PART, WAJIB:
   • Satu PART dihasilkan dalam SATU panggilan generate video. 'cuts' adalah POTONGAN VISUAL DI DALAM satu generate itu, bukan generate terpisah.
@@ -607,15 +617,10 @@ Dialog antar-Part WAJIB menyambung sebagai satu narasi berkelanjutan — jangan 
 `;
 }
 
-function buildUserPrompt({ property, karakterDesc, jumlahPart, partAssignments, durasiDetik, partDurations, partRoles, cameraDirectives, archetypeNote, regeneratePart, existingParts }) {
+function buildUserPrompt({ property, karakterDesc, karakterNama, expressionLabel, jumlahPart, partAssignments, durasiDetik, partDurations, partRoles, cameraDirectives, archetypeNote, regeneratePart, existingParts }) {
   const durasiByPart = new Map((partDurations ?? []).map(d => [Number(d.part), Number(d.durasi)]));
-  // ⚠️ Dulu baris ini `const fasilitas = 'tidak disebutkan';` — literal HARDCODED
-  // yang tidak pernah membaca database. Akibatnya SETIAP properti dilaporkan
-  // "fasilitas tidak diketahui" ke AI, termasuk yang datanya jelas ada. Pada
-  // properti 1002 kolom `furnished` berbunyi "unfurnished", tapi AI menerima
-  // "tidak disebutkan" lalu mengarang "fully furnished" DUA KALI (2026-08-02).
-  // Kolom `furnished` NULL di 504 dari 533 properti, jadi "tidak disebutkan" tetap
-  // jawaban yang benar untuk mayoritas — yang salah adalah tidak pernah mengecek.
+  // Furnished DIBACA dari DB, JANGAN hardcode 'tidak disebutkan' (bug nyata
+  // 2026-08-02: AI mengarang 'fully furnished' pada properti unfurnished).
   const FURNISHED_LABEL = {
     fully: 'fully furnished (perabot lengkap)',
     semi: 'semi furnished (sebagian berperabot)',
@@ -623,26 +628,19 @@ function buildUserPrompt({ property, karakterDesc, jumlahPart, partAssignments, 
   };
   const fasilitas = FURNISHED_LABEL[property.furnished]
     ?? 'tidak disebutkan — JANGAN mengarang kondisi perabot, cukup tidak dibahas';
-  // Deskripsi dulu dipotong 200 karakter, dan pada properti 1002 potongan itu
-  // jatuh TEPAT sebelum kalimat "Kondisi properti tidak disebutkan furnished" —
-  // fakta penyangkal yang justru dibutuhkan. 700 masih jauh di bawah biaya token
-  // yang berarti, dan menampung paragraf pertama beserta detail lokasinya.
+  // 700 char (bukan 200 lama) — potongan pendek sempat membuang fakta penyangkal
+  // furnished di paragraf lanjutan (properti 1002, 2026-08-02).
   const deskripsi = (property.deskripsi ?? '').slice(0, 700);
 
   // Daftar-putih landmark: frasa setelah "dekat/depan/samping/seberang" yang
-  // BENAR-BENAR tertulis di judul atau deskripsi. Disodorkan eksplisit supaya AI
-  // tidak perlu menyimpulkan sendiri dari nama kota — persis kesalahan yang
-  // terjadi 2026-08-02 (data "Dekat UPN Seturan" → dialog "dekat UGM").
-  // Sengaja konservatif: kalau tidak ketemu apa-apa, jawabannya "tidak ada",
-  // dan aturan di system prompt melarang menyebut landmark sama sekali.
+  // BENAR-BENAR tertulis di judul/deskripsi, supaya AI tidak menebak landmark
+  // dari nama kota (bug nyata 2026-08-02: data "Dekat UPN Seturan" → "dekat UGM").
+  // Kosong = 'tidak ada', dan system prompt melarang landmark sama sekali.
   const landmarkBoleh = (() => {
     const sumber = `${property.title ?? ''} . ${property.deskripsi ?? ''}`;
     const hasil = new Set();
-    // ⚠️ TANPA flag `i`. Kata pemicunya ditulis dua varian huruf besar/kecil, tapi
-    // bagian TANGKAPANNYA wajib case-sensitive: nama tempat selalu berhuruf kapital.
-    // Dengan flag `i`, `[A-Z]` ikut mencocokkan huruf kecil sehingga "dekat dengan
-    // berbagai kampus" masuk daftar-putih — justru frasa kabur yang memancing AI
-    // menebak kampus terkenal, persis penyebab insiden yang sedang diperbaiki.
+    // TANPA flag `i` — tangkapan WAJIB case-sensitive (nama tempat berhuruf kapital),
+    // kalau tidak "dekat dengan berbagai kampus" ikut lolos jadi daftar-putih kabur.
     const re = /\b(?:[Dd]ekat|[Dd]epan|[Ss]amping|[Ss]eberang)\s+((?:[A-Z][\w.'-]*|\d+)(?:\s+(?:[A-Z][\w.'-]*|\d+|dan|&)){0,3})/g;
     let m;
     while ((m = re.exec(sumber)) !== null) {
@@ -679,9 +677,17 @@ function buildUserPrompt({ property, karakterDesc, jumlahPart, partAssignments, 
         })
         .join('\n');
       const refFiles = [...new Set((a.cuts ?? []).map(c => c.foto_file))];
+      // Delivery klausa TERHITUNG dari durasi VO Part ini (busur emosi & intent
+      // akting juga per peran) — audit 2026-08-04, lihat viralframe-shared.js.
+      const delivery = buildDeliveryClause(karakterNama, durVo).replace('[VOICE_PERSONA]', 'suara narator (lihat System Prompt [5])');
+      const emosi = getEmotionForRole(role, expressionLabel);
+      const intent = PERFORMANCE_INTENT_BY_ROLE[role] ?? PERFORMANCE_INTENT_BY_ROLE.Body;
       return `PART ${a.part} (${role}) — durasi ${d} detik, voiceover ${durVo} detik:
-  Kamera    : ${kameraHint}
-  Maks kata : ${getMaxWords(durVo)} kata untuk bagian dialog (dihitung dari durasi VOICEOVER)
+  Kamera        : ${kameraHint}
+  Emosi         : ${emosi}
+  Intent akting : ${intent}
+  Delivery      : ${delivery}
+  Maks kata     : ${getMaxWords(durVo)} kata untuk bagian dialog setelah "mengatakan:"
   Reference image yang dilampirkan (${refFiles.length}${refFiles.length > MAX_REF_IMAGES_PER_PART ? ` — MELEBIHI batas ${MAX_REF_IMAGES_PER_PART}` : ''}): ${refFiles.join(', ')}
   DAFTAR CUT (WAJIB dikembalikan persis segini, urutan sama, nama file sama):
 ${daftarCut || '    (tidak ada cut — perlakukan sebagai satu shot utuh sepanjang Part)'}`;
@@ -902,15 +908,9 @@ export async function onRequestPost(context) {
   const partAssignments = body.part_assignments;
   const supportsRefImage = body.supports_ref_image === true;
   const expression = typeof body.expression === 'string' ? body.expression : 'auto';
-  // Arketipe (opsional) — string siap-pakai dari client (client compute, backend consume).
-  // Riwayat cap: 600 → 2000 → 4000. Naik ke 2000 karena arketipe baru
-  // (agent_broll_hybrid, kinetic_typography, client_testimonial) punya
-  // shotGrammarNote lebih detail dan 600 char memotong instruksi krusial di tengah
-  // kalimat (klarifikasi audio-tidak-terpotong pada agent_broll_hybrid jatuh SETELAH
-  // byte ke-600, jadi tidak pernah sampai ke LLM). Naik lagi ke 4000 pada 2026-08-02
-  // karena shotGrammarNote terpanjang (selfie_luxury_hybrid) sudah 1.661 char —
-  // sisa 339 char terlalu tipis, satu-dua kalimat tambahan akan memotongnya
-  // DIAM-DIAM tanpa error apa pun. Dijaga gate BAGIAN 4 check-viralframe-rulebook.
+  // Arketipe (opsional) — string siap-pakai dari client. Cap 4000 (terpanjang:
+  // selfie_luxury_hybrid ~1.661 char) — jangan turunkan, memotong diam-diam tanpa
+  // error (gate: check-viralframe-rulebook).
   const archetypeNote = typeof body.archetype_note === 'string' ? body.archetype_note.slice(0, 4000) : '';
   // ID arketipe — TIDAK dipakai di prompt (note-nya yang dipakai), hanya dicatat ke
   // riwayat agar badge rotasi arketipe di UI menghitung generate Jalur C juga.
@@ -938,19 +938,8 @@ export async function onRequestPost(context) {
   const cameraDirectives = Array.isArray(body.camera_directives)
     ? body.camera_directives
         .filter(c => c && Number.isInteger(Number(c.part)) && typeof c.camera === 'string')
-        // Cap 900, BUKAN 400. Diukur 2026-08-02: koreografi arketipe hybrid
-        // (agent_broll_hybrid, selfie_luxury_hybrid) menghasilkan 397-499 char —
-        // 17 dari 18 kombinasi peran x indeks MELEBIHI cap lama 400, sehingga
-        // ekor arahan kamera terpotong di tengah kata pada hampir setiap generate.
-        // Yang hilang justru FRAMESAFE_SUFFIX ("camera stays within the framing of
-        // the reference image") — instruksi kesetiaan-ke-foto. Cap tetap ada
-        // sebagai rem penyalahgunaan, hanya dilonggarkan ke ukuran realistis.
-        //
-        // Angka 1200 dipilih dari pengukuran, bukan tebakan: kombinasi terpanjang
-        // (selfie_luxury_hybrid, leadIn BAGIAN 1 + 3 beat b-roll + FRAMESAFE_SUFFIX)
-        // = 852 char. Cap 900 sempat dipertimbangkan tapi hanya menyisakan 48 char —
-        // terlalu ketat untuk kelas bug yang baru saja diperbaiki di sini. 1200
-        // memberi ~40% headroom bila leadInCamera diperpanjang nanti.
+        // Cap 1200 (diukur 2026-08-02, terpanjang: selfie_luxury_hybrid ~852 char) —
+        // cap lama 400 memotong FRAMESAFE_SUFFIX di tengah kata. Jangan turunkan.
         .map(c => ({ part: Number(c.part), camera: c.camera.slice(0, 1200) }))
     : [];
 
@@ -1035,32 +1024,13 @@ export async function onRequestPost(context) {
   const nativeAudio = isNativeAudioTool(aiTool);
   const clipMaxSec = getClipMaxSec(aiTool);
 
-  // Hook/CTA "Auto" — sebelum audit 2026-08-01 ini berarti "tanpa instruksi tambahan",
-  // jadi AI cenderung jatuh ke pola paling generik berulang-ulang. Sekarang: kalau Auto,
-  // ambil hook/cta yang BARU dipakai (lintas seluruh katalog, bukan cuma properti ini —
-  // penonton feed sosmed melihat semua listing bercampur) dari riwayat generate, lalu
-  // instruksikan AI untuk TIDAK memakainya lagi. Gagal-aman: query gagal → tetap 'auto' tanpa exclusion.
-  //
-  // ⚠️ DUA BUG DIPERBAIKI DI SINI (2026-08-02) — mekanisme ini TIDAK PERNAH BERJALAN:
-  //
-  // (1) BENTUK DATA SALAH. Blok ini membaca `p.hookType` (top-level), tapi
-  //     satu-satunya penulis menyimpannya NESTED sebagai `p.s1.hookType`
-  //     (AdminViralFrameWorkspacePage.tsx, params_json = {s1, s3}). Diverifikasi ke
-  //     D1 produksi: dari 8 generate terakhir, `p.hookType` = 0 baris, `p.s1.hookType`
-  //     = 8 baris. Jadi excludedHooks/excludedCtas SELALU kosong sejak awal.
-  //     Sekarang mentoleransi kedua bentuk, sama seperti suggest-storyboard.js yang
-  //     memang sudah benar (`parsedGen?.parts ?? parsedGen?.s1?.parts`).
-  //
-  // (2) GATE `isAutoValue` MEMATIKAN SEMUANYA. Dulu riwayat hanya dibaca kalau
-  //     hook/CTA dibiarkan "Auto". Begitu user memilih sendiri di dropdown —
-  //     yang justru perilaku normal — anti-pengulangan mati total. Sekarang riwayat
-  //     SELALU dibaca; yang berbeda hanya CARA PAKAInya di hookLine/ctaLine:
-  //       • Auto   → hindari TIPE yang baru dipakai.
-  //       • Manual → tipe pilihan user tetap DIPATUHI (jangan pernah ditimpa),
-  //                  tapi AI diwajibkan memvariasikan EKSEKUSInya dan dilarang
-  //                  mengulang kalimat pembuka yang sudah pernah dipakai.
-  //
-  // Gagal-aman dipertahankan: query gagal → array kosong, generate tetap jalan.
+  // Hook/CTA "Auto" → ambil hook/cta yang BARU dipakai lintas katalog dari riwayat
+  // generate, instruksikan AI untuk TIDAK memakainya lagi. Manual → tipe pilihan
+  // user tetap DIPATUHI, tapi eksekusi & kalimat pembuka WAJIB divariasikan.
+  // Baca `p.s1.hookType` (NESTED, bentuk asli AdminViralFrameWorkspacePage.tsx) DAN
+  // `p.hookType` (fallback) — riwayat lama sempat hanya membaca bentuk top-level
+  // yang tidak pernah ditulis, jadi exclusion selalu kosong (fixed 2026-08-02).
+  // Gagal-aman: query gagal → array kosong, generate tetap jalan.
   let excludedHooks = [];
   let excludedCtas = [];
   let excludedOpenings = [];
@@ -1094,7 +1064,7 @@ export async function onRequestPost(context) {
   }
 
   const systemPrompt = buildSystemPrompt({ jumlahPart, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, excludedHooks, excludedCtas, excludedOpenings, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotPart, cutawayExcludedParts, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec });
-  const userPrompt = buildUserPrompt({ property, karakterDesc, jumlahPart, partAssignments, durasiDetik, partDurations, partRoles, cameraDirectives, archetypeNote, regeneratePart, existingParts });
+  const userPrompt = buildUserPrompt({ property, karakterDesc, karakterNama: karakter.nama, expressionLabel, jumlahPart, partAssignments, durasiDetik, partDurations, partRoles, cameraDirectives, archetypeNote, regeneratePart, existingParts });
 
   // ── Panggil AI dengan fallback berantai, respons streaming NDJSON ──────────
   // Urutan: provider pilihan user dulu, lalu sisanya (yang punya key). Heartbeat
@@ -1186,20 +1156,28 @@ export async function onRequestPost(context) {
           : [];
         return {
           ...s,
-          // Sanitasi tipe — on_screen_text tidak divalidasi ketat oleh isValidPart()
-          // (opsional/best-effort), pastikan selalu string agar tidak bocor undefined/tipe lain ke frontend/ZIP.
-          on_screen_text: typeof s.on_screen_text === 'string' ? s.on_screen_text.trim() : '',
+          // Sanitasi tipe — on_screen_text & presentation tidak divalidasi ketat oleh
+          // isValidPart() (opsional/best-effort). on_screen_text kini array (kontrak
+          // sama dengan jsonValidator.ts frontend) — string lama dari provider yang
+          // belum patuh dibungkus jadi array 1 elemen, bukan dibuang.
+          on_screen_text: Array.isArray(s.on_screen_text)
+            ? s.on_screen_text.map(t => String(t).trim()).filter(Boolean)
+            : (typeof s.on_screen_text === 'string' && s.on_screen_text.trim() ? [s.on_screen_text.trim()] : []),
+          presentation: typeof s.presentation === 'string' ? s.presentation.trim() : '',
           role: assignment?.role ?? null,
           durasi_detik: assignment?.durasi ?? null,
           vo_durasi_detik: assignment?.vo_durasi ?? null,
           // Cut yang BENAR-BENAR dipakai = milik assignment (sumber kebenaran client),
-          // diperkaya dengan action/timecode dari AI. Mencegah AI mengarang nama file.
+          // diperkaya dengan action/gesture/emotion/timecode dari AI. Mencegah AI
+          // mengarang nama file.
           cuts: (assignment?.cuts ?? []).map((c, i) => ({
             t: s.cuts?.[i]?.t ?? '',
             photo: c.foto_file,
             foto_label: c.foto_label,
             durasi: c.durasi,
             action: s.cuts?.[i]?.action ?? '',
+            gesture: s.cuts?.[i]?.gesture ?? '',
+            emotion: s.cuts?.[i]?.emotion ?? '',
           })),
           // negative_prompt disuntik SERVER, bukan diminta ke AI — nilainya tetap dan
           // deterministik, jadi tidak ada gunanya membakar token & risiko model lupa.

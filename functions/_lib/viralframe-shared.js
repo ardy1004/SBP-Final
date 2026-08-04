@@ -20,7 +20,7 @@
 // sama sekali tidak mengimpor REALISM_* saat itu ditambahkan ke 2 jalur lain —
 // dicegah terulang lewat scripts/check-viralframe-rulebook.mjs (jalankan sebelum
 // deploy, sama seperti check-bundle-budget.mjs).
-export const RULEBOOK_VERSION = '2026-07-28.1';
+export const RULEBOOK_VERSION = '2026-08-04.1';
 
 // Tabel lipsync (PRD 3.8) — sinkronisasi durasi klip ↔ jumlah kata narasi.
 //
@@ -228,3 +228,86 @@ export const EXPRESSION_EN = {
   mysterious:      'mysterious and dramatic',
   curious_invest:  'curious and investigative',
 };
+
+// ════════════════════════════════════════════════════════════════════════════
+// DELIVERY CLAUSE TERHITUNG DARI DURASI (perbaikan audit 2026-08-04)
+// ════════════════════════════════════════════════════════════════════════════
+// Ditemukan: ai-generate.js MENULIS TETAP "berbicara cepat, artikulasi jelas,
+// tanpa jeda atau gagap" di SETIAP dialog — bertentangan langsung dengan
+// getLipsync() di atas, yang untuk Part 9–12 detik justru memberi pace 'medium'
+// ("Tempo sedang, ada penekanan kata kunci"). Akibatnya suara terdengar
+// terburu-buru/robotik walau tabel lipsync sudah menghitung tempo yang benar.
+// Rujukan prompt ChatGPT yang terbukti bagus di Google Flow TIDAK PERNAH
+// menyuruh "cepat" — ia mengendalikan KARAKTER SUARA (voice_style/tone) +
+// ANGGARAN WAKTU (duration), lalu membiarkan model mengatur tempo sendiri.
+// Perbaikan struktural: klausa delivery WAJIB dihitung dari getLipsync(durasi),
+// bukan string tetap — sehingga Part pendek dan panjang otomatis berbeda.
+
+// Busur emosi per peran Part, disaring dari pola konsisten di 6 storyboard
+// rujukan (Hook menarik perhatian, Body meyakinkan lewat detail, CTA menutup).
+export const EMOTION_ARC_BY_ROLE = {
+  Hook: 'curious and enthusiastic, drawing the viewer in',
+  Body: 'impressed and informative, genuinely engaged with the details',
+  CTA:  'convincing and persuasive, warm urgency without pressure',
+};
+
+// Menggabungkan (BUKAN mengganti) ekspresi dasar pilihan user dengan busur emosi
+// per peran. Project ini sudah 3x kena bug "nilai hardcoded membuang pilihan
+// user" — baseExpressionEn WAJIB tetap muncul di hasil.
+export function getEmotionForRole(role, baseExpressionEn) {
+  const arc = EMOTION_ARC_BY_ROLE[role];
+  if (!arc || !baseExpressionEn) return baseExpressionEn;
+  return `${baseExpressionEn}; for this Part: ${arc}`;
+}
+
+// Intent akting ("kenapa dia bicara begini"), bukan aksi fisik ("apa yang
+// dilakukan tangan/tubuh") — pola diambil dari rujukan ChatGPT yang terbukti
+// menghasilkan delivery natural, bukan pembacaan skrip.
+export const PERFORMANCE_INTENT_BY_ROLE = {
+  Hook: 'she feels like she is sharing a hidden gem discovery with her followers',
+  Body: 'she talks like she is personally showing a friend around her own home',
+  CTA:  'she talks like she is personally recommending a valuable opportunity',
+};
+
+// Karakter suara narator (selaras dengan pola "dialogue.voice" di
+// youtube-long.js, yang sudah terbukti dipakai di produksi). JANGAN bikin gaya
+// baru; kalau pola di youtube-long.js berubah, selaraskan lagi di sini.
+//
+// ⚠️ NILAI MURNI — DILARANG menyisipkan instruksi ke dalam string ini.
+// Ketiga pemanggil memakainya sebagai CONTOH ISI field `dialogue.voice`/
+// `narration_voice` DI DALAM TANDA KUTIP, jadi apa pun yang ada di sini akan
+// disalin AI apa adanya ke output yang dikirim ke Google Flow. Versi pertama
+// (2026-08-04) sempat menempelkan "— gunakan deskripsi suara yang SAMA di setiap
+// Part" di ekornya, sehingga kalimat perintah berbahasa Indonesia ikut masuk ke
+// field voice. Aturan "wajib sama di semua Part" adalah INSTRUKSI dan sudah
+// ditulis di masing-masing pemanggil — biarkan di sana, jangan digabung ke nilai.
+export const VOICE_PERSONA_HINT = 'warm confident young Indonesian female voice, natural documentary pace';
+
+// Prioritas mixing audio — dipakai bersama VOICE_PERSONA_HINT agar dialog tidak
+// tenggelam oleh backsound saat AI menyusun prompt akhir.
+export const VOICE_PRIORITY_NOTE = 'voice clear and mixed above background music';
+
+// Frasa delivery lama yang DILARANG ditulis tetap — terbukti bertentangan
+// dengan getLipsync() dan membuat suara terdengar terburu-buru/robotik.
+export const BANNED_DELIVERY_PHRASES = [
+  'berbicara cepat', 'tanpa jeda atau gagap', 'speaks quickly', 'no pauses or stutters',
+];
+
+/**
+ * Klausa delivery untuk SATU Part, DIHITUNG dari durasi VO-nya lewat
+ * getLipsync() — bukan string "cepat" tetap. Pace & instruksi otomatis
+ * berbeda antara Part pendek (mis. 3 detik → ultra_fast) dan Part panjang
+ * (mis. 8 detik → normal), jadi tempo yang diminta selalu cocok dengan waktu
+ * yang tersedia untuk diucapkan.
+ *
+ * [VOICE_PERSONA] adalah placeholder yang diisi AI dengan VOICE_PERSONA_HINT —
+ * dipertahankan sebagai placeholder (bukan langsung disuntik) agar pemanggil
+ * bisa menaruh deskripsi suara final di titik yang tepat dalam kalimatnya.
+ *
+ * Anchor "mengatakan:" WAJIB tetap di ujung — ai-generate.js:360 memakainya
+ * sebagai pemisah untuk menyalin dialog ke dalam tanda kutip di field 'prompt'.
+ */
+export function buildDeliveryClause(nama, voDurasiDetik) {
+  const { pace, instruksi } = getLipsync(voDurasiDetik);
+  return `${nama} ([VOICE_PERSONA]), durasi VO ${voDurasiDetik} detik, pace ${pace}: ${instruksi}, mengatakan:`;
+}

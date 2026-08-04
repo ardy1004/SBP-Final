@@ -20,6 +20,8 @@ import {
   REALISM_QUALITY_CUES, REALISM_BANNED_QUALITY_PHRASES,
   MAX_REF_IMAGES_PER_PART, buildZipNames, slugifyLabel,
   totalDurationOfParts, sumDurasiCuts,
+  getEmotionForRole, PERFORMANCE_INTENT_BY_ROLE,
+  VOICE_PERSONA_HINT, VOICE_PRIORITY_NOTE,
   type PartDef, type ZipSourceImage,
 } from './options';
 import { findArchetype, compileCameraChoreography } from './archetypes';
@@ -359,7 +361,7 @@ export function compileMasterPrompt(
     L.push('Untuk tool ini, tiap Part di BLOK 5 punya field "dialogue" TERSTRUKTUR (bukan digabung ke teks cut).');
     L.push('Aturan wajibnya:');
     L.push('  - dialogue.line Part ini WAJIB berisi narasi (field "dialog") Part itu PERSIS SAMA, karakter demi karakter — jangan diterjemahkan/diringkas/diparafrase. Bahasanya tetap sesuai BAHASA NARASI di BLOK 2.');
-    L.push('  - dialogue.voice diisi karakter suara singkat (mis. "warm confident female voice, natural conversational pace") dan WAJIB SAMA di semua Part agar timbre narator konsisten.');
+    L.push(`  - dialogue.voice diisi karakter suara singkat (rekomendasi: "${VOICE_PERSONA_HINT}") dan WAJIB SAMA di semua Part agar timbre narator konsisten.`);
     L.push('  - Untuk Part TANPA orang di layar (b-roll/voiceover), tetap isi dialogue.line dengan narasinya dan set dialogue.speaker = "narrator (voiceover, off-screen)".');
     L.push('  - Field "audio" tiap Part untuk lapisan NON-dialog saja (ambience ruangan, musik latar). JANGAN menaruh kalimat narasi di sini.');
     L.push('PERINGATAN SUBTITLE: tool ini cenderung MEMBAKAR subtitle ke dalam frame begitu ada dialog.');
@@ -454,6 +456,16 @@ export function compileMasterPrompt(
   L.push('  - Eskalasi energi naik dari Hook → Body → CTA.');
   L.push('  - Transisi antar Part mengalir sebagai satu video utuh.');
   L.push('');
+  // Arahan konkret utk eskalasi energi di atas — sebelumnya klaim "eskalasi"
+  // tidak pernah diterjemahkan jadi instruksi konkret per Part (audit 2026-08-04).
+  const baseExpr = EXPRESSION_EN[s3.expression] ?? EXPRESSION_EN.auto;
+  L.push('ARAHAN EMOSI & INTENT AKTING PER PART (konkret — terapkan ke ekspresi wajah, tone dialog, dan energi tubuh):');
+  parts.forEach((p, pi) => {
+    const emosi = getEmotionForRole(p.role, baseExpr) ?? baseExpr;
+    const intent = PERFORMANCE_INTENT_BY_ROLE[p.role] ?? '';
+    L.push(`  PART ${pi + 1} (${p.role}): Ekspresi: ${emosi}.${intent ? ` Intent akting: ${intent}.` : ''}`);
+  });
+  L.push('');
   L.push('GUARDRAIL SBP (DIPERTEGAS — TIDAK BOLEH DILANGGAR):');
   L.push('  - WORD COUNT WAJIB: field "dialog" setiap Part HARUS dalam rentang ±10% dari max_words BUDGET NARASI PER PART di atas (BUKAN sekadar di bawah maksimal — target presisi agar durasi ucapan PAS dengan voDurationSec Part).');
   L.push('  - SETIAP cut WAJIB ground pada foto referensinya (lihat BLOK 3b) — gambarkan ruangan/area konkret dan AKURAT, bukan generik.');
@@ -485,7 +497,8 @@ export function compileMasterPrompt(
   L.push('    "visual_style": "deskripsi gaya visual & sinematografi",');
   L.push('    "color_grade": "1 LUT/mood konsisten untuk semua Part",');
   L.push('    "music_mood": "tema musik yang ber-eskalasi",');
-  L.push('    "narration_voice": "persona & tone narator"');
+  L.push(`    "narration_voice": "persona & tone narator, rekomendasi: ${VOICE_PERSONA_HINT}",`);
+  L.push(`    "audio_mix_note": "${VOICE_PRIORITY_NOTE}"`);
   L.push('  },');
   L.push('  "character_sheet": {');
   if (s3.useCharacter && s3.character) {
@@ -503,9 +516,16 @@ export function compileMasterPrompt(
   L.push('      "role": "Hook | Body | CTA",');
   L.push('      "duration_sec": 0,');
   L.push('      "vo_duration_sec": 0,');
+  // `presentation` = INTENT AKTING ("kenapa dia bicara begini"), SAMA persis dengan
+  // field bernama sama di ai-generate.js [9]. Versi pertama (2026-08-04) meminta
+  // MODE PRESENTER (talking-head/voiceover/selfie) di sini — nama field sama, makna
+  // beda antar jalur, padahal renderer-nya sama (SceneCards & workspace sama-sama
+  // menampilkan "Presentasi:"). Mode presenter juga sudah ditetapkan arketipe di
+  // BLOK 0, jadi memintanya lagi hanya membuka peluang AI membantahnya sendiri.
+  L.push('      "presentation": "intent akting Part ini (Inggris, 1 kalimat) — SALIN dari \'Intent akting\' Part ini di ARAHAN EMOSI & INTENT AKTING (BLOK 4), jangan tulis mode presenter",');
   L.push('      "reference_images": ["urutan file yang WAJIB dilampirkan — lihat LAMPIRKAN SEBAGAI REFERENCE IMAGE di BLOK 3b"],');
   L.push('      "cuts": [');
-  L.push('        { "t": "0-4s", "photo": "nama file cut (lihat BLOK 3b)", "action": "aksi/motion pada cut ini, ground akurat pada foto", "camera": "gerakan kamera sesuai KOREOGRAFI" }');
+  L.push('        { "t": "0-4s", "photo": "nama file cut (lihat BLOK 3b)", "action": "aksi/motion fisik pada cut ini, ground akurat pada foto", "gesture": "gesture tangan/tubuh spesifik pada cut ini (mis. \'gestures toward the window\')", "emotion": "ekspresi/emosi pada cut ini, selaras ARAHAN EMOSI Part di BLOK 4", "camera": "gerakan kamera sesuai KOREOGRAFI" }');
   L.push('        // ... ulangi untuk setiap cut Part ini, Σ durasi cut = duration_sec Part');
   L.push('      ],');
   L.push('      "dialog": "narasi/dialog Part ini (patuhi WORD COUNT ±10% dari BUDGET NARASI)",');
@@ -520,7 +540,7 @@ export function compileMasterPrompt(
     L.push(`      "negative_prompt": "${NEGATIVE_PROMPT_VIDEO}",`);
   }
   L.push('      "on_screen_text": ["teks overlay untuk EDITOR (array, boleh kosong)"],');
-  L.push('      "audio": "ambience & musik latar Part ini — SAJA, tanpa kalimat narasi",');
+  L.push(`      "audio": "ambience & musik latar Part ini — SAJA, tanpa kalimat narasi (${VOICE_PRIORITY_NOTE})",`);
   L.push('      "transition_to_next": "transisi eksplisit + audio cue"');
   L.push('    }');
   L.push(`    // ... ulangi untuk seluruh ${parts.length} Part sesuai STRUKTUR PART di BLOK 3`);

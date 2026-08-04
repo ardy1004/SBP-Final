@@ -365,15 +365,37 @@ function Section({ n, title, open, done, onToggle, children, footer }: {
 /** Satu PART hasil Jalur C = satu panggilan generate video (bukan lagi satu scene). */
 interface AIScene {
   part: number; kamera: string; prompt: string; dialog_karakter: string;
-  on_screen_text?: string; role?: string | null;
+  /** ⚠️ Bentuk ganda (2026-08-04): backend/AI SEHARUSNYA mengirim string[]
+   * sekarang (satu kanal per teks overlay), tapi draft lama di localStorage
+   * (vf_draft_*) dan riwayat D1 (viralframe_generations.params_json) masih
+   * berbentuk string tunggal — SELALU baca lewat toleransi dua bentuk (lihat
+   * getOnScreenTextArray() di bawah), jangan asumsikan salah satu bentuk saja.
+   * Sama persis pola bug layar putih 2026-08-01 (readNdjsonFinal<T> = cast
+   * tanpa validasi, ketidakcocokan bentuk lolos typecheck). */
+  on_screen_text?: string | string[]; role?: string | null;
+  /** INTENT AKTING Part ini — "kenapa dia bicara begini", mis. "she feels like she
+   * is sharing a hidden gem discovery with her followers". BUKAN mode presenter
+   * (talking-head/voiceover/selfie) — itu sudah ditetapkan arketipe. Makna ini
+   * WAJIB sama dengan field `presentation` di masterPromptCompiler BLOK 5 &
+   * ai-generate.js [9]: renderer-nya dipakai bersama. */
+  presentation?: string;
   durasi_detik?: number | null; vo_durasi_detik?: number | null;
   /** Hanya untuk tool ber-audio native (Veo/Flow) — disuntik server, lihat ai-generate.js. */
   negative_prompt?: string; max_clip_sec?: number | null;
   /** Potongan visual DI DALAM satu generate call. Menggantikan `sequences` lama:
    * foto BOLEH berganti antar cut karena semua referensinya dilampirkan sekaligus. */
-  cuts?: { t?: string; photo?: string; foto_label?: string; durasi?: number; action?: string }[];
+  cuts?: { t?: string; photo?: string; foto_label?: string; durasi?: number; action?: string; gesture?: string; emotion?: string }[];
   /** Nama file yang WAJIB dilampirkan user di Google Flow (identik dgn isi ZIP). */
   reference_images?: string[]; character_reference?: string;
+}
+
+/** Toleran dua bentuk on_screen_text (string tunggal lama vs string[] baru) —
+ * WAJIB dipakai di setiap tempat yang membaca field ini. Lihat catatan di
+ * interface AIScene di atas untuk alasan lengkapnya. */
+function getOnScreenTextArray(v: string | string[] | null | undefined): string[] {
+  if (Array.isArray(v)) return v.filter(t => typeof t === 'string' && t.trim().length > 0);
+  if (typeof v === 'string' && v.trim().length > 0) return [v];
+  return [];
 }
 interface AIKarakter { nama: string; deskripsi: string; foto_url: string }
 interface AIMetadata {
@@ -807,11 +829,13 @@ function AIGenerateTab({
           // Untuk Veo/Flow, dialog sudah TERTANAM di dalam 'prompt' (di dalam tanda
           // kutip) — 'dialog_karakter' tinggal jadi rujukan naskah untuk editor.
           dialog_karakter: part.dialog_karakter,
+          ...(part.presentation ? { presentation: part.presentation } : {}),
           ...(part.negative_prompt ? { negative_prompt: part.negative_prompt } : {}),
           ...(part.max_clip_sec ? { max_clip_sec: part.max_clip_sec } : {}),
-          // cuts[] — potongan visual DI DALAM satu generate call (pengganti sequences[]).
+          // cuts[] — potongan visual DI DALAM satu generate call (pengganti sequences[]),
+          // gesture/emotion ikut disertakan bila ada (bug "sequences hilang dari ZIP" 2026-07-28).
           ...(Array.isArray(part.cuts) && part.cuts.length > 0 ? { cuts: part.cuts } : {}),
-          on_screen_text: part.on_screen_text || null,
+          on_screen_text: getOnScreenTextArray(part.on_screen_text),
           catatan_musik: metadata.musik_value !== 'none'
             ? 'Deskripsi audio optimal untuk Veo3/Google Flow. Kling/Wan: efek suara saja, tambahkan musik via CapCut.'
             : 'Mode tanpa musik.',
@@ -1137,9 +1161,14 @@ function AIGenerateTab({
                 </div>
                 <p className="text-xs text-[#0F172A] leading-relaxed">{s.prompt.slice(0, 200)}{s.prompt.length > 200 ? '…' : ''}</p>
                 <p className="text-xs text-[#1565C0] mt-1.5 italic">"{s.dialog_karakter}"</p>
-                {s.on_screen_text && (
+                {s.presentation && (
+                  <p className="text-xs text-[#64748B] mt-1">
+                    <span className="font-semibold">Presentasi:</span> {s.presentation}
+                  </p>
+                )}
+                {getOnScreenTextArray(s.on_screen_text).length > 0 && (
                   <p className="text-xs text-[#7C3AED] mt-1 flex items-center gap-1">
-                    <span className="font-semibold">Teks on-screen:</span> {s.on_screen_text}
+                    <span className="font-semibold">Teks on-screen:</span> {getOnScreenTextArray(s.on_screen_text).join(' / ')}
                   </p>
                 )}
               </div>

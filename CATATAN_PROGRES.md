@@ -5,6 +5,50 @@
 
 ---
 
+## SESI 4 AGUSTUS 2026 — Kualitas bicara & performa ViralFrame (LIVE)
+
+Dipicu uji banding user: ia menyusun storyboard 3-Part lewat ChatGPT (6 varian, properti sama) lalu memasukkannya ke Google Flow. Hasilnya **lebih bagus daripada keluaran ViralFrame** pada dua hal — kualitas bicara dan kualitas video. Diagnosis ke kode menemukan penyebabnya **bukan modelnya, tapi prompt kita sendiri**.
+
+### Temuan inti: kita menyuruh Flow berbicara cepat tanpa jeda
+
+`ai-generate.js` menghardcode klausa `"[Nama] berbicara cepat, artikulasi jelas, tanpa jeda atau gagap, mengatakan:"` ke **setiap** dialog. Flow audio-native membacanya sebagai arahan akting → suara terburu-buru. Yang membuatnya jelas keliru: klausa itu **bertentangan dengan `getLipsync()` milik kita sendiri**, yang untuk Part 10 detik justru memberi pace `medium` + *"jeda wajar antar frasa"*.
+
+Perbaikannya struktural — klausa delivery **dihitung** dari durasi VO, bukan ditulis tetap:
+
+| Durasi VO | Pace | Instruksi yang dikirim |
+|---|---|---|
+| 3 s | `ultra_fast` | 1 kalimat pendek punchy, tanpa jeda |
+| 8 s | `normal` | Tempo natural, **jeda wajar antar frasa** |
+| 10 s | `medium` | Tempo sedang, ada penekanan kata kunci |
+
+Pola pembanding dari ChatGPT: kendalikan **karakter suara** (`voice_style`/`tone`) + beri **anggaran waktu** (`duration: 8 seconds`) — tidak pernah menyuruh cepat.
+
+### Empat cacat lain di jalur yang sama
+
+1. **Kontradiksi register.** `registerLine` menyuntik gaya gaul, lalu baris hardcoded *"gunakan Bahasa Indonesia formal yang hangat"* muncul **belakangan** dan menang. Pilihan register user praktis dibuang — kelas bug yang sama dengan 3 placeholder hardcoded di audit SEO.
+2. **Contoh few-shot datar** (*"Selamat datang di hunian impian Anda"* — 6 kata, formal). Model meniru contoh lebih kuat daripada mematuhi aturan, jadi contohnya sendiri yang mengajarkan suara kaku. Diganti bergaya `sapaan → sikap personal → fakta → ajakan`, dengan panutan untuk register gaul **dan** formal.
+3. **Emosi dipaksa seragam** lintas Part — melawan BLOK 4 `masterPromptCompiler` yang justru menuntut eskalasi. Sekarang ekspresi pilihan user jadi nada **dasar** yang dimodulasi peran (`getEmotionForRole`), ditambah `PERFORMANCE_INTENT_BY_ROLE` (intent akting: *"kenapa dia bicara begini"*).
+4. **Sisa model lama** di `[2d]`: masih menulis *"DUA gambar terlampir"* dan *"the attached scene reference image"* (tunggal) padahal satu Part bisa melampirkan 5 foto — frasa tunggal jadi ambigu. Diperbaiki jadi jamak + rujuk nama file dari DAFTAR CUT.
+
+Kualitas video: ditambah `presentation` (intent akting), `cuts[].gesture` (gerak tangan saat bicara — tangan diam adalah penanda AI paling kentara), `cuts[].emotion`, dan `voice_priority` agar VO tidak tenggelam musik. `on_screen_text` disamakan jadi **array** di tiga jalur; Part CTA wajib mengisinya dengan spec/harga — kanal yang aturan kita sendiri tetapkan tapi selama ini tak pernah terisi karena kita cuma meminta "teks singkat".
+
+### Dua cacat yang lolos seluruh gate, ditemukan saat verifikasi
+
+Implementasi dikerjakan 4 agent swarm dengan kepemilikan file eksklusif. Semua gate hijau, tapi dua hal tetap salah:
+
+1. **`VOICE_PERSONA_HINT` mencampur nilai dengan instruksi.** Isinya berakhiran *"— gunakan deskripsi suara yang SAMA di setiap Part"*, sementara 3 pemanggil menaruhnya **di dalam tanda kutip** sebagai contoh isi `dialogue.voice`. Akibatnya kalimat perintah berbahasa Indonesia ikut tersalin ke field yang dikirim ke Google Flow. Aturannya sekarang: konstanta yang dipakai sebagai contoh nilai **wajib nilai murni**.
+2. **`presentation` bermakna dua hal.** Jalur C mengartikannya intent akting, Jalur A mengartikannya mode presenter — padahal renderer-nya sama. Disamakan jadi intent akting (mode presenter sudah ditetapkan arketipe di BLOK 0). **Guard hanya memeriksa nama field, bukan maknanya.**
+
+### Penjaga baru
+
+`check-viralframe-rulebook.mjs` bertambah 2 bagian: **BAGIAN 5** ratchet `BANNED_DELIVERY_PHRASES` (baris contoh-negatif & komentar dikecualikan) dan **BAGIAN 6** guard kontradiksi register. Ratchet-nya **diuji dengan menyuntik regresi palsu ke salinan repo** — guard gagal dengan 2 pesan, jadi terbukti menggigit, bukan lulus karena tidak memeriksa apa pun.
+
+Anggaran bundle **turun** 5.976.762 → **5.972.460 B** (99,5%) meski teks prompt bertambah — redundansi dipangkas, sesuai keputusan "pangkas dulu, jangan naikkan angkanya".
+
+⚠️ **Yang belum terbukti:** semua di atas membuktikan instruksinya kini benar dan konsisten. Apakah suaranya benar-benar terdengar lebih natural hanya bisa dibuktikan lewat generate nyata di Google Flow — gate hijau bukan buktinya.
+
+---
+
 ## SESI 2–3 AGUSTUS 2026 — Audit ViralFrame, kuota Gemini, dan SEO katalog (LIVE)
 
 7 commit, semuanya live production. Satu benang merah menyatukan hampir semuanya: **kode yang berjalan sempurna tapi menunjuk ke tempat yang salah** — tidak ada error, semua gate hijau, fitur hanya diam-diam tidak pernah hidup.

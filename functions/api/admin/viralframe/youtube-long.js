@@ -14,9 +14,16 @@ import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiP
 // (audit 2026-07-26 & 2026-07-28). REALISM_* dipakai supaya jalur ini tidak lagi
 // tertinggal dari perbaikan "kelihatan AI banget" yang sudah diterapkan ke 2 jalur
 // lain — sebelumnya jalur ini tidak mengimpor sama sekali (audit 2026-07-28).
+// VOICE_PERSONA_HINT/VOICE_PRIORITY_NOTE (audit 2026-08-04): jalur ini SUDAH
+// punya pola "dialogue.voice WAJIB SAMA di semua blok" sejak awal — justru
+// preseden yang dipakai menulis VOICE_PERSONA_HINT di viralframe-shared.js
+// (lihat komentar di sana). Diimpor dari sumber tunggal di sini juga supaya
+// KEDUANYA (jalur ini & Jalur C ai-generate.js) tidak bisa lagi drift satu
+// sama lain kalau salah satu diubah tanpa yang lain.
 import {
   NEGATIVE_PROMPT_VIDEO, getClipMaxSec, getMaxWords,
   REALISM_QUALITY_CUES, REALISM_BANNED_QUALITY_PHRASES, RULEBOOK_VERSION,
+  VOICE_PERSONA_HINT, VOICE_PRIORITY_NOTE,
 } from '../../../_lib/viralframe-shared.js';
 
 // Jalur ini diasumsikan untuk Veo/Google Flow. Batas panjang satu klip mengikuti
@@ -162,7 +169,8 @@ export async function onRequestPost(context) {
 SYARAT WAJIB — AUDIO NATIVE (DIALOG TERUCAP): prompt ini dieksekusi di Veo 3.x / Google Flow yang menghasilkan AUDIO NATIVE — kalimat yang ada DI DALAM objek "prompt" akan BENAR-BENAR DIUCAPKAN dengan lip-sync, sedangkan kalimat yang hanya ada di field tetangga TIDAK akan terdengar sama sekali.
   • Setiap objek "prompt" untuk blok VIDEO (opening, tiap scene, ending) WAJIB punya field "dialogue" berisi { "speaker", "language", "line", "voice", "delivery" }.
   • "dialogue.line" WAJIB berisi teks yang SAMA PERSIS dengan "narration_id" blok itu — karakter demi karakter, tetap dalam ${langName}. Jangan diterjemahkan, diringkas, atau diparafrase.
-  • "dialogue.voice" WAJIB SAMA di semua blok agar timbre narator konsisten (mis. "warm confident ${language === 'en' ? 'English' : 'Indonesian'} voice, natural documentary pace").
+  • "dialogue.voice" WAJIB SAMA di semua blok agar timbre narator konsisten (mis. "${language === 'en' ? 'warm confident young English female voice, natural documentary pace' : VOICE_PERSONA_HINT}").
+  • "audio" (ambience/musik latar blok VIDEO) WAJIB tunduk pada prioritas ini: ${VOICE_PRIORITY_NOTE} — jangan tulis ambience/musik yang mengesankan volumenya menutupi dialog.
   • ${agent ? `"dialogue.speaker" = nama agen (host tampil di layar dan berbicara).` : `"dialogue.speaker" = "narrator (voiceover, off-screen)" karena tidak ada orang di layar.`}
   • Semua field lain di dalam "prompt" ditulis dalam BAHASA INGGRIS — HANYA "dialogue.line" yang memakai ${langName}.
   • Blok "thumbnail" TIDAK punya "dialogue" (gambar diam, bukan video).
