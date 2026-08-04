@@ -43,7 +43,39 @@ export const PROVIDERS = {
     //   gemini-3.5-flash .......... OK 901 ms
     //   gemini-3.6-flash .......... OK 1538 ms
     //
-    // Kenapa `gemini-3.5-flash-lite`:
+    // ⚠️ DIGANTI 2026-08-04: `gemini-3.5-flash-lite` → `gemini-3.1-flash-lite`.
+    //
+    // Gejalanya "AI Rancang Storyboard gagal 3 dari 4 percobaan". Akarnya BUKAN
+    // kuota dan BUKAN penolakan prompt (diukur: kunci sah, ke-7 model 200, prompt
+    // penuh ai-generate OK 4,7 s, visi benar-benar melihat foto). Akarnya LATENSI
+    // VISI BANYAK FOTO melawan `CAP_FASE1_MS = 14000` di suggest-storyboard.js.
+    //
+    // Diukur ke key produksi, visi 5 foto asli, 3× per model:
+    //   gemini-3.5-flash-lite ... 11,9 / 12,4 / 13,2 s  ← median ~12,5 s vs cap 14 s
+    //   gemini-3.5-flash ........  6,4 /  7,4 /  8,5 s
+    //   gemini-3.1-flash-lite ...  5,6 /  6,0 /  7,2 s  ← dipilih
+    // Percobaan dengan cap 14 s nyata GAGAL di 14.017 ms. Ekor distribusinya rutin
+    // melewati batas — itulah "kadang berhasil, sering gagal" yang dilaporkan user.
+    //
+    // Kenapa ini lolos sampai produksi: model lama dipilih 2026-08-02 berdasar
+    // latensi TEKS (703 ms, tercepat saat itu). Pada beban VISI BANYAK FOTO ia
+    // justru 2× lebih lambat. Peringatan "uji beban banyak foto sekaligus" sudah
+    // ada di CLAUDE.md — poin itulah yang tidak benar-benar diuji. Latensi teks
+    // BUKAN proksi untuk latensi visi; ukur beban yang sesungguhnya dipakai.
+    //
+    // `gemini-3.1-flash-lite` unggul di KETIGA sumbu wajib:
+    //   (a) visi terverifikasi — deskripsinya konvergen dengan model lain pada
+    //       detail spesifik (krem/putih, batu alam, benda hitam di halaman); dua
+    //       model tidak mungkin mengarang detail yang sama.
+    //   (b) `reasoning_effort` DITERIMA → tidak membayar bolak-balik retry 400
+    //       (~370 ms per panggilan) seperti `3.5-flash-lite` yang MENOLAK.
+    //   (c) visi 5 foto 5,6–7,2 s — jauh di bawah cap, ada margin untuk variasi
+    //       jaringan dan overhead Worker.
+    // `gemini-3.5-flash` cepat juga TAPI membakar thinking token: pada max_tokens
+    // kecil jawabannya terpotong ("2 specific objects:*") — jangan dipakai default.
+    //
+    // Catatan alasan model LAMA dipilih (masih berlaku sebagai kriteria, hanya
+    // pemenangnya yang berubah) — kenapa dulu `gemini-3.5-flash-lite`:
     //  (1) GA/stabil, bukan preview — model preview-lah yang dapat jatah kecil;
     //  (2) visi TERVERIFIKASI dengan foto properti asli (mendeskripsikan pintu
     //      garasi kayu, pilar cokelat, lantai carport berpola — cocok dengan 2
@@ -58,7 +90,7 @@ export const PROVIDERS = {
     // "lebih besar dari 20" itu kesimpulan dari (1), bukan angka terukur. Kalau
     // suatu saat model ini ikut 429, pesan errornya akan menyebut limitnya —
     // CATAT angka itu di sini, jangan diganti tebakan.
-    defaultModel: 'gemini-3.5-flash-lite',
+    defaultModel: 'gemini-3.1-flash-lite',
     quota: null, // tidak ada endpoint kuota — status dari cek models
     supportsVision: true,
   },

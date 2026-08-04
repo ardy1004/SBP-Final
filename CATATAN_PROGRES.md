@@ -47,6 +47,26 @@ Anggaran bundle **turun** 5.976.762 → **5.972.460 B** (99,5%) meski teks promp
 
 ⚠️ **Yang belum terbukti:** semua di atas membuktikan instruksinya kini benar dan konsisten. Apakah suaranya benar-benar terdengar lebih natural hanya bisa dibuktikan lewat generate nyata di Google Flow — gate hijau bukan buktinya.
 
+### Lanjutan: "AI Rancang Storyboard gagal 3 dari 4" — model default terlalu lambat untuk visi
+
+User melaporkan Gemini "selalu gagal generate". Pertanyaannya: apakah prompt kita salah suntik sehingga Gemini menolak? **Bukan.** Diukur berlapis ke API produksi: kunci sah, **ke-7 model Gemini balas 200** (tidak ada kuota habis), prompt penuh `ai-generate` (24.037 char) **OK 4,7 detik** dengan JSON valid, visi benar-benar melihat foto produksi, `error_logs` kosong sejak 1 Agustus.
+
+Akarnya **latensi visi melawan cap waktu**. `CAP_FASE1_MS = 14000` di `suggest-storyboard.js`, sementara model default `gemini-3.5-flash-lite` memproses 5 foto dalam **11,9 / 12,4 / 13,2 detik** — median duduk di bibir batas, ekornya rutin lewat. Direproduksi: gagal nyata di **14.017 ms**. Itu persis pola "3 gagal, ke-4 berhasil" yang dilaporkan.
+
+Kenapa lolos sampai produksi: model itu dipilih 2 Agustus berdasar **latensi teks** (703 ms, tercepat). Pada visi banyak foto ia justru **2× paling lambat**. Peringatan "uji beban banyak foto sekaligus" sudah tertulis di CLAUDE.md — poin itulah yang tidak benar-benar diuji. **Latensi teks bukan proksi latensi visi.**
+
+Diganti ke **`gemini-3.1-flash-lite`**, lolos ketiga syarat wajib:
+
+| | `3.5-flash-lite` (lama) | `3.1-flash-lite` (baru) |
+|---|---|---|
+| Visi 5 foto | 11,9 / 12,4 / 13,2 s | **5,3 – 7,1 s** |
+| Uji cap 14 s | gagal di 14.017 ms | **5/5 lulus** |
+| `reasoning_effort` | DITOLAK 400 (bayar retry ~370 ms) | **DITERIMA** |
+
+Visi diverifikasi bukan sekadar cepat: deskripsinya **konvergen dengan model lain pada detail spesifik** (krem/putih, batu alam, benda hitam di halaman) — dua model tidak mungkin mengarang detail yang sama. `gemini-3.5-flash` juga cepat tapi **membakar thinking token** (jawaban terpotong di `max_tokens` kecil), jadi tidak dipakai.
+
+Nol perubahan logika — hanya satu nilai `defaultModel`. Badge `👁️ visi AI` / `📝 mode teks` di UI sudah ada sejak sebelumnya, jadi user tetap bisa melihat kapan storyboard dibuat tanpa melihat foto.
+
 ---
 
 ## SESI 2–3 AGUSTUS 2026 — Audit ViralFrame, kuota Gemini, dan SEO katalog (LIVE)
