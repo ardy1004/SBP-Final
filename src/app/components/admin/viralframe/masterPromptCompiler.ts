@@ -12,7 +12,7 @@
 // DIHAPUS oleh Tahap 1 — compiler ini sepenuhnya bertumpu pada `PartDef[]`.
 import {
   AI_TOOLS, AI_TOOL_FORMAT_SPEC, PLATFORM_BEHAVIOR, PLATFORMS,
-  REAL_ESTATE_CONTEXT, PHOTO_LABEL_HINT, HOOK_TYPES, CTA_TYPES,
+  REAL_ESTATE_CONTEXT, PHOTO_LABEL_HINT, HOOK_TYPES, CTA_TYPES, CTA_SPOKEN_EXAMPLE,
   VISUAL_STYLES, TONES, LANGUAGES, RATIOS, EXPRESSIONS,
   ETHNIC_EN, STYLE_EN, EXPRESSION_EN, getLipsync,
   characterFileName, REGISTER_INSTRUCTION,
@@ -466,6 +466,14 @@ export function compileMasterPrompt(
     L.push(`  PART ${pi + 1} (${p.role}): Ekspresi: ${emosi}.${intent ? ` Intent akting: ${intent}.` : ''}`);
   });
   L.push('');
+  // Objek ajakan CTA wajib konkret. Mengirim nama kategori saja membuat model
+  // menulis ajakan umum yang tak menyebut link/komentar/DM sama sekali
+  // (audit 2026-08-04, Jalur C) — Jalur A memakai contoh yang sama.
+  const ctaContoh = CTA_SPOKEN_EXAMPLE[s1.ctaType];
+  if (ctaContoh) {
+    L.push(`ARAHAN CTA TERUCAP (Part ber-role CTA, atau Part TERAKHIR bila tidak ada): ajakan yang diucapkan WAJIB menyebut objek ajakan yang sama seperti contoh ini — "${ctaContoh}"${s1.ctaType === 'comment_keyword' && s1.ctaKeyword.trim() ? ` (keyword: "${s1.ctaKeyword.trim()}")` : ''}. Diksinya boleh divariasikan, OBJEK ajakannya TIDAK boleh diganti atau dikaburkan jadi ajakan umum.`);
+    L.push('');
+  }
   L.push('GUARDRAIL SBP (DIPERTEGAS — TIDAK BOLEH DILANGGAR):');
   L.push('  - WORD COUNT WAJIB: field "dialog" setiap Part HARUS dalam rentang ±10% dari max_words BUDGET NARASI PER PART di atas (BUKAN sekadar di bawah maksimal — target presisi agar durasi ucapan PAS dengan voDurationSec Part).');
   L.push('  - SETIAP cut WAJIB ground pada foto referensinya (lihat BLOK 3b) — gambarkan ruangan/area konkret dan AKURAT, bukan generik.');

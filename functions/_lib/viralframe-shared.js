@@ -40,14 +40,44 @@ export const RULEBOOK_VERSION = '2026-08-04.1';
 // Angka laju berasal dari satu titik data nyata (41 kata @10s = terpotong), jadi
 // ini perkiraan konservatif — kalau uji berikutnya menyisakan hening di akhir,
 // naikkan `kataPerDetik`, jangan kembalikan tabel tetap.
+//
+// ⚠️ DINAIKKAN 2026-08-04 — uji itu terjadi. User melaporkan Part CTA "belibet dan
+// berulang, kurang panjang kalimatnya": laju 2,2 terlalu RENDAH, sehingga dialog
+// selesai jauh sebelum klip habis dan Veo mengisi sisanya dengan mengulang.
+// Dikalibrasi ke 6 storyboard ChatGPT milik user yang hasil videonya SUDAH TERBUKTI
+// bagus (Part CTA, VO 8 detik):
+//   Lisa 22 kata = 2,75 · Ayu/Vina/Angel 20 = 2,50 · Hana/Cindy 19 = 2,38
+//   → median 2,50 kata/detik. Keluaran kita saat gagal: 17 kata / 10 s = 1,70.
+// Dipakai 2,5 (median), BUKAN 2,75 (batas atas hanya satu sampel). Masih jauh di
+// bawah 4,1 kata/detik yang dulu terbukti terpotong, jadi tidak mengulang bug lama.
+// Rentang pendek (2–5 dtk) TIDAK dinaikkan: di sana masalahnya memang kepadatan,
+// bukan kekosongan. Rentang panjang dinaikkan lebih hati-hati.
 const LIPSYNC_ROWS = [
   { minSec: 2,  maxSec: 3,  kataPerDetik: 2.4, pace: 'ultra_fast',    instruksi: 'Ucapan sangat cepat, 1 kalimat pendek punchy, tanpa jeda.' },
   { minSec: 4,  maxSec: 5,  kataPerDetik: 2.4, pace: 'fast',          instruksi: 'Ucapan cepat, 1 kalimat ringkas, jeda minimal.' },
-  { minSec: 6,  maxSec: 8,  kataPerDetik: 2.2, pace: 'normal',        instruksi: 'Tempo natural, 1–2 kalimat, jeda wajar antar frasa.' },
-  { minSec: 9,  maxSec: 12, kataPerDetik: 2.2, pace: 'medium',        instruksi: 'Tempo sedang, 2 kalimat, ada penekanan kata kunci.' },
-  { minSec: 13, maxSec: 20, kataPerDetik: 2.1, pace: 'relaxed',       instruksi: 'Tempo santai, 2–3 kalimat, ruang untuk storytelling.' },
-  { minSec: 21, maxSec: 30, kataPerDetik: 1.9, pace: 'slow_dramatic', instruksi: 'Tempo lambat dramatis, jeda sengaja untuk emosi.' },
+  { minSec: 6,  maxSec: 8,  kataPerDetik: 2.5, pace: 'normal',        instruksi: 'Tempo natural, 1–2 kalimat, jeda wajar antar frasa.' },
+  { minSec: 9,  maxSec: 12, kataPerDetik: 2.5, pace: 'medium',        instruksi: 'Tempo sedang, 2 kalimat mengalir, ada penekanan kata kunci.' },
+  { minSec: 13, maxSec: 20, kataPerDetik: 2.4, pace: 'relaxed',       instruksi: 'Tempo santai, 2–3 kalimat, ruang untuk storytelling.' },
+  { minSec: 21, maxSec: 30, kataPerDetik: 2.0, pace: 'slow_dramatic', instruksi: 'Tempo lambat dramatis, jeda sengaja untuk emosi.' },
 ];
+
+/**
+ * Durasi VO baku untuk sebuah Part = ~80% durasi klip.
+ *
+ * ⚠️ Dulu nilai awalnya = durationSec PENUH (`options.ts`: "voDurationSec awal =
+ * durationSec"), artinya kita meminta orang berbicara TANPA HENTI sepanjang klip.
+ * Storyboard ChatGPT yang hasilnya bagus justru sengaja menyisakan ruang: klip 10
+ * detik dengan `voiceover.duration: 8 seconds` — 2 detik untuk napas awal, jeda,
+ * dan ekor penutup. Arsitektur kita sudah punya konsep sisa itu (`sisaDetik`,
+ * ringkasan "3×8s VO = 24s, sisa 6s"), hanya nilai awalnya yang menutupnya.
+ *
+ * Minimal 2 detik supaya Part sangat pendek tidak jadi 0 dan mematikan lipsync.
+ */
+export function defaultVoDurationSec(durationSec) {
+  const d = Number(durationSec);
+  if (!Number.isFinite(d) || d <= 0) return 0;
+  return Math.max(2, Math.round(d * 0.8));
+}
 
 function barisLipsync(d) {
   for (const row of LIPSYNC_ROWS) {
@@ -286,6 +316,34 @@ export const VOICE_PERSONA_HINT = 'warm confident young Indonesian female voice,
 // Prioritas mixing audio — dipakai bersama VOICE_PERSONA_HINT agar dialog tidak
 // tenggelam oleh backsound saat AI menyusun prompt akhir.
 export const VOICE_PRIORITY_NOTE = 'voice clear and mixed above background music';
+
+/**
+ * Contoh KALIMAT TERUCAP per tipe CTA, dikunci ke `value` di CTA_TYPES (options.ts).
+ *
+ * ⚠️ LATAR (2026-08-04): sebelumnya kita hanya mengirim NAMA KATEGORI ke AI
+ * ("Kunjungi Link di Bio"), lalu menyuruhnya mengarang kalimatnya sendiri. Hasil
+ * nyata: user memilih "Kunjungi Link di Bio", dialog yang keluar "Yuk jadwalkan
+ * waktu buat lihat langsung, jangan sampai ketinggalan info menariknya ya!" —
+ * TIDAK menyebut link di bio sama sekali, DAN memakai frasa urgensi yang aturan
+ * kita sendiri larang. Bandingkan uji ChatGPT user yang berhasil: di sana yang
+ * dikirim adalah KATA-KATANYA ("link ada di bio ya gaes"), bukan nama kategori.
+ *
+ * Kalimat di bawah SUDAH DISARING terhadap aturan kebijakan: tanpa nominal harga,
+ * tanpa penumpukan urgensi/kelangkaan. AI boleh memvariasikan diksinya, tapi
+ * MAKSUD dan objek ajakannya wajib sama — itulah gunanya contoh ini.
+ */
+export const CTA_SPOKEN_EXAMPLE = {
+  dm_info:         'DM aku ya, nanti aku kirim detail lengkapnya.',
+  comment_keyword: 'Komen kata kuncinya di bawah ya, nanti aku balas satu-satu.',
+  visit_link_bio:  'Yuk jadwalkan survei lokasi, klik link di bio ya gaes!',
+  save_post:       'Simpan dulu video ini biar nggak lupa pas mau survei.',
+  share_friend:    'Bagikan ke temanmu yang lagi cari properti kayak gini.',
+  whatsapp_now:    'Yuk chat aku buat lihat unitnya langsung.',
+  book_viewing:    'Yuk jadwalkan survei lokasi, biar bisa lihat sendiri kondisinya.',
+  follow_more:     'Follow aku ya, masih banyak listing menarik lainnya.',
+  limited_offer:   'Cek detail penawarannya ya, mumpung masih tersedia.',
+  ask_question:    'Kalau ada yang mau ditanyain, tulis di kolom komentar ya.',
+};
 
 // Frasa delivery lama yang DILARANG ditulis tetap — terbukti bertentangan
 // dengan getLipsync() dan membuat suara terdengar terburu-buru/robotik.

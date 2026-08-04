@@ -47,6 +47,39 @@ Anggaran bundle **turun** 5.976.762 → **5.972.460 B** (99,5%) meski teks promp
 
 ⚠️ **Yang belum terbukti:** semua di atas membuktikan instruksinya kini benar dan konsisten. Apakah suaranya benar-benar terdengar lebih natural hanya bisa dibuktikan lewat generate nyata di Google Flow — gate hijau bukan buktinya.
 
+### Lanjutan 2: "Part CTA belibet dan berulang" — dialog kependekan, bukan kepanjangan
+
+Uji video nyata user pada Part 3: bicaranya **belibet, berulang, kalimatnya kurang panjang**. Dugaan awal saya justru terbalik (saya mengira kata kelebihan sehingga ngebut) — laporan ini sekaligus membuktikan VO **berlanjut menutupi b-roll**, tidak berhenti di Shot 1.
+
+Dikalibrasi ke 6 storyboard ChatGPT milik user yang hasilnya sudah terbukti bagus (Part CTA, VO 8 detik):
+
+| Sumber | Kata | Jendela VO | Laju |
+|---|---|---|---|
+| Lisa | 22 | 8 s | 2,75 kata/dtk |
+| Ayu / Vina / Angel | 20 | 8 s | 2,50 |
+| Hana / Cindy | 19 | 8 s | 2,38 |
+| **ViralFrame (gagal)** | **17** | **10 s** | **1,70** |
+
+Bicara hanya **68%** dari kepadatan yang bekerja → dialog selesai di ~6,8 detik dari klip 10 detik → Veo mengisi ~3 detik sisa dengan pengulangan.
+
+**Tiga penyebab menumpuk, semuanya milik kita:**
+
+1. **Hanya ada plafon, tidak pernah lantai.** `ai-generate.js` menulis "maksimal" di empat tempat. Model patuh bermain aman di bawahnya. Ironisnya `masterPromptCompiler` sudah benar sejak awal (*"rentang ±10%, BUKAN sekadar di bawah maksimal"*) — Jalur C tertinggal. Drift antar jalur lagi.
+2. **`kataPerDetik` 2,2 memang terlalu rendah** — di bawah seluruh rentang yang terbukti (2,38–2,75). Angkanya dulu berasal dari **satu** titik data, dan komentarnya sendiri menulis *"kalau uji berikutnya menyisakan hening, naikkan kataPerDetik"*. Laporan user adalah uji itu. Dinaikkan ke **2,5** (median, bukan batas atas).
+3. **`voDurationSec` baku = durasi penuh** — kita menyuruh orang bicara tanpa henti sepanjang klip. Rujukan justru menyisakan 2 detik. Diubah jadi **~80%**.
+
+Ditambah **CTA yang tidak pernah menyebut objeknya**: user memilih "Kunjungi Link di Bio", dialog yang keluar *"jangan sampai ketinggalan info menariknya ya"* — tidak menyebut link di bio, dan memakai frasa urgensi yang **aturan kita sendiri larang**. Sebabnya kita hanya mengirim **nama kategori**; uji ChatGPT berhasil karena mengirim **kata-katanya**. Sekarang ada `CTA_SPOKEN_EXAMPLE` untuk 10 tipe CTA.
+
+**Hasil terukur** — titik kerja baru: klip 10 dtk → VO 8 dtk → target 18–20 kata, persis titik yang menghasilkan video bagus. Uji nyata ke Gemini:
+
+| Part | Kata | Status |
+|---|---|---|
+| 1 Hook | 19 | ✓ dalam target |
+| 2 Body | 19 | ✓ dalam target |
+| 3 CTA | 20 | ✓ dalam target |
+
+Part 3 berbunyi *"Potensi investasinya mantap banget nih, yuk jadwalkan survei lokasi, **klik link di bio ya gaes!**"* — objek ajakan tepat, tanpa urgensi karangan.
+
 ### Lanjutan: "AI Rancang Storyboard gagal 3 dari 4" — model default terlalu lambat untuk visi
 
 User melaporkan Gemini "selalu gagal generate". Pertanyaannya: apakah prompt kita salah suntik sehingga Gemini menolak? **Bukan.** Diukur berlapis ke API produksi: kunci sah, **ke-7 model Gemini balas 200** (tidak ada kuota habis), prompt penuh `ai-generate` (24.037 char) **OK 4,7 detik** dengan JSON valid, visi benar-benar melihat foto produksi, `error_logs` kosong sejak 1 Agustus.

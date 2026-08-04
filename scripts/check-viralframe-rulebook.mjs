@@ -48,6 +48,9 @@ const REQUIRED_IMPORTS = {
     // viralframe-shared.js — VERIFIKASI ke masterPromptCompiler.ts kalau nama
     // re-export berubah.
     'getEmotionForRole', 'PERFORMANCE_INTENT_BY_ROLE', 'VOICE_PERSONA_HINT',
+    // Contoh kalimat CTA terucap — label kategori saja membuat model menulis ajakan
+    // umum yang tidak menyebut objeknya sama sekali (audit 2026-08-04).
+    'CTA_SPOKEN_EXAMPLE',
   ],
   'functions/api/admin/viralframe/ai-generate.js': [
     'REALISM_QUALITY_CUES', 'REALISM_BANNED_QUALITY_PHRASES', 'NEGATIVE_PROMPT_VIDEO', 'RULEBOOK_VERSION',

@@ -12,7 +12,7 @@ import {
   TONES, PLATFORMS, PHOTO_LABELS, LANGUAGE_REGISTERS, REGISTER_INSTRUCTION,
   characterFileName, AI_TOOL_FORMAT_SPEC,
   isNativeAudioTool, getClipMaxSec, namaFileKarakter, PLATFORM_BEHAVIOR,
-  totalDurationOfParts,
+  totalDurationOfParts, CTA_SPOKEN_EXAMPLE,
   konversiDraftLama, normalisasiParts, buildZipNames, slugifyLabel, MAX_REF_IMAGES_PER_PART,
   RULEBOOK_VERSION,
   type PartDef, type ZipSourceImage,
@@ -654,6 +654,9 @@ function AIGenerateTab({
       visual_style: visualStyleLabel,
       hook_type: hookTypeLabel,
       cta_type: ctaTypeLabel,
+      // Contoh KALIMAT terucap, bukan cuma nama kategori. Tanpa ini AI mengarang
+      // ajakan kabur yang tak menyebut objeknya (audit 2026-08-04).
+      cta_example: CTA_SPOKEN_EXAMPLE[ctaType] ?? '',
       part_roles,
       part_durations,
       // Kirim value yang SUDAH diresolve, bukan 'auto' — supaya riwayat mencatat

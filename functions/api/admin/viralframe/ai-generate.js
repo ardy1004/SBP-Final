@@ -111,11 +111,15 @@ function isAutoValue(label) {
   return !label || label.trim().toLowerCase().startsWith('auto');
 }
 
-function buildSystemPrompt({ jumlahPart, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, excludedHooks, excludedCtas, excludedOpenings, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotPart, cutawayExcludedParts, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec }) {
+function buildSystemPrompt({ jumlahPart, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, ctaExample, excludedHooks, excludedCtas, excludedOpenings, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotPart, cutawayExcludedParts, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec }) {
   // Budget kata kini PER SCENE (audit 2026-07-26). Bila semua scene berdurasi
   // sama, sebut angkanya langsung supaya instruksinya sekonkret dulu; bila
-  // berbeda-beda, arahkan ke kolom 'Maks kata' milik masing-masing scene.
-  const batasKata = durasiSeragam ? `${maxWords} kata` : `batas "Maks kata" scene tersebut`;
+  // berbeda-beda, arahkan ke kolom 'Target kata' milik masing-masing scene.
+  // ⚠️ Kata "batas" sengaja diganti "target" di seluruh prompt (2026-08-04): selama
+  // hanya ada PLAFON, model bermain aman di bawahnya dan dialognya kependekan —
+  // klip jadi punya hening yang diisi Veo dengan pengulangan. Jalur A
+  // (masterPromptCompiler) sudah memakai rentang ±10% sejak awal; Jalur C tertinggal.
+  const batasKata = durasiSeragam ? `${maxWords} kata` : `angka "Target kata" scene tersebut`;
   const registerLine = registerInstruction ? `\nGAYA BAHASA WAJIB: ${registerInstruction}\n` : '';
   // Perbaikan kontradiksi register (audit 2026-08-04): dulu baris "bahasa = Indonesia"
   // di bawah SELALU memaksa "formal" walau registerLine sudah menyuntik gaya gaul —
@@ -181,7 +185,16 @@ ${VOICE_PRIORITY_NOTE} — sisipkan sebagai instruksi mixing di prompt agar VO t
     // bernama "Call to Action (Scene Terakhir)" di UI, jadi ia wajib mengenai Part
     // penutup meskipun user membiarkan role-nya Body (lihat CATATAN PENUTUP di
     // buildPartBlock). Dulu hanya menyasar role → instruksi menggantung.
-    : `Scene berperan CTA — ATAU Part TERAKHIR bila tidak ada Part ber-role CTA — WAJIB memakai gaya ajakan: ${ctaType}. Tipe ini WAJIB dipertahankan, TAPI kalimat ajakannya WAJIB dirumuskan berbeda dari video sebelumnya.\n`;
+    // ⚠️ Contoh KALIMAT TERUCAP wajib ikut, bukan cuma nama kategori (2026-08-04).
+    // Dengan label saja, user memilih "Kunjungi Link di Bio" tapi dialog yang keluar
+    // tidak menyebut link di bio sama sekali — AI mengarang ajakan kabur yang justru
+    // melanggar aturan urgensi kita. Uji ChatGPT user berhasil karena yang dikirim
+    // KATA-KATANYA, bukan nama kategorinya.
+    : `Scene berperan CTA — ATAU Part TERAKHIR bila tidak ada Part ber-role CTA — WAJIB memakai gaya ajakan: ${ctaType}. Tipe ini WAJIB dipertahankan.${
+        ctaExample
+          ? ` Ajakan yang diucapkan WAJIB menyebut objek ajakan yang sama persis seperti contoh ini: "${ctaExample}". Contoh ini SUDAH lolos aturan kebijakan di bawah — diksinya boleh divariasikan agar tidak sama dengan video sebelumnya, tetapi OBJEK ajakannya (link di bio / komentar / DM / simpan / dst) DILARANG diganti atau dikaburkan menjadi ajakan umum.`
+          : ' Kalimat ajakannya WAJIB dirumuskan berbeda dari video sebelumnya.'
+      }\n`;
   // Berlaku untuk KEDUA mode (auto maupun manual) — inilah sinyal anti-pengulangan
   // yang paling berguna saat user memilih tipe hook secara manual, karena tipe
   // enum-nya memang sengaja tidak berubah.
@@ -494,17 +507,22 @@ Karena itu, di dalam 'dialog_karakter' dan dialog yang tertanam di 'prompt':
 Harga, kontak, dan urgensi TETAP boleh ditampilkan — tapi lewat 'on_screen_text'
 dan caption, BUKAN diucapkan. Ini juga lebih baik secara praktik: harga berubah,
 dan video dengan harga terucap jadi tidak bisa dipakai lagi.
-Bagian dialog (setelah klausa delivery di bawah) WAJIB MAKSIMAL sebanyak "Maks kata" yang tertera pada instruksi scene tersebut di user prompt — ini BATAS KETAT, bukan saran, dan BERBEDA-BEDA per scene mengikuti durasinya. Klip video pendek; dialog kepanjangan akan terlihat dipercepat/tidak sinkron dengan gerak bibir.
+⚠️ PANJANG DIALOG ADALAH TARGET, BUKAN SEKADAR PLAFON — INI PALING SERING SALAH.
+Bagian dialog (setelah klausa delivery) WAJIB MENGENAI rentang "Target kata" pada instruksi Part tersebut di user prompt: minimal 90% dan maksimal 100% dari angka itu. Angkanya BERBEDA-BEDA per Part mengikuti durasi VO-nya.
+  ✗ Terlalu PANJANG → ucapan dipercepat, tidak sinkron dengan gerak bibir, atau terpotong.
+  ✗ Terlalu PENDEK → JAUH LEBIH SERING TERJADI dan sama merusaknya: dialog habis sebelum klip selesai, lalu generator video MENGISI SISANYA dengan mengulang frasa dan tersendat. Kejadian nyata 2026-08-04: Part CTA 10 detik hanya diisi 17 kata (butuh ~20), hasil videonya "belibet dan berulang".
+  ✓ Anggap angka target itu sebagai jumlah kata yang HARUS dicapai, lalu susun kalimat yang mengalir sampai ke sana — bukan berhenti begitu maksudnya tersampaikan.
+Hitung sendiri jumlah katamu sebelum menjawab. Menulis 60-70% dari target = OUTPUT DITOLAK.
 ${durasiSeragam
-    ? `Semua scene di permintaan ini berdurasi sama, jadi batasnya ${maxWords} kata untuk setiap scene.`
-    : `PERHATIAN: durasi scene BERBEDA-BEDA di permintaan ini. Baca "Maks kata" pada tiap scene satu per satu — JANGAN memakai satu angka yang sama untuk semua scene. Batas terbesar yang muncul adalah ${maxWords} kata.`}
+    ? `Semua scene di permintaan ini berdurasi sama, jadi targetnya ${maxWords} kata untuk setiap scene (terima ${Math.round(maxWords * 0.9)}–${maxWords}).`
+    : `PERHATIAN: durasi scene BERBEDA-BEDA di permintaan ini. Baca "Target kata" pada tiap scene satu per satu — JANGAN memakai satu angka yang sama untuk semua scene. Target terbesar yang muncul adalah ${maxWords} kata.`}
 Field 'dialog_karakter' WAJIB berupa SATU KESATUAN TEKS: salin UTUH klausa "Delivery" dari instruksi Part tersebut (di user prompt) lalu sambung dialog setelah "mengatakan:" — JANGAN mengganti klausa delivery dengan tempo buatan sendiri seperti "berbicara cepat, tanpa jeda" (pace SUDAH dihitung per durasi Part, beda Part beda tempo).
-Hanya bagian [dialog] setelah "mengatakan:" yang dihitung ke batas ${batasKata}.
+Hanya bagian [dialog] setelah "mengatakan:" yang dihitung terhadap target ${batasKata}.
 ✗ SALAH: dialog polos tanpa klausa delivery, atau klausa delivery "cepat" yang sama untuk semua Part.
 ✗ SALAH (jika bahasa = Indonesia): 'Welcome to our property'
 ✓ CONTOH register gaul: '..., mengatakan: Gaes, aku nemu hidden gem nih! Properti ini lokasinya strategis banget dan bikin betah.'
 ✓ CONTOH register formal: '..., mengatakan: Selamat datang, saya ingin menunjukkan properti yang lokasinya sangat strategis dan terawat dengan baik.'
-Dialog harus: natural diucapkan, menyebut 1 fitur properti nyata, maksimal ${batasKata}.
+Dialog harus: natural diucapkan, menyebut 1 fitur properti nyata, dan MENGENAI target ${batasKata} (90–100%).
 ${bahasaLine}
 JIKA bahasa = English: gunakan English professional, delivery clause diterjemahkan proporsional (nama, voice, pace, lalu "saying:").
 JIKA bahasa = Jawa: gunakan Bahasa Jawa Krama yang sopan.
@@ -535,7 +553,7 @@ Format yang diharapkan:
     "kamera": "nama singkat gerakan kamera dalam 3-5 kata",
     "presentation": "intent akting Part ini (Inggris, 1 kalimat) — lihat 'Intent akting' di instruksi Part",
     "prompt": "teks prompt lengkap bahasa Inggris minimum 50 kata, mencakup SELURUH cut di Part ini secara berurutan",
-    "dialog_karakter": "klausa delivery + dialog karakter dalam ${bahasa}, sesuai pola wajib di [4], maksimal ${batasKata} untuk bagian dialog",
+    "dialog_karakter": "klausa delivery + dialog karakter dalam ${bahasa}, sesuai pola wajib di [4], bagian dialog MENGENAI target ${batasKata} (90-100%, jangan kependekan)",
     "on_screen_text": ["array teks overlay — Part CTA WAJIB isi daftar spec properti (LT/LB/KM/lantai/legalitas/harga) yang ADA di data; array kosong [] kalau tidak ditekankan"],
     "cuts": [{ "t": "00:00-00:0Xs", "photo": "nama_file.webp persis seperti di DAFTAR CUT", "action": "gerak FISIK/kamera cut ini (Inggris)", "gesture": "gerak tangan/tubuh karakter saat bicara (Inggris) — tangan diam saat bicara adalah penanda AI paling kentara, WAJIB diisi", "emotion": "emosi cut ini (Inggris, dari busur peran Part)" }]
   }
@@ -687,7 +705,7 @@ function buildUserPrompt({ property, karakterDesc, karakterNama, expressionLabel
   Emosi         : ${emosi}
   Intent akting : ${intent}
   Delivery      : ${delivery}
-  Maks kata     : ${getMaxWords(durVo)} kata untuk bagian dialog setelah "mengatakan:"
+  Target kata   : ${Math.round(getMaxWords(durVo) * 0.9)}–${getMaxWords(durVo)} kata untuk bagian dialog setelah "mengatakan:" (HARUS masuk rentang ini — kependekan bikin video mengulang)
   Reference image yang dilampirkan (${refFiles.length}${refFiles.length > MAX_REF_IMAGES_PER_PART ? ` — MELEBIHI batas ${MAX_REF_IMAGES_PER_PART}` : ''}): ${refFiles.join(', ')}
   DAFTAR CUT (WAJIB dikembalikan persis segini, urutan sama, nama file sama):
 ${daftarCut || '    (tidak ada cut — perlakukan sebagai satu shot utuh sepanjang Part)'}`;
@@ -901,6 +919,9 @@ export async function onRequestPost(context) {
   const {
     platform, ai_tool: aiTool, bahasa, musik_value: musikValue,
     tone, visual_style: visualStyle, hook_type: hookType, cta_type: ctaType,
+    // Contoh kalimat CTA terucap dikirim frontend (CTA_SPOKEN_EXAMPLE, keyed by value).
+    // Opsional: klien lama yang belum mengirimnya tetap jalan, hanya tanpa contoh.
+    cta_example: ctaExample = '',
   } = body;
   const partRoles = Array.isArray(body.part_roles) ? body.part_roles : [];
   const musikPrompt = typeof body.musik_prompt === 'string' ? body.musik_prompt : '';
@@ -1063,7 +1084,7 @@ export async function onRequestPost(context) {
     console.error('[viralframe ai-generate hook/cta history]', err.message);
   }
 
-  const systemPrompt = buildSystemPrompt({ jumlahPart, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, excludedHooks, excludedCtas, excludedOpenings, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotPart, cutawayExcludedParts, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec });
+  const systemPrompt = buildSystemPrompt({ jumlahPart, bahasa, musikValue, musikPrompt, tone, visualStyle, hookType, ctaType, ctaExample, excludedHooks, excludedCtas, excludedOpenings, maxWords, supportsRefImage, expressionLabel, presenterMode, registerInstruction, multiShotPart, cutawayExcludedParts, nativeAudio, durasiSeragam, ratio, platformBehavior, toolFormatSpec, aiTool, clipMaxSec });
   const userPrompt = buildUserPrompt({ property, karakterDesc, karakterNama: karakter.nama, expressionLabel, jumlahPart, partAssignments, durasiDetik, partDurations, partRoles, cameraDirectives, archetypeNote, regeneratePart, existingParts });
 
   // ── Panggil AI dengan fallback berantai, respons streaming NDJSON ──────────

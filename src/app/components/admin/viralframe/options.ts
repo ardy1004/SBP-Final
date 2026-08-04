@@ -20,6 +20,8 @@ import {
   getEmotionForRole as sharedGetEmotionForRole,
   PERFORMANCE_INTENT_BY_ROLE as SHARED_PERFORMANCE_INTENT_BY_ROLE,
   VOICE_PERSONA_HINT as SHARED_VOICE_PERSONA_HINT,
+  CTA_SPOKEN_EXAMPLE as SHARED_CTA_SPOKEN_EXAMPLE,
+  defaultVoDurationSec as sharedDefaultVoDurationSec,
   VOICE_PRIORITY_NOTE as SHARED_VOICE_PRIORITY_NOTE,
 } from '../../../../../functions/_lib/viralframe-shared.js';
 
@@ -291,8 +293,11 @@ export interface DraftLamaS1 {
  * 6. `refPhotoIds` Part = photoId unik dari cuts miliknya (foto karakter TIDAK
  *    disertakan di sini — itu ditambahkan konsumen hilir saat menghitung kuota
  *    gabungan MAX_REF_IMAGES_PER_PART).
- * 7. `voDurationSec` awal = `durationSec` (asumsi VO memenuhi seluruh durasi;
- *    user bisa mengoreksi di UI baru).
+ * 7. `voDurationSec` awal = `defaultVoDurationSec(durationSec)` ≈ 80% durasi klip.
+ *    DULU = durasi PENUH, yang berarti kita meminta orang berbicara tanpa henti
+ *    sepanjang klip. Storyboard rujukan yang hasilnya bagus justru menyisakan
+ *    ruang (klip 10 dtk, VO 8 dtk) untuk napas awal, jeda, dan ekor penutup.
+ *    User bisa mengoreksi di UI. Nilai yang SUDAH tersimpan tidak diubah.
  */
 /**
  * Paksa sembarang bentuk `parts` tersimpan menjadi `PartDef[]` yang AMAN dirender.
@@ -324,7 +329,11 @@ export function normalisasiParts(raw: unknown, aiTool?: string): PartDef[] {
     const durationSec = Number.isFinite(durNum) && durNum > 0 ? Math.min(durNum, clipMax) : clipMax;
 
     const voNum = Number(o.voDurationSec);
-    const voDurationSec = Number.isFinite(voNum) && voNum >= 0 ? Math.min(voNum, durationSec) : durationSec;
+    // Nilai tersimpan dihormati apa adanya (draft/riwayat lama tidak boleh berubah
+    // diam-diam); hanya Part TANPA nilai yang memakai default baru ~80%.
+    const voDurationSec = Number.isFinite(voNum) && voNum >= 0
+      ? Math.min(voNum, durationSec)
+      : defaultVoDurationSec(durationSec);
 
     const cuts: CutDef[] = Array.isArray(o.cuts)
       ? (o.cuts as unknown[]).flatMap((c): CutDef[] => {
@@ -456,7 +465,7 @@ export function konversiDraftLama(
         partsBaru.push({
           role: g.role,
           durationSec: durTotal,
-          voDurationSec: durTotal,
+          voDurationSec: defaultVoDurationSec(durTotal),
           refPhotoIds: refIds,
           cuts,
           label: g.label,
@@ -674,6 +683,13 @@ export const EMOTION_ARC_BY_ROLE: Record<string, string> = SHARED_EMOTION_ARC_BY
 export const getEmotionForRole: (role: string, baseExpressionEn?: string) => string | undefined = sharedGetEmotionForRole;
 export const PERFORMANCE_INTENT_BY_ROLE: Record<string, string> = SHARED_PERFORMANCE_INTENT_BY_ROLE;
 export const VOICE_PERSONA_HINT: string = SHARED_VOICE_PERSONA_HINT;
+/** Contoh KALIMAT TERUCAP per tipe CTA (keyed by CTA_TYPES.value). Dikirim ke
+ * backend bersama label — label saja membuat AI mengarang ajakan kabur yang tidak
+ * menyebut objek ajakannya (audit 2026-08-04). */
+export const CTA_SPOKEN_EXAMPLE: Record<string, string> = SHARED_CTA_SPOKEN_EXAMPLE;
+/** Durasi VO baku sebuah Part (~80% durasi klip) — menyisakan ruang napas.
+ * Dulu nilainya = durasi penuh, sehingga model disuruh bicara tanpa henti. */
+export const defaultVoDurationSec: (durationSec: number) => number = sharedDefaultVoDurationSec;
 export const VOICE_PRIORITY_NOTE: string = SHARED_VOICE_PRIORITY_NOTE;
 
 // ─── Penamaan file aset (dipakai Master Prompt + ZIP export) ─────────────────
