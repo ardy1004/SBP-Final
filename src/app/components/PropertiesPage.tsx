@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { useSearchParams, useNavigate } from 'react-router';
-import { SlidersHorizontal, Grid3X3, List, Map, X, ChevronDown, RotateCcw, MapPin, AlertCircle, RefreshCw, Search, Building2 } from 'lucide-react';
+import { SlidersHorizontal, Grid3X3, List, Map, X, ChevronDown, ChevronLeft, ChevronRight, RotateCcw, MapPin, AlertCircle, RefreshCw, Search, Building2 } from 'lucide-react';
 
 const LazyPropertyMap = lazy(() => import('./PropertyMap'));
 import {
@@ -10,6 +10,7 @@ import {
 } from '../../lib/api';
 import { PROPERTY_TYPES, getPropertyTypeLabel } from '../../lib/propertyTypes';
 import { cfImg } from '../../lib/img';
+import { urlHalaman, deretHalaman, type PaginationInfo } from '../../lib/pagination';
 import { parseSmartQuery, type LocationIndex, type FlatLoc, type SmartFilters } from './smartSearchParser';
 import { trackEvent } from '../../lib/tracking';
 import PropertyCard from './PropertyCard';
@@ -94,9 +95,11 @@ interface PropertiesPageProps {
   heading?: string | null;
   /** Subteks kustom di bawah H1 (mis. disclaimer radius perkiraan halaman landmark). null/undefined = teks default otomatis dari heading. */
   subheading?: string | null;
+  /** Info paginasi dari loader. null = tidak ada paginasi (mis. render CSR murni). */
+  pagination?: PaginationInfo | null;
 }
 
-export default function PropertiesPage({ ssrData, heading, subheading }: PropertiesPageProps = {}) {
+export default function PropertiesPage({ ssrData, heading, subheading, pagination }: PropertiesPageProps = {}) {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -820,8 +823,13 @@ export default function PropertiesPage({ ssrData, heading, subheading }: Propert
               </div>
             ))}
 
-            {/* Muat Lebih Banyak — server-side load more (akumulatif) */}
-            {viewMode !== 'map' && !error && properties.length > 0 && properties.length < totalCount && (
+            {/* Muat Lebih Banyak — server-side load more (akumulatif).
+                Disembunyikan di halaman paginasi ke-2 dst: fetch client tidak
+                membawa `page`, jadi menekannya di ?page=3 akan menarik item dari
+                awal daftar dan menggantikan yang sedang dilihat. Di halaman itu
+                navigasi diserahkan ke nav paginasi di bawah. */}
+            {viewMode !== 'map' && !error && properties.length > 0 && properties.length < totalCount
+              && (!pagination || pagination.page === 1) && (
               <div className="flex justify-center mt-8">
                 <button
                   onClick={() => setLimit(prev => prev + 20)}
@@ -832,6 +840,71 @@ export default function PropertiesPage({ ssrData, heading, subheading }: Propert
                   {loading ? 'Memuat…' : `Muat Lebih Banyak (${totalCount - properties.length} tersisa)`}
                 </button>
               </div>
+            )}
+
+            {/* ⚠️ Nav paginasi — WAJIB <a href> asli, bukan tombol ber-onClick.
+                Crawler tidak menjalankan JS, jadi "Muat Lebih Banyak" di atas
+                tidak pernah bisa diikutinya. Akibatnya terukur di Search Console
+                2026-08-07: Google hanya mengenal 71 dari 655 URL, dan nol halaman
+                detail properti pernah tampil di hasil pencarian — 514 listing
+                tidak punya satu pun jalur tautan yang bisa dirayapi.
+                Blok ini yang membukanya. Jangan diganti jadi tombol. */}
+            {viewMode !== 'map' && !error && pagination && pagination.totalPages > 1 && (
+              <nav className="flex justify-center mt-8" aria-label="Navigasi halaman">
+                <ul className="flex flex-wrap items-center justify-center gap-1.5">
+                  {pagination.page > 1 && (
+                    <li>
+                      <a
+                        href={urlHalaman(pagination.basePath, pagination.page - 1)}
+                        rel="prev"
+                        aria-label="Halaman sebelumnya"
+                        className="flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-[#0F172A] hover:border-[#1565C0] transition-colors"
+                      >
+                        <ChevronLeft size={14} /> Sebelumnya
+                      </a>
+                    </li>
+                  )}
+
+                  {deretHalaman(pagination.page, pagination.totalPages).map((n, i) =>
+                    n === null ? (
+                      <li key={`gap-${i}`} className="px-2 text-sm text-gray-400 select-none" aria-hidden="true">…</li>
+                    ) : n === pagination.page ? (
+                      <li key={n}>
+                        <span
+                          aria-current="page"
+                          className="flex min-w-9 justify-center px-3 py-2 rounded-lg text-sm font-semibold text-white"
+                          style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
+                        >
+                          {n}
+                        </span>
+                      </li>
+                    ) : (
+                      <li key={n}>
+                        <a
+                          href={urlHalaman(pagination.basePath, n)}
+                          aria-label={`Halaman ${n}`}
+                          className="flex min-w-9 justify-center px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-[#0F172A] hover:border-[#1565C0] transition-colors"
+                        >
+                          {n}
+                        </a>
+                      </li>
+                    ),
+                  )}
+
+                  {pagination.page < pagination.totalPages && (
+                    <li>
+                      <a
+                        href={urlHalaman(pagination.basePath, pagination.page + 1)}
+                        rel="next"
+                        aria-label="Halaman berikutnya"
+                        className="flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-[#0F172A] hover:border-[#1565C0] transition-colors"
+                      >
+                        Berikutnya <ChevronRight size={14} />
+                      </a>
+                    </li>
+                  )}
+                </ul>
+              </nav>
             )}
           </div>
         </div>

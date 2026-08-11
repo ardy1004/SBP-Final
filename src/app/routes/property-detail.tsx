@@ -7,6 +7,50 @@ import PropertyDetailPage from "../components/PropertyDetailPage";
 // yang sama persis dengan jalur API, kalau tidak satu view bisa masuk tanggal
 // berbeda tergantung dilayani SSR atau API.
 import { SQL_TANGGAL_WIB } from "../../../functions/_lib/waktu.js";
+import { cfImg, cfImgOg, OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT } from "../../lib/img";
+
+const ORIGIN = 'https://salambumi.xyz';
+
+/**
+ * URL absolut untuk konsumen di LUAR browser: og:image, twitter:image, dan array
+ * `image` di JSON-LD. Ketiganya tidak punya base URL untuk me-resolve path relatif.
+ *
+ * ⚠️ Sampai 2026-08-11 hanya og:image yang diabsolutkan; array `image` di
+ * RealEstateListing dikirim mentah ("/api/media?key=…") sehingga Google tidak bisa
+ * mengambilnya sama sekali — dan gambar adalah field yang praktis wajib untuk rich
+ * result listing properti. Satu helper untuk SEMUA jalur supaya tidak terpecah lagi.
+ */
+function abs(u: string): string {
+  return u.startsWith('http') ? u : `${ORIGIN}${u}`;
+}
+
+/**
+ * Potong di batas kata — dan kalau bisa, di batas KALIMAT.
+ *
+ * `slice()` mentah memotong di tengah kata ("…untuk in...") dan membuat deskripsi
+ * JSON-LD berhenti menggantung ("…2 lantai, 4 KT, "). Itu bukan sekadar jelek:
+ * field `description` inilah yang paling sering dikutip mentah-mentah oleh mesin
+ * generatif, jadi kalimat terpenggal ikut tersalin ke jawaban AI.
+ *
+ * Titik akhir kalimat di 60% terakhir rentang dipakai lebih dulu (kutipan jadi utuh
+ * dan tanpa elipsis); kalau tidak ada, mundur ke spasi terakhir.
+ */
+function potongDiBatasKata(s: string, max: number): string {
+  const teks = s.trim();
+  if (teks.length <= max) return teks;
+  const kandidat = teks.slice(0, max);
+
+  const akhirKalimat = Math.max(
+    kandidat.lastIndexOf('. '), kandidat.lastIndexOf('! '), kandidat.lastIndexOf('? '),
+  );
+  if (akhirKalimat > max * 0.6) return kandidat.slice(0, akhirKalimat + 1);
+
+  const spasi = kandidat.lastIndexOf(' ');
+  // Tanpa spasi yang masuk akal (satu kata sangat panjang) lebih baik potong apa
+  // adanya daripada mengembalikan potongan yang nyaris kosong.
+  const dasar = spasi > max * 0.5 ? kandidat.slice(0, spasi) : kandidat;
+  return dasar.replace(/[\s,;:.\-—]+$/, '') + '…';
+}
 
 // Identik dengan functions/api/properties/[slug].js
 function hitungInvestmentIntelligence(p: {
@@ -187,12 +231,19 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
   const fallbackTitle = `${p.title} ${p.kecamatan} ${p.kabupaten} | Salam Bumi Property`;
   const titleSeo = p.meta_title?.trim() ? p.meta_title.trim() : fallbackTitle;
 
+  // Judul share (og:title/twitter:title) SENGAJA beda dari titleSeo: dipakai saat link
+  // di-share manual ke WhatsApp/FB, jadi pakai Judul Listing (title, human-friendly) —
+  // bukan meta_title yang formatnya faktual demi menghindari duplikat di Google.
+  const titleShare = p.title?.trim() ? p.title.trim() : titleSeo;
+
   // Description: pakai meta_description admin bila terisi, jika tidak → fallback deskripsi/lokasi (identik perilaku lama).
   const rawDesc = p.deskripsi ||
     `${p.jenis} ${tujuanPath === 'dijual' ? 'dijual' : 'disewa'} di ${p.kecamatan}, ${p.kabupaten}, ${p.provinsi}.`;
-  const fallbackDesc = rawDesc.length > 158 ? rawDesc.slice(0, 155) + '...' : rawDesc;
+  const fallbackDesc = potongDiBatasKata(rawDesc, 155);
   const desc = p.meta_description?.trim() ? p.meta_description.trim() : fallbackDesc;
-  const ogImage = p.images[0] ? (p.images[0].startsWith('http') ? p.images[0] : `https://salambumi.xyz${p.images[0]}`) : 'https://images.salambumi.xyz/materai/hg.png';
+  // Dipotong ke 1200×630 pasti (lihat cfImgOg) supaya og:image:width/height di bawah
+  // adalah fakta, bukan tebakan — dimensi asli foto tidak tersimpan di D1.
+  const ogImage = abs(cfImgOg(p.images[0] ?? 'https://images.salambumi.xyz/materai/hg.png'));
 
   return [
     { title: titleSeo },
@@ -200,13 +251,19 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
     { name: "robots", content: "index, follow" },
     { tagName: "link", rel: "canonical", href: canonicalUrl },
     { property: "og:site_name", content: "Salam Bumi Property" },
-    { property: "og:title", content: titleSeo },
+    { property: "og:title", content: titleShare },
     { property: "og:description", content: desc },
     { property: "og:image", content: ogImage },
+    // Tanpa dimensi, sebagian klien sosial merender kartu kecil alih-alih gambar
+    // besar — merugikan tepat di jalur share WhatsApp yang jadi kanal utama SBP.
+    // Halaman beranda sudah mengirim ini sejak awal; halaman detail belum.
+    { property: "og:image:width", content: String(OG_IMAGE_WIDTH) },
+    { property: "og:image:height", content: String(OG_IMAGE_HEIGHT) },
+    { property: "og:image:alt", content: titleShare },
     { property: "og:type", content: "website" },
     { property: "og:url", content: canonicalUrl },
     { name: "twitter:card", content: "summary_large_image" },
-    { name: "twitter:title", content: titleSeo },
+    { name: "twitter:title", content: titleShare },
     { name: "twitter:description", content: desc },
     { name: "twitter:image", content: ogImage },
     {
@@ -216,8 +273,14 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
           {
             "@type": "RealEstateListing",
             name: p.title,
-            description: rawDesc.slice(0, 300),
-            image: p.images.slice(0, 5),
+            // 500 (bukan 300): ini field yang paling sering dikutip mentah oleh mesin
+            // generatif, dan potongan 300 karakter selalu berhenti di tengah kalimat.
+            description: potongDiBatasKata(rawDesc, 500),
+            // ⚠️ WAJIB absolut — schema.org tidak punya base URL. Sampai 2026-08-11
+            // baris ini mengirim "/api/media?key=…" mentah sehingga Google tak pernah
+            // bisa mengambil satu pun gambar listing. Lebar 1200 mengikuti anjuran
+            // Google untuk rich result (≥1200px).
+            image: p.images.slice(0, 5).map(u => abs(cfImg(u, 1200))),
             url: canonicalUrl,
             offers: {
               "@type": "Offer",

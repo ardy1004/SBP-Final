@@ -41,3 +41,34 @@ export function cfSrcSet(src: string, widths: number[]): string | undefined {
   if (!src.startsWith('/') && !src.startsWith('https://images.salambumi.xyz/')) return undefined;
   return widths.map(w => `${cfImg(src, w)} ${w}w`).join(', ');
 }
+
+/** Dimensi kanonik og:image — rasio 1,91:1 yang diminta Open Graph & Twitter. */
+export const OG_IMAGE_WIDTH = 1200;
+export const OG_IMAGE_HEIGHT = 630;
+
+/**
+ * Varian og:image dengan dimensi PASTI 1200×630 (fit=cover memotong, tidak
+ * menggepengkan). Dipisah dari cfImg karena tujuannya beda: cfImg menjaga rasio
+ * asli untuk tampilan di halaman, sedangkan kartu share WAJIB rasio tetap.
+ *
+ * Alasan memaksa dimensi: `og:image:width`/`height` hanya boleh diemit kalau kita
+ * benar-benar TAHU ukurannya. Dimensi asli foto tidak tersimpan di D1, dan menebak
+ * lebih buruk daripada mengosongkan. Dengan memotong sendiri, angkanya jadi fakta.
+ * Tanpa dimensi, sebagian klien (termasuk jalur share WhatsApp yang jadi kanal
+ * utama SBP) merender kartu kecil alih-alih gambar besar.
+ *
+ * quality=70 (bukan 65 seperti cfImg): kartu share hanya dimuat sekali oleh
+ * scraper, jadi tidak ada biaya bandwidth berulang seperti gambar di halaman.
+ */
+export function cfImgOg(src: string): string {
+  if (!src || !ENABLED) return src;
+  const opts = `width=${OG_IMAGE_WIDTH},height=${OG_IMAGE_HEIGHT},fit=cover,format=auto,quality=70`;
+  if (src.startsWith('/')) {
+    if (src.startsWith('/cdn-cgi/')) return src;
+    return `/cdn-cgi/image/${opts}${src}`;
+  }
+  if (src.startsWith('https://images.salambumi.xyz/')) {
+    return `/cdn-cgi/image/${opts}/${src}`;
+  }
+  return src;
+}

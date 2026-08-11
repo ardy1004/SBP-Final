@@ -41,6 +41,15 @@ export async function onRequestGet(context) {
   return withEdgeCache(context, { ttl: 3600 }, () => bangunSitemap(context));
 }
 
+// Cloudflare Pages Functions TIDAK otomatis memetakan HEAD ke onRequestGet (beda
+// dari [[catchall]].js yang pakai onRequest generik) — tanpa ini, HEAD /sitemap.xml
+// 404 walau GET-nya 200, ditemukan 2026-08-06 saat menelusuri kegagalan fetch sitemap
+// di Search Console. Reuse onRequestGet (tetap kena cache edge) lalu buang body.
+export async function onRequestHead(context) {
+  const res = await onRequestGet(context);
+  return new Response(null, { status: res.status, headers: res.headers });
+}
+
 async function bangunSitemap(context) {
   const { env } = context;
   const base = (env.APP_URL || 'https://salambumi.xyz').replace(/\/$/, '');

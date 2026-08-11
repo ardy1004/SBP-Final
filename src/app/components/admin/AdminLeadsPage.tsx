@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Search, Phone, MessageCircle, Clock, User, Home,
-  ChevronDown, GripVertical, StickyNote, ChevronUp, Send, AlertCircle, Loader2,
+  ChevronDown, GripVertical, StickyNote, ChevronUp, Send, AlertCircle, Loader2, Trash2,
 } from 'lucide-react';
 
 type PipelineStatus = 'baru' | 'dihubungi' | 'negosiasi' | 'closing' | 'arsip';
@@ -79,6 +79,7 @@ export default function AdminLeadsPage() {
   const [search, setSearch]           = useState('');
   const [dragging, setDragging]       = useState<number | null>(null);
   const [dragOver, setDragOver]       = useState<PipelineStatus | null>(null);
+  const [dragOverDelete, setDragOverDelete] = useState(false);
   const [expandedCards, setExpanded]  = useState<Set<number>>(new Set());
   const [noteInputs, setNoteInputs]   = useState<Record<number, string>>({});
   const [noteLoading, setNoteLoading] = useState<Set<number>>(new Set());
@@ -111,10 +112,28 @@ export default function AdminLeadsPage() {
   };
 
   const onDragStart = (id: number) => setDragging(id);
-  const onDragEnd   = () => { setDragging(null); setDragOver(null); };
+  const onDragEnd   = () => { setDragging(null); setDragOver(null); setDragOverDelete(false); };
   const onDrop      = (status: PipelineStatus) => {
     if (dragging !== null) moveCard(dragging, status);
     setDragging(null); setDragOver(null);
+  };
+
+  // Drag & drop ke kotak hapus — permanen, jadi wajib konfirmasi (pola sama
+  // seperti window.confirm di AdminListingPage.tsx: tangan meleset saat drag
+  // dekat kolom Arsip tidak boleh langsung menghapus data tanpa jeda).
+  const deleteLead = async (id: number) => {
+    const lead = leads.find(l => l.id === id);
+    setDragging(null); setDragOverDelete(false);
+    if (!lead) return;
+    if (!window.confirm(`Hapus lead "${lead.nama ?? '(tamu)'}" permanen? Tidak bisa dibatalkan.`)) return;
+
+    setLeads(prev => prev.filter(l => l.id !== id));
+    try {
+      const res = await fetch(`/api/admin/leads/${id}`, { method: 'DELETE', credentials: 'include' });
+      if (!res.ok) throw new Error(`${res.status}`);
+    } catch {
+      fetchLeads(); // revert on failure
+    }
   };
 
   const toggleExpand = (id: number) =>
@@ -188,7 +207,7 @@ export default function AdminLeadsPage() {
             const cards = byStatus(col.id);
             return (
               <div key={col.id}
-                className={`w-68 rounded-2xl flex flex-col transition-all ${dragOver === col.id ? 'ring-2' : ''}`}
+                className={`w-68 flex-shrink-0 rounded-2xl flex flex-col transition-all ${dragOver === col.id ? 'ring-2' : ''}`}
                 style={{ width: 272, background: dragOver === col.id ? col.bg : '#F8FAFC' } as React.CSSProperties}
                 onDragOver={e => { e.preventDefault(); setDragOver(col.id); }}
                 onDrop={() => onDrop(col.id)}
@@ -348,10 +367,26 @@ export default function AdminLeadsPage() {
               </div>
             );
           })}
+
+          {/* Drop di sini untuk hapus lead permanen — selalu terlihat sebagai
+              penanda lokasi, menyala lebih terang saat kartu ditarik di atasnya. */}
+          <div
+            className={`flex-1 min-w-[180px] rounded-2xl flex flex-col items-center justify-center gap-2 border-2 border-dashed transition-all ${
+              dragOverDelete ? 'border-red-500 bg-red-100' : 'border-red-200 bg-red-50/60'
+            }`}
+            onDragOver={e => { e.preventDefault(); setDragOverDelete(true); }}
+            onDragLeave={() => setDragOverDelete(false)}
+            onDrop={() => { if (dragging !== null) deleteLead(dragging); else setDragOverDelete(false); }}
+          >
+            <Trash2 size={26} className={dragOverDelete ? 'text-red-600' : 'text-red-300'} />
+            <p className={`text-xs font-semibold text-center px-3 ${dragOverDelete ? 'text-red-600' : 'text-red-400'}`}>
+              Lepas di sini untuk hapus lead
+            </p>
+          </div>
         </div>
       </div>
 
-      <p className="text-xs text-[#94A3B8] text-center">Drag & drop kartu untuk mengubah status lead</p>
+      <p className="text-xs text-[#94A3B8] text-center">Drag & drop kartu untuk mengubah status lead — atau ke kotak merah untuk menghapus</p>
     </div>
   );
 }

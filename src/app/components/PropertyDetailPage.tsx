@@ -10,7 +10,7 @@ import {
 } from '../../lib/api';
 import { formatRibuan } from '../../lib/format';
 import { trackEvent } from '../../lib/tracking';
-import { cfImg } from '../../lib/img';
+import { cfImg, cfSrcSet } from '../../lib/img';
 // KPRCalculator dimuat hanya di klien — recharts akses window saat import, crash SSR.
 // Pola mounted-flag: server & render-klien-pertama tampilkan placeholder identik → no hydration mismatch.
 function KPRCalculatorClient({ defaultHarga }: { defaultHarga: number }) {
@@ -498,9 +498,21 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                       style={{ paddingTop: '56.25%' }}
                       onClick={() => { setCurrentImg(i); setLightbox(true); }}
                     >
+                      {/* ⚠️ Galeri ini sempat memuat gambar MENTAH: 20 foto, semuanya
+                          eager, 2.494.002 B sekali muat — padahal kartu di halaman
+                          kategori sudah lewat /cdn-cgi/image sejak lama. Terukur
+                          2026-08-11: lewat cfImg turun ke ~1,16 MB (−52%), dan satu
+                          foto di lebar mobile 288.880 B → 35.432 B (−88%).
+                          Hanya slide pertama yang eager — itu kandidat LCP; sisanya
+                          di luar viewport dan tidak boleh ikut menahan render. */}
                       <img
-                        src={img}
+                        src={cfImg(img, 800)}
+                        srcSet={cfSrcSet(img, [400, 640, 800, 1200])}
+                        sizes="(max-width: 768px) 100vw, (max-width: 1280px) 66vw, 800px"
                         alt={`${property.title} ${i + 1}`}
+                        loading={i === 0 ? 'eager' : 'lazy'}
+                        fetchPriority={i === 0 ? 'high' : undefined}
+                        decoding="async"
                         className="absolute inset-0 w-full h-full object-cover"
                         onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80'; }}
                         suppressHydrationWarning
@@ -748,7 +760,9 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
           <button onClick={() => setLightbox(false)} className="absolute top-4 right-4 p-2 text-white hover:text-gray-300">
             <X size={24} />
           </button>
-          <img src={images[currentImg]} alt="" className="max-w-full max-h-full object-contain rounded-xl" suppressHydrationWarning />
+          {/* Lightbox = tampilan penuh, jadi lebarnya besar (1600) — tapi tetap lewat
+              cfImg supaya format auto (AVIF/WebP) dan bukan file asli mentah. */}
+          <img src={cfImg(images[currentImg], 1600)} alt={`${property.title} ${currentImg + 1}`} className="max-w-full max-h-full object-contain rounded-xl" suppressHydrationWarning />
         </div>
       )}
     </div>

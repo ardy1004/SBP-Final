@@ -14,6 +14,8 @@ export interface ChatPropItem {
   kecamatan: string;
   kabupaten: string;
   cover_url: string | null;
+  jarak_km?: number;
+  lokasi_approx?: boolean;
 }
 
 export default function ChatPropertyCard({ prop }: { prop: ChatPropItem }) {
@@ -66,6 +68,11 @@ export default function ChatPropertyCard({ prop }: { prop: ChatPropItem }) {
         <p className="text-[10px] text-gray-400 truncate mb-0.5">
           {prop.kecamatan}{prop.kabupaten ? `, ${prop.kabupaten.replace(/^(Kabupaten|Kota)\s+/i, '')}` : ''}
         </p>
+        {prop.jarak_km != null && (
+          <p className="text-[10px] text-gray-400 truncate mb-0.5">
+            {prop.lokasi_approx ? '≈' : ''}{prop.jarak_km} km
+          </p>
+        )}
         <p className="text-[12px] font-bold" style={{ color: '#1565C0' }}>
           {priceLabel}
         </p>

@@ -4,6 +4,7 @@ import { createLead } from '../_lib/createLead.js';
 import { verifyTurnstile } from '../_lib/turnstile.js';
 import { signJWT, verifyJWT } from './_shared/jwt.js';
 import { getProviderKey } from '../_lib/aiProviders.js';
+import { LANDMARKS } from '../_lib/geoLandmarks.js';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const MODEL    = 'llama-3.3-70b-versatile';
@@ -28,6 +29,11 @@ PENTING - Harga sewa di database adalah PER TAHUN (berlaku untuk jenis selain ko
 - Jika budget sewa disebut per tahun, kirim apa adanya.
 - Saat menyebutkan harga sewa ke user, sampaikan juga hitungan per bulannya agar mudah dipahami.
 
+PENTING - Landmark/kampus terkenal dicari lewat koordinat asli, BUKAN tebakan kecamatan:
+- Kalau user menyebut nama kampus/RS/mall terkenal (${LANDMARKS.map(l => l.label).join(', ')}), WAJIB isi parameter dekat_landmark dengan slug yang sesuai saat memanggil search_properties. JANGAN menebak kecamatan sendiri dari pengetahuan umum — nama kecamatan di database tidak selalu sama dengan intuisi geografis (contoh nyata: UGM ada di Kecamatan Depok, BUKAN Kecamatan Sleman, meski kabupatennya memang Sleman — kecamatan ibu kota kabupaten sering punya nama sama dengan kabupatennya, jangan tertukar).
+- Kalau dekat_landmark dipakai, JANGAN isi kabupaten/kecamatan sekaligus — cukup landmark saja, radiusnya sudah presisi.
+- Hasil pencarian lewat landmark punya field jarak_km — SEBUTKAN jaraknya ke user (mis. "≈1.2 km dari UGM") supaya jawaban terasa konkret. Kalau lokasi_approx=true, itu perkiraan (dari titik pusat kecamatan, properti tidak punya koordinat sendiri) — jangan disebut sebagai jarak pasti, cukup bilang "sekitar" atau "kurang lebih".
+
 Jika user menunjukkan minat tinggi pada sebuah properti (misal bertanya cara membeli, ingin survei lokasi, ingin nego, atau bilang 'saya minat'/'serius'), TANYAKAN nama dan nomor WhatsApp mereka secara sopan jika belum disebutkan. SETELAH user memberikan nama DAN nomor WhatsApp, panggil tool submit_lead dengan data tersebut. JANGAN panggil submit_lead sebelum kedua data (nama dan nomor WA) tersedia di percakapan. Setelah submit_lead berhasil, beri konfirmasi ramah bahwa tim akan segera menghubungi via WhatsApp.`;
 
 const TOOLS = [
@@ -49,8 +55,13 @@ const TOOLS = [
             enum: ['rumah', 'tanah', 'kost', 'hotel', 'homestay', 'villa', 'apartment', 'ruko', 'gudang', 'komersial'],
             description: 'Jenis properti (satu nilai). Opsional.',
           },
-          kabupaten: { type: 'string', description: 'Nama kabupaten/kota. Contoh: Sleman, Bantul, Gunung Kidul.' },
-          kecamatan: { type: 'string', description: 'Nama kecamatan.' },
+          kabupaten: { type: 'string', description: 'Nama kabupaten/kota. Contoh: Sleman, Bantul, Gunung Kidul. JANGAN isi bersamaan dengan dekat_landmark.' },
+          kecamatan: { type: 'string', description: 'Nama kecamatan. JANGAN isi bersamaan dengan dekat_landmark.' },
+          dekat_landmark: {
+            type: 'string',
+            enum: LANDMARKS.map(l => l.slug),
+            description: 'Slug landmark/kampus terkenal jika user menyebutnya (radius asli dari koordinat, lebih akurat daripada menebak kecamatan). WAJIB dipakai alih-alih kabupaten/kecamatan saat user sebut nama landmark spesifik.',
+          },
           harga_min:  { type: 'integer', description: 'Harga minimum dalam Rupiah penuh (integer), BUKAN notasi singkat. Misal budget "500jt" = 500000000, "1M" = 1000000000.' },
           harga_max:  { type: 'integer', description: 'Harga maksimum dalam Rupiah penuh (integer), BUKAN notasi singkat. Misal budget "5M" (5 Milyar) = 5000000000, "800jt" = 800000000.' },
           kt: { type: 'integer', description: 'Jumlah kamar tidur minimum.' },
@@ -271,7 +282,7 @@ export async function onRequestPost(context) {
 
     if (toolCalls.some(tc => tc.function?.name === 'search_properties')) {
       contextParts.push(lastSearchResults.length > 0
-        ? `HASIL PENCARIAN PROPERTI (${lastSearchResults.length} listing ditemukan):\n${JSON.stringify(lastSearchResults)}\n\nGunakan data di atas untuk menjawab user. Sebutkan nama properti, harga, dan lokasi dari data yang tersedia.`
+        ? `HASIL PENCARIAN PROPERTI (${lastSearchResults.length} listing ditemukan):\n${JSON.stringify(lastSearchResults)}\n\nGunakan data di atas untuk menjawab user. Sebutkan nama properti, harga, dan lokasi dari data yang tersedia. Kalau ada field jarak_km, sebutkan jaraknya (pakai "≈"/"sekitar" bila lokasi_approx=true — itu perkiraan, bukan jarak pasti).`
         : 'HASIL PENCARIAN: Tidak ada properti yang sesuai kriteria user. Sampaikan dengan jujur dan tawarkan alternatif (lokasi/budget berbeda).');
     }
 

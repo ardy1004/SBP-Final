@@ -7,9 +7,10 @@ import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { buildPropertyUrl } from '../../../_lib/propertyUrl.js';
 import { sendCapiEvent } from '../../../_lib/metaCapi.js';
 import { SQL_TANGGAL_WIB } from '../../../_lib/waktu.js';
+import { extractGeo } from '../../../_lib/geoRequest.js';
 
 export async function onRequestPost(context) {
-  const { env, params } = context;
+  const { env, params, request } = context;
   const slug = params.slug;
 
   if (!slug || typeof slug !== 'string') {
@@ -42,8 +43,10 @@ export async function onRequestPost(context) {
 
   const timestamp = Date.now();
 
-  // Jalankan keduanya paralel
-  const [clickResult, leadResult] = await Promise.allSettled([
+  const geo = extractGeo(request);
+
+  // Jalankan ketiganya paralel
+  const [clickResult, leadResult, geoResult] = await Promise.allSettled([
     env.DB.prepare(`
       INSERT INTO property_view_daily (property_id, tanggal, wa_clicks)
       VALUES (?, ${SQL_TANGGAL_WIB}, 1)
@@ -58,6 +61,11 @@ export async function onRequestPost(context) {
         (?, NULL, NULL, 'quick_wa', ?,
          CURRENT_TIMESTAMP, 'baru', '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `).bind(propertyId, propUrl).run(),
+
+    env.DB.prepare(`
+      INSERT INTO property_click_geo (property_id, click_type, city, region, country)
+      VALUES (?, 'wa_click', ?, ?, ?)
+    `).bind(propertyId, geo.city, geo.region, geo.country).run(),
   ]);
 
   if (clickResult.status === 'rejected') {
@@ -65,6 +73,9 @@ export async function onRequestPost(context) {
   }
   if (leadResult.status === 'rejected') {
     console.error('[wa-click] leads insert failed:', leadResult.reason?.message);
+  }
+  if (geoResult.status === 'rejected') {
+    console.error('[wa-click] click_geo insert failed:', geoResult.reason?.message);
   }
 
   const leadId = leadResult.status === 'fulfilled' ? leadResult.value?.meta?.last_row_id : null;

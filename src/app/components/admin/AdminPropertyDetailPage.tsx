@@ -2,6 +2,15 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { ArrowLeft, Save, AlertTriangle, ChevronDown, Sparkles, MessageCircle } from 'lucide-react';
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
+// Aturan tampil per jenis + opsi dropdown: SATU SUMBER bersama form Titip Jual
+// publik (src/app/components/TitipJualPage.tsx). Dulu diduplikasi di kedua file
+// dan sudah terbukti melenceng — lihat komentar di propertyFields.ts.
+import {
+  SHOW_LUAS_TANAH, SHOW_LUAS_BANGUNAN, SHOW_LEBAR_DEPAN, SHOW_LANTAI,
+  SHOW_KT_KM, SHOW_FURNISHED, SHOW_SEWA_KAMAR, SHOW_INCOME, SHOW_PENGELUARAN,
+  LEGALITAS_OPTIONS, FURNISHED_OPTS, JENIS_KOST_OPTS, JENIS_HOTEL_OPTS,
+  labelJenisHotel,
+} from '../../../lib/propertyFields';
 import PropertyPhotosCard from './PropertyPhotosCard';
 import { getLocations, type ApiLocation, bacaJson } from '../../../lib/api';
 // Reuse logic generate meta SEO yang sama dengan endpoint CREATE (jangan duplikasi).
@@ -99,16 +108,6 @@ const TUJUAN_OPTS = [
   { value: 'disewa', label: 'Disewakan' },
   { value: 'dijual_disewa', label: 'Dijual & Disewakan' },
 ];
-const LEGALITAS_OPTIONS = [
-  'SHM & IMB/PBG Lengkap', 'SHGB & IMB/PBG Lengkap',
-  'SHM Pekarangan Tanpa IMB/PBG', 'SHM Sawah/Tegalan',
-  'SHGB Tanpa IMB/PBG', 'Girik/Letter C/PPJB/dll', 'Izin Usaha',
-];
-const FURNISHED_OPTS = [
-  { value: 'unfurnished', label: 'Unfurnished' },
-  { value: 'semi', label: 'Semi Furnished' },
-  { value: 'fully', label: 'Fully Furnished' },
-];
 const STATUS_OPTIONS = ['draft', 'published', 'sold', 'archived'] as const;
 type StatusValue = typeof STATUS_OPTIONS[number];
 
@@ -121,24 +120,8 @@ const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
 
 type LingkunganType = 'jauh' | 'sungai' | 'makam' | 'sutet';
 
-// Field visibility per jenis_properti
-const SHOW_LUAS_TANAH    = new Set(['rumah','tanah','kost','hotel','homestay','villa','gudang','komersial','ruko']);
-const SHOW_LUAS_BANGUNAN = new Set(['rumah','kost','hotel','homestay','villa','apartment','gudang','komersial','ruko']);
-const SHOW_LEBAR_DEPAN   = new Set(['rumah','tanah','kost','hotel','homestay','villa','gudang','komersial','ruko']);
-const SHOW_LANTAI        = new Set(['rumah','kost','hotel','homestay','villa','apartment','ruko']);
-const SHOW_KT_KM         = new Set(['rumah','kost','hotel','homestay','villa','apartment']);
-const SHOW_FURNISHED     = new Set(['kost','hotel','homestay','villa','apartment']);
-const SHOW_SEWA_KAMAR    = new Set(['kost','hotel','homestay','villa']);
-// 'kost' WAJIB ada di sini. Kost di SBP dijual utuh sebagai aset investasi
-// (Rp 850 juta - Rp 25 miliar), dan Investment Intelligence — yield, cap rate,
-// payback, skor 1-5 — dihitung dari income_per_bulan. Tanpa 'kost' di daftar
-// ini, field-nya tersembunyi di form sehingga admin TIDAK BISA mengisinya sama
-// sekali; per audit 2026-07-26 seluruh 184 kost berakhir dengan income kosong
-// dan blok investasinya padam justru di listing yang dijual sebagai investasi.
-// Janggal pula karena 'kost' sudah ada di SHOW_PENGELUARAN — bisa isi
-// pengeluaran tapi tidak pendapatan.
-const SHOW_INCOME        = new Set(['kost','hotel','homestay','villa']);
-const SHOW_PENGELUARAN   = new Set(['kost','hotel','homestay','villa']);
+// Aturan tampil per jenis_properti kini diimpor dari lib/propertyFields.ts
+// (dipakai bersama form Titip Jual) — lihat blok import di atas.
 
 // ─── UI primitives ────────────────────────────────────────────────────────────
 
@@ -323,7 +306,6 @@ export default function AdminPropertyDetailPage() {
       jenis_properti: form.jenis_properti ?? '',
       tujuan: form.tujuan ?? '',
       harga: form.harga ?? 0,
-      kelurahan: form.kelurahan ?? '',
       kecamatan: form.kecamatan ?? '',
       kabupaten: form.kabupaten ?? '',
       luas_tanah: form.luas_tanah ?? null,
@@ -841,7 +823,7 @@ export default function AdminPropertyDetailPage() {
               <Field label="Jenis Kost">
                 <select value={String(getDetail('jenis_kost'))} onChange={e => setDetail('jenis_kost', e.target.value || null)} className={selectCls}>
                   <option value="">— pilih —</option>
-                  {['putra','putri','campur'].map(v => (
+                  {JENIS_KOST_OPTS.map(v => (
                     <option key={v} value={v}>{v.charAt(0).toUpperCase()+v.slice(1)}</option>
                   ))}
                 </select>
@@ -851,8 +833,8 @@ export default function AdminPropertyDetailPage() {
               <Field label="Jenis Hotel">
                 <select value={String(getDetail('jenis_hotel'))} onChange={e => setDetail('jenis_hotel', e.target.value || null)} className={selectCls}>
                   <option value="">— pilih —</option>
-                  {['budget','bintang1','bintang2','bintang3','bintang4','bintang5','boutique'].map(v => (
-                    <option key={v} value={v}>{v.startsWith('bintang') ? `Bintang ${v.slice(-1)}` : v.charAt(0).toUpperCase()+v.slice(1)}</option>
+                  {JENIS_HOTEL_OPTS.map(v => (
+                    <option key={v} value={v}>{labelJenisHotel(v)}</option>
                   ))}
                 </select>
               </Field>

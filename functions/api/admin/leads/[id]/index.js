@@ -1,5 +1,6 @@
-// GET   /api/admin/leads/:id — detail satu lead + properti terkait
-// PATCH /api/admin/leads/:id — update status_pipeline dan/atau tambah catatan
+// GET    /api/admin/leads/:id — detail satu lead + properti terkait
+// PATCH  /api/admin/leads/:id — update status_pipeline dan/atau tambah catatan
+// DELETE /api/admin/leads/:id — hapus lead permanen (drag & drop ke kotak hapus di Kanban)
 //
 // Body PATCH: { status_pipeline?: string, note_baru?: string }
 // notes bersifat append-only — tidak pernah menghapus/overwrite catatan lama.
@@ -162,6 +163,24 @@ export async function onRequestPatch(context) {
     pesan: 'Lead berhasil diperbarui',
     lead: toLeadResponse(updated),
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DELETE /api/admin/leads/:id
+// ═══════════════════════════════════════════════════════════════════
+export async function onRequestDelete(context) {
+  const { env, params } = context;
+  const id = parseInt(params.id, 10);
+  if (!Number.isInteger(id) || id <= 0) return jsonError('ID tidak valid', 400);
+
+  try {
+    const res = await env.DB.prepare('DELETE FROM leads WHERE id = ?').bind(id).run();
+    if (res.meta.changes === 0) return jsonError('Lead tidak ditemukan', 404);
+    return jsonOk({ pesan: 'Lead berhasil dihapus' });
+  } catch (err) {
+    console.error('[admin leads DELETE]', err.message);
+    return jsonError('Gagal menghapus lead', 500);
+  }
 }
 
 export async function onRequestOptions() {

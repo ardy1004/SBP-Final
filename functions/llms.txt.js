@@ -12,6 +12,12 @@ export async function onRequestGet(context) {
   return withEdgeCache(context, { ttl: 3600 }, () => bangunLlmsTxt(context));
 }
 
+// Lihat komentar onRequestHead di sitemap.xml.js — bug & alasan yang sama persis.
+export async function onRequestHead(context) {
+  const res = await onRequestGet(context);
+  return new Response(null, { status: res.status, headers: res.headers });
+}
+
 async function bangunLlmsTxt(context) {
   const { env } = context;
   const base = (env.APP_URL || 'https://salambumi.xyz').replace(/\/$/, '');

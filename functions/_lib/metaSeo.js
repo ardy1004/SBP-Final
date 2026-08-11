@@ -30,7 +30,7 @@ function trunc(str, max) {
   return str.length > max ? str.slice(0, max - 3) + '...' : str;
 }
 
-export function generateMetaSeo({ jenis_properti, tujuan, harga, kelurahan, kecamatan, kabupaten, luas_tanah, luas_bangunan, nego }) {
+export function generateMetaSeo({ jenis_properti, tujuan, harga, kecamatan, kabupaten, luas_tanah, luas_bangunan, nego }) {
   const jenisLabel = JENIS_LABEL[jenis_properti] || 'Properti';
   const tujuanLabel = TUJUAN_LABEL[tujuan] || '';
   const lokasi = kecamatan || kabupaten || 'Yogyakarta';
@@ -49,11 +49,16 @@ export function generateMetaSeo({ jenis_properti, tujuan, harga, kelurahan, keca
   //   + kelurahan ....................... 148
   //   kelurahan + KT + KM ............... 303  (lebih buruk — banyak yang sekamar sama)
   //   kelurahan + KT + harga ............  46
-  //   kelurahan + LT + LB + harga .......   2  ← dipakai
+  //   kelurahan + LT + LB + harga .......   2  ← dipakai 2026-08-03
   //
-  // Brand disingkat 'SBP' (bukan 'Salam Bumi Property') karena selisih 17 karakter itu
-  // yang menentukan pembeda ikut terpotong atau tidak.
-  const lokasiJudul = (kelurahan && String(kelurahan).trim()) || lokasi;
+  // ⚠️ 2026-08-06: kelurahan DIGANTI kecamatan di kepala judul. Struktur pembeda
+  // (LT/LB/harga) TIDAK berubah — hanya kata lokasinya. Alasan: kelurahan nyaris
+  // tidak pernah diketik orang saat mencari ("rumah dijual sardonoharjo" ≈ 0 volume),
+  // sedangkan kecamatan/kabupaten itu yang benar-benar dicari ("rumah dijual ngaglik
+  // sleman"). Diuji ulang GROUP BY ke 533 properti nyata sebelum diganti:
+  //   kecamatan+kabupaten, TANPA pembeda spek ........ 259 kembar (lebih buruk)
+  //   kecamatan+kabupaten, +kelurahan kalau bentrok ... 199 kembar, panjang maks 77 (gagal)
+  //   kecamatan (bukan kelurahan) + LT/LB + harga ..... 4 kembar, panjang maks 60 ← dipakai
   const luasBagian = [
     luas_tanah ? `LT${luas_tanah}` : null,
     // `tanah` hampir selalu tanpa bangunan — jangan menulis 'LB0' yang menyesatkan.
@@ -64,7 +69,7 @@ export function generateMetaSeo({ jenis_properti, tujuan, harga, kelurahan, keca
   // Memotong dengan '...' (perilaku lama) selalu membuang bagian EKOR — yaitu harga
   // dan brand — padahal itu yang paling berguna di hasil pencarian. Lebih baik
   // melepas komponen luas secara sadar daripada memotong buta.
-  const kepala = `${jenisLabel} ${tujuanLabel} ${lokasiJudul}`.replace(/\s+/g, ' ').trim();
+  const kepala = `${jenisLabel} ${tujuanLabel} ${lokasi}`.replace(/\s+/g, ' ').trim();
   const ekor = `- ${hargaShort || 'Harga Nego'} | SBP`;
   const kandidat = [
     [kepala, luasBagian, ekor],                                    // lengkap

@@ -6,6 +6,7 @@ import { verifyTurnstile } from '../_lib/turnstile.js';
 import { normalizeWA, isValidWA } from '../_lib/waUtils.js';
 import { parseGmapsCoords } from '../_lib/parseGmapsCoords.js';
 import { nextKodeSeq, fmtSeq, isUniqueErr } from '../_lib/kodeSeq.js';
+import { normalisasiHarga } from '../_lib/hargaTanah.js';
 import { logServerError } from '../_lib/logError.js';
 
 function sanitize(val, maxLen = 500) {
@@ -53,7 +54,14 @@ export async function onRequestPost(context) {
   const errors = {};
 
   // ─── Owner fields ─────────────────────────────────────────────────────────
-  const nama_pemilik    = sanitize(body.nama_pemilik ?? '', 100);
+  // Form publik hanya mengumpulkan SATU nama ("Nama Lengkap Sesuai KTP"), jadi
+  // nama_pemilik jatuh ke nama_ktp — simetris dengan fallback di baris berikutnya.
+  // ⚠️ JANGAN kembalikan syarat `body.nama_pemilik` yang berdiri sendiri: form
+  // tidak punya field itu sejak d54f117 (8 Jun 2026) dan validasinya sudah
+  // disinkronkan di 1a8e43b hari yang sama. Commit hardening f7bc909 (18 Jul)
+  // menghidupkannya kembali tanpa mengembalikan field-nya → SELURUH submit gagal
+  // 422 selama ±3 minggu (submit sukses terakhir SBP-20260716-003, 16 Jul).
+  const nama_pemilik    = sanitize(body.nama_pemilik ?? body.nama_ktp ?? '', 100);
   const nama_ktp        = sanitize(body.nama_ktp ?? body.nama_pemilik ?? '', 100);
   const nik_raw         = sanitize(body.nik ?? '', 20);
   const alamat_ktp      = sanitize(body.alamat_ktp ?? '', 300);
@@ -117,6 +125,26 @@ export async function onRequestPost(context) {
     }
   }
 
+  // Luas tanah diparse DI SINI (bukan bersama field opsional lain di bawah)
+  // karena normalisasiHarga() membutuhkannya, dan hasilnya bisa menambah error
+  // yang harus ikut terkumpul sebelum pemeriksaan 422.
+  const luas_tanah = parseInt(body.luas_tanah, 10) || null;
+
+  // Harga total ↔ per-m² untuk tanah. Endpoint ini dulu SAMA SEKALI tidak
+  // mengisi harga_per_m2/harga_mode, sehingga tanah dari Titip Jual selalu lahir
+  // tanpa per-m² sampai admin membuka & menyimpannya manual — bug yang identik
+  // dengan yang sudah diperbaiki di endpoint create admin (lihat komentar di
+  // functions/api/admin/properties/index.js). Pakai helper bersama, JANGAN tulis
+  // rumus sendiri: kontraknya kolom `harga` SELALU total rupiah.
+  const hrg = normalisasiHarga({
+    jenis_properti,
+    luas_tanah,
+    harga,
+    harga_per_m2: body.harga_per_m2,
+    harga_mode: body.harga_mode,
+  });
+  if (!hrg.ok) errors.harga = hrg.error;
+
   // ─── Foto validation ──────────────────────────────────────────────────────
   // Total dibatasi 40MB (decoded) — client sudah downscale ke 1920px WebP, jadi
   // normalnya jauh di bawah ini. Tanpa batas total, 20 × 8MB = ~213MB base64
@@ -160,7 +188,7 @@ export async function onRequestPost(context) {
   const kecamatan_prop = sanitize(body.kecamatan_prop ?? '', 100);
   const kelurahan_prop = sanitize(body.kelurahan_prop ?? '', 100);
   const alamat_prop    = sanitize(body.alamat ?? '', 500) || null;
-  const luas_tanah     = parseInt(body.luas_tanah, 10) || null;
+  // luas_tanah sudah diparse lebih awal (dibutuhkan normalisasiHarga)
   const luas_bangunan  = parseInt(body.luas_bangunan, 10) || null;
   const kt             = parseInt(body.jumlah_kamar_tidur, 10) || null;
   const km             = parseInt(body.jumlah_kamar_mandi, 10) || null;
@@ -233,8 +261,10 @@ export async function onRequestPost(context) {
 
   const meta = generateMetaSeo({
     jenis_properti, tujuan,
-    // Kolom `harga` = 0 untuk tujuan disewa murni — pakai harga_sewa_tahun supaya meta title/description tidak jatuh ke "Harga Nego"
-    harga: tujuan === 'disewa' ? harga_sewa_tahun : harga,
+    // Kolom `harga` = 0 untuk tujuan disewa murni — pakai harga_sewa_tahun supaya meta title/description tidak jatuh ke "Harga Nego".
+    // ⚠️ hrg.harga (TOTAL), bukan `harga` mentah: pada mode per-m² nilai mentahnya
+    // harga per meter, sehingga meta SEO akan mengiklankan harga yang salah.
+    harga: tujuan === 'disewa' ? harga_sewa_tahun : hrg.harga,
     kelurahan: kelurahan_prop || kelurahan_owner,
     kecamatan: kecamatan_prop || kecamatan_owner,
     kabupaten, luas_tanah, luas_bangunan, nego,
@@ -246,7 +276,7 @@ export async function onRequestPost(context) {
     // Retry saat tabrakan UNIQUE kode_listing (dua submit paralel dapat sequence sama)
     const insertProperty = () => env.DB.prepare(`
       INSERT INTO properties
-        (kode_listing, title, slug, jenis_properti, tujuan, harga, harga_sewa_tahun,
+        (kode_listing, title, slug, jenis_properti, tujuan, harga, harga_per_m2, harga_mode, harga_sewa_tahun,
          nego, nett,
          provinsi, kabupaten, kecamatan, kelurahan, alamat,
          luas_tanah, luas_bangunan, lebar_depan, lantai,
@@ -259,7 +289,7 @@ export async function onRequestPost(context) {
          meta_title, meta_description,
          status_publish, created_at, updated_at)
       VALUES
-        (?,?,?,?,?,?,?,
+        (?,?,?,?,?,?,?,?,?,
          ?,?,
          ?,?,?,?,?,
          ?,?,?,?,
@@ -272,7 +302,7 @@ export async function onRequestPost(context) {
          ?,?,
          'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     `).bind(
-      kode_listing, titleFinal, slug, jenis_properti, tujuan, harga, harga_sewa_tahun,
+      kode_listing, titleFinal, slug, jenis_properti, tujuan, hrg.harga, hrg.harga_per_m2, hrg.harga_mode, harga_sewa_tahun,
       nego, nett,
       provinsi, kabupaten, kecamatan_prop, kelurahan_prop, alamat_prop,
       luas_tanah, luas_bangunan, lebar_depan, lantai,

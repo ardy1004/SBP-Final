@@ -53,6 +53,14 @@ export async function onRequestGet(context) {
       runReport(propertyId, token, {
         dimensions: [{ name: 'pagePath' }, { name: 'pageTitle' }],
         metrics: [{ name: 'screenPageViews' }],
+        // Tanpa filter ini, trafik admin membuka dashboard sendiri (/admin/*) ikut
+        // masuk "Halaman Terpopuler" — mengaburkan halaman publik mana yang
+        // sebenarnya dilihat calon klien.
+        dimensionFilter: {
+          notExpression: {
+            filter: { fieldName: 'pagePath', stringFilter: { matchType: 'BEGINS_WITH', value: '/admin' } },
+          },
+        },
         orderBys: [{ metric: { metricName: 'screenPageViews' }, desc: true }],
         limit: 10,
       }),
@@ -60,6 +68,27 @@ export async function onRequestGet(context) {
         dimensions: [{ name: 'sessionDefaultChannelGroup' }],
         metrics: [{ name: 'sessions' }],
         orderBys: [{ metric: { metricName: 'sessions' }, desc: true }],
+      }),
+    ]);
+
+    // Tiga laporan tambahan — GA4 sudah mengumpulkan ini otomatis untuk SETIAP
+    // kunjungan (bukan cuma yang klik sesuatu), tidak butuh custom event apa pun.
+    const [cities, devices, newVsReturning] = await Promise.all([
+      runReport(propertyId, token, {
+        dimensions: [{ name: 'city' }],
+        metrics: [{ name: 'activeUsers' }],
+        orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
+        limit: 10,
+      }),
+      runReport(propertyId, token, {
+        dimensions: [{ name: 'deviceCategory' }],
+        metrics: [{ name: 'activeUsers' }],
+        orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
+      }),
+      runReport(propertyId, token, {
+        dimensions: [{ name: 'newVsReturning' }],
+        metrics: [{ name: 'activeUsers' }],
+        orderBys: [{ metric: { metricName: 'activeUsers' }, desc: true }],
       }),
     ]);
 
@@ -91,7 +120,28 @@ export async function onRequestGet(context) {
       { name: 'sessions', idx: 0, metric: true },
     ]);
 
-    return jsonOk({ trend: trendRows, topPages: topPagesRows, channels: channelRows });
+    const cityRows = parseRows(cities, [
+      { name: 'city', idx: 0 },
+      { name: 'activeUsers', idx: 0, metric: true },
+    ]);
+
+    const deviceRows = parseRows(devices, [
+      { name: 'device', idx: 0 },
+      { name: 'activeUsers', idx: 0, metric: true },
+    ]);
+
+    // GA4 mengembalikan literal 'new'/'returning'/'(not set)' — diterjemahkan
+    // di frontend (pola sama seperti JENIS_LABEL/labelGaya di file lain),
+    // bukan di sini, biar nilai mentah tetap bisa dipakai apa adanya.
+    const newVsReturningRows = parseRows(newVsReturning, [
+      { name: 'type', idx: 0 },
+      { name: 'activeUsers', idx: 0, metric: true },
+    ]);
+
+    return jsonOk({
+      trend: trendRows, topPages: topPagesRows, channels: channelRows,
+      cities: cityRows, devices: deviceRows, newVsReturning: newVsReturningRows,
+    });
   } catch (err) {
     console.error('[ga4-summary] runReport', err.message);
     return jsonError(`Gagal mengambil data GA4: ${err.message}`, 502);

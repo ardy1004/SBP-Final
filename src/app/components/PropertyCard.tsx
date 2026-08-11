@@ -36,6 +36,15 @@ function formatHargaShort(n: number): string {
   return `Rp ${Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
 }
 
+// Fire-and-forget: dari kota mana kartu properti ini diklik (lihat migrasi
+// 0036_property_click_geo.sql + widget "Sebaran Lokasi Audiens" di Ringkasan
+// admin). sendBeacon tidak menunda navigasi — tidak ada preventDefault.
+function trackCardClick(slug: string) {
+  if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+    navigator.sendBeacon(`/api/properties/${slug}/track-click`);
+  }
+}
+
 export default function PropertyCard({ property, className = '' }: Props) {
   const [slideIdx, setSlideIdx] = useState(0);
   const [dragOffset, setDragOffset] = useState(0);
@@ -226,7 +235,7 @@ export default function PropertyCard({ property, className = '' }: Props) {
       <div className="p-4">
         <p className="text-[10px] text-gray-500 font-mono mb-1">{property.kode}</p>
         <h3 className="font-display font-bold text-[#0F172A] text-sm leading-tight mb-2 line-clamp-2 hover:text-[#1565C0] transition-colors">
-          <Link to={detailPath}>{property.title}</Link>
+          <Link to={detailPath} onClick={() => trackCardClick(property.slug)}>{property.title}</Link>
         </h3>
         <div className="flex items-center gap-1 text-[#64748B] text-xs mb-3">
           <MapPin size={11} />
@@ -287,6 +296,7 @@ export default function PropertyCard({ property, className = '' }: Props) {
         {/* CTA */}
         <Link
           to={detailPath}
+          onClick={() => trackCardClick(property.slug)}
           className={`block w-full text-center py-2.5 rounded-xl text-sm font-semibold transition-all duration-200
             ${isSold
               ? 'bg-gray-100 text-gray-500 cursor-not-allowed'

@@ -40,6 +40,8 @@ export async function onRequestGet(context) {
       agreementsRecentRes,
       listingsRecentRes,
       viewsPerHariRes,
+      topPropertiesRes,
+      sebaranLokasiRes,
     ] = await Promise.all([
 
       // 1. Breakdown listing per status_publish
@@ -117,6 +119,43 @@ export async function onRequestGet(context) {
         GROUP BY tanggal
         ORDER BY tanggal ASC
       `).all(),
+
+      // 13. Properti terpopuler: ranking berdasar leads dulu, views 30 hari sebagai
+      // tiebreak — views tinggi tanpa leads cuma menunjukkan populer dilihat,
+      // bukan properti yang benar-benar menggerakkan bisnis.
+      db.prepare(`
+        SELECT p.id, p.title, p.kode_listing,
+               COALESCE(pv.views_30d, 0) AS views_30d,
+               COALESCE(lc.leads_count, 0) AS leads_count
+        FROM properties p
+        LEFT JOIN (
+          SELECT property_id, SUM(views) AS views_30d
+          FROM property_view_daily
+          WHERE tanggal >= ${sqlTanggalWibMinus(29)}
+          GROUP BY property_id
+        ) pv ON pv.property_id = p.id
+        LEFT JOIN (
+          SELECT property_id, COUNT(*) AS leads_count
+          FROM leads
+          WHERE property_id IS NOT NULL
+          GROUP BY property_id
+        ) lc ON lc.property_id = p.id
+        WHERE p.status_publish = 'published'
+        ORDER BY leads_count DESC, views_30d DESC
+        LIMIT 8
+      `).all(),
+
+      // 14. Sebaran lokasi audiens (klik kartu + WA, 30 hari) — dari property_click_geo
+      // (migrasi 0036), sumber geo request.cf Cloudflare. Rolling window, tidak
+      // perlu presisi WIB seperti bucket kalender di waktu.js.
+      db.prepare(`
+        SELECT COALESCE(NULLIF(TRIM(city), ''), '(tidak diketahui)') AS kota, COUNT(*) AS jumlah
+        FROM property_click_geo
+        WHERE created_at >= DATETIME('now','-30 days')
+        GROUP BY kota
+        ORDER BY jumlah DESC
+        LIMIT 10
+      `).all(),
     ]);
 
     // --- KPI ---
@@ -162,7 +201,7 @@ export async function onRequestGet(context) {
     for (const r of (leadsRecentRes.results ?? [])) {
       activities.push({
         tipe: 'lead', warna: '#10B981',
-        teks: r.title ? `Lead baru: ${r.nama} → ${r.title}` : `Lead baru dari ${r.nama}`,
+        teks: r.title ? `Lead baru: ${r.nama ?? 'Pengunjung'} → ${r.title}` : `Lead baru dari ${r.nama ?? 'Pengunjung'}`,
         waktu: fmtWaktu(r.created_at), _ts: r.created_at,
       });
     }
@@ -203,7 +242,16 @@ export async function onRequestGet(context) {
       return { tanggal: tgl, views: entry.views, wa_clicks: entry.wa_clicks };
     });
 
-    return jsonOk({ kpi, leads_per_bulan, distribusi_jenis, aktivitas_terbaru, views_per_hari });
+    const top_properties = (topPropertiesRes.results ?? []).map(r => ({
+      id: r.id, title: r.title, kode_listing: r.kode_listing,
+      views_30d: r.views_30d, leads_count: r.leads_count,
+    }));
+
+    const sebaran_lokasi = (sebaranLokasiRes.results ?? []).map(r => ({
+      kota: r.kota, jumlah: r.jumlah,
+    }));
+
+    return jsonOk({ kpi, leads_per_bulan, distribusi_jenis, aktivitas_terbaru, views_per_hari, top_properties, sebaran_lokasi });
 
   } catch (err) {
     // Pesan error internal cukup ke log (wrangler tail), JANGAN ke body response —

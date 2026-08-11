@@ -3,6 +3,19 @@ import { Link } from 'react-router';
 import { Check, ChevronRight, Upload, X, AlertCircle } from 'lucide-react';
 import { getLocations, bacaJson, type ApiLocation } from '../../lib/api';
 import { PROPERTY_TYPES } from '../../lib/propertyTypes';
+// Aturan tampil per jenis + opsi dropdown: SATU SUMBER bersama form admin
+// (src/app/components/admin/AdminPropertyDetailPage.tsx). Sebelumnya form ini
+// punya salinan sendiri (showLT/showKTKM/dst) yang sudah melenceng dari admin —
+// lihat komentar di propertyFields.ts.
+import {
+  SHOW_LUAS_TANAH, SHOW_LUAS_BANGUNAN, SHOW_LEBAR_DEPAN, SHOW_LANTAI,
+  SHOW_KT_KM, SHOW_FURNISHED, SHOW_SEWA_KAMAR, SHOW_INCOME, SHOW_HARGA_PER_M2,
+  LEGALITAS_OPTIONS, FURNISHED_OPTS, JENIS_KOST_OPTS, JENIS_HOTEL_OPTS,
+  LINGKUNGAN_OPTIONS, labelJenisHotel,
+} from '../../lib/propertyFields';
+// Konversi harga total ↔ per-m² untuk tanah. SATU SUMBER dengan endpoint admin
+// (functions/_lib/hargaTanah.js) — jangan tulis rumus sendiri.
+import { HARGA_MODE_TOTAL, HARGA_MODE_PER_M2 } from '../../../functions/_lib/hargaTanah.js';
 import Turnstile from './Turnstile';
 import { pageMeta } from '../../lib/pageMeta';
 
@@ -324,24 +337,21 @@ function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
 // ─── STEP 2: Info Properti ────────────────────────────────────────────────────
 
 const JENIS_OPTIONS = PROPERTY_TYPES.map(t => ({ value: t.value, label: t.label }));
-const LEGALITAS_OPTIONS = [
-  'SHM & IMB/PBG Lengkap', 'SHGB & IMB/PBG Lengkap',
-  'SHM Pekarangan Tanpa IMB/PBG', 'SHM Sawah/Tegalan',
-  'SHGB Tanpa IMB/PBG', 'Girik/Letter C/PPJB/dll', 'Izin Usaha',
-];
-const LINGKUNGAN_OPTIONS = [
-  { value: 'jauh_dari_semuanya', label: 'Jauh dari Semuanya' },
-  { value: 'dekat_sungai',       label: 'Dekat Sungai' },
-  { value: 'dekat_makam',        label: 'Dekat Makam' },
-  { value: 'dekat_sutet',        label: 'Dekat Sutet' },
-];
 
-const showLT   = (j: string) => j !== 'apartment';
-const showLB   = (j: string) => !['tanah'].includes(j);
-const showKTKM = (j: string) => !['tanah', 'gudang'].includes(j);
-const showLD   = (j: string) => !['apartment'].includes(j);
-const showLant = (j: string) => !['tanah'].includes(j);
-const showIncome = (j: string) => ['kost', 'hotel', 'homestay', 'villa'].includes(j);
+// Key error milik Step 1 — tidak punya field terikat di Step 2, jadi kalau
+// backend menolak salah satunya, setErrors() saja membuat pesannya HILANG dan
+// user cuma melihat kalimat generik tanpa satu pun kolom disorot. Persis inilah
+// yang membuat regresi 422 `nama_pemilik` (f7bc909, 18 Jul 2026) tidak
+// terdiagnosa selama ±3 minggu. Key di sini ditampilkan apa adanya di banner.
+const STEP1_ERROR_KEYS = new Set([
+  'nama_pemilik', 'nama_ktp', 'nik', 'alamat_ktp', 'rt_rw',
+  'kelurahan', 'kecamatan', 'bertindak_sebagai', 'no_wa', 'no_wa_2',
+]);
+
+// ⚠️ Fungsi show*() lokal DIHAPUS — aturannya sudah melenceng dari form admin
+// (Lantai muncul untuk gudang/komersial, KT/KM untuk ruko/komersial, sedangkan
+// Kelengkapan Furnitur justru TIDAK muncul untuk kost). Sekarang seluruhnya
+// memakai Set bersama dari lib/propertyFields.ts — jangan bikin salinan lagi.
 
 // Preview kode listing (display only; server assigns actual sequence)
 function genDisplayKode() {
@@ -377,6 +387,10 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
   const [tujuan, setTujuan] = useState('dijual');
   const [harga, setHarga]   = useState('');
   const [hargaSewa, setHargaSewa] = useState('');
+  // Mode harga tanah: owner mengetik total ATAU per-m². Konversi ke total
+  // dilakukan backend lewat normalisasiHarga() — kolom `harga` di D1 WAJIB
+  // selalu total rupiah (lihat kontrak di functions/_lib/hargaTanah.js).
+  const [hargaMode, setHargaMode] = useState<string>(HARGA_MODE_TOTAL);
   const [kondisi, setKondisi] = useState<'nego' | 'nett'>('nego');
   const [alamat, setAlamat] = useState('');
   const [lt, setLt]         = useState('');
@@ -396,6 +410,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
   const [alasanJual, setAlasanJual]     = useState('');
   // Jenis-specific
   const [jenisKost, setJenisKost]   = useState('');
+  const [jenisHotel, setJenisHotel] = useState('');
   const [noUnit, setNoUnit]         = useState('');
   const [kelengkapan, setKelengkapan] = useState('');
   const [incomePerBulan, setIncomePerBulan]         = useState('');
@@ -513,11 +528,21 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     setPhotoPreviews(p => p.filter((_, i) => i !== idx));
   };
 
+  // Mode per-m² hanya sah untuk tanah dijual; jenis lain dipaksa total oleh
+  // modeHargaValid() di backend, tapi UI-nya juga tidak boleh menawarkannya.
+  const modePerM2 = SHOW_HARGA_PER_M2.has(jenis) && hargaMode === HARGA_MODE_PER_M2 && tujuan !== 'disewa';
+  const totalDariPerM2 = modePerM2 && harga && lt
+    ? Math.round(parseFloat(harga) * parseFloat(lt))
+    : null;
+
   // Build jenis-specific details object
   const buildDetails = () => {
     const d: Record<string, unknown> = {};
-    if (jenis === 'kost' && jenisKost) d.jenis_kost = jenisKost;
-    if (['hotel','homestay','villa','apartment'].includes(jenis) && kelengkapan) d.kelengkapan = kelengkapan;
+    if (jenis === 'kost' && jenisKost)   d.jenis_kost  = jenisKost;
+    if (jenis === 'hotel' && jenisHotel) d.jenis_hotel = jenisHotel;
+    // Backend memetakan details.kelengkapan → kolom `furnished`. Pakai Set
+    // bersama supaya kost ikut terkirim (dulu hardcoded tanpa kost).
+    if (SHOW_FURNISHED.has(jenis) && kelengkapan) d.kelengkapan = kelengkapan;
     if (jenis === 'apartment' && noUnit) d.no_unit = noUnit;
     return Object.keys(d).length > 0 ? d : undefined;
   };
@@ -526,6 +551,9 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     const e: Record<string, string> = {};
     if (!jenis) e.jenis = 'Jenis properti wajib dipilih';
     if (!harga || parseInt(harga) <= 0) e.harga = 'Harga wajib diisi';
+    // Cegah 422 dari normalisasiHarga(): mode per-m² mustahil dihitung tanpa
+    // luas tanah, dan pesan servernya baru muncul setelah upload foto terkirim.
+    else if (modePerM2 && (!lt || parseInt(lt) <= 0)) e.harga = 'Mode harga per m² membutuhkan Luas Tanah — isi Luas Tanah dulu atau ganti ke Harga Total';
     if (tujuan === 'dijual_disewa' && (!hargaSewa || parseInt(hargaSewa) <= 0)) e.harga_sewa_tahun = 'Harga sewa/tahun wajib diisi untuk opsi Dijual & Disewakan';
     if (!gmaps.trim()) e.gmaps_link = 'Link Google Maps wajib diisi';
     if (!legalitas) e.legalitas = 'Legalitas wajib dipilih';
@@ -562,7 +590,13 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         jenis_properti:    jenis,
         tujuan,
         title:             judul.trim() || undefined,
-        harga:             tujuan === 'disewa' ? undefined : (parseInt(harga) || 0),
+        // Mode per-m²: kolom `harga` diisi 0 dan backend menghitung totalnya
+        // dari harga_per_m2 × luas_tanah lewat normalisasiHarga(). JANGAN kirim
+        // angka per-meter ke `harga` — itu persis kesalahan yang dulu membuat
+        // 39 listing tanah tampil seharga per-meternya.
+        harga:             tujuan === 'disewa' ? undefined : (modePerM2 ? 0 : (parseInt(harga) || 0)),
+        harga_mode:        tujuan === 'disewa' ? undefined : hargaMode,
+        harga_per_m2:      modePerM2 ? (parseInt(harga) || undefined) : undefined,
         harga_sewa_tahun:  tujuan === 'disewa'        ? (parseInt(harga) || undefined)
                           : tujuan === 'dijual_disewa' ? (hargaSewa ? parseInt(hargaSewa) : undefined)
                           : undefined,
@@ -608,7 +642,16 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
       if (!res.ok) {
         if (res.status === 422 && json.details) {
           setErrors(json.details);
-          setApiError('Mohon periksa kembali isian form Anda.');
+          // Error milik Step 1 tidak punya kolom di layar ini — tanpa penanganan
+          // khusus pesannya lenyap dan user tidak punya petunjuk sama sekali.
+          const pesanStep1 = Object.entries(json.details)
+            .filter(([k]) => STEP1_ERROR_KEYS.has(k))
+            .map(([, v]) => v);
+          setApiError(
+            pesanStep1.length
+              ? `Ada masalah pada Data Diri (Step 1): ${pesanStep1.join(', ')}. Klik "← Kembali" untuk memperbaikinya.`
+              : 'Mohon periksa kembali isian form Anda.'
+          );
         } else {
           setApiError(json.error ?? 'Terjadi kesalahan. Silakan coba lagi.');
         }
@@ -655,13 +698,30 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
           </div>
         </div>
 
-        {/* Harga */}
+        {/* Harga — tanah boleh diketik per-m² (cara agen mengiklankan tanah),
+            jenis lain selalu total. Padanan toggle yang sudah ada di form admin. */}
         <div>
+          {SHOW_HARGA_PER_M2.has(jenis) && tujuan !== 'disewa' && (
+            <div className="flex gap-2 mb-2">
+              {[{ v: HARGA_MODE_TOTAL, l: 'Harga Total' }, { v: HARGA_MODE_PER_M2, l: 'Harga per m²' }].map(o => (
+                <button key={o.v} onClick={() => { setHargaMode(o.v); clearErr('harga'); }} className={toggleBtnCls(hargaMode === o.v)}>{o.l}</button>
+              ))}
+            </div>
+          )}
           <label className="block text-xs font-semibold text-[#64748B] mb-1">
-            Harga {tujuan === 'disewa' ? 'Sewa/Tahun' : 'Penawaran'} (Rp) *
+            {tujuan === 'disewa'
+              ? 'Harga Sewa/Tahun (Rp) *'
+              : modePerM2 ? 'Harga per m² (Rp) *' : 'Harga Penawaran (Rp) *'}
           </label>
           <input value={harga} onChange={e => { setHarga(e.target.value); clearErr('harga'); }}
-            type="number" placeholder="Contoh: 850000000" className={inputCls(errors.harga)} />
+            type="number" placeholder={modePerM2 ? 'Contoh: 4900000' : 'Contoh: 850000000'} className={inputCls(errors.harga)} />
+          {modePerM2 && (
+            <p className="text-xs text-gray-400 mt-0.5">
+              {totalDariPerM2 != null
+                ? `Total: Rp ${totalDariPerM2.toLocaleString('id-ID')} (${harga || 0}/m² × ${lt} m²)`
+                : 'Isi Luas Tanah di bawah agar total harga bisa dihitung.'}
+            </p>
+          )}
           <FieldErr msg={errors.harga} />
         </div>
 
@@ -701,12 +761,24 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
           <div>
             <label className="block text-xs font-semibold text-[#64748B] mb-2">Jenis Kost</label>
             <div className="flex gap-2">
-              {['putra','putri','campur'].map(v => (
+              {JENIS_KOST_OPTS.map(v => (
                 <button key={v} onClick={() => setJenisKost(v)} className={toggleBtnCls(jenisKost === v)}>
                   {v.charAt(0).toUpperCase() + v.slice(1)}
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Jenis Hotel (kondisional) — padanan Jenis Kost, sebelumnya hanya ada
+            di form admin sehingga owner hotel tidak punya cara mengisinya. */}
+        {jenis === 'hotel' && (
+          <div>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">Jenis Hotel</label>
+            <select value={jenisHotel} onChange={e => setJenisHotel(e.target.value)} className={selectCls()}>
+              <option value="">-- Pilih Jenis Hotel --</option>
+              {JENIS_HOTEL_OPTS.map(v => <option key={v} value={v}>{labelJenisHotel(v)}</option>)}
+            </select>
           </div>
         )}
 
@@ -719,13 +791,15 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
           </div>
         )}
 
-        {/* Kelengkapan Furnitur (hotel/homestay/villa/apartment) */}
-        {['hotel','homestay','villa','apartment'].includes(jenis) && (
+        {/* Kelengkapan Furnitur — kini termasuk KOST (inventori terbesar, 184
+            listing). Sebelumnya kondisinya hardcoded tanpa kost, sehingga kolom
+            `furnished` selalu kosong untuk kost dari jalur Titip Jual. */}
+        {SHOW_FURNISHED.has(jenis) && (
           <div>
             <label className="block text-xs font-semibold text-[#64748B] mb-2">Kelengkapan Furnitur</label>
             <div className="flex gap-2">
-              {[{v:'fully',l:'Fully Furnished'},{v:'semi',l:'Semi Furnished'},{v:'unfurnished',l:'Unfurnished'}].map(o => (
-                <button key={o.v} onClick={() => setKelengkapan(o.v)} className={toggleBtnCls(kelengkapan === o.v)}>{o.l}</button>
+              {FURNISHED_OPTS.map(o => (
+                <button key={o.value} onClick={() => setKelengkapan(o.value)} className={toggleBtnCls(kelengkapan === o.value)}>{o.label}</button>
               ))}
             </div>
           </div>
@@ -734,31 +808,31 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         {/* Dimensi kondisional */}
         {jenis && (
           <div className="grid grid-cols-2 gap-3">
-            {showLT(jenis) && (
+            {SHOW_LUAS_TANAH.has(jenis) && (
               <div>
                 <label className="block text-xs font-semibold text-[#64748B] mb-1">Luas Tanah (m²)</label>
-                <input type="number" value={lt} onChange={e => setLt(e.target.value)} placeholder="m²" className={inputCls()} />
+                <input type="number" value={lt} onChange={e => { setLt(e.target.value); clearErr('harga'); }} placeholder="m²" className={inputCls()} />
               </div>
             )}
-            {showLB(jenis) && (
+            {SHOW_LUAS_BANGUNAN.has(jenis) && (
               <div>
                 <label className="block text-xs font-semibold text-[#64748B] mb-1">Luas Bangunan (m²)</label>
                 <input type="number" value={lb} onChange={e => setLb(e.target.value)} placeholder="m²" className={inputCls()} />
               </div>
             )}
-            {showLD(jenis) && (
+            {SHOW_LEBAR_DEPAN.has(jenis) && (
               <div>
                 <label className="block text-xs font-semibold text-[#64748B] mb-1">Lebar Depan (m)</label>
                 <input type="number" value={lebar_depan} onChange={e => setLebarDepan(e.target.value)} placeholder="m" className={inputCls()} />
               </div>
             )}
-            {showLant(jenis) && (
+            {SHOW_LANTAI.has(jenis) && (
               <div>
                 <label className="block text-xs font-semibold text-[#64748B] mb-1">Jumlah Lantai</label>
                 <input type="number" value={lantai} onChange={e => setLantai(e.target.value)} placeholder="1" className={inputCls()} />
               </div>
             )}
-            {showKTKM(jenis) && (
+            {SHOW_KT_KM.has(jenis) && (
               <>
                 <div>
                   <label className="block text-xs font-semibold text-[#64748B] mb-1">Kamar Tidur</label>
@@ -773,8 +847,8 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
           </div>
         )}
 
-        {/* Income per bulan (kost/hotel/villa) */}
-        {jenis && showIncome(jenis) && (
+        {/* Income per bulan (kost/hotel/homestay/villa) */}
+        {jenis && SHOW_INCOME.has(jenis) && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-[#64748B] mb-1">Income/Bulan (Rp)</label>
@@ -786,7 +860,9 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
               <input type="number" value={pengeluaranPerBulan} onChange={e => setPengeluaranPerBulan(e.target.value)}
                 placeholder="Opsional" className={inputCls()} />
             </div>
-            {jenis === 'kost' && (
+            {/* Dulu dibatasi `jenis === 'kost'` saja, padahal admin memberikannya
+                ke hotel/homestay/villa juga. */}
+            {SHOW_SEWA_KAMAR.has(jenis) && (
               <div>
                 <label className="block text-xs font-semibold text-[#64748B] mb-1">Harga Sewa/Kamar/Bulan (Rp)</label>
                 <input type="number" value={sewaKamarBulan} onChange={e => setSewaBulan(e.target.value)}
@@ -817,15 +893,25 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
                   {kecList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
                 </select>
               )}
-              {/* Disembunyikan sementara — TODO aktifkan kembali jika data kelurahan siap.
-                  State (kelList, kelProp, setKelProp) & handler (handleKelChange) sengaja dipertahankan.
+              {/* Kelurahan/Desa — diaktifkan 2026-08-10. Komentar lama "TODO
+                  aktifkan jika data kelurahan siap" sudah usang: D1 berisi
+                  81.903 kelurahan (Kec. Depok DIY mengembalikan tepat 3:
+                  Caturtunggal, Condongcatur, Maguwoharjo). Selama dimatikan,
+                  kolom `kelurahan` SELALU lahir kosong dari jalur Titip Jual —
+                  padahal dipakai meta_title SEO dan halaman programmatic
+                  /kost-dijual-condongcatur. Pola disabled + peringatan amber
+                  mengikuti form admin. */}
               {kecId && (
-                <select onChange={handleKelChange} defaultValue="" className={selectCls()}>
-                  <option value="">-- Pilih Kelurahan --</option>
-                  {kelList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
-                </select>
+                <>
+                  <select onChange={handleKelChange} defaultValue="" className={selectCls()}>
+                    <option value="">-- Pilih Kelurahan/Desa --</option>
+                    {kelList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
+                  </select>
+                  {kelList.length === 0 && (
+                    <p className="text-xs text-amber-600">⚠️ Data kelurahan belum tersedia untuk kecamatan ini — boleh dilewati.</p>
+                  )}
+                </>
               )}
-              */}
             </div>
           )}
         </div>
@@ -1030,6 +1116,16 @@ export default function TitipJualPage() {
   const handleStep1 = (data: Step1State) => { setStep1Data(data); setStep(2); };
   const handleSuccess = (r: ApiResult) => setResult(r);
 
+  // Gulir ke atas tiap ganti step. Formulir ini panjang: tanpa ini user bisa
+  // mendarat di tengah halaman dan mengira isiannya hilang — persis persepsi
+  // yang sedang diperbaiki. Render pertama dilewati agar tidak mengganggu
+  // pemuatan halaman (mis. saat masuk lewat anchor).
+  const stepPertamaKali = useRef(true);
+  useEffect(() => {
+    if (stepPertamaKali.current) { stepPertamaKali.current = false; return; }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [step]);
+
   if (result) {
     return (
       <div className="pt-16 min-h-screen" style={{ background: '#F0F4F8' }}>
@@ -1051,10 +1147,32 @@ export default function TitipJualPage() {
         </div>
         <div className="bg-white rounded-2xl shadow-sm p-6 sm:p-8">
           <Stepper step={step} />
-          {step === 1 ? (
+          {/* ⚠️ Kedua step SENGAJA tetap terpasang; yang tidak aktif hanya
+              disembunyikan CSS. JANGAN kembalikan ke
+              `{step === 1 ? <Step1/> : <Step2/>}` — mengganti tipe komponen
+              membuat React MELEPAS yang lama sehingga seluruh isian terhapus,
+              termasuk foto yang sudah dikonversi WebP (bisa 20 file, kerja
+              berat di HP). Ditemukan 2026-08-10: klik "← Kembali" mengosongkan
+              Step 1 DAN Step 2 sekaligus.
+              Step 1 tidak perlu prop nilai awal — state internalnya bertahan
+              sendiri justru karena tidak pernah dilepas. */}
+          <div style={{ display: step === 1 ? undefined : 'none' }}>
             <Step1 onNext={handleStep1} />
-          ) : (
-            <Step2 step1={step1Data!} onBack={() => setStep(1)} onSuccess={handleSuccess} />
+          </div>
+          {/* Step 2 WAJIB tetap lazy (baru dipasang setelah Step 1 selesai),
+              dua alasan keras:
+              1. Hidrasi SSR — Step 2 merender genDisplayKode() yang memanggil
+                 `new Date()`. Selama ini aman HANYA karena Step 2 tak pernah
+                 dirender di server; memasangnya sejak awal = hydration mismatch.
+              2. Token Turnstile — widgetnya dirender saat mount dan tokennya
+                 kedaluwarsa. Dipasang sejak halaman dibuka, token bisa basi
+                 sebelum user sampai ke tombol Kirim.
+              Sesudah terpasang ia TIDAK dilepas lagi, jadi isian Step 2 aman
+              saat user bolak-balik. */}
+          {step1Data !== null && (
+            <div style={{ display: step === 2 ? undefined : 'none' }}>
+              <Step2 step1={step1Data} onBack={() => setStep(1)} onSuccess={handleSuccess} />
+            </div>
           )}
         </div>
       </div>

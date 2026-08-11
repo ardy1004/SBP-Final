@@ -1,6 +1,8 @@
 // Reusable property search untuk dipakai chat endpoint + future use.
 // Logic filter diadaptasi dari functions/api/properties/index.js.
 
+import { LANDMARK_RADIUS_KM, findLandmark, resolveApproxCoord, haversineKm } from './geoLandmarks.js';
+
 const VALID_JENIS  = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
 const VALID_TUJUAN = ['dijual','disewa','dijual_disewa'];
 const ORDER_MAP    = {
@@ -38,9 +40,32 @@ export async function searchProperties(env, params = {}) {
     bindings.push(String(params.jenis).toLowerCase());
   }
 
-  // lokasi — pakai LIKE agar cocok dengan "Kabupaten Sleman" maupun "Sleman"
-  if (params.kabupaten) { conditions.push('LOWER(p.kabupaten) LIKE ?'); bindings.push(`%${String(params.kabupaten).toLowerCase()}%`); }
-  if (params.kecamatan) { conditions.push('LOWER(p.kecamatan) LIKE ?'); bindings.push(`%${String(params.kecamatan).toLowerCase()}%`); }
+  // Landmark (mis. "dekat UGM") — radius asli lintas kecamatan, jauh lebih
+  // akurat daripada AI menebak nama kecamatan dari pengetahuan umum. Terbukti
+  // 2026-08-06: model menebak kecamatan='Sleman' untuk "kost dekat UGM",
+  // padahal kost dekat UGM sebenarnya ada di Kecamatan Depok — kecamatan ibu
+  // kota kabupaten (namanya sama dengan kabupatennya) itu jebakan tebakan
+  // umum. Kalau landmark valid, filter administratif kabupaten/kecamatan
+  // DIABAIKAN — radius yang menentukan, bukan batas kecamatan.
+  const landmark = params.dekat_landmark ? findLandmark(String(params.dekat_landmark).toLowerCase()) : null;
+
+  // lokasi — pakai LIKE agar cocok dengan "Kabupaten Sleman" maupun "Sleman".
+  // Kalau kecamatan diisi, kabupaten DIABAIKAN — kecamatan sudah cukup presisi
+  // (kecamatan selalu anak dari satu kabupaten tertentu), dan meng-AND-kan
+  // keduanya berisiko kontradiksi kalau AI/user menebak kabupaten yang sedikit
+  // meleset (mis. kecamatan='Sleman' + kabupaten='Yogyakarta' — Kecamatan Sleman
+  // sebenarnya masuk Kabupaten Sleman, bukan Yogyakarta). Kontradiksi begini
+  // selalu menghasilkan 0 baris walau datanya ada, dan chatbot AI terbukti
+  // membuat kombinasi begini (diverifikasi 2026-08-06).
+  if (!landmark) {
+    if (params.kecamatan) {
+      conditions.push('LOWER(p.kecamatan) LIKE ?');
+      bindings.push(`%${String(params.kecamatan).toLowerCase()}%`);
+    } else if (params.kabupaten) {
+      conditions.push('LOWER(p.kabupaten) LIKE ?');
+      bindings.push(`%${String(params.kabupaten).toLowerCase()}%`);
+    }
+  }
 
   // harga range
   const priceCol = tujuan === 'disewa' ? 'p.harga_sewa_tahun' : 'p.harga';
@@ -73,11 +98,17 @@ export async function searchProperties(env, params = {}) {
   const limit   = Math.min(Math.max(1, parseInt(params.limit, 10) || 5), 10);
   const where   = conditions.join(' AND ');
 
+  // Mode landmark: ambil kandidat lebih luas (radius yang menyaring, bukan
+  // LIMIT SQL) — filter & urut jarak dilakukan di JS di bawah, sama seperti
+  // sitemap.xml.js (D1/SQLite standar tidak punya fungsi trig untuk haversine).
+  const fetchLimit = landmark ? 60 : limit;
+
   const sql = `
     SELECT
       p.id, p.slug, p.title, p.jenis_properti, p.tujuan,
       p.harga, p.harga_sewa_tahun, p.nego,
       p.provinsi, p.kecamatan, p.kabupaten,
+      p.latitude, p.longitude,
       p.luas_tanah, p.luas_bangunan,
       p.jumlah_kamar_tidur, p.jumlah_kamar_mandi,
       p.legalitas,
@@ -90,8 +121,24 @@ export async function searchProperties(env, params = {}) {
   `;
 
   try {
-    const res = await env.DB.prepare(sql).bind(...bindings, limit).all();
-    return res.results ?? [];
+    const res = await env.DB.prepare(sql).bind(...bindings, fetchLimit).all();
+    const rows = res.results ?? [];
+    if (!landmark) return rows;
+
+    // Radius asli, bukan batas kecamatan — buang yang tak ada info lokasi
+    // sama sekali, urutkan terdekat dulu (override `sort` user: relevansi
+    // jarak jadi prioritas begitu landmark disebut).
+    return rows
+      .map(row => {
+        const coord = resolveApproxCoord(row);
+        if (!coord) return null;
+        const jarak = haversineKm(coord.lat, coord.lon, landmark.lat, landmark.lon);
+        if (jarak > LANDMARK_RADIUS_KM) return null;
+        return { ...row, jarak_km: Math.round(jarak * 10) / 10, lokasi_approx: coord.approx };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.jarak_km - b.jarak_km)
+      .slice(0, limit);
   } catch (err) {
     console.error('[searchProperties] DB error:', err.message);
     return [];

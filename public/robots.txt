@@ -1,6 +1,17 @@
 User-agent: *
 Allow: /
 
+# Foto properti disajikan lewat /api/media?key=… — WAJIB di atas Disallow: /api/
+# di bawah, dan WAJIB tetap ada. Tanpa baris ini, `Disallow: /api/` ikut memblokir
+# SELURUH 2.189 foto listing dari Googlebot-Image: og:image, twitter:image, dan
+# array `image` di JSON-LD RealEstateListing semuanya memakai path ini.
+# Terukur di Search Console 2026-08-07: 14 halaman berstatus "Diblokir oleh
+# robots.txt" — nol trafik Google Images, hasil pencarian tanpa thumbnail, dan
+# rich result listing properti kehilangan field gambar yang praktis wajib.
+# Aturan robots.txt dimenangkan pola PALING SPESIFIK (bukan urutan), jadi
+# /api/media terbuka sementara endpoint API lain tetap tertutup.
+Allow: /api/media
+
 # Area admin & endpoint API tidak untuk diindeks
 Disallow: /admin
 Disallow: /api/

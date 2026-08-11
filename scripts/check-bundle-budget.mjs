@@ -73,7 +73,7 @@ import { join } from 'node:path';
 //             karena metrik yang benar-benar berbahaya tidak bergerak.
 // ─────────────────────────────────────────────────────────────────────────────
 const BUDGET_SSR_MAIN_CHUNK = 560_000;    // 503.003 +11% — headroom nyata, bukan tepi jurang
-const BUDGET_FUNCTIONS_RAW  = 6_000_000;  // 5.940.611 +1% (naik dari 5.950.000 — indikator slot scheduler ViralFrame, 2026-07-29)
+const BUDGET_FUNCTIONS_RAW  = 6_050_000;  // 6.001.544 + headroom (naik dari 6.000.000 — tracking lokasi + pengayaan GA4, 2026-08-06)
 const BUDGET_FUNCTIONS_GZIP = 8_000_000;  // jauh di bawah batas 10 MB; alarm jaring pengaman saja
 
 /**
