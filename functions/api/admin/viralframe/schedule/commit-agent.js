@@ -35,20 +35,20 @@ export async function onRequestPost(context) {
   // Fallback di sini artinya konten agent ini terbit di akun sosmed agent lain,
   // dan post yang sudah tayang tidak bisa ditarik (lihat agentAccounts.js).
   const akun = await resolveScheduler(env, video.character_id);
+  // Saat mode terpusat, akun yang dipakai bisa MILIK AGENT LAIN (agent utama) —
+  // sebut namanya di pesan error, kalau tidak admin akan mencari kesalahan di
+  // agent yang salah.
+  const namaAkun = akun.targetId === video.character_id
+    ? `Agent "${video.character_nama}"`
+    : `Agent utama (dipakai karena mode Terpusat)`;
   if (!akun.bufferKey && !akun.zernioKey) {
-    return jsonError(
-      `Agent "${video.character_nama}" belum punya kredensial scheduler. Isi dulu di Admin → Pengaturan → Akun Agent.`,
-      422
-    );
+    return jsonError(`${namaAkun} belum punya kredensial scheduler. Isi dulu di Admin → Pengaturan → Akun Agent.`, 422);
   }
   // Key ada tapi belum ada satu pun channel = fan-out akan menghasilkan NOL
   // baris dan endpoint balas "sukses" yang tidak menjadwalkan apa pun. Tolak di
   // sini supaya kegagalannya terlihat, bukan tersamar jadi keberhasilan kosong.
   if (Object.keys(akun.channels).length === 0) {
-    return jsonError(
-      `Agent "${video.character_nama}" belum punya channel sosmed. Buka Pengaturan → Akun Agent → "Ambil dari API", lalu Simpan.`,
-      422
-    );
+    return jsonError(`${namaAkun} belum punya channel sosmed. Buka Pengaturan → Akun Agent → "Ambil dari API", lalu Simpan.`, 422);
   }
 
   const { slotIndex, rows } = await scheduleFanOut(env, { assetUrl: video.cloudinary_url, caption, akun });

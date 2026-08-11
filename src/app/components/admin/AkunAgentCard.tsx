@@ -13,8 +13,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Users, CheckCircle, XCircle, RefreshCw, Save } from 'lucide-react';
 import {
-  getAgentAccounts, saveAgentAccount, getSchedulerAccounts,
-  type AgentAccount, type AgentAccountInput, type AgentChannels,
+  getAgentAccounts, saveAgentAccount, saveModeAkun, getSchedulerAccounts,
+  type AgentAccount, type AgentAccountInput, type AgentChannels, type ModeAkun,
   type SchedulerAccountsResult, type SchedulerPlatform,
 } from '../../../lib/api';
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
@@ -61,12 +61,23 @@ export default function AkunAgentCard() {
   const [msg, setMsg] = useState<Msg | null>(null);
   const [akunTertaut, setAkunTertaut] = useState<SchedulerAccountsResult | null>(null);
   const [memuatAkun, setMemuatAkun] = useState(false);
+  const [mode, setMode] = useState<ModeAkun>('terpusat');
+  const [utama, setUtama] = useState<number | null>(null);
+  const [ubahMode, setUbahMode] = useState(false);
 
   const muat = useCallback(async () => {
     const r = await getAgentAccounts();
-    if (r.success && r.data) setItems(r.data.items);
+    if (r.success && r.data) { setItems(r.data.items); setMode(r.data.mode); setUtama(r.data.utama); }
     else setMsg({ type: 'error', text: r.error ?? 'Gagal memuat akun agent' });
   }, []);
+
+  const gantiMode = async (m: ModeAkun) => {
+    setUbahMode(true); setMsg(null);
+    const r = await saveModeAkun({ mode: m });
+    setUbahMode(false);
+    if (r.success) { setMode(m); muat(); }
+    else setMsg({ type: 'error', text: r.error ?? 'Gagal mengubah mode' });
+  };
 
   useEffect(() => { muat(); }, [muat]);
 
@@ -140,6 +151,8 @@ export default function AkunAgentCard() {
       return { ...f, channels };
     });
 
+  const namaUtama = items?.find(a => a.character_id === utama)?.nama ?? 'agent utama';
+
   return (
     <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 overflow-y-auto h-full">
       <div className="flex items-center gap-3 mb-4">
@@ -148,6 +161,32 @@ export default function AkunAgentCard() {
           <h2 className="font-display font-semibold text-[#0F172A]">Akun Agent (Storage &amp; Scheduler)</h2>
           <p className="text-xs text-[#64748B]">Tiap agent punya Cloudinary + Buffer/Zernio sendiri. Kosongkan storage = ikut akun global.</p>
         </div>
+      </div>
+
+      {/* Mode akun — menentukan akun SIAPA yang dipakai, mengatur storage DAN
+          scheduler sekaligus. Ditaruh paling atas karena mengubah arti seluruh
+          daftar di bawahnya. */}
+      <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 mb-3">
+        <div className="text-[11px] font-bold text-[#94A3B8] mb-1.5">MODE AKUN</div>
+        <div className="flex flex-wrap gap-2">
+          {([
+            { v: 'terpusat' as ModeAkun, judul: 'Terpusat', ket: 'semua lewat akun agent utama' },
+            { v: 'per_agent' as ModeAkun, judul: 'Per agent', ket: 'tiap agent pakai akunnya sendiri' },
+          ]).map(o => (
+            <button key={o.v} type="button" disabled={ubahMode} onClick={() => gantiMode(o.v)}
+              className={`text-left px-3 py-2 rounded-xl border text-xs disabled:opacity-50 ${
+                mode === o.v ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'bg-white text-[#334155] border-gray-200'
+              }`}>
+              <div className="font-semibold">{o.judul}</div>
+              <div className={mode === o.v ? 'text-white/80' : 'text-[#94A3B8]'}>{o.ket}</div>
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] text-[#64748B] mt-2">
+          {mode === 'terpusat'
+            ? `Upload & posting semua agent memakai akun ${namaUtama} — kredensial masing-masing di bawah tersimpan tapi belum dipakai. Aturan spesialis tidak berlaku.`
+            : 'Tiap agent memakai akun & storage sendiri. Agent berspesialis hanya menerima jenis properti yang cocok; agent utama bebas semua jenis.'}
+        </p>
       </div>
 
       {msg && (

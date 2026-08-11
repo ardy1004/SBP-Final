@@ -1302,6 +1302,10 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
   gaya: string;
 }) {
   const [characters, setCharacters] = useState<CharacterOption[]>([]);
+  // Mode akun global (migrasi 0040). 'terpusat' = semua upload mendarat di akun
+  // agent utama, jadi aturan spesialis TIDAK berlaku dan tidak boleh diperingatkan
+  // seolah berlaku — backend pun mengizinkannya.
+  const [modeAkun, setModeAkun] = useState<'terpusat' | 'per_agent'>('terpusat');
   const [characterId, setCharacterId] = useState<number | ''>('');
   const [file, setFile] = useState<File | null>(null);
   const [caption, setCaption] = useState('');
@@ -1509,7 +1513,11 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
   useEffect(() => {
     fetch('/api/admin/viralframe/characters', { credentials: 'include' })
       .then(r => bacaJson(r))
-      .then(j => { if (j.success) setCharacters(j.data?.items ?? []); })
+      .then(j => {
+        if (!j.success) return;
+        setCharacters(j.data?.items ?? []);
+        if (j.data?.mode) setModeAkun(j.data.mode);
+      })
       .catch(() => {});
   }, []);
 
@@ -1774,15 +1782,22 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
           ))}
         </select>
         {characters.length === 0 && <p className="text-[11px] text-[#94A3B8] mt-1">Belum ada karakter. Buat dulu di Step 2 — Pilih Karakter.</p>}
-        {/* Peringatan lunak: menyarankan, TIDAK memblokir — menyilang agent memang
-            kadang perlu (keputusan user 2026-08-11). */}
-        {agentTerpilih && !cocokSpesialis(agentTerpilih, jenisProperti) && (agentTerpilih.spesialis?.length ?? 0) > 0 && (
-          <p className="text-[11px] text-amber-600 mt-1">
-            {agentTerpilih.nama} spesialis {agentTerpilih.spesialis?.join(', ')}, properti ini {jenisProperti}. Tetap boleh dilanjut.
-            {agentDisarankan.length > 0 && ` Yang cocok: ${agentDisarankan.map(c => c.nama).join(', ')}.`}
+        {/* Mode per-agent: spesialis MEMBLOKIR (backend menolak 422, jadi
+            peringatan di sini harus tegas, bukan "tetap boleh dilanjut").
+            Mode terpusat: semua mendarat di akun agent utama, aturan tidak aktif. */}
+        {modeAkun === 'per_agent' && agentTerpilih && !cocokSpesialis(agentTerpilih, jenisProperti)
+          && (agentTerpilih.spesialis?.length ?? 0) > 0 && (
+          <p className="text-[11px] text-red-600 mt-1">
+            {agentTerpilih.nama} khusus properti {agentTerpilih.spesialis?.join('/')}, sedangkan properti ini {jenisProperti} — upload akan ditolak.
+            {agentDisarankan.length > 0 && ` Pilih: ${agentDisarankan.map(c => c.nama).join(', ')}.`}
           </p>
         )}
-        {agentTerpilih && !agentTerpilih.storage_siap && (
+        {modeAkun === 'terpusat' && (
+          <p className="text-[11px] text-[#94A3B8] mt-1">
+            Mode Terpusat aktif — video mendarat di storage agent utama apa pun agent yang dipilih. Ubah di Pengaturan → Akun Agent.
+          </p>
+        )}
+        {modeAkun === 'per_agent' && agentTerpilih && !agentTerpilih.storage_siap && (
           <p className="text-[11px] text-[#94A3B8] mt-1">
             {agentTerpilih.nama} belum punya Cloudinary sendiri — video akan masuk ke akun global. Atur di Pengaturan → Akun Agent.
           </p>

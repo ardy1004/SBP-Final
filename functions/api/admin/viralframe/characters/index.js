@@ -6,7 +6,7 @@
 // Auth: otomatis via functions/api/admin/_middleware.js
 
 import { jsonOk, jsonCreated, jsonError, handleOptions } from '../../../_shared/response.js';
-import { parseSpesialis } from '../../../../_lib/agentAccounts.js';
+import { parseSpesialis, getModeAkun } from '../../../../_lib/agentAccounts.js';
 
 const WEBP_PREFIX = 'data:image/webp;base64,';
 // ~2.2MB terdekode (base64 ~4/3x lebih besar dari biner) — client sudah downscale
@@ -51,7 +51,11 @@ export async function onRequestGet(context) {
       spesialis: parseSpesialis(r.spesialis),
       storage_siap: !!r.storage_siap,
     }));
-    return jsonOk({ items, total: items.length });
+    // mode ikut di sini supaya form Upload Hasil tahu apakah aturan spesialis
+    // sedang berlaku — tanpa request kedua. Saat 'terpusat', semua upload
+    // mendarat di akun agent utama dan pembatasan spesialis tidak aktif.
+    const { mode, utama } = await getModeAkun(env);
+    return jsonOk({ items, total: items.length, mode, utama });
   } catch (err) {
     console.error('[viralframe characters GET]', err.message);
     return jsonError('Gagal mengambil data karakter', 500);

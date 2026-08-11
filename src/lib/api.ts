@@ -603,9 +603,21 @@ export interface AgentAccountInput {
   channels?: AgentChannels;
 }
 
+/** 'terpusat' = semua agent memakai akun agent utama (storage + scheduler);
+ *  'per_agent' = tiap agent memakai akunnya sendiri. Lihat migrasi 0040. */
+export type ModeAkun = 'terpusat' | 'per_agent';
+
 /** GET /api/admin/viralframe/agent-accounts */
 export async function getAgentAccounts() {
-  return apiFetch<{ items: AgentAccount[] }>('/admin/viralframe/agent-accounts');
+  return apiFetch<{ items: AgentAccount[]; mode: ModeAkun; utama: number | null }>('/admin/viralframe/agent-accounts');
+}
+
+/** PATCH /api/admin/viralframe/agent-accounts — mode akun global */
+export async function saveModeAkun(body: { mode?: ModeAkun; utama?: number }) {
+  return apiFetch<{ mode: ModeAkun; utama: number | null }>('/admin/viralframe/agent-accounts', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
 }
 
 /** PUT /api/admin/viralframe/agent-accounts/:id */

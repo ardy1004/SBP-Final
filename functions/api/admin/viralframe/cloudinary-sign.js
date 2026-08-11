@@ -16,7 +16,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { sha1Hex } from '../../../_lib/cloudinary.js';
-import { resolveCloudinary } from '../../../_lib/agentAccounts.js';
+import { resolveCloudinary, cekSpesialis } from '../../../_lib/agentAccounts.js';
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -25,6 +25,18 @@ export async function onRequestPost(context) {
   try { body = await request.json(); } catch { /* body opsional */ }
 
   const characterId = parseInt(body.character_id, 10);
+  const propertyId0 = parseInt(body.property_id, 10);
+
+  // Cek kecocokan spesialis SEBELUM tanda tangan diberikan — kalau ditolak di
+  // sini, admin belum sempat mengunggah file 20 MB untuk kemudian ditolak.
+  // Gerbang sebenarnya tetap di agent-videos POST (endpoint ini bisa dilewati).
+  if (Number.isInteger(characterId) && Number.isInteger(propertyId0)) {
+    const prop = await env.DB.prepare('SELECT jenis_properti FROM properties WHERE id = ?')
+      .bind(propertyId0).first().catch(() => null);
+    const cek = await cekSpesialis(env, characterId, prop?.jenis_properti);
+    if (!cek.boleh) return jsonError(cek.pesan, 422);
+  }
+
   const creds = await resolveCloudinary(env, Number.isInteger(characterId) ? characterId : null);
   if (!creds) {
     return jsonError('Cloudinary belum dikonfigurasi — isi di Admin → Pengaturan → Akun Agent, atau set CLOUDINARY_* di Cloudflare', 500);

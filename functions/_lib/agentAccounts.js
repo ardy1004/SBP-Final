@@ -17,6 +17,42 @@
 // agentAccounts TIDAK mengimpor schedulerProviders dan sebaliknya —
 // scheduleFanOut menerima kredensial yang sudah di-resolve dari pemanggil.
 
+// ── Mode akun ────────────────────────────────────────────────────────────────
+// 'terpusat'  : SEMUA agent memakai akun agent utama (storage + scheduler).
+//               Dipakai selama masa "habiskan dulu antrean video lama lewat
+//               satu kanal", sebelum tiap agent benar-benar jalan sendiri.
+// 'per_agent' : tiap agent memakai akunnya sendiri.
+//
+// Satu saklar mengatur storage DAN scheduler sekaligus, sengaja tidak
+// dipisah: kalau cuma posting yang dipusatkan, video baru tetap mendarat di
+// cloud agent sementara yang lama di cloud utama — justru memecah aset ke dua
+// tempat, yang persis mau dihindari.
+export async function getModeAkun(env) {
+  try {
+    const res = await env.DB.prepare(
+      `SELECT key, value FROM settings WHERE key IN ('viralframe_akun_mode','viralframe_akun_utama')`
+    ).all();
+    const map = Object.fromEntries((res.results ?? []).map(r => [r.key, r.value]));
+    const utama = parseInt(map.viralframe_akun_utama ?? '', 10);
+    return {
+      mode: map.viralframe_akun_mode === 'per_agent' ? 'per_agent' : 'terpusat',
+      utama: Number.isInteger(utama) && utama > 0 ? utama : null,
+    };
+  } catch {
+    // Tabel/baris belum ada -> anggap terpusat tanpa agent utama, artinya
+    // resolver jatuh ke perilaku lama (env global). Aman, bukan diam-diam
+    // memakai akun agent lain.
+    return { mode: 'terpusat', utama: null };
+  }
+}
+
+// Agent yang AKUNNYA benar-benar dipakai untuk sebuah video milik characterId.
+export async function resolveAkunTarget(env, characterId) {
+  const { mode, utama } = await getModeAkun(env);
+  if (mode === 'terpusat' && utama) return { targetId: utama, mode, utama };
+  return { targetId: parseInt(characterId, 10) || null, mode, utama };
+}
+
 export async function getAgentAccount(env, characterId) {
   const id = parseInt(characterId, 10);
   if (!Number.isInteger(id) || id <= 0) return null;
@@ -34,7 +70,8 @@ function cloudinaryLengkap(row) {
 // Kredensial Cloudinary untuk MENULIS (upload/sign) atas nama satu agent.
 // sumber: 'agent' = akun milik agent itu, 'global' = env secret lama.
 export async function resolveCloudinary(env, characterId) {
-  const acc = await getAgentAccount(env, characterId);
+  const { targetId } = await resolveAkunTarget(env, characterId);
+  const acc = await getAgentAccount(env, targetId);
   if (cloudinaryLengkap(acc)) {
     return {
       sumber: 'agent',
@@ -53,7 +90,8 @@ export async function resolveCloudinary(env, characterId) {
 // Cloud name saja (tanpa secret) — cukup untuk delivery URL seperti
 // image/fetch di thumbnail.js, yang tidak butuh tanda tangan sama sekali.
 export async function resolveCloudName(env, characterId) {
-  const acc = await getAgentAccount(env, characterId);
+  const { targetId } = await resolveAkunTarget(env, characterId);
+  const acc = await getAgentAccount(env, targetId);
   return acc?.cloudinary_name || env.CLOUDINARY_CLOUD_NAME || null;
 }
 
@@ -112,11 +150,44 @@ export function parseChannels(raw) {
 // Selalu kembalikan objek — pemanggil memeriksa isinya sendiri supaya pesan
 // errornya bisa menyebut platform mana yang belum siap.
 export async function resolveScheduler(env, characterId) {
-  const acc = await getAgentAccount(env, characterId);
+  const { targetId, mode } = await resolveAkunTarget(env, characterId);
+  const acc = await getAgentAccount(env, targetId);
   return {
+    mode,
+    // Agent yang akunnya dipakai — beda dari characterId saat mode terpusat.
+    // Dipakai pesan error supaya admin tahu akun SIAPA yang belum lengkap.
+    targetId,
     bufferKey: acc?.buffer_api_key ?? null,
     zernioKey: acc?.zernio_api_key ?? null,
     channels: parseChannels(acc?.channels_json),
+  };
+}
+
+// Aturan spesialis (keputusan user 2026-08-11): pembatasan mengikuti STORAGE
+// TUJUAN, bukan sekadar agent yang dipilih.
+//   • Menuju akun agent utama (entah karena mode terpusat, entah karena yang
+//     dipilih memang agent utama) -> BEBAS jenis apa pun.
+//   • Menuju akun agent spesialis -> jenis properti WAJIB cocok.
+// Agent tanpa spesialis tersimpan juga bebas — belum diatur, bukan "tidak boleh
+// apa-apa".
+export async function cekSpesialis(env, characterId, jenisProperti) {
+  const { targetId, utama } = await resolveAkunTarget(env, characterId);
+  if (!targetId || (utama && targetId === utama)) return { boleh: true };
+
+  const row = await env.DB.prepare(
+    `SELECT c.nama, a.spesialis
+     FROM viralframe_characters c LEFT JOIN viralframe_agent_accounts a ON a.character_id = c.id
+     WHERE c.id = ?`
+  ).bind(targetId).first().catch(() => null);
+  if (!row) return { boleh: true }; // agent tidak dikenal -> biarkan validator lain yang menolak
+
+  const spesialis = parseSpesialis(row.spesialis);
+  if (spesialis.length === 0) return { boleh: true };
+  if (jenisProperti && spesialis.includes(jenisProperti)) return { boleh: true };
+
+  return {
+    boleh: false,
+    pesan: `${row.nama} khusus properti ${spesialis.join('/')}, sedangkan properti ini ${jenisProperti || 'tidak diketahui jenisnya'}. Pilih agent yang sesuai, atau pakai agent utama yang bebas semua jenis.`,
   };
 }
 

@@ -9,7 +9,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { destroyByCloudName } from '../../../../_lib/cloudinary.js';
-import { resolveCloudinaryByCloudName, cloudNameDariUrl } from '../../../../_lib/agentAccounts.js';
+import { resolveCloudinaryByCloudName, cloudNameDariUrl, cekSpesialis } from '../../../../_lib/agentAccounts.js';
 
 const SELECT_COLS = `
   v.id, v.character_id, v.property_id, v.caption, v.hashtags,
@@ -157,8 +157,13 @@ export async function onRequestPost(context) {
 
   const character = await env.DB.prepare('SELECT id FROM viralframe_characters WHERE id = ?').bind(characterId).first().catch(() => null);
   if (!character) return jsonError('Karakter tidak ditemukan', 404);
-  const property = await env.DB.prepare('SELECT id FROM properties WHERE id = ?').bind(propertyId).first().catch(() => null);
+  const property = await env.DB.prepare('SELECT id, jenis_properti FROM properties WHERE id = ?').bind(propertyId).first().catch(() => null);
   if (!property) return jsonError('Properti tidak ditemukan', 404);
+
+  // Gerbang spesialis yang sebenarnya (cloudinary-sign cuma menolak lebih awal
+  // demi UX — endpoint ini bisa dipanggil langsung tanpa lewat sana).
+  const cek = await cekSpesialis(env, characterId, property.jenis_properti);
+  if (!cek.boleh) return jsonError(cek.pesan, 422);
 
   try {
     const res = await env.DB.prepare(
