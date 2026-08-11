@@ -3,7 +3,7 @@
 //                             tanpa itu (atau agent belum punya akun) pakai akun global.
 //          { property_id? } → folder default sbp-viralframe/agent-videos/{id}
 //          { folder? } eksplisit (harus diawali "sbp-viralframe/") untuk kebutuhan
-//                      lain (mis. upload badge/logo ke sbp-viralframe/badges).
+//                      lain di luar video agent.
 //   Membuat parameter signed upload Cloudinary (timestamp + signature) supaya
 //   browser bisa upload video langsung ke Cloudinary tanpa lewat Worker
 //   (hindari limit 30 detik wall-clock & buffering file besar) dan tanpa

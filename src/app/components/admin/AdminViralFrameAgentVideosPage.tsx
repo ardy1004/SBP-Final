@@ -2,17 +2,37 @@ import { bacaJson } from '../../../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router';
 import {
-  Users, Loader2, Download, Trash2, Pencil, Check, X, Copy, Layers, ChevronDown, ChevronUp,
+  Users, Loader2, Download, Trash2, Pencil, Check, X, Copy,
   Archive, RotateCcw, CheckCircle2, Circle, Send, BarChart3,
 } from 'lucide-react';
-import { buildOverlayVideoUrl, composeOverlaysForProperty, pickStatusBadgeType, toAttachmentUrl, toImageThumbnailUrl, type BadgeAsset, type BadgeType } from '../../lib/cloudinaryOverlay';
+import { toAttachmentUrl, toImageThumbnailUrl } from '../../lib/cloudinaryUrl';
 import { findArchetype } from './viralframe/archetypes';
-import BadgeLogoSettings from './viralframe/BadgeLogoSettings';
 import SlotIndicatorStrip from './viralframe/SlotIndicatorStrip';
 
-const STATUS_BADGE_LABEL: Record<BadgeType, string> = {
-  sold: 'SOLD', premium: 'Premium', featured: 'Featured', hot: 'Hot', pilihan: 'Pilihan', logo: 'Logo',
+// Penanda status properti — MURNI TEKS, dihitung dari flag properti yang sudah
+// ada di baris video. Ini BUKAN sisa fitur badge/logo video (overlay gambar ke
+// video, dihapus 2026-08-11 karena tiap overlay memaksa render ulang video
+// utuh — lihat src/app/lib/cloudinaryUrl.ts). Label di bawah nol biaya
+// Cloudinary: tidak ada transformasi, cuma tulisan di kartu & prefiks caption.
+type StatusProperti = 'sold' | 'premium' | 'featured' | 'hot' | 'pilihan';
+
+const STATUS_LABEL: Record<StatusProperti, string> = {
+  sold: 'SOLD', premium: 'Premium', featured: 'Featured', hot: 'Hot', pilihan: 'Pilihan',
 };
+
+// Kalau beberapa status berlaku sekaligus, hanya yang tertinggi yang tampil.
+const STATUS_PRIORITAS: StatusProperti[] = ['sold', 'premium', 'featured', 'hot', 'pilihan'];
+
+function pickStatusProperti(v: {
+  status_sold?: number | null; badge_premium?: number | null;
+  badge_featured?: number | null; badge_hot?: number | null; properti_pilihan?: number | null;
+}): StatusProperti | null {
+  const aktif: Record<StatusProperti, boolean> = {
+    sold: !!v.status_sold, premium: !!v.badge_premium, featured: !!v.badge_featured,
+    hot: !!v.badge_hot, pilihan: !!v.properti_pilihan,
+  };
+  return STATUS_PRIORITAS.find(t => aktif[t]) ?? null;
+}
 
 interface CharacterOption {
   id: number;
@@ -129,26 +149,16 @@ export default function AdminViralFrameAgentVideosPage() {
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [ratioFilter, setRatioFilter] = useState<RatioClass | 'semua'>('semua');
   const [cardSize, setCardSize] = useState<CardSize>('sedang');
-  const [badgeAssets, setBadgeAssets] = useState<Partial<Record<BadgeType, BadgeAsset>>>({});
-  const [showBadgeEditor, setShowBadgeEditor] = useState(false);
   const [view, setView] = useState<ViewMode>('active');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [scheduleTarget, setScheduleTarget] = useState<{ video: AgentVideo; displayUrl: string } | null>(null);
+  const [scheduleTarget, setScheduleTarget] = useState<AgentVideo | null>(null);
   const [slotRefreshTick, setSlotRefreshTick] = useState(0);
 
   useEffect(() => {
     const saved = localStorage.getItem(CARD_SIZE_STORAGE_KEY) as CardSize | null;
     if (saved && saved in CARD_SIZE_PX) setCardSize(saved);
-  }, []);
-
-  const loadBadges = useCallback(async (characterId: number) => {
-    try {
-      const r = await fetch(`/api/admin/viralframe/badges?character_id=${characterId}`, { credentials: 'include' });
-      const j = await bacaJson(r);
-      if (j.success) setBadgeAssets(Object.fromEntries((j.data?.items ?? []).map((a: BadgeAsset) => [a.type, a])));
-    } catch { /* noop */ }
   }, []);
 
   const changeCardSize = (size: CardSize) => {
@@ -217,9 +227,8 @@ export default function AdminViralFrameAgentVideosPage() {
     if (selectedCharId != null) {
       setRatioFilter('semua'); setSelectedIds(new Set()); setContextMenu(null);
       loadVideos(selectedCharId, view);
-      if (view === 'active') loadBadges(selectedCharId);
     }
-  }, [selectedCharId, view, loadVideos, loadBadges]);
+  }, [selectedCharId, view, loadVideos]);
 
   const selectedCharacter = characters.find(c => c.id === selectedCharId) ?? null;
 
@@ -366,7 +375,7 @@ export default function AdminViralFrameAgentVideosPage() {
   };
 
   const copyCaption = async (v: AgentVideo) => {
-    const prefix = pickStatusBadgeType(v) === 'sold' ? '[SOLD] ' : '';
+    const prefix = pickStatusProperti(v) === 'sold' ? '[SOLD] ' : '';
     const text = `${prefix}${v.caption ?? ''}${v.hashtags ? `\n\n${v.hashtags}` : ''}`;
     try {
       await navigator.clipboard.writeText(text);
@@ -459,27 +468,6 @@ export default function AdminViralFrameAgentVideosPage() {
             ))}
           </div>
 
-          {view === 'active' && selectedCharacter && (
-            <div>
-              <button onClick={() => setShowBadgeEditor(s => !s)}
-                className="w-full flex items-center justify-between gap-2 px-4 py-2.5 rounded-2xl bg-white border border-gray-100 text-sm font-semibold text-[#0F172A] hover:border-[#1565C0]/30">
-                <span className="flex items-center gap-2"><Layers size={16} className="text-[#F97316]" /> Badge &amp; Logo — {selectedCharacter.nama}</span>
-                {showBadgeEditor ? <ChevronUp size={16} className="text-[#94A3B8]" /> : <ChevronDown size={16} className="text-[#94A3B8]" />}
-              </button>
-              {showBadgeEditor && (
-                <div className="mt-3">
-                  <BadgeLogoSettings
-                    characterId={selectedCharacter.id}
-                    characterName={selectedCharacter.nama}
-                    assets={Object.values(badgeAssets).filter((a): a is BadgeAsset => !!a)}
-                    sampleVideos={videos}
-                    onChanged={() => loadBadges(selectedCharacter.id)}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Toolbar seleksi bulk */}
           {selectedIds.size > 0 && (
             <div className="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-[#0F172A] text-white text-sm sticky top-2 z-10">
@@ -552,16 +540,14 @@ export default function AdminViralFrameAgentVideosPage() {
                 const m = metricEdits[v.id] ?? { post_url: '', views: '', likes: '' };
                 const editing = editingId === v.id;
                 const ratio = classifyRatio(v.width, v.height);
-                const statusBadgeType = pickStatusBadgeType(v);
-                const overlays = composeOverlaysForProperty(badgeAssets, v);
-                const displayUrl = buildOverlayVideoUrl(v.cloudinary_url, overlays);
+                const statusProperti = pickStatusProperti(v);
                 const selected = selectedIds.has(v.id);
                 const purgeDays = v.trashed_at ? daysUntilPurge(v.trashed_at) : null;
                 return (
                   <div key={v.id} onContextMenu={e2 => openContextMenu(e2, v.id)}
                     className={`border rounded-2xl overflow-hidden bg-white flex flex-col transition-colors ${selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-gray-100'}`}>
                     <div className="relative">
-                      <video key={displayUrl} src={displayUrl} poster={toImageThumbnailUrl(displayUrl)} controls preload="none" className="w-full bg-black"
+                      <video key={v.cloudinary_url} src={v.cloudinary_url} poster={toImageThumbnailUrl(v.cloudinary_url)} controls preload="none" className="w-full bg-black"
                         style={{ aspectRatio: v.width && v.height ? `${v.width} / ${v.height}` : '16 / 9', objectFit: 'contain' }} />
                       <button onClick={() => toggleSelect(v.id)}
                         className="absolute top-2 left-2 w-6 h-6 rounded-full bg-black/50 hover:bg-black/70 flex items-center justify-center text-white"
@@ -582,9 +568,9 @@ export default function AdminViralFrameAgentVideosPage() {
                             <span>{v.kode_listing}</span>
                             <span>·</span>
                             <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-[#64748B] font-semibold">{RATIO_LABEL[ratio]}</span>
-                            {statusBadgeType && (
-                              <span className={`px-1.5 py-0.5 rounded-full font-semibold text-white ${statusBadgeType === 'sold' ? 'bg-red-500' : 'bg-[#1565C0]'}`}>
-                                {STATUS_BADGE_LABEL[statusBadgeType]}
+                            {statusProperti && (
+                              <span className={`px-1.5 py-0.5 rounded-full font-semibold text-white ${statusProperti === 'sold' ? 'bg-red-500' : 'bg-[#1565C0]'}`}>
+                                {STATUS_LABEL[statusProperti]}
                               </span>
                             )}
                             {v.bytes && <><span>·</span><span>{(v.bytes / 1024 / 1024).toFixed(1)}MB</span></>}
@@ -600,7 +586,7 @@ export default function AdminViralFrameAgentVideosPage() {
                               <BarChart3 size={14} />
                             </button>
                           )}
-                          <a href={toAttachmentUrl(displayUrl)} className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download (versi siap-post)"><Download size={14} /></a>
+                          <a href={toAttachmentUrl(v.cloudinary_url)} className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download"><Download size={14} /></a>
                           {view === 'active' ? (
                             <button onClick={() => trashOne(v.id)} className="p-1.5 rounded-lg text-[#64748B] hover:bg-gray-100" title="Pindahkan ke Sampah"><Archive size={14} /></button>
                           ) : (
@@ -629,7 +615,7 @@ export default function AdminViralFrameAgentVideosPage() {
                         <div className="pt-1 border-t border-gray-50 flex-1">
                           <div className="flex items-start justify-between gap-2">
                             <p className="text-xs text-[#0F172A] whitespace-pre-wrap line-clamp-3 flex-1">
-                              {statusBadgeType === 'sold' && <span className="font-bold text-red-500">[SOLD] </span>}
+                              {statusProperti === 'sold' && <span className="font-bold text-red-500">[SOLD] </span>}
                               {v.caption || <span className="text-[#94A3B8]">Belum ada caption</span>}
                             </p>
                             <div className="flex gap-1 flex-shrink-0">
@@ -675,7 +661,7 @@ export default function AdminViralFrameAgentVideosPage() {
                       )}
 
                       {view === 'active' && (
-                        <button onClick={() => setScheduleTarget({ video: v, displayUrl })}
+                        <button onClick={() => setScheduleTarget(v)}
                           className="mt-auto flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700">
                           <Send size={12} /> Jadwalkan ke Sosmed
                         </button>
@@ -717,7 +703,7 @@ export default function AdminViralFrameAgentVideosPage() {
       )}
 
       {scheduleTarget && (
-        <AgentScheduleModal video={scheduleTarget.video} assetUrl={scheduleTarget.displayUrl} onClose={() => setScheduleTarget(null)}
+        <AgentScheduleModal video={scheduleTarget} onClose={() => setScheduleTarget(null)}
           onScheduled={() => { setScheduleTarget(null); setSlotRefreshTick(t => t + 1); if (selectedCharId != null) loadVideos(selectedCharId, view); }} />
       )}
     </div>
@@ -726,37 +712,27 @@ export default function AdminViralFrameAgentVideosPage() {
 
 // ── Modal "Jadwalkan ke Sosmed" untuk Konten Agent — TIDAK butuh upload
 // presign seperti Content Library, karena cloudinary_url sudah publik begitu
-// video ini diupload. Satu panggilan server saja cukup. `assetUrl` dikirim dari
-// parent (bukan cloudinary_url mentah dari DB) — itu URL versi "siap-post" YANG
-// SUDAH ADA overlay badge (SOLD/Hot/Featured) dari buildOverlayVideoUrl(), sama
-// persis dengan yang dipreview & di-download admin. cloudinary_url mentah TIDAK
-// PERNAH punya badge, cuma jadi bahan baku overlay.
-function AgentScheduleModal({ video, assetUrl, onClose, onScheduled }: { video: AgentVideo; assetUrl: string; onClose: () => void; onScheduled: () => void }) {
+// video ini diupload. Satu panggilan server saja cukup.
+//
+// Dulu di sini ada fase "warming": URL versi siap-post punya overlay badge yang
+// mungkin belum pernah dirender Cloudinary, jadi harus dipanaskan dari browser
+// dulu supaya Buffer/Zernio tidak membaca metadata video yang belum utuh.
+// Sejak fitur badge dihapus (2026-08-11) yang dikirim adalah file asli yang
+// sudah jadi sejak diupload — tidak ada transcode on-the-fly, jadi tidak ada
+// yang perlu dipanaskan.
+function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo; onClose: () => void; onScheduled: () => void }) {
   const [caption, setCaption] = useState(video.caption ?? '');
-  const [phase, setPhase] = useState<'form' | 'warming' | 'submitting' | 'done' | 'error'>('form');
+  const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
   const [errorMsg, setErrorMsg] = useState('');
   const [results, setResults] = useState<{ platform: string; status: 'scheduled' | 'failed'; error: string | null }[]>([]);
 
   const submit = async () => {
     setErrorMsg('');
-    try {
-      // Kombinasi video+overlay badge ini bisa saja BELUM PERNAH dirender
-      // Cloudinary (on-the-fly transform). Kalau Buffer/Zernio yang fetch
-      // duluan saat masih cold, mereka bisa baca metadata video yang belum
-      // utuh (durasi kebaca ~0 detik -> ditolak). "Panaskan" dulu dari browser
-      // (GET penuh, bukan HEAD, supaya Cloudinary benar2 selesai transcode
-      // dan meng-cache hasilnya) SEBELUM diserahkan ke Buffer/Zernio.
-      setPhase('warming');
-      await fetch(assetUrl).then(r => r.blob());
-    } catch {
-      // Warm-up gagal (mis. CORS/network) -- tetap lanjut, jangan blokir user;
-      // risikonya cuma sama seperti sebelum fix ini ada.
-    }
     setPhase('submitting');
     try {
       const res = await fetch('/api/admin/viralframe/schedule/commit-agent', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_id: video.id, caption, asset_url: assetUrl }),
+        body: JSON.stringify({ video_id: video.id, caption }),
       });
       const json = await bacaJson<{ results: typeof results; trashed: boolean }>(res);
       if (!json.success || !json.data) throw new Error(json.error ?? 'Gagal menjadwalkan post');
@@ -775,7 +751,7 @@ function AgentScheduleModal({ video, assetUrl, onClose, onScheduled }: { video: 
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-bold text-[#0F172A]">Jadwalkan ke Sosmed</h3>
-          {phase !== 'submitting' && phase !== 'warming' && (
+          {phase !== 'submitting' && (
             <button onClick={phase === 'done' ? onScheduled : onClose} className="p-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
           )}
         </div>
@@ -792,10 +768,10 @@ function AgentScheduleModal({ video, assetUrl, onClose, onScheduled }: { video: 
           </>
         )}
 
-        {(phase === 'warming' || phase === 'submitting') && (
+        {phase === 'submitting' && (
           <div className="py-6 text-center text-sm text-[#64748B]">
             <Loader2 size={20} className="animate-spin mx-auto mb-2" />
-            {phase === 'warming' ? 'Menyiapkan video (render badge)…' : 'Menjadwalkan ke 5 akun…'}
+            Menjadwalkan ke 5 akun…
           </div>
         )}
 

@@ -17,11 +17,10 @@ export async function onRequestPost(context) {
   const videoId = parseInt(body.video_id, 10);
   if (!Number.isInteger(videoId) || videoId <= 0) return jsonError('video_id wajib', 422);
   const caption = typeof body.caption === 'string' ? body.caption.slice(0, 2000) : '';
-  // asset_url (opsional): URL "versi siap-post" dari browser (buildOverlayVideoUrl,
-  // sudah ada badge SOLD/Hot/Featured) -- WAJIB dipakai kalau ada, supaya video yang
-  // terpost ke sosmed konsisten dengan yang dipreview admin. Fallback ke
-  // cloudinary_url mentah (tanpa badge) kalau browser tidak mengirimkannya.
-  const assetUrlOverride = typeof body.asset_url === 'string' ? body.asset_url.trim() : '';
+  // Dulu ada parameter asset_url: browser mengirim URL "versi siap-post" yang
+  // sudah bertempel overlay badge, supaya yang terbit sama persis dengan yang
+  // dipreview admin. Fitur badge dihapus 2026-08-11, jadi tidak ada lagi versi
+  // turunan — yang diposting selalu file asli apa adanya.
 
   const video = await env.DB.prepare(
     `SELECT v.id, v.cloudinary_url, v.trashed_at, v.character_id, c.nama AS character_nama
@@ -52,7 +51,7 @@ export async function onRequestPost(context) {
     );
   }
 
-  const { slotIndex, rows } = await scheduleFanOut(env, { assetUrl: assetUrlOverride || video.cloudinary_url, caption, akun });
+  const { slotIndex, rows } = await scheduleFanOut(env, { assetUrl: video.cloudinary_url, caption, akun });
 
   let trashed;
   try {

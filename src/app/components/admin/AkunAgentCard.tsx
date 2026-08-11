@@ -11,9 +11,9 @@
 // ter-mask, jadi tidak ada cara tidak sengaja mengosongkan key yang sudah ada.
 
 import { useState, useEffect, useCallback } from 'react';
-import { Users, CheckCircle, XCircle, RefreshCw, Save, Images } from 'lucide-react';
+import { Users, CheckCircle, XCircle, RefreshCw, Save } from 'lucide-react';
 import {
-  getAgentAccounts, saveAgentAccount, copyAgentBadges, getSchedulerAccounts,
+  getAgentAccounts, saveAgentAccount, getSchedulerAccounts,
   type AgentAccount, type AgentAccountInput, type AgentChannels,
   type SchedulerAccountsResult, type SchedulerPlatform,
 } from '../../../lib/api';
@@ -139,17 +139,6 @@ export default function AkunAgentCard() {
       if (!baru.id.trim()) delete channels[p]; else channels[p] = baru;
       return { ...f, channels };
     });
-
-  const salinBadge = async (characterId: number) => {
-    setMsg(null);
-    const r = await copyAgentBadges(characterId);
-    if (!r.success || !r.data) { setMsg({ type: 'error', text: r.error ?? 'Gagal menyalin badge' }); return; }
-    const { disalin, gagal, pesan } = r.data;
-    setMsg({
-      type: gagal.length > 0 ? 'error' : 'success',
-      text: pesan ?? `${disalin} badge/logo disalin ke cloud agent${gagal.length > 0 ? `, ${gagal.length} gagal` : ''}.`,
-    });
-  };
 
   return (
     <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 overflow-y-auto h-full">
@@ -282,13 +271,6 @@ export default function AkunAgentCard() {
                       className="px-4 py-2 rounded-xl bg-[#1565C0] text-white text-sm font-semibold inline-flex items-center gap-1.5 disabled:opacity-50">
                       <Save size={14} /> {menyimpan ? 'Menyimpan…' : 'Simpan'}
                     </button>
-                    {a.storage_siap && (
-                      <button type="button" onClick={() => salinBadge(a.character_id)}
-                        className="px-3 py-2 rounded-xl bg-white border border-gray-200 text-[#334155] text-sm font-semibold inline-flex items-center gap-1.5"
-                        title="Badge & logo harus berada di cloud yang sama dengan videonya supaya overlay bisa dipakai">
-                        <Images size={14} /> Salin badge ke cloud ini
-                      </button>
-                    )}
                   </div>
                 </div>
               )}

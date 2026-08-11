@@ -616,13 +616,6 @@ export async function saveAgentAccount(characterId: number, body: AgentAccountIn
   });
 }
 
-/** POST /api/admin/viralframe/agent-accounts/:id/copy-badges — pindahkan badge/logo ke cloud agent */
-export async function copyAgentBadges(characterId: number) {
-  return apiFetch<{ disalin: number; jenis?: string[]; gagal: { type: string; error: string }[]; pesan?: string }>(
-    `/admin/viralframe/agent-accounts/${characterId}/copy-badges`,
-    { method: 'POST' },
-  );
-}
 
 export type ScheduleSlotStatus = 'available' | 'used' | 'passed';
 export interface ScheduleSlotUsedBy {

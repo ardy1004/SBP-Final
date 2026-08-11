@@ -1,0 +1,22 @@
+-- Migration 0039: buang tabel badge/logo video bersama fiturnya.
+--
+-- Fitur overlay badge/logo ke video ViralFrame DIHAPUS 2026-08-11 atas keputusan
+-- user, setelah diukur ke akun Cloudinary produksi: 437 dari 464 derived
+-- resource berasal dari overlay badge (0,64 GB), dan tiap overlay memaksa
+-- Cloudinary me-render ULANG video utuh (~4,1 MB per salinan). Karena
+-- transformasi VIDEO ditagih menurut durasi/ukuran — bukan per file — itulah
+-- yang membuat angka transformasi menembus 14.556 alias 62% dari kuota free
+-- tier akun tersebut (storage-nya sendiri cuma 18%).
+--
+-- Catatan: repo ini biasanya MEMPERTAHANKAN tabel yatim sebagai batu nisan
+-- (lihat viralframe_videos). Di sini tabelnya benar-benar di-DROP karena user
+-- meminta eksplisit "hapus saja sekarang, jangan sisakan". Aset Cloudinary yang
+-- dirujuk baris-baris ini juga dihapus di operasi yang sama, jadi barisnya akan
+-- menunjuk ke file yang tidak ada lagi. Backup penuh D1 diambil tepat sebelum
+-- migrasi ini dijalankan.
+--
+-- Kalau badge dibutuhkan lagi suatu saat: bakar di hulu (Google Flow) atau di
+-- browser lewat ffmpeg.wasm seperti fitur Caption — dua-duanya nol biaya
+-- Cloudinary karena render terjadi sebelum file diupload.
+
+DROP TABLE IF EXISTS viralframe_badge_assets;
