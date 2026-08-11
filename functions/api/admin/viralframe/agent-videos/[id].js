@@ -3,17 +3,19 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
-import { destroyCloudinaryAsset } from '../../../../_lib/cloudinary.js';
+import { destroyByCloudName } from '../../../../_lib/cloudinary.js';
 
 export async function onRequestDelete(context) {
   const { env, params } = context;
   const id = parseInt(params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return jsonError('id tidak valid', 400);
 
-  const row = await env.DB.prepare('SELECT cloudinary_public_id, resource_type FROM viralframe_agent_videos WHERE id = ?').bind(id).first().catch(() => null);
+  const row = await env.DB.prepare('SELECT cloudinary_public_id, cloudinary_name, resource_type FROM viralframe_agent_videos WHERE id = ?').bind(id).first().catch(() => null);
   if (!row) return jsonError('Video tidak ditemukan', 404);
 
-  try { await destroyCloudinaryAsset(env, row.cloudinary_public_id, row.resource_type); }
+  // Hapus di cloud tempat aset ini tersimpan (bisa berbeda dari akun agent
+  // sekarang kalau agent-nya pernah pindah akun) — migrasi 0037.
+  try { await destroyByCloudName(env, row.cloudinary_name, row.cloudinary_public_id, row.resource_type); }
   catch (err) { console.error('[vf agent-videos] cloudinary destroy', err.message); }
 
   try {

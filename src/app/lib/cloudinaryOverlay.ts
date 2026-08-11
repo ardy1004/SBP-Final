@@ -11,6 +11,10 @@ export interface BadgeAsset {
   type: BadgeType;
   cloudinary_public_id: string;
   cloudinary_url: string;
+  // Cloud tempat file badge ini tersimpan (migrasi 0037). Sejak tiap agent bisa
+  // punya akun Cloudinary sendiri, badge dari cloud LAIN tidak bisa dipakai
+  // sebagai overlay — lihat buildOverlayVideoUrl. Null = baris lama.
+  cloudinary_name?: string | null;
   // Posisi bebas (persentase 0-1 dari pojok kiri-atas video) — bisa di titik mana pun,
   // bukan cuma preset gravity. Diatur lewat drag langsung di preview (BadgeLogoSettings).
   x_pct: number;
@@ -67,14 +71,34 @@ export function toTrimmedImageUrl(imageUrl: string): string {
   return imageUrl.slice(0, insertAt) + 'e_trim/' + imageUrl.slice(insertAt);
 }
 
+export function cloudNameDariUrl(url: string): string | null {
+  const m = /^https:\/\/res\.cloudinary\.com\/([^/]+)\//.exec(url ?? '');
+  return m ? m[1] : null;
+}
+
+// Badge yang BISA dipakai sebagai overlay untuk video ini: l_<public_id> hanya
+// menemukan aset di cloud yang sama dengan videonya. Sejak tiap agent punya
+// akun Cloudinary sendiri (migrasi 0037), badge dari cloud lain WAJIB dibuang
+// di sini — kalau tidak, URL yang dihasilkan ditolak Cloudinary dan videonya
+// gagal tampil sama sekali (bukan sekadar tampil tanpa badge).
+// Baris lama tanpa cloudinary_name dianggap cocok — sebelum 0037 semuanya
+// memang berada di satu cloud yang sama.
+export function badgeSecloud(baseUrl: string, assets: BadgeAsset[]): BadgeAsset[] {
+  const cloud = cloudNameDariUrl(baseUrl);
+  if (!cloud) return assets;
+  return assets.filter(a => !a.cloudinary_name || a.cloudinary_name === cloud);
+}
+
 // Sisipkan transformasi overlay tepat setelah "/upload/" pada secure_url Cloudinary.
 export function buildOverlayVideoUrl(baseUrl: string, assets: BadgeAsset[]): string {
   if (!baseUrl || assets.length === 0) return baseUrl;
   const marker = '/upload/';
   const idx = baseUrl.indexOf(marker);
   if (idx === -1) return baseUrl;
+  const dipakai = badgeSecloud(baseUrl, assets);
+  if (dipakai.length === 0) return baseUrl;
   const insertAt = idx + marker.length;
-  const transforms = assets.map(overlaySegment).join('/');
+  const transforms = dipakai.map(overlaySegment).join('/');
   return baseUrl.slice(0, insertAt) + transforms + '/' + baseUrl.slice(insertAt);
 }
 

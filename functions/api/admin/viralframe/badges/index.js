@@ -6,6 +6,7 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
+import { cloudNameDariUrl } from '../../../../_lib/agentAccounts.js';
 
 const VALID_TYPES = ['sold', 'premium', 'featured', 'hot', 'pilihan', 'logo'];
 
@@ -22,7 +23,7 @@ export async function onRequestGet(context) {
 
   try {
     const res = await env.DB.prepare(
-      `SELECT id, character_id, type, cloudinary_public_id, cloudinary_url, x_pct, y_pct, width_pct, updated_at
+      `SELECT id, character_id, type, cloudinary_public_id, cloudinary_url, cloudinary_name, x_pct, y_pct, width_pct, updated_at
        FROM viralframe_badge_assets WHERE character_id = ? ORDER BY type`
     ).bind(characterId).all();
     return jsonOk({ items: res.results ?? [] });
@@ -47,6 +48,12 @@ export async function onRequestPost(context) {
   const cloudinaryUrl = typeof body.cloudinary_url === 'string' ? body.cloudinary_url.slice(0, 1000) : '';
   if (!cloudinaryPublicId || !cloudinaryUrl) return jsonError('cloudinary_public_id dan cloudinary_url wajib', 422);
 
+  // Overlay Cloudinary (l_<public_id>) HANYA bisa merujuk aset di cloud yang
+  // sama dengan videonya. Sejak agent punya cloud sendiri (migrasi 0037),
+  // cloud badge wajib dicatat supaya buildOverlayVideoUrl bisa melewati badge
+  // yang beda cloud alih-alih menghasilkan URL yang error di Cloudinary.
+  const cloudinaryName = cloudNameDariUrl(cloudinaryUrl);
+
   const xPct = clamp01(body.x_pct, type === 'logo' ? 0.78 : 0.05);
   const yPct = clamp01(body.y_pct, type === 'logo' ? 0.82 : 0.05);
   const widthPct = Number.isFinite(Number(body.width_pct)) ? Math.min(Math.max(Number(body.width_pct), 0.02), 1) : 0.18;
@@ -64,15 +71,15 @@ export async function onRequestPost(context) {
     if (existing) {
       await env.DB.prepare(
         `UPDATE viralframe_badge_assets
-         SET cloudinary_public_id = ?, cloudinary_url = ?, x_pct = ?, y_pct = ?, width_pct = ?, updated_at = datetime('now')
+         SET cloudinary_public_id = ?, cloudinary_url = ?, cloudinary_name = ?, x_pct = ?, y_pct = ?, width_pct = ?, updated_at = datetime('now')
          WHERE id = ?`
-      ).bind(cloudinaryPublicId, cloudinaryUrl, xPct, yPct, widthPct, existing.id).run();
+      ).bind(cloudinaryPublicId, cloudinaryUrl, cloudinaryName, xPct, yPct, widthPct, existing.id).run();
       return jsonOk({ id: existing.id });
     }
     const res = await env.DB.prepare(
-      `INSERT INTO viralframe_badge_assets (character_id, type, cloudinary_public_id, cloudinary_url, x_pct, y_pct, width_pct)
-       VALUES (?,?,?,?,?,?,?)`
-    ).bind(characterId, type, cloudinaryPublicId, cloudinaryUrl, xPct, yPct, widthPct).run();
+      `INSERT INTO viralframe_badge_assets (character_id, type, cloudinary_public_id, cloudinary_url, cloudinary_name, x_pct, y_pct, width_pct)
+       VALUES (?,?,?,?,?,?,?,?)`
+    ).bind(characterId, type, cloudinaryPublicId, cloudinaryUrl, cloudinaryName, xPct, yPct, widthPct).run();
     return jsonOk({ id: res.meta?.last_row_id }, 201);
   } catch (err) {
     console.error('[vf badges] upsert', err.message);

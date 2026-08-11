@@ -8,6 +8,7 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+import { resolveCloudName } from '../../../_lib/agentAccounts.js';
 
 // Cloudinary text overlay: koma & slash di teks WAJIB di-escape ganda (bukan
 // encodeURIComponent biasa) karena keduanya juga pemisah komponen transformasi URL.
@@ -31,7 +32,10 @@ export async function onRequestGet(context) {
   const characterId = parseInt(url.searchParams.get('character_id') ?? '', 10);
   if (!Number.isInteger(propertyId) || propertyId <= 0) return jsonError('property_id wajib', 400);
 
-  const cloudName = env.CLOUDINARY_CLOUD_NAME;
+  // Pakai cloud milik agent kalau ada (migrasi 0037) supaya bandwidth delivery
+  // tercatat di akunnya sendiri. Delivery 'image/fetch' tidak butuh API secret,
+  // cuma nama cloud — jadi cukup resolveCloudName().
+  const cloudName = await resolveCloudName(env, Number.isInteger(characterId) ? characterId : null);
   if (!cloudName) return jsonError('Cloudinary belum dikonfigurasi', 500);
 
   try {

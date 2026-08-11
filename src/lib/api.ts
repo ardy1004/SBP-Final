@@ -536,31 +536,14 @@ export async function getAiModels(provider: AiProviderId) {
 
 // ── Scheduler ViralFrame (Buffer + Zernio) ──────────────────────────────────
 export type SchedulerProviderId = 'buffer' | 'zernio';
-export interface SchedulerKeyInfo { configured: boolean; masked: string | null }
 export interface SchedulePresetRow { slot: number; time: string }
+/** Hanya preset jam yang masih global. Key & channel ID milik masing-masing
+ *  agent (migrasi 0037/0038) — lihat AgentAccount di bawah. */
 export interface SchedulerConfig {
-  buffer_channel_id_youtube: string | null;
-  buffer_channel_id_tiktok: string | null;
-  buffer_channel_id_threads: string | null;
-  zernio_account_id_facebook: string | null;
-  zernio_account_id_instagram: string | null;
   viralframe_schedule_preset: SchedulePresetRow[];
 }
 
-/** GET /api/admin/settings/scheduler-keys — key Buffer/Zernio ter-mask */
-export async function getSchedulerKeys() {
-  return apiFetch<Record<SchedulerProviderId, SchedulerKeyInfo>>('/admin/settings/scheduler-keys');
-}
-
-/** PATCH /api/admin/settings/scheduler-keys — simpan key (kirim hanya yang diubah) */
-export async function saveSchedulerKeys(body: Partial<Record<SchedulerProviderId, string>>) {
-  return apiFetch<{ updated: string[] }>('/admin/settings/scheduler-keys', {
-    method: 'PATCH',
-    body: JSON.stringify(body),
-  });
-}
-
-/** GET /api/admin/settings/scheduler-config — channel/account ID + preset jam posting */
+/** GET /api/admin/settings/scheduler-config — preset jam posting */
 export async function getSchedulerConfig() {
   return apiFetch<SchedulerConfig>('/admin/settings/scheduler-config');
 }
@@ -578,9 +561,67 @@ export interface SchedulerAccountsResult {
   zernio: { ok: boolean; error?: string; accounts?: { id: string | null; platform: string | null; name: string | null; raw?: unknown }[] };
 }
 
-/** GET /api/admin/settings/scheduler-accounts — daftar channel Buffer & akun Zernio tertaut (untuk cari ID) */
-export async function getSchedulerAccounts() {
-  return apiFetch<SchedulerAccountsResult>('/admin/settings/scheduler-accounts');
+/** GET /api/admin/settings/scheduler-accounts?character_id= — daftar channel Buffer
+ *  & akun Zernio yang tertaut pada akun agent tsb (untuk mengisi channel ID). */
+export async function getSchedulerAccounts(characterId: number) {
+  return apiFetch<SchedulerAccountsResult>(`/admin/settings/scheduler-accounts?character_id=${characterId}`);
+}
+
+// ── Akun per agent (storage Cloudinary + scheduler) ─────────────────────────
+// Rahasia hanya diterima dalam bentuk ter-mask. Mengirim balik nilai ber-'•'
+// saat menyimpan = "jangan ubah field ini" (backend melewatinya).
+export type SchedulerPlatform = 'youtube' | 'tiktok' | 'threads' | 'facebook' | 'instagram';
+/** Provider ditentukan PER PLATFORM per agent — bukan pasangan tetap. Akun Monica
+ *  menaruh Threads di Buffer & Instagram di Zernio; agent lain kebalikannya.
+ *  Lihat migrasi 0038. */
+export type AgentChannels = Partial<Record<SchedulerPlatform, { provider: SchedulerProviderId; id: string }>>;
+
+export interface AgentAccount {
+  character_id: number;
+  nama: string;
+  gmail: string;
+  spesialis: string[];
+  cloudinary_name: string;
+  cloudinary_api_key: string;
+  cloudinary_api_secret_masked: string | null;
+  buffer_api_key_masked: string | null;
+  zernio_api_key_masked: string | null;
+  channels: AgentChannels;
+  storage_siap: boolean;
+  scheduler_siap: boolean;
+  video_aktif: number;
+}
+
+export interface AgentAccountInput {
+  gmail?: string;
+  spesialis?: string[];
+  cloudinary_name?: string;
+  cloudinary_api_key?: string;
+  cloudinary_api_secret?: string;
+  buffer_api_key?: string;
+  zernio_api_key?: string;
+  channels?: AgentChannels;
+}
+
+/** GET /api/admin/viralframe/agent-accounts */
+export async function getAgentAccounts() {
+  return apiFetch<{ items: AgentAccount[] }>('/admin/viralframe/agent-accounts');
+}
+
+/** PUT /api/admin/viralframe/agent-accounts/:id */
+export async function saveAgentAccount(characterId: number, body: AgentAccountInput) {
+  return apiFetch<{ updated: string[] }>(`/admin/viralframe/agent-accounts/${characterId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+/** POST /api/admin/viralframe/agent-accounts/:id/copy-badges — pindahkan badge/logo ke cloud agent */
+export async function copyAgentBadges(characterId: number) {
+  return apiFetch<{ disalin: number; jenis?: string[]; gagal: { type: string; error: string }[]; pesan?: string }>(
+    `/admin/viralframe/agent-accounts/${characterId}/copy-badges`,
+    { method: 'POST' },
+  );
 }
 
 export type ScheduleSlotStatus = 'available' | 'used' | 'passed';

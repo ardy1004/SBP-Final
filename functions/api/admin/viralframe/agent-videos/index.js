@@ -8,11 +8,12 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
-import { destroyCloudinaryAsset } from '../../../../_lib/cloudinary.js';
+import { destroyByCloudName } from '../../../../_lib/cloudinary.js';
+import { resolveCloudinaryByCloudName, cloudNameDariUrl } from '../../../../_lib/agentAccounts.js';
 
 const SELECT_COLS = `
   v.id, v.character_id, v.property_id, v.caption, v.hashtags,
-  v.cloudinary_public_id, v.cloudinary_url, v.resource_type,
+  v.cloudinary_public_id, v.cloudinary_url, v.cloudinary_name, v.resource_type,
   v.duration_sec, v.bytes, v.format, v.width, v.height,
   v.status, v.scheduled_at, v.posted_at,
   v.post_url, v.platform_targets, v.trashed_at, v.created_at,
@@ -33,17 +34,23 @@ async function backfillDimensions(env, rows) {
   const missing = rows.filter(r => r.width == null || r.height == null).slice(0, BACKFILL_MAX_PER_REQUEST);
   if (missing.length === 0) return;
 
-  const cloudName = env.CLOUDINARY_CLOUD_NAME;
-  const apiKey = env.CLOUDINARY_API_KEY;
-  const apiSecret = env.CLOUDINARY_API_SECRET;
-  if (!cloudName || !apiKey || !apiSecret) return; // belum dikonfigurasi, lewati diam-diam
-
-  const auth = 'Basic ' + btoa(`${apiKey}:${apiSecret}`);
+  // Tiap agent bisa punya cloud sendiri (migrasi 0037), jadi kredensialnya
+  // di-resolve PER CLOUD, bukan sekali dari env. Cache per request supaya 10
+  // baris di cloud yang sama tidak jadi 10 query D1.
+  const credsCache = new Map();
+  const ambilCreds = async (cloudName) => {
+    const kunci = cloudName ?? '';
+    if (!credsCache.has(kunci)) credsCache.set(kunci, await resolveCloudinaryByCloudName(env, cloudName));
+    return credsCache.get(kunci);
+  };
 
   await Promise.all(missing.map(async (row) => {
     try {
+      const creds = await ambilCreds(row.cloudinary_name);
+      if (!creds) return; // cloud tidak dikenali / belum dikonfigurasi, lewati diam-diam
+      const auth = 'Basic ' + btoa(`${creds.apiKey}:${creds.apiSecret}`);
       const res = await fetch(
-        `https://api.cloudinary.com/v1_1/${cloudName}/resources/${row.resource_type || 'video'}/upload/${row.cloudinary_public_id}`,
+        `https://api.cloudinary.com/v1_1/${creds.cloudName}/resources/${row.resource_type || 'video'}/upload/${row.cloudinary_public_id}`,
         { headers: { Authorization: auth } }
       );
       if (!res.ok) return;
@@ -129,6 +136,12 @@ export async function onRequestPost(context) {
   const cloudinaryUrl = typeof body.cloudinary_url === 'string' ? body.cloudinary_url.slice(0, 1000) : '';
   if (!cloudinaryPublicId || !cloudinaryUrl) return jsonError('cloudinary_public_id dan cloudinary_url wajib', 422);
 
+  // Cloud tempat file benar-benar mendarat. Diambil dari URL Cloudinary itu
+  // sendiri (sumber paling tepercaya — client tidak bisa salah lapor), dengan
+  // nilai kiriman client sebagai cadangan kalau bentuk URL-nya tak terduga.
+  const cloudinaryName = cloudNameDariUrl(cloudinaryUrl)
+    ?? (typeof body.cloudinary_name === 'string' ? body.cloudinary_name.slice(0, 100) || null : null);
+
   const caption = typeof body.caption === 'string' ? body.caption.slice(0, 1000) || null : null;
   const hashtags = typeof body.hashtags === 'string' ? body.hashtags.slice(0, 500) || null : null;
   const resourceType = typeof body.resource_type === 'string' ? body.resource_type.slice(0, 20) : 'video';
@@ -150,15 +163,15 @@ export async function onRequestPost(context) {
   try {
     const res = await env.DB.prepare(
       `INSERT INTO viralframe_agent_videos
-        (character_id, property_id, caption, hashtags, cloudinary_public_id, cloudinary_url, resource_type, duration_sec, bytes, format, width, height, gaya)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).bind(characterId, propertyId, caption, hashtags, cloudinaryPublicId, cloudinaryUrl, resourceType, durationSec, bytes, format, width, height, gaya).run();
+        (character_id, property_id, caption, hashtags, cloudinary_public_id, cloudinary_url, cloudinary_name, resource_type, duration_sec, bytes, format, width, height, gaya)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(characterId, propertyId, caption, hashtags, cloudinaryPublicId, cloudinaryUrl, cloudinaryName, resourceType, durationSec, bytes, format, width, height, gaya).run();
     return jsonOk({ id: res.meta?.last_row_id }, 201);
   } catch (err) {
     console.error('[vf agent-videos] insert', err.message);
     // Bersihkan aset yatim di Cloudinary (best-effort) supaya storage tidak terisi
     // file tanpa catatan DB
-    try { await destroyCloudinaryAsset(env, cloudinaryPublicId, resourceType); }
+    try { await destroyByCloudName(env, cloudinaryName, cloudinaryPublicId, resourceType); }
     catch (e) { console.error('[vf agent-videos] cleanup orphan', e.message); }
     return jsonError('Gagal mencatat video ke DB — upload dibatalkan, silakan coba lagi', 500);
   }

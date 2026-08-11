@@ -6,6 +6,7 @@
 // Auth: otomatis via functions/api/admin/_middleware.js
 
 import { jsonOk, jsonCreated, jsonError, handleOptions } from '../../../_shared/response.js';
+import { parseSpesialis } from '../../../../_lib/agentAccounts.js';
 
 const WEBP_PREFIX = 'data:image/webp;base64,';
 // ~2.2MB terdekode (base64 ~4/3x lebih besar dari biner) — client sudah downscale
@@ -32,13 +33,25 @@ export async function onRequestGet(context) {
   const { env } = context;
 
   try {
+    // spesialis + kesiapan storage ikut di sini (migrasi 0037) supaya dropdown
+    // "Karakter / Agent" di Upload Hasil bisa menyarankan agent yang cocok
+    // dengan jenis properti tanpa request kedua. LEFT JOIN: karakter tanpa
+    // baris akun (mis. Vina) tetap muncul.
     const result = await env.DB.prepare(`
-      SELECT id, nama, foto_url, gender, usia, etnik, style, ciri_fisik, created_at
-      FROM viralframe_characters
-      ORDER BY created_at DESC, id DESC
+      SELECT c.id, c.nama, c.foto_url, c.gender, c.usia, c.etnik, c.style, c.ciri_fisik, c.created_at,
+             a.spesialis,
+             (a.cloudinary_name IS NOT NULL AND a.cloudinary_api_key IS NOT NULL AND a.cloudinary_api_secret IS NOT NULL) AS storage_siap
+      FROM viralframe_characters c
+      LEFT JOIN viralframe_agent_accounts a ON a.character_id = c.id
+      ORDER BY c.created_at DESC, c.id DESC
     `).all();
 
-    return jsonOk({ items: result.results ?? [], total: (result.results ?? []).length });
+    const items = (result.results ?? []).map(r => ({
+      ...r,
+      spesialis: parseSpesialis(r.spesialis),
+      storage_siap: !!r.storage_siap,
+    }));
+    return jsonOk({ items, total: items.length });
   } catch (err) {
     console.error('[viralframe characters GET]', err.message);
     return jsonError('Gagal mengambil data karakter', 500);

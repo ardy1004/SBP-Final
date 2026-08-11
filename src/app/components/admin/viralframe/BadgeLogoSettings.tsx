@@ -47,7 +47,10 @@ function BadgeSlot({ type, label, hint, characterId, asset, sampleVideo, onChang
     try {
       const signRes = await fetch('/api/admin/viralframe/cloudinary-sign', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folder: `sbp-viralframe/badges/${characterId}` }),
+        // character_id menentukan akun Cloudinary tujuan (migrasi 0037) — badge
+        // WAJIB mendarat di cloud yang sama dengan video agent ini, karena
+        // overlay l_<public_id> tidak bisa lintas cloud.
+        body: JSON.stringify({ folder: `sbp-viralframe/badges/${characterId}`, character_id: characterId }),
       });
       const signJson = await bacaJson(signRes);
       if (!signJson.success) throw new Error(signJson.error ?? 'Gagal menyiapkan upload');

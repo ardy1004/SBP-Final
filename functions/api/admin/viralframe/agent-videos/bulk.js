@@ -5,7 +5,7 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
-import { destroyCloudinaryAsset } from '../../../../_lib/cloudinary.js';
+import { destroyByCloudName } from '../../../../_lib/cloudinary.js';
 import { logServerError } from '../../../../_lib/logError.js';
 
 const VALID_ACTIONS = ['trash', 'restore', 'delete'];
@@ -40,7 +40,7 @@ export async function onRequestPost(context) {
     // action 'delete' bisa menghapus permanen video AKTIF tanpa lewat Sampah dulu
     // (audit 2026-07-28), melewati safety net "trash dulu baru purge".
     const rows = await env.DB.prepare(
-      `SELECT id, cloudinary_public_id, resource_type FROM viralframe_agent_videos WHERE id IN (${placeholders}) AND trashed_at IS NOT NULL`
+      `SELECT id, cloudinary_public_id, cloudinary_name, resource_type FROM viralframe_agent_videos WHERE id IN (${placeholders}) AND trashed_at IS NOT NULL`
     ).bind(...ids).all();
     const candidates = rows.results ?? [];
     const skippedNotTrashed = ids.length - candidates.length;
@@ -54,7 +54,7 @@ export async function onRequestPost(context) {
     await Promise.all(candidates.map(async row => {
       if (!row.cloudinary_public_id) { deletable.push(row.id); return; }
       try {
-        await destroyCloudinaryAsset(env, row.cloudinary_public_id, row.resource_type);
+        await destroyByCloudName(env, row.cloudinary_name, row.cloudinary_public_id, row.resource_type);
         deletable.push(row.id);
       } catch (err) {
         console.error('[vf agent-videos bulk] cloudinary destroy', row.id, err.message);

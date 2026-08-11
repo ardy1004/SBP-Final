@@ -7,7 +7,7 @@
 // Auth: header X-Purge-Secret harus sama persis dengan env.VIRALFRAME_PURGE_SECRET.
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
-import { destroyCloudinaryAsset } from '../../../_lib/cloudinary.js';
+import { destroyByCloudName } from '../../../_lib/cloudinary.js';
 import { logServerError } from '../../../_lib/logError.js';
 
 // Batas D1 = 100 bound parameter per query, dan DELETE di bawah memakai
@@ -26,7 +26,7 @@ export async function onRequestPost(context) {
 
   try {
     const res = await env.DB.prepare(
-      `SELECT id, cloudinary_public_id, resource_type FROM viralframe_agent_videos
+      `SELECT id, cloudinary_public_id, cloudinary_name, resource_type FROM viralframe_agent_videos
        WHERE trashed_at IS NOT NULL AND trashed_at <= datetime('now', '-30 days')
        LIMIT ?`
     ).bind(PURGE_LIMIT_PER_RUN).all();
@@ -43,7 +43,7 @@ export async function onRequestPost(context) {
     await Promise.all(rows.map(async row => {
       if (!row.cloudinary_public_id) { deletable.push(row.id); return; }
       try {
-        await destroyCloudinaryAsset(env, row.cloudinary_public_id, row.resource_type);
+        await destroyByCloudName(env, row.cloudinary_name, row.cloudinary_public_id, row.resource_type);
         deletable.push(row.id);
       } catch (err) {
         console.error('[purge-trash] cloudinary destroy', row.id, err.message);

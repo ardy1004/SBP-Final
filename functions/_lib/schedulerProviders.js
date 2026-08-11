@@ -94,55 +94,56 @@ export async function pickNextSlot(env, preset) {
   return { slotIndex: 1, dateWib: tomorrowWib, driftMinutes: getDriftMinutes(tomorrowWib) };
 }
 
-// Fan-out inti dipakai oleh Content Library (viralframe_videos) DAN Konten
-// Agent (viralframe_agent_videos) — satu-satunya beda antar keduanya adalah
-// dari mana assetUrl datang (browser upload ke Zernio vs cloudinary_url yang
-// sudah publik). Slot harian dihitung LINTAS kedua sumber (tabel yang sama),
-// jadi "5 slot/hari" berlaku total, bukan per modul.
-export async function scheduleFanOut(env, { assetUrl, caption }) {
-  const [bufferKey, zernioKey, ytChannel, tiktokChannel, threadsChannel, fbAccount, igAccount] = await Promise.all([
-    getSetting(env, 'buffer_api_key'),
-    getSetting(env, 'zernio_api_key'),
-    getSetting(env, 'buffer_channel_id_youtube'),
-    getSetting(env, 'buffer_channel_id_tiktok'),
-    getSetting(env, 'buffer_channel_id_threads'),
-    getSetting(env, 'zernio_account_id_facebook'),
-    getSetting(env, 'zernio_account_id_instagram'),
-  ]);
+// Fan-out inti. Kredensial TIDAK lagi diambil sendiri dari settings global —
+// pemanggil WAJIB mengirim `akun` hasil resolveScheduler() milik agent yang
+// bersangkutan (migrasi 0037). Alasannya di functions/_lib/agentAccounts.js:
+// key yang salah = konten agent A terbit di akun sosmed agent B, dan itu tidak
+// bisa ditarik kembali. Arah impor juga dijaga satu jalur — file ini TIDAK
+// boleh mengimpor agentAccounts.js (agentAccounts yang mengimpor getSetting
+// dari sini).
+//
+// Slot harian masih dihitung GLOBAL lintas semua agent (tabel yang sama) —
+// pengaturan slot per agent sengaja ditunda, dibahas terpisah dengan user
+// (2026-08-11).
+export async function scheduleFanOut(env, { assetUrl, caption, akun }) {
+  const bufferKey = akun?.bufferKey ?? null;
+  const zernioKey = akun?.zernioKey ?? null;
+  const channels = akun?.channels ?? {};
 
   const preset = await getSchedulePreset(env);
   const { slotIndex, dateWib, driftMinutes } = await pickNextSlot(env, preset);
   const presetRow = preset.find(p => p.slot === slotIndex) ?? preset[0];
   const scheduledAt = buildSlotTime(dateWib, presetRow, driftMinutes);
 
-  const zernioPlatforms = [];
-  if (fbAccount) zernioPlatforms.push({ platform: 'facebook', accountId: fbAccount });
-  if (igAccount) zernioPlatforms.push({ platform: 'instagram', accountId: igAccount });
+  // Provider tiap platform dibaca dari konfigurasi akun, TIDAK dipasangkan mati
+  // di kode — lihat migrasi 0038. Buffer dipanggil per channel; Zernio menerima
+  // banyak platform dalam SATU panggilan.
+  const bufferPlatforms = [], zernioPlatforms = [];
+  for (const [platform, cfg] of Object.entries(channels)) {
+    if (!cfg?.id) continue;
+    if (cfg.provider === 'buffer') bufferPlatforms.push({ platform, id: cfg.id });
+    else if (cfg.provider === 'zernio') zernioPlatforms.push({ platform, accountId: cfg.id });
+  }
 
   const zernioJob = zernioPlatforms.length > 0
-    ? () => callZernioCreatePost({
+    ? callZernioCreatePost({
         apiKey: zernioKey, content: caption, scheduledFor: scheduledAt,
         timezone: 'Asia/Jakarta', platforms: zernioPlatforms, mediaUrl: assetUrl,
       })
-    : () => Promise.resolve({ ok: false, error: 'Akun Facebook/Instagram belum dikonfigurasi' });
+    : null;
 
-  const [ytRes, tiktokRes, threadsRes, zernioRes] = await Promise.all([
-    callBufferCreatePost({ apiKey: bufferKey, channelId: ytChannel, assetUrl, dueAt: scheduledAt, caption, platform: 'youtube' }),
-    callBufferCreatePost({ apiKey: bufferKey, channelId: tiktokChannel, assetUrl, dueAt: scheduledAt, caption, platform: 'tiktok' }),
-    callBufferCreatePost({ apiKey: bufferKey, channelId: threadsChannel, assetUrl, dueAt: scheduledAt, caption, platform: 'threads' }),
-    zernioJob(),
+  const [bufferResults, zernioRes] = await Promise.all([
+    Promise.all(bufferPlatforms.map(b =>
+      callBufferCreatePost({ apiKey: bufferKey, channelId: b.id, assetUrl, dueAt: scheduledAt, caption, platform: b.platform })
+    )),
+    zernioJob ?? Promise.resolve(null),
   ]);
 
   const rows = [
-    { platform: 'youtube', provider: 'buffer', scheduledAt, result: ytRes },
-    { platform: 'tiktok', provider: 'buffer', scheduledAt, result: tiktokRes },
-    { platform: 'threads', provider: 'buffer', scheduledAt, result: threadsRes },
-    // Satu panggilan Zernio menjadwalkan FB+IG sekaligus — sukses/gagalnya
-    // atomik untuk keduanya, respons Zernio tidak memisahkan status per-platform.
-    ...(zernioPlatforms.some(p => p.platform === 'facebook')
-      ? [{ platform: 'facebook', provider: 'zernio', scheduledAt, result: zernioRes }] : []),
-    ...(zernioPlatforms.some(p => p.platform === 'instagram')
-      ? [{ platform: 'instagram', provider: 'zernio', scheduledAt, result: zernioRes }] : []),
+    ...bufferPlatforms.map((b, i) => ({ platform: b.platform, provider: 'buffer', scheduledAt, result: bufferResults[i] })),
+    // Satu panggilan Zernio menjadwalkan semua platformnya sekaligus —
+    // sukses/gagalnya atomik, respons Zernio tidak memisahkan status per platform.
+    ...zernioPlatforms.map(z => ({ platform: z.platform, provider: 'zernio', scheduledAt, result: zernioRes })),
   ];
 
   return { slotIndex, rows };

@@ -7,6 +7,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { scheduleFanOut, persistScheduleResult } from '../../../../_lib/schedulerProviders.js';
+import { resolveScheduler } from '../../../../_lib/agentAccounts.js';
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -22,13 +23,36 @@ export async function onRequestPost(context) {
   // cloudinary_url mentah (tanpa badge) kalau browser tidak mengirimkannya.
   const assetUrlOverride = typeof body.asset_url === 'string' ? body.asset_url.trim() : '';
 
-  const video = await env.DB.prepare('SELECT id, cloudinary_url, trashed_at FROM viralframe_agent_videos WHERE id = ?')
-    .bind(videoId).first().catch(() => null);
+  const video = await env.DB.prepare(
+    `SELECT v.id, v.cloudinary_url, v.trashed_at, v.character_id, c.nama AS character_nama
+     FROM viralframe_agent_videos v JOIN viralframe_characters c ON c.id = v.character_id
+     WHERE v.id = ?`
+  ).bind(videoId).first().catch(() => null);
   if (!video) return jsonError('Video tidak ditemukan', 404);
   if (video.trashed_at) return jsonError('Video sudah ada di Sampah', 409);
   if (!video.cloudinary_url) return jsonError('Video belum punya URL Cloudinary', 422);
 
-  const { slotIndex, rows } = await scheduleFanOut(env, { assetUrl: assetUrlOverride || video.cloudinary_url, caption });
+  // Kredensial scheduler milik AGENT video ini — tanpa fallback ke akun global.
+  // Fallback di sini artinya konten agent ini terbit di akun sosmed agent lain,
+  // dan post yang sudah tayang tidak bisa ditarik (lihat agentAccounts.js).
+  const akun = await resolveScheduler(env, video.character_id);
+  if (!akun.bufferKey && !akun.zernioKey) {
+    return jsonError(
+      `Agent "${video.character_nama}" belum punya kredensial scheduler. Isi dulu di Admin → Pengaturan → Akun Agent.`,
+      422
+    );
+  }
+  // Key ada tapi belum ada satu pun channel = fan-out akan menghasilkan NOL
+  // baris dan endpoint balas "sukses" yang tidak menjadwalkan apa pun. Tolak di
+  // sini supaya kegagalannya terlihat, bukan tersamar jadi keberhasilan kosong.
+  if (Object.keys(akun.channels).length === 0) {
+    return jsonError(
+      `Agent "${video.character_nama}" belum punya channel sosmed. Buka Pengaturan → Akun Agent → "Ambil dari API", lalu Simpan.`,
+      422
+    );
+  }
+
+  const { slotIndex, rows } = await scheduleFanOut(env, { assetUrl: assetUrlOverride || video.cloudinary_url, caption, akun });
 
   let trashed;
   try {

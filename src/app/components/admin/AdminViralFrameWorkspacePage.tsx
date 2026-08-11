@@ -1275,14 +1275,28 @@ function CaptionStudio({ propertyId, platform, registerInstruction }: {
 const CaptionStudioMemo = memo(CaptionStudio);
 
 // ── Upload Hasil (Tahap 4): upload video jadi dari AI eksternal ke Cloudinary, tertaut karakter/agent ──
-interface CharacterOption { id: number; nama: string; foto_url: string }
+interface CharacterOption {
+  id: number; nama: string; foto_url: string;
+  /** Jenis properti yang jadi spesialisasi agent (migrasi 0037). Kosong = bebas. */
+  spesialis?: string[];
+  storage_siap?: boolean;
+}
 interface CloudinaryUploadResult {
   public_id: string; secure_url: string; resource_type?: string; duration?: number; bytes?: number; format?: string;
   width?: number; height?: number;
   error?: { message: string };
 }
-function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platform, registerInstruction, gaya }: {
+
+// Agent tanpa spesialis (mis. Monica Vera "All Properties") sengaja TIDAK
+// dianggap cocok di sini — kalau tidak, ia akan selalu ikut terdaftar sebagai
+// "yang disarankan" dan saran itu jadi tidak berarti apa-apa.
+function cocokSpesialis(c: CharacterOption, jenis: string): boolean {
+  return !!jenis && (c.spesialis?.includes(jenis) ?? false);
+}
+function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platform, registerInstruction, gaya, jenisProperti }: {
   propertyId: number; kodeListing: string; defaultCharacterId: number | null; platform: string; registerInstruction: string;
+  /** Jenis properti listing ini — dicocokkan dengan spesialis agent (saran, bukan larangan). */
+  jenisProperti: string;
   // Arketipe yang sedang dipilih di Parameter Video. Ikut tersimpan bersama video
   // supaya Analitik bisa membandingkan performa antar gaya tanpa admin mengetik apa pun.
   gaya: string;
@@ -1517,6 +1531,9 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
 
   const pickVariasi = (c: { caption: string; hashtags: string }) => { setCaption(c.caption); setHashtags(c.hashtags); };
 
+  const agentTerpilih = characters.find(c => c.id === characterId) ?? null;
+  const agentDisarankan = characters.filter(c => cocokSpesialis(c, jenisProperti));
+
   const reset = () => {
     setFile(null); setCaption(''); setHashtags(''); setCapVariasi([]); setProgress(0); setError(''); setSuccess(false);
     setBacksoundId(null); setBacksoundItem(null); setMergeError(''); invalidateMerged();
@@ -1529,9 +1546,12 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
     if (!characterId) { setError('Pilih karakter/agent dulu'); return; }
     setUploading(true); setError(''); setSuccess(false); setProgress(0);
     try {
+      // character_id WAJIB dikirim: dialah yang menentukan akun Cloudinary mana
+      // yang dipakai (migrasi 0037). Tanpa itu semua video kembali mendarat di
+      // akun global.
       const signRes = await fetch('/api/admin/viralframe/cloudinary-sign', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ property_id: propertyId }),
+        body: JSON.stringify({ property_id: propertyId, character_id: characterId }),
       });
       const signJson = await bacaJson(signRes);
       if (!signJson.success) throw new Error(signJson.error ?? 'Gagal menyiapkan upload');
@@ -1568,6 +1588,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
         body: JSON.stringify({
           character_id: characterId, property_id: propertyId, caption: caption || null, hashtags: hashtags || null,
           cloudinary_public_id: cloudinaryResult.public_id, cloudinary_url: cloudinaryResult.secure_url,
+          cloudinary_name: cloudName,
           resource_type: cloudinaryResult.resource_type ?? 'video', duration_sec: cloudinaryResult.duration ?? null,
           bytes: cloudinaryResult.bytes ?? null, format: cloudinaryResult.format ?? null,
           width: cloudinaryResult.width ?? null, height: cloudinaryResult.height ?? null,
@@ -1746,9 +1767,26 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
         <select value={characterId} onChange={e => setCharacterId(e.target.value ? parseInt(e.target.value, 10) : '')}
           className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#1565C0]">
           <option value="">— Pilih karakter —</option>
-          {characters.map(c => <option key={c.id} value={c.id}>{c.nama}</option>)}
+          {characters.map(c => (
+            <option key={c.id} value={c.id}>
+              {c.nama}{cocokSpesialis(c, jenisProperti) ? ` — spesialis ${jenisProperti}` : ''}
+            </option>
+          ))}
         </select>
         {characters.length === 0 && <p className="text-[11px] text-[#94A3B8] mt-1">Belum ada karakter. Buat dulu di Step 2 — Pilih Karakter.</p>}
+        {/* Peringatan lunak: menyarankan, TIDAK memblokir — menyilang agent memang
+            kadang perlu (keputusan user 2026-08-11). */}
+        {agentTerpilih && !cocokSpesialis(agentTerpilih, jenisProperti) && (agentTerpilih.spesialis?.length ?? 0) > 0 && (
+          <p className="text-[11px] text-amber-600 mt-1">
+            {agentTerpilih.nama} spesialis {agentTerpilih.spesialis?.join(', ')}, properti ini {jenisProperti}. Tetap boleh dilanjut.
+            {agentDisarankan.length > 0 && ` Yang cocok: ${agentDisarankan.map(c => c.nama).join(', ')}.`}
+          </p>
+        )}
+        {agentTerpilih && !agentTerpilih.storage_siap && (
+          <p className="text-[11px] text-[#94A3B8] mt-1">
+            {agentTerpilih.nama} belum punya Cloudinary sendiri — video akan masuk ke akun global. Atur di Pengaturan → Akun Agent.
+          </p>
+        )}
       </div>
 
       <div className="space-y-2">
@@ -4059,6 +4097,7 @@ export default function AdminViralFrameWorkspacePage() {
               platform={platformForAI}
               registerInstruction={REGISTER_INSTRUCTION[s1.register] ?? ''}
               gaya={s1.archetype}
+              jenisProperti={prop.jenis_properti}
             />
           )}
 
