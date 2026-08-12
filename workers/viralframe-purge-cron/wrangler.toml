@@ -2,9 +2,15 @@ name = "viralframe-purge-cron"
 main = "src/index.js"
 compatibility_date = "2026-01-01"
 
-# 20:00 UTC = 03:00 WIB — purge sampah, di luar jam kerja.
+# 20:10 UTC = 03:10 WIB — purge sampah, di luar jam kerja.
 # 18:00-21:30 UTC tiap 30 menit = 01:00-04:30 WIB — auto-jadwal per agent.
 #   Tiap agent punya jam_auto sendiri di D1; endpoint yang mencocokkan.
 #   Ini jam MENGIRIM KE Buffer/Zernio, bukan jam tayang di medsos.
+#
+# ⚠️ Menit purge SENGAJA :10, JANGAN dikembalikan ke :00. Dulu "0 20 * * *"
+# bertabrakan tepat dengan slot auto-jadwal 20:00 UTC, sedangkan handler-nya
+# memilih SALAH SATU cabang lewat event.cron. Kalau Cloudflare mengirim pola
+# purge di menit itu, agent ber-jam_auto 03:00 WIB (= 20:00 UTC, dipakai Ayu)
+# tidak akan pernah dijadwalkan — diam total, tanpa error.
 [triggers]
-crons = ["0 20 * * *", "0,30 18-21 * * *"]
+crons = ["10 20 * * *", "0,30 18-21 * * *"]

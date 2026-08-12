@@ -9,7 +9,7 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
-import { kuotaAkun, slotTersedia, pilihJendela, waktuPerPlatform, getJendela } from '../../../../_lib/jadwalOtomatis.js';
+import { kuotaAkun, slotTersedia, pilihJendela, waktuPerPlatform, getJendela, slotDipakai } from '../../../../_lib/jadwalOtomatis.js';
 import { resolveAkunTarget, resolveScheduler, getModeAkun } from '../../../../_lib/agentAccounts.js';
 import { tanggalWib } from '../../../../_lib/waktu.js';
 
@@ -20,10 +20,11 @@ export async function onRequestGet({ env, request }) {
   try {
     const { utama } = await getModeAkun(env);
     const { targetId } = await resolveAkunTarget(env, characterId);
-    const [jendela, akun, { kuota, hari, utama: iaUtama }] = await Promise.all([
+    const [jendela, akun, { kuota, hari, utama: iaUtama }, dipakai] = await Promise.all([
       getJendela(env),
       resolveScheduler(env, characterId),
       kuotaAkun(env, targetId, utama),
+      slotDipakai(env, targetId),
     ]);
 
     const platforms = Object.keys(akun.channels);
@@ -40,8 +41,13 @@ export async function onRequestGet({ env, request }) {
 
     // Jam rencana hari ini menurut mesin — ditampilkan apa adanya supaya admin
     // bisa melihat jadwal SEBELUM apa pun dikirim.
+    //
+    // `terpakai` dihitung PER JENDELA, bukan "n pertama sudah terisi". Jendela
+    // yang terisi tidak selalu berurutan: penjadwalan siang hari melewatkan
+    // jendela pagi, dan baris lama memakai penomoran slot preset 5-jam.
     const rencana = pilihJendela(targetId, hariIni, kuota, jendela).map(j => ({
       nama: j.nama,
+      terpakai: dipakai.has(`${hariIni}|${j.index + 1}`),
       waktu: platforms.length ? waktuPerPlatform(targetId, hariIni, j, platforms) : {},
     }));
 
@@ -55,7 +61,9 @@ export async function onRequestGet({ env, request }) {
       sisa: Math.max(0, kuota - terisi),
       platform: platforms,
       rencana,
-      tersedia: slotTersedia({ akunId: targetId, kuota, platforms, jendela }).length,
+      // `dipakai` wajib ikut: tanpa itu angka ini menghitung jendela yang
+      // sebenarnya sudah terisi, jadi UI menjanjikan slot yang akan ditolak.
+      tersedia: slotTersedia({ akunId: targetId, kuota, platforms, jendela, dipakai }).length,
       gagal: baris.filter(b => b.status === 'failed').map(b => ({ platform: b.platform, error: b.error_message })),
     });
   } catch (err) {

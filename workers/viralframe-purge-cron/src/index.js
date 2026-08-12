@@ -2,10 +2,11 @@
 // sama sekali. Seluruh logic tetap satu-satunya di Pages Functions, supaya tidak
 // ada duplikasi kode.
 //
-//   "0 20 * * *"        -> purge sampah (03:00 WIB)
+//   "10 20 * * *"       -> purge sampah (03:10 WIB)
 //   "0,30 18-21 * * *"  -> auto-jadwal (01:00-04:30 WIB, tiap 30 menit)
 //
-// Keduanya sama-sama menyala pada 20:00 UTC; event.cron yang membedakan.
+// Menitnya SENGAJA berbeda supaya tidak pernah ada satu menit yang cocok dengan
+// dua pola sekaligus — alasannya di wrangler.toml.
 const BASIS = 'https://salambumi.xyz/api/internal/viralframe/';
 
 async function panggil(jalur, secret, label) {
@@ -17,7 +18,7 @@ async function panggil(jalur, secret, label) {
 
 export default {
   async scheduled(event, env) {
-    if (event.cron === '0 20 * * *') {
+    if (event.cron === '10 20 * * *') {
       await panggil('purge-trash', env.VIRALFRAME_PURGE_SECRET, 'purge-trash');
       return;
     }

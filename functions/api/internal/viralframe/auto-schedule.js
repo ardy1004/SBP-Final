@@ -18,7 +18,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { getSetting, setSetting } from '../../../_lib/schedulerProviders.js';
 import { resolveScheduler, resolveAkunTarget, getModeAkun } from '../../../_lib/agentAccounts.js';
-import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela } from '../../../_lib/jadwalOtomatis.js';
+import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai } from '../../../_lib/jadwalOtomatis.js';
 import { tanggalWib } from '../../../_lib/waktu.js';
 
 // Jam WIB sekarang, dibulatkan ke bawah ke kelipatan 30 menit — dipakai
@@ -55,6 +55,10 @@ export async function onRequestPost({ request, env }) {
   const { utama } = await getModeAkun(env);
   const jendela = await getJendela(env);
   const laporan = [];
+  // Klaim slot dibagi PER AKUN TUJUAN, bukan per agent: di mode terpusat
+  // beberapa agent bermuara ke akun yang sama, dan saat dry-run tidak ada baris
+  // DB yang menahan mereka agar tidak memilih jendela yang sama.
+  const klaimPerAkun = new Map();
 
   for (const ag of agents) {
     const hasilAgent = { agent: ag.nama, character_id: ag.id, terjadwal: 0, gagal: 0, detail: [] };
@@ -68,6 +72,8 @@ export async function onRequestPost({ request, env }) {
     const { targetId } = await resolveAkunTarget(env, ag.id);
     const { kuota, hari } = await kuotaAkun(env, targetId, utama);
     const terpakai = await slotTerpakaiHariIni(env, targetId);
+    if (!klaimPerAkun.has(targetId)) klaimPerAkun.set(targetId, await slotDipakai(env, targetId));
+    const dipakai = klaimPerAkun.get(targetId);
     hasilAgent.kuota = kuota;
     hasilAgent.hari_nyata = hari;
     hasilAgent.sudah_terjadwal = terpakai;
@@ -90,7 +96,7 @@ export async function onRequestPost({ request, env }) {
 
     for (let i = 0; i < videos.length; i++) {
       const r = await jadwalkanVideo(env, {
-        video: videos[i], akun, targetId, kuota, jendela, urutanSlot: terpakai + i, dryRun: dry,
+        video: videos[i], akun, targetId, kuota, jendela, dipakai, dryRun: dry,
       });
       if (!r.ok) { hasilAgent.gagal++; hasilAgent.detail.push({ video_id: videos[i].id, alasan: r.alasan }); continue; }
       if (dry) { hasilAgent.detail.push({ video_id: videos[i].id, jendela: r.jendela, waktu: r.waktu }); hasilAgent.terjadwal++; continue; }

@@ -41,7 +41,10 @@ export default function SlotIndicatorStrip({ characterId, refreshKey }: { charac
 
       <div className="flex flex-wrap gap-2">
         {data.rencana.map((r, i) => {
-          const terpakai = i < data.terisi;
+          // Status per jendela datang dari server. Dulu dihitung `i < terisi`
+          // (n pertama dianggap terpakai) — salah begitu jendela yang terisi
+          // tidak berurutan, mis. pagi dilewati karena jamnya sudah lewat.
+          const terpakai = r.terpakai;
           const jam = Object.values(r.waktu).sort();
           const rentang = jam.length ? `${jam[0].slice(11, 16)}–${jam[jam.length - 1].slice(11, 16)}` : '—';
           return (

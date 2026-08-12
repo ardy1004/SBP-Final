@@ -172,15 +172,45 @@ export async function slotTerpakaiHariIni(env, akunId, tanggal = tanggalWib()) {
   }
 }
 
+// ── Slot yang sudah terisi ───────────────────────────────────────────────────
+// Kunci slot = "<tanggal>|<slot_index>", dengan slot_index = index jendela + 1
+// (nilai yang sama yang ditulis persistScheduleResult). Hari ini DAN besok ikut
+// dibaca, karena penjadwalan sore/malam wajar mendarat di jendela besok.
+export async function slotDipakai(env, akunId, sekarang = Date.now()) {
+  const set = new Set();
+  try {
+    const hariIni = tanggalWib(new Date(sekarang), 0);
+    const besok = tanggalWib(new Date(sekarang), 1);
+    const res = await env.DB.prepare(
+      `SELECT DISTINCT substr(scheduled_at,1,10) AS tgl, slot_index
+         FROM viralframe_scheduled_posts
+        WHERE akun_id = ? AND status = 'scheduled' AND substr(scheduled_at,1,10) IN (?, ?)`
+    ).bind(akunId, hariIni, besok).all();
+    for (const r of res.results ?? []) set.add(`${r.tgl}|${r.slot_index}`);
+  } catch { /* kolom/tabel belum ada -> anggap kosong, jangan matikan penjadwalan */ }
+  return set;
+}
+
 // ── Slot yang masih bisa dipakai ─────────────────────────────────────────────
-// Mengembalikan seluruh slot hari ini yang jamnya masih di depan (Buffer/Zernio
-// menolak jadwal di masa lalu). Kalau hari ini sudah habis, memakai jendela
-// besok — supaya cron yang jalan dini hari tetap punya sasaran.
-// Pemanggil tinggal mengambil sebanyak kekurangannya.
-export function slotTersedia({ akunId, kuota, platforms, jendela = JENDELA_DEFAULT, sekarang = Date.now() }) {
+// Mengembalikan slot hari ini yang (a) jendelanya belum terisi dan (b) jamnya
+// masih di depan (Buffer/Zernio menolak jadwal di masa lalu). Kalau hari ini
+// habis, memakai jendela besok — supaya cron dini hari tetap punya sasaran.
+//
+// ⚠️ `dipakai` WAJIB dikirim pemanggil yang menjadwalkan lebih dari satu video.
+// Tanpa itu pemilihan slot jatuh ke urutan posisi, dan posisi TIDAK SETARA
+// dengan "jendela mana yang kosong" — dua bug nyata lahir dari situ (diukur
+// 2026-08-12): (1) menjadwalkan jam 23:00 membuat semua video mendarat di
+// MENIT YANG SAMA besok pagi, karena penghitung kuota cuma melihat hari ini
+// sehingga indeksnya tak pernah naik; (2) sesudah satu jendela lewat, indeks
+// bergeser dan jendela kosong di tengah dilompati, jadi kuota 3 cuma terisi 2.
+export function slotTersedia({ akunId, kuota, platforms, jendela = JENDELA_DEFAULT, sekarang = Date.now(), dipakai = new Set() }) {
+  // Tanpa platform tidak ada jam yang bisa dihitung; Math.min(...[]) = Infinity
+  // akan lolos filter waktu dan melaporkan slot yang sebenarnya tidak ada.
+  if (!platforms?.length) return [];
   for (let hariKe = 0; hariKe <= 1; hariKe++) {
     const tanggal = tanggalWib(new Date(sekarang), hariKe);
     const layak = pilihJendela(akunId, tanggal, kuota, jendela)
+      .filter(j => !dipakai.has(`${tanggal}|${j.index + 1}`))
       .map(j => ({ jendela: j, tanggal, waktu: waktuPerPlatform(akunId, tanggal, j, platforms) }))
       .filter(s => Math.min(...Object.values(s.waktu).map(t => new Date(t).getTime())) > sekarang + MIN_LEAD_MS);
     if (layak.length > 0) return layak;
@@ -192,15 +222,22 @@ export function slotTersedia({ akunId, kuota, platforms, jendela = JENDELA_DEFAU
 // Dipakai jalur MANUAL (tombol Jadwalkan) dan jalur CRON, supaya keduanya
 // mustahil berbeda perilaku. Pemanggil sudah menyiapkan akun & kuota.
 //
+// `dipakai` = Set kunci slot dari slotDipakai(), DIPAKAI BERSAMA sepanjang satu
+// putaran penjadwalan. Slot yang dipilih langsung diklaim ke dalamnya, jadi
+// video berikutnya di putaran yang sama tidak bisa mengambil jendela itu lagi.
+// Ini juga satu-satunya pengaman saat `dryRun` — di mode itu tidak ada baris DB
+// yang ditulis, jadi Set inilah yang mencegah laporan berisi slot kembar.
+//
 // `dryRun` mengembalikan jam yang AKAN dipakai tanpa menyentuh Buffer/Zernio —
 // itu yang dipakai admin untuk memeriksa jadwal sebelum menyalakan otomatis.
-export async function jadwalkanVideo(env, { video, akun, targetId, kuota, jendela, urutanSlot = 0, dryRun = false }) {
+export async function jadwalkanVideo(env, { video, akun, targetId, kuota, jendela, dipakai, dryRun = false }) {
   const platforms = Object.keys(akun.channels ?? {});
   if (platforms.length === 0) return { ok: false, alasan: 'akun belum punya channel sosmed' };
 
-  const slots = slotTersedia({ akunId: targetId, kuota, platforms, jendela });
-  const slot = slots[urutanSlot];
-  if (!slot) return { ok: false, alasan: 'tidak ada jendela tersisa hari ini' };
+  const klaim = dipakai ?? await slotDipakai(env, targetId);
+  const slot = slotTersedia({ akunId: targetId, kuota, platforms, jendela, dipakai: klaim })[0];
+  if (!slot) return { ok: false, alasan: 'tidak ada jendela kosong yang tersisa' };
+  klaim.add(`${slot.tanggal}|${slot.jendela.index + 1}`);
 
   if (dryRun) return { ok: true, dry: true, tanggal: slot.tanggal, jendela: slot.jendela.nama, waktu: slot.waktu };
 

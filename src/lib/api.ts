@@ -655,7 +655,9 @@ export interface StatusSlotAkun {
   terisi: number;
   sisa: number;
   platform: string[];
-  rencana: { nama: string; waktu: Record<string, string> }[];
+  /** `terpakai` per jendela — JANGAN diturunkan dari `terisi`, jendela yang
+   *  terisi tidak selalu berurutan. */
+  rencana: { nama: string; terpakai: boolean; waktu: Record<string, string> }[];
   tersedia: number;
   gagal: { platform: string; error: string | null }[];
 }

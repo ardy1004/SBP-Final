@@ -374,11 +374,15 @@ export default function AkunAgentCard() {
                       </label>
                       <label className="flex items-center gap-1.5 text-xs text-[#334155]">
                         Jam kirim
-                        {/* Kelipatan 30 menit: cron menyala tiap :00 dan :30, jam lain tidak akan pernah cocok. */}
+                        {/* Daftar ini = jam yang BENAR-BENAR dijalankan cron
+                            (workers/viralframe-purge-cron/wrangler.toml:
+                            "0,30 18-21 UTC" = 01:00–04:30 WIB). Jam di luar itu
+                            tersimpan rapi tapi tidak pernah menyala — 00:30
+                            sempat ada di sini dan termasuk kasus itu. */}
                         <select value={form.jam_auto} onChange={e => ubah('jam_auto', e.target.value)}
                           className="px-2 py-1 rounded-lg border border-gray-200 text-xs">
                           <option value="">—</option>
-                          {['00:30','01:00','01:30','02:00','02:30','03:00','03:30','04:00','04:30'].map(j => <option key={j} value={j}>{j} WIB</option>)}
+                          {['01:00','01:30','02:00','02:30','03:00','03:30','04:00','04:30'].map(j => <option key={j} value={j}>{j} WIB</option>)}
                         </select>
                       </label>
                       {a.auto_terakhir && (

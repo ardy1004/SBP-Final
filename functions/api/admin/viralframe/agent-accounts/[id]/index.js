@@ -21,7 +21,11 @@ const FIELDS = [
   'jam_auto',
 ];
 
-const JAM_RE = /^([01]\d|2[0-3]):(00|30)$/;
+// Jam yang benar-benar dilalui cron: "0,30 18-21 UTC" = 01:00–04:30 WIB
+// (workers/viralframe-purge-cron/wrangler.toml). Di luar rentang ini nilainya
+// tersimpan rapi tapi agent-nya tidak akan pernah menyala — ditolak di sini
+// supaya kegagalannya terlihat saat menyimpan, bukan berbulan-bulan kemudian.
+const JAM_RE = /^(0[1-4]):(00|30)$/;
 
 const PROVIDERS = ['buffer', 'zernio'];
 
@@ -61,11 +65,12 @@ export async function onRequestPut({ env, request, params }) {
     nilai.push(body.auto_aktif ? 1 : 0);
   }
 
-  // Jam submit harus tepat di kelipatan 30 menit: cron menyala tiap :00 dan :30,
-  // jadi jam seperti '01:17' tidak akan pernah cocok dan agent-nya diam selamanya.
+  // Jam submit harus tepat di kelipatan 30 menit DAN di dalam jendela cron:
+  // jam seperti '01:17' atau '09:00' tidak akan pernah cocok, dan agent-nya
+  // diam selamanya tanpa satu pun pesan error.
   if (kolom.includes('jam_auto')) {
     const v = nilai[kolom.indexOf('jam_auto')];
-    if (v && !JAM_RE.test(v)) return jsonError('jam_auto harus HH:00 atau HH:30 (cron menyala tiap 30 menit)', 422);
+    if (v && !JAM_RE.test(v)) return jsonError('jam_auto harus antara 01:00–04:30 WIB, tepat di :00 atau :30 (di luar itu cron tidak pernah menyala)', 422);
   }
 
   // channels: { "<platform>": { provider, id } }. Entri tanpa id dibuang —
