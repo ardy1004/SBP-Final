@@ -34,6 +34,49 @@ function jenisTransaksi(tujuan) {
   return tujuan === 'disewa' ? 'sewa' : 'jual';
 }
 
+/**
+ * Cari submit yang sudah pernah tersimpan dengan submit_id yang sama.
+ *
+ * Endpoint ini menulis property+owner+agreement DULU, foto belakangan, dan
+ * payload-nya bisa 8–11 MB. Kalau koneksi putus setelah request sampai server
+ * tapi sebelum response diterima, klien menampilkan "Koneksi ke server gagal"
+ * padahal datanya sudah aman — lalu user menekan Kirim lagi dan lahirlah
+ * listing kedua. Lihat migrations/0042_titipjual_submit_id.sql.
+ *
+ * Sengaja fail-open (return null saat query error): lebih baik menanggung
+ * risiko duplikat yang bisa dihapus admin daripada menolak submit yang asli.
+ */
+async function cariSubmitLama(db, submit_id) {
+  try {
+    const row = await db.prepare(`
+      SELECT p.id AS property_id, p.kode_listing,
+             (SELECT id              FROM owners     WHERE property_id = p.id ORDER BY id ASC LIMIT 1) AS owner_id,
+             (SELECT id              FROM agreements WHERE property_id = p.id ORDER BY id ASC LIMIT 1) AS agreement_id,
+             (SELECT kode_perjanjian FROM agreements WHERE property_id = p.id ORDER BY id ASC LIMIT 1) AS kode_perjanjian,
+             (SELECT COUNT(*)        FROM property_images WHERE property_id = p.id)                    AS photos_uploaded
+        FROM properties p
+       WHERE p.submit_id = ?
+    `).bind(submit_id).first();
+    if (!row) return null;
+    return {
+      kode_perjanjian: row.kode_perjanjian,
+      kode_listing:    row.kode_listing,
+      property_id:     row.property_id,
+      owner_id:        row.owner_id,
+      agreement_id:    row.agreement_id,
+      photos_uploaded: row.photos_uploaded,
+      photos_failed:   0,
+      photos_warning:  null,
+      status:          'draft',
+      duplikat:        true,
+      pesan: 'Data properti Anda sudah kami terima sebelumnya. Tim SBP akan menghubungi Anda via WhatsApp.',
+    };
+  } catch (err) {
+    console.error('[titip-jual] cek submit_id gagal:', err.message);
+    return null;
+  }
+}
+
 export async function onRequestPost(context) {
   const { request, env } = context;
 
@@ -202,6 +245,15 @@ export async function onRequestPost(context) {
     return jsonError('Konfigurasi server tidak lengkap', 503);
   }
 
+  // ─── Idempotensi ──────────────────────────────────────────────────────────
+  // Diperiksa sedini mungkin: sesudah ini ada enkripsi NIK, fetch ke Google Maps,
+  // dan 3 INSERT — semuanya percuma bila submit ini sebenarnya percobaan ulang.
+  const submit_id = sanitize(body.submit_id ?? '', 40) || null;
+  if (submit_id) {
+    const lama = await cariSubmitLama(env.DB, submit_id);
+    if (lama) return jsonOk(lama, 200);
+  }
+
   // ─── Optional property fields ─────────────────────────────────────────────
   const provinsi       = sanitize(body.provinsi ?? 'DI Yogyakarta', 100);
   const kabupaten      = sanitize(body.kabupaten ?? '', 100);
@@ -307,7 +359,7 @@ export async function onRequestPost(context) {
          gmaps_link, latitude, longitude, lebar_jalan_m,
          income_per_bulan, pengeluaran_per_bulan, harga_sewa_kamar_bulan,
          details, furnished,
-         meta_title, meta_description,
+         meta_title, meta_description, submit_id,
          status_publish, created_at, updated_at)
       VALUES
         (?,?,?,?,?,?,?,?,?,
@@ -320,7 +372,7 @@ export async function onRequestPost(context) {
          ?,?,?,?,
          ?,?,?,
          ?,?,
-         ?,?,
+         ?,?,?,
          'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     `).bind(
       kode_listing, titleFinal, slug, jenis_properti, tujuan, hrg.harga, hrg.harga_per_m2, hrg.harga_mode, harga_sewa_tahun,
@@ -333,7 +385,7 @@ export async function onRequestPost(context) {
       gmaps_link, geo.latitude, geo.longitude, lebar_jalan_m,
       income_per_bulan, pengeluaran_per_bulan, harga_sewa_kamar_bulan,
       details, furnished,
-      meta.meta_title, meta.meta_description
+      meta.meta_title, meta.meta_description, submit_id
     ).run();
 
     let propResult;
@@ -384,6 +436,14 @@ export async function onRequestPost(context) {
     agreement_id = agrResult.meta?.last_row_id;
   } catch (err) {
     console.error('[titip-jual] INSERT error:', err.message);
+    // Dua submit dengan submit_id sama berbalapan: yang kalah kena UNIQUE.
+    // Datanya sudah tersimpan oleh yang menang — kembalikan itu, jangan 500.
+    // (Retry loop di atas tidak bisa menolong: ia mengganti kode_listing,
+    // sedangkan yang bentrok adalah submit_id.)
+    if (submit_id) {
+      const lama = await cariSubmitLama(env.DB, submit_id);
+      if (lama) return jsonOk(lama, 200);
+    }
     context.waitUntil(logServerError(env, { message: `[titip-jual] INSERT error: ${err.message}`, stack: err.stack, url: request.url }));
     return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
   }

@@ -34,6 +34,13 @@ export interface TitipJualDraft {
   s2?: Record<string, unknown>;
   /** id baris `leads` prospek — dipakai agar klik "Lanjut" berulang meng-UPDATE, bukan menambah baris. */
   leadId?: number;
+  /**
+   * Kunci idempotensi submit, tetap sama sepanjang satu sesi form termasuk saat
+   * mencoba ulang. Mencegah percobaan kedua melahirkan listing kedua ketika
+   * percobaan pertama sebenarnya sudah tersimpan tapi response-nya tidak sampai.
+   * Lihat migrations/0042_titipjual_submit_id.sql.
+   */
+  submitId?: string;
   /** Berapa foto yang sempat dipilih (file-nya sendiri tidak bisa disimpan). */
   jumlahFoto?: number;
   ts: number;

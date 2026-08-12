@@ -106,6 +106,41 @@ function adaIsi(obj: Record<string, unknown>): boolean {
 }
 
 /**
+ * POST JSON sambil melaporkan progres UNGGAHAN.
+ *
+ * fetch() tidak punya cara apa pun melaporkan progres upload — request body
+ * berupa ReadableStream belum didukung lintas browser. Padahal payload di sini
+ * memuat seluruh foto sebagai base64 (8–11 MB untuk 20 foto) dan di uplink
+ * seluler bisa memakan 60–90 detik. Tanpa angka yang bergerak, user hanya
+ * melihat spinner "Memproses…", menyimpulkan formnya menggantung, lalu menutup
+ * tab — dan submit yang sebenarnya sedang berjalan ikut mati.
+ * XMLHttpRequest satu-satunya jalan mendapat `upload.onprogress`.
+ */
+function postDenganProgres(
+  url: string, body: string, onProgress: (pct: number) => void,
+): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.upload.onprogress = ev => {
+      if (ev.lengthComputable) onProgress(Math.round((ev.loaded / ev.total) * 100));
+    };
+    xhr.onload  = () => resolve({ status: xhr.status, text: xhr.responseText });
+    xhr.onerror = () => reject(new Error('jaringan'));
+    xhr.send(body);
+  });
+}
+
+/**
+ * Ukuran biner sebenarnya dari sebuah data URL base64 — dipakai untuk menolak
+ * payload kebesaran SEBELUM user menunggu satu setengah menit sia-sia.
+ */
+function ukuranBase64(dataUrl: string): number {
+  return Math.ceil((dataUrl.length - dataUrl.indexOf(',') - 1) * 3 / 4);
+}
+
+/**
  * Kunci error Step 2 menurut URUTAN TAMPILNYA di layar — perhatikan `jenis`
  * ada SETELAH `harga`, mengikuti tata letak sebenarnya, bukan urutan
  * pemeriksaan di handleSubmit.
@@ -528,6 +563,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
   const [turnstileStatus, setTurnstileStatus] = useState<TurnstileStatus>('memuat');
   const turnstileRef = useRef<TurnstileHandle>(null);
   const [loading, setLoading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
   const [errors, setErrors]   = useState<Record<string, string>>({});
   const [apiError, setApiError] = useState<string | null>(null);
 
@@ -719,6 +755,14 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     if (!gmaps.trim()) e.gmaps_link = 'Link Google Maps wajib diisi';
     if (!legalitas) e.legalitas = 'Legalitas wajib dipilih';
     if (!photoPreviews.length) e.photos = 'Minimal 1 foto wajib diupload';
+    else {
+      // Batas server 40 MB. Ditolak DI SINI supaya user tahu sekarang, bukan
+      // setelah menunggu unggahan 8–11 MB selesai lalu kena 422.
+      const totalMB = photoPreviews.reduce((n, p) => n + ukuranBase64(p), 0) / 1024 / 1024;
+      if (totalMB > 35) {
+        e.photos = `Total ukuran foto ${totalMB.toFixed(1)} MB, melebihi batas 35 MB. Kurangi jumlah foto atau pilih foto beresolusi lebih rendah.`;
+      }
+    }
     if (!consent) e.consent = 'Persetujuan privasi wajib dicentang';
     // Token anti-bot: backend FAIL-CLOSED, jadi submit tanpa token pasti ditolak
     // 403 setelah user menunggu seluruh foto terunggah. Hentikan di sini, dengan
@@ -742,6 +786,12 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
 
     setLoading(true);
     setApiError(null);
+    setUploadPct(0);
+
+    // Dibuat sekali lalu dipertahankan di draft: percobaan ulang WAJIB memakai
+    // id yang sama, kalau tidak idempotensinya tidak ada artinya.
+    const submitId = bacaDraft()?.submitId ?? crypto.randomUUID();
+    simpanDraft({ submitId });
 
     try {
       const payload: Record<string, unknown> = {
@@ -809,17 +859,28 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         // Supaya prospek yang dicatat di Step 1 ditandai selesai — kalau tidak,
         // admin akan mengejar orang yang sebenarnya sudah menyelesaikan formnya.
         prospek_lead_id:   bacaDraft()?.leadId,
+        // Kunci idempotensi: SAMA sepanjang sesi form ini, termasuk saat
+        // mencoba ulang setelah gagal. Tanpa ini, submit yang datanya sudah
+        // tersimpan tapi response-nya tidak sampai akan melahirkan listing
+        // kedua saat user menekan Kirim lagi.
+        submit_id:         submitId,
       };
 
       // Remove undefined keys
       Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
 
-      const res = await fetch('/api/titip-jual', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const json = await bacaJson<ApiResult>(res);
+      const { status, text } = await postDenganProgres(
+        '/api/titip-jual', JSON.stringify(payload), setUploadPct,
+      );
+      let json: { success?: boolean; data?: ApiResult; error?: string; details?: Record<string, string> };
+      try {
+        json = JSON.parse(text);
+      } catch {
+        // Body bukan JSON (mis. halaman error HTML dari platform) — padanan
+        // perilaku bacaJson(), jangan lempar SyntaxError mentah ke UI.
+        json = { success: false, error: `Server mengembalikan respons tak terduga (HTTP ${status}).` };
+      }
+      const res = { ok: status >= 200 && status < 300, status };
 
       if (!res.ok) {
         if (res.status === 422 && json.details) {
@@ -857,9 +918,12 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
       hapusDraft();
       onSuccess({ ...json.data!, photos_total_sent: photoPreviews.length });
     } catch {
-      setApiError('Koneksi ke server gagal. Periksa koneksi internet Anda dan coba lagi.');
+      // Draft SENGAJA tidak dihapus di sini — submit_id di dalamnya justru yang
+      // membuat percobaan ulang aman dari duplikat.
+      setApiError('Koneksi ke server terputus saat mengirim. Tekan Kirim sekali lagi — bila data Anda ternyata sudah masuk, sistem mengenalinya dan tidak akan membuat listing ganda.');
     } finally {
       setLoading(false);
+      setUploadPct(0);
     }
   };
 
@@ -1311,7 +1375,13 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
           className={`flex-1 py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all ${loading ? 'opacity-60 cursor-not-allowed' : 'hover:brightness-110'}`}
           style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
           {loading ? (
-            <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Memproses...</>
+            <>
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              {/* Angka yang bergerak, bukan spinner buta: mengunggah 20 foto di
+                  jaringan seluler bisa 60–90 detik dan tanpa umpan balik user
+                  menyimpulkan formnya menggantung lalu menutup tab. */}
+              {uploadPct > 0 && uploadPct < 100 ? `Mengunggah ${uploadPct}%…` : 'Menyimpan…'}
+            </>
           ) : '📄 Kirim Properti →'}
         </button>
       </div>
