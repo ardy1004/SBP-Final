@@ -11,7 +11,7 @@
 // ter-mask, jadi tidak ada cara tidak sengaja mengosongkan key yang sudah ada.
 
 import { useState, useEffect, useCallback } from 'react';
-import { Users, CheckCircle, XCircle, RefreshCw, Save } from 'lucide-react';
+import { Users, CheckCircle, XCircle, RefreshCw, Save, Play, Pause } from 'lucide-react';
 import {
   getAgentAccounts, saveAgentAccount, saveModeAkun, getSchedulerAccounts,
   type AgentAccount, type AgentAccountInput, type AgentChannels, type ModeAkun,
@@ -31,6 +31,7 @@ type FormState = {
   cloudinary_name: string; cloudinary_api_key: string; cloudinary_api_secret: string;
   buffer_api_key: string; zernio_api_key: string;
   channels: AgentChannels;
+  jam_auto: string; auto_aktif: boolean;
 };
 
 function formDari(a: AgentAccount): FormState {
@@ -39,6 +40,7 @@ function formDari(a: AgentAccount): FormState {
     cloudinary_name: a.cloudinary_name, cloudinary_api_key: a.cloudinary_api_key,
     cloudinary_api_secret: '', buffer_api_key: '', zernio_api_key: '',
     channels: { ...a.channels },
+    jam_auto: a.jam_auto, auto_aktif: a.auto_aktif,
   };
 }
 
@@ -62,14 +64,25 @@ export default function AkunAgentCard() {
   const [akunTertaut, setAkunTertaut] = useState<SchedulerAccountsResult | null>(null);
   const [memuatAkun, setMemuatAkun] = useState(false);
   const [mode, setMode] = useState<ModeAkun>('terpusat');
+  const [autoAktif, setAutoAktif] = useState(false);
   const [utama, setUtama] = useState<number | null>(null);
   const [ubahMode, setUbahMode] = useState(false);
 
   const muat = useCallback(async () => {
     const r = await getAgentAccounts();
-    if (r.success && r.data) { setItems(r.data.items); setMode(r.data.mode); setUtama(r.data.utama); }
+    if (r.success && r.data) {
+      setItems(r.data.items); setMode(r.data.mode); setUtama(r.data.utama); setAutoAktif(r.data.auto_aktif);
+    }
     else setMsg({ type: 'error', text: r.error ?? 'Gagal memuat akun agent' });
   }, []);
+
+  const gantiAuto = async (nyala: boolean) => {
+    setUbahMode(true); setMsg(null);
+    const r = await saveModeAkun({ auto_aktif: nyala });
+    setUbahMode(false);
+    if (r.success) { setAutoAktif(nyala); muat(); }
+    else setMsg({ type: 'error', text: r.error ?? 'Gagal mengubah saklar auto' });
+  };
 
   const gantiMode = async (m: ModeAkun) => {
     setUbahMode(true); setMsg(null);
@@ -101,6 +114,7 @@ export default function AkunAgentCard() {
       gmail: form.gmail, spesialis: form.spesialis,
       cloudinary_name: form.cloudinary_name, cloudinary_api_key: form.cloudinary_api_key,
       channels: form.channels,
+      jam_auto: form.jam_auto, auto_aktif: form.auto_aktif,
     };
     if (form.cloudinary_api_secret.trim()) body.cloudinary_api_secret = form.cloudinary_api_secret.trim();
     if (form.buffer_api_key.trim()) body.buffer_api_key = form.buffer_api_key.trim();
@@ -163,6 +177,22 @@ export default function AkunAgentCard() {
         </div>
       </div>
 
+      {/* Saklar induk auto-jadwal. Ini MENGIRIM KE Buffer/Zernio pada jam dini
+          hari; yang menerbitkan ke medsos tetap Buffer/Zernio di jam primetime. */}
+      <div className={`rounded-xl border p-3 mb-3 ${autoAktif ? 'border-emerald-200 bg-emerald-50/60' : 'border-gray-100 bg-gray-50/60'}`}>
+        <div className="flex items-center gap-3">
+          <button type="button" disabled={ubahMode} onClick={() => gantiAuto(!autoAktif)}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-white disabled:opacity-50 ${autoAktif ? 'bg-emerald-600' : 'bg-[#64748B]'}`}>
+            {autoAktif ? <Pause size={13} /> : <Play size={13} />}
+            {autoAktif ? 'Auto AKTIF — klik untuk jeda' : 'Auto MATI — klik untuk mulai'}
+          </button>
+          <p className="text-[10px] text-[#64748B] flex-1">
+            Tiap agent dikirim ke Buffer/Zernio pada jamnya masing-masing (dini hari), sebanyak kuota hariannya.
+            Yang menayangkan ke medsos tetap Buffer/Zernio, di jam primetime.
+          </p>
+        </div>
+      </div>
+
       {/* Mode akun — menentukan akun SIAPA yang dipakai, mengatur storage DAN
           scheduler sekaligus. Ditaruh paling atas karena mengubah arti seluruh
           daftar di bawahnya. */}
@@ -210,6 +240,10 @@ export default function AkunAgentCard() {
                 {a.spesialis.length > 0 && (
                   <span className="text-[10px] text-[#64748B] capitalize">{a.spesialis.join(', ')}</span>
                 )}
+                <span className="text-[10px] text-[#64748B]">
+                  {a.auto_aktif ? `auto ${a.jam_auto || '—'}` : 'auto mati'} · kuota {a.kuota}
+                  {!a.utama && a.hari != null && ` · ${a.hari} hari nyata`}
+                </span>
                 <span className="ml-auto text-[10px] text-[#94A3B8]">{a.video_aktif} video</span>
               </button>
 
@@ -303,6 +337,31 @@ export default function AkunAgentCard() {
                         {akunTertaut.zernio.ok ? `Zernio: ${akunTertaut.zernio.accounts?.length ?? 0} akun` : `Zernio: ${akunTertaut.zernio.error}`}
                       </div>
                     )}
+                  </div>
+
+                  <div>
+                    <div className="text-[11px] font-bold text-[#94A3B8] mb-1.5">AUTO-JADWAL AGENT INI</div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="flex items-center gap-1.5 text-xs text-[#334155]">
+                        <input type="checkbox" checked={form.auto_aktif} onChange={e => ubah('auto_aktif', e.target.checked as never)} />
+                        Aktifkan
+                      </label>
+                      <label className="flex items-center gap-1.5 text-xs text-[#334155]">
+                        Jam kirim
+                        {/* Kelipatan 30 menit: cron menyala tiap :00 dan :30, jam lain tidak akan pernah cocok. */}
+                        <select value={form.jam_auto} onChange={e => ubah('jam_auto', e.target.value)}
+                          className="px-2 py-1 rounded-lg border border-gray-200 text-xs">
+                          <option value="">—</option>
+                          {['00:30','01:00','01:30','02:00','02:30','03:00','03:30','04:00','04:30'].map(j => <option key={j} value={j}>{j} WIB</option>)}
+                        </select>
+                      </label>
+                      {a.auto_terakhir && (
+                        <span className="text-[10px] text-[#64748B]">
+                          Terakhir: {new Date(a.auto_terakhir).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
+                          {a.auto_hasil && ` · ${a.auto_hasil.terjadwal} terjadwal${a.auto_hasil.gagal ? `, ${a.auto_hasil.gagal} gagal` : ''}${a.auto_hasil.alasan ? ` (${a.auto_hasil.alasan})` : ''}`}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2 pt-1">

@@ -1,55 +1,54 @@
-// GET   /api/admin/settings/scheduler-config — preset jam posting (WIB)
-// PATCH /api/admin/settings/scheduler-config — simpan preset
+// GET   /api/admin/settings/scheduler-config — jendela primetime (WIB)
+// PATCH /api/admin/settings/scheduler-config — simpan jendela
 // Auth: _middleware.js
 //
-// Channel/account ID dan API key TIDAK lagi di sini: sejak migrasi 0037/0038
-// keduanya milik masing-masing agent (viralframe_agent_accounts) dan diatur di
-// Admin → Pengaturan → Akun Agent. Menyisakannya di sini berarti ada layar yang
-// bisa diedit tapi tidak dibaca siapa pun — persis jenis konfigurasi mati yang
-// bikin orang mengira sudah mengatur sesuatu.
+// Menggantikan preset 5 slot tetap (migrasi 0041). Sekarang yang diatur adalah
+// RENTANG jam, bukan jam persis: menit sebenarnya diundi ber-seed di dalam
+// rentang itu, dan tiap platform digeser lagi beberapa menit — supaya kelima
+// platform tidak lagi terbit pada detik yang sama seperti dulu.
 //
-// Yang tersisa memang global: jam primetime berlaku untuk semua agent
-// (pengaturan slot per agent ditunda, dibahas terpisah 2026-08-11).
+// Key & channel ID tidak ada di sini sejak 0037/0038 — itu milik tiap agent.
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
-import { setSetting, getSchedulePreset } from '../../../_lib/schedulerProviders.js';
+import { setSetting } from '../../../_lib/schedulerProviders.js';
+import { TANGGA_PLATFORM, getJendela } from '../../../_lib/jadwalOtomatis.js';
 
-const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const JAM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const keMenit = (j) => Number(j.slice(0, 2)) * 60 + Number(j.slice(3));
 
-function isValidPreset(preset) {
-  if (!Array.isArray(preset) || preset.length !== 5) return false;
-  const slots = new Set();
-  for (const row of preset) {
-    if (!row || typeof row !== 'object') return false;
-    if (!Number.isInteger(row.slot) || row.slot < 1 || row.slot > 5) return false;
-    if (!TIME_RE.test(row.time)) return false;
-    slots.add(row.slot);
-  }
-  return slots.size === 5;
-}
+// Jendela harus lebih panjang dari tangga geseran platform, kalau tidak platform
+// paling belakang tidak punya ruang dan semuanya menumpuk di batas akhir.
+const MIN_PANJANG = Math.max(...TANGGA_PLATFORM) + 10;
 
 export async function onRequestGet({ env }) {
-  try {
-    return jsonOk({ viralframe_schedule_preset: await getSchedulePreset(env) });
-  } catch (err) {
-    console.error('[settings/scheduler-config GET]', err.message);
-    return jsonError('Gagal memuat konfigurasi scheduler', 500);
-  }
+  return jsonOk({ jendela: await getJendela(env), min_panjang_menit: MIN_PANJANG });
 }
 
 export async function onRequestPatch({ env, request }) {
   let body;
   try { body = await request.json(); } catch { return jsonError('Body tidak valid', 400); }
 
-  const preset = body.viralframe_schedule_preset;
-  if (!isValidPreset(preset)) return jsonError('Preset jam posting tidak valid — butuh 5 slot dengan jam HH:MM', 422);
+  const j = body.jendela;
+  if (!Array.isArray(j) || j.length === 0 || j.length > 6) {
+    return jsonError('Butuh 1–6 jendela', 422);
+  }
+  const bersih = [];
+  for (const row of j) {
+    if (!JAM_RE.test(row?.mulai) || !JAM_RE.test(row?.akhir)) return jsonError('Format jam harus HH:MM', 422);
+    const panjang = keMenit(row.akhir) - keMenit(row.mulai);
+    if (panjang < MIN_PANJANG) {
+      return jsonError(`Jendela "${row.nama ?? row.mulai}" cuma ${panjang} menit — minimal ${MIN_PANJANG} menit supaya tiap platform punya ruang geser`, 422);
+    }
+    bersih.push({ nama: String(row.nama ?? '').slice(0, 30) || row.mulai, mulai: row.mulai, akhir: row.akhir });
+  }
+  bersih.sort((a, b) => keMenit(a.mulai) - keMenit(b.mulai));
 
   try {
-    await setSetting(env, 'viralframe_schedule_preset', JSON.stringify(preset));
-    return jsonOk({ updated: true });
+    await setSetting(env, 'viralframe_jendela', JSON.stringify(bersih));
+    return jsonOk({ jendela: bersih });
   } catch (err) {
     console.error('[settings/scheduler-config PATCH]', err.message);
-    return jsonError('Gagal menyimpan konfigurasi scheduler', 500);
+    return jsonError('Gagal menyimpan jendela', 500);
   }
 }
 

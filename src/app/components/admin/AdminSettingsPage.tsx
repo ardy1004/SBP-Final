@@ -6,7 +6,7 @@ import 'react-resizable/css/styles.css';
 import { Lock, User, CheckCircle, XCircle, Eye, EyeOff, BarChart2, Plus, Trash2, Edit2, ToggleLeft, ToggleRight, KeyRound, RotateCcw, Send } from 'lucide-react';
 import {
   getAiKeys, saveAiKeys, getAiStatus, type AiProviderId, type AiKeyInfo, type AiStatusInfo, bacaJson,
-  getSchedulerConfig, saveSchedulerConfig, type SchedulePresetRow,
+  getSchedulerConfig, saveSchedulerConfig, type JendelaJam,
 } from '../../../lib/api';
 import AkunAgentCard from './AkunAgentCard';
 
@@ -37,13 +37,15 @@ const STATUS_COLOR: Record<'green' | 'yellow' | 'red', string> = {
   green: '#10B981', yellow: '#F59E0B', red: '#EF4444',
 };
 
-const DEFAULT_SCHEDULE_PRESET: SchedulePresetRow[] = [
-  { slot: 1, time: '06:00' },
-  { slot: 2, time: '09:00' },
-  { slot: 3, time: '12:00' },
-  { slot: 4, time: '17:00' },
-  { slot: 5, time: '19:00' },
+const JENDELA_DEFAULT: JendelaJam[] = [
+  { nama: 'Pagi', mulai: '06:30', akhir: '08:30' },
+  { nama: 'Siang', mulai: '11:30', akhir: '13:30' },
+  { nama: 'Malam', mulai: '19:00', akhir: '21:30' },
 ];
+// Jendela harus lebih panjang dari tangga geseran platform (maks 19 menit),
+// kalau tidak platform paling belakang tidak punya ruang. Divalidasi juga di server.
+const MIN_PANJANG_MENIT = 29;
+const keMenit = (j: string) => Number(j.slice(0, 2)) * 60 + Number(j.slice(3));
 
 interface AdminUser { sub: number; email: string; nama: string; role: string; }
 interface PasswordForm { password_lama: string; password_baru: string; password_baru_konfirmasi: string; }
@@ -164,23 +166,25 @@ export default function AdminSettingsPage() {
   // Key & channel ID sudah pindah ke kartu "Akun Agent" (migrasi 0037/0038):
   // tiap agent punya akun Buffer/Zernio sendiri, dan provider tiap platform pun
   // berbeda antar akun — tidak ada lagi satu set global yang masuk akal di sini.
-  const [preset, setPreset] = useState<SchedulePresetRow[]>(DEFAULT_SCHEDULE_PRESET);
+  const [jendela, setJendela] = useState<JendelaJam[]>(JENDELA_DEFAULT);
   const [savingSchedulerConfig, setSavingSchedulerConfig] = useState(false);
   const [schedulerConfigMsg, setSchedulerConfigMsg] = useState<Msg | null>(null);
 
   useEffect(() => {
     getSchedulerConfig().then(r => {
-      if (r.success && r.data?.viralframe_schedule_preset?.length === 5) setPreset(r.data.viralframe_schedule_preset);
+      if (r.success && r.data?.jendela?.length) setJendela(r.data.jendela);
     });
   }, []);
 
-  const setPresetTime = (slot: number, val: string) => {
-    setPreset(prev => prev.map(row => row.slot === slot ? { ...row, time: val } : row));
-  };
+  const ubahJendela = (i: number, k: keyof JendelaJam, v: string) =>
+    setJendela(prev => prev.map((row, idx) => idx === i ? { ...row, [k]: v } : row));
+  const hapusJendela = (i: number) => setJendela(prev => prev.filter((_, idx) => idx !== i));
+  const tambahJendela = () => setJendela(prev => [...prev, { nama: 'Baru', mulai: '15:00', akhir: '16:00' }]);
+  const jendelaPendek = jendela.filter(j => keMenit(j.akhir) - keMenit(j.mulai) < MIN_PANJANG_MENIT);
 
   const handleSaveSchedulerConfig = async () => {
     setSavingSchedulerConfig(true); setSchedulerConfigMsg(null);
-    const r = await saveSchedulerConfig({ viralframe_schedule_preset: preset });
+    const r = await saveSchedulerConfig({ jendela });
     setSavingSchedulerConfig(false);
     if (r.success) setSchedulerConfigMsg({ type: 'success', text: 'Konfigurasi scheduler disimpan' });
     else setSchedulerConfigMsg({ type: 'error', text: r.error ?? 'Gagal menyimpan' });
@@ -566,32 +570,41 @@ export default function AdminSettingsPage() {
         </div>
 
         <p className="text-[10px] text-[#94A3B8] mb-2">
-          Klik "Jadwalkan ke Sosmed" otomatis pakai slot kosong berikutnya hari ini, jam dasar sesuai tabel ini —
-          lalu digeser otomatis +5 menit tiap hari (maks +120 menit dari jam dasar), lalu reset ke jam dasar lagi
-          (siklus 24 hari), supaya jam posting tidak identik persis tiap hari.
+          Yang diatur di sini <strong>rentang</strong>, bukan jam persis. Menit sebenarnya diundi di dalam rentang
+          (berbeda tiap hari &amp; tiap agent), lalu tiap platform digeser lagi 0–19 menit supaya tidak terbit
+          bersamaan. Kuota harian menentukan berapa jendela yang dipakai: 3 = semua, 1–2 = dirotasi harian.
         </p>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs border-collapse max-w-xs">
-            <thead>
-              <tr className="text-left text-[#64748B]">
-                <th className="py-1 pr-2 font-semibold">Slot</th>
-                <th className="py-1 pl-2 font-semibold">Jam Dasar</th>
-              </tr>
-            </thead>
-            <tbody>
-              {preset.map(row => (
-                <tr key={row.slot} className="border-t border-gray-50">
-                  <td className="py-1.5 pr-2 font-medium text-[#0F172A]">{row.slot}</td>
-                  <td className="py-1.5 pl-2"><input type="time" value={row.time} onChange={e => setPresetTime(row.slot, e.target.value)} className="w-full border border-gray-200 rounded-lg px-2 py-1 text-xs" /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-2 mb-2">
+          {jendela.map((j, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input value={j.nama} onChange={e => ubahJendela(i, 'nama', e.target.value)} placeholder="Nama"
+                className="w-24 border border-gray-200 rounded-lg px-2 py-1 text-xs" />
+              <input type="time" value={j.mulai} onChange={e => ubahJendela(i, 'mulai', e.target.value)}
+                className="border border-gray-200 rounded-lg px-2 py-1 text-xs" />
+              <span className="text-xs text-[#94A3B8]">→</span>
+              <input type="time" value={j.akhir} onChange={e => ubahJendela(i, 'akhir', e.target.value)}
+                className="border border-gray-200 rounded-lg px-2 py-1 text-xs" />
+              <span className={`text-[10px] ${keMenit(j.akhir) - keMenit(j.mulai) < MIN_PANJANG_MENIT ? 'text-red-600 font-semibold' : 'text-[#94A3B8]'}`}>
+                {keMenit(j.akhir) - keMenit(j.mulai)} mnt
+              </span>
+              {jendela.length > 1 && (
+                <button onClick={() => hapusJendela(i)} className="text-[#94A3B8] hover:text-red-500"><Trash2 size={13} /></button>
+              )}
+            </div>
+          ))}
+          {jendela.length < 6 && (
+            <button onClick={tambahJendela} className="text-[11px] font-semibold text-[#1565C0] hover:underline">+ Tambah jendela</button>
+          )}
         </div>
+        {jendelaPendek.length > 0 && (
+          <p className="text-[11px] text-red-600 mb-2">
+            Jendela minimal {MIN_PANJANG_MENIT} menit — di bawah itu kelima platform menumpuk di batas akhir.
+          </p>
+        )}
         <MsgBox msg={schedulerConfigMsg} />
-        <button onClick={handleSaveSchedulerConfig} disabled={savingSchedulerConfig}
+        <button onClick={handleSaveSchedulerConfig} disabled={savingSchedulerConfig || jendelaPendek.length > 0}
           className="w-full mt-2 bg-[#1565C0] hover:bg-[#1565C0]/90 disabled:opacity-50 text-white rounded-xl py-2.5 text-sm font-semibold transition-colors">
-          {savingSchedulerConfig ? 'Menyimpan...' : 'Simpan Jam Primetime'}
+          {savingSchedulerConfig ? 'Menyimpan...' : 'Simpan Jendela'}
         </button>
       </div>
 

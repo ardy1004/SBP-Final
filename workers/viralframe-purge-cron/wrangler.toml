@@ -2,6 +2,9 @@ name = "viralframe-purge-cron"
 main = "src/index.js"
 compatibility_date = "2026-01-01"
 
-# Jam 20:00 UTC = 03:00 WIB — di luar jam kerja, sebelum admin mulai aktivitas pagi.
+# 20:00 UTC = 03:00 WIB — purge sampah, di luar jam kerja.
+# 18:00-21:30 UTC tiap 30 menit = 01:00-04:30 WIB — auto-jadwal per agent.
+#   Tiap agent punya jam_auto sendiri di D1; endpoint yang mencocokkan.
+#   Ini jam MENGIRIM KE Buffer/Zernio, bukan jam tayang di medsos.
 [triggers]
-crons = ["0 20 * * *"]
+crons = ["0 20 * * *", "0,30 18-21 * * *"]

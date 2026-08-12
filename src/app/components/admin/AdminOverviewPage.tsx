@@ -4,6 +4,7 @@ import { useOutletContext, Link } from 'react-router';
 import { TrendingUp, Home, Users, Eye, MessageCircle, FileText, ArrowUpRight, ArrowDownRight, BarChart3, Settings, Video } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { findArchetype } from './viralframe/archetypes';
+import AutoJadwalBanner from './AutoJadwalBanner';
 
 // Sama seperti AdminViralFrameAgentVideosPage.tsx: `gaya` disimpan sebagai ID
 // arketipe, diterjemahkan ke label hanya saat ditampilkan.
@@ -180,6 +181,7 @@ export default function AdminOverviewPage() {
 
   return (
     <div className="space-y-8">
+      <AutoJadwalBanner />
       <div>
         <h1 className="font-display text-xl font-bold text-[#0F172A]">
           Selamat datang, {admin?.nama ?? 'Admin'}

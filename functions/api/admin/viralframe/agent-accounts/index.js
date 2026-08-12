@@ -8,7 +8,8 @@
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { maskKey } from '../../../../_lib/aiProviders.js';
 import { parseSpesialis, parseChannels, getModeAkun } from '../../../../_lib/agentAccounts.js';
-import { setSetting } from '../../../../_lib/schedulerProviders.js';
+import { setSetting, getSetting } from '../../../../_lib/schedulerProviders.js';
+import { kuotaAkun } from '../../../../_lib/jadwalOtomatis.js';
 
 export async function onRequestGet({ env }) {
   try {
@@ -16,13 +17,15 @@ export async function onRequestGet({ env }) {
       SELECT c.id AS character_id, c.nama,
              a.gmail, a.spesialis, a.cloudinary_name, a.cloudinary_api_key, a.cloudinary_api_secret,
              a.buffer_api_key, a.zernio_api_key, a.channels_json,
+             a.jam_auto, a.auto_aktif, a.mulai_aktif, a.auto_terakhir, a.auto_hasil,
              (SELECT COUNT(*) FROM viralframe_agent_videos v WHERE v.character_id = c.id AND v.trashed_at IS NULL) AS video_aktif
       FROM viralframe_characters c
       LEFT JOIN viralframe_agent_accounts a ON a.character_id = c.id
       ORDER BY c.id
     `).all();
 
-    const items = (res.results ?? []).map(r => ({
+    const { utama } = await getModeAkun(env);
+    const items = await Promise.all((res.results ?? []).map(async r => ({
       character_id: r.character_id,
       nama: r.nama,
       gmail: r.gmail ?? '',
@@ -40,9 +43,21 @@ export async function onRequestGet({ env }) {
       // channel menghasilkan nol baris, yang dulu terbaca seperti sukses.
       scheduler_siap: !!(r.buffer_api_key || r.zernio_api_key) && Object.keys(parseChannels(r.channels_json)).length > 0,
       video_aktif: r.video_aktif ?? 0,
-    }));
+      jam_auto: r.jam_auto ?? '',
+      auto_aktif: r.auto_aktif === 1,
+      mulai_aktif: r.mulai_aktif ?? null,
+      auto_terakhir: r.auto_terakhir ?? null,
+      // Ringkasan cron terakhir. Data lama/rusak tidak boleh meledakkan UI.
+      auto_hasil: (() => { try { return r.auto_hasil ? JSON.parse(r.auto_hasil) : null; } catch { return null; } })(),
+      ...(await kuotaAkun(env, r.character_id, utama)),
+    })));
 
-    return jsonOk({ items, ...(await getModeAkun(env)) });
+    return jsonOk({
+      items,
+      ...(await getModeAkun(env)),
+      auto_aktif: (await getSetting(env, 'viralframe_auto_aktif')) === '1',
+      auto_terakhir: await getSetting(env, 'viralframe_auto_terakhir'),
+    });
   } catch (err) {
     console.error('[vf agent-accounts] GET', err.message);
     return jsonError('Gagal memuat akun agent', 500);
@@ -61,6 +76,9 @@ export async function onRequestPatch({ env, request }) {
   if (body.mode === 'terpusat' || body.mode === 'per_agent') {
     ops.push(setSetting(env, 'viralframe_akun_mode', body.mode));
   }
+  if ('auto_aktif' in body) {
+    ops.push(setSetting(env, 'viralframe_auto_aktif', body.auto_aktif ? '1' : '0'));
+  }
   if ('utama' in body) {
     const id = parseInt(body.utama, 10);
     if (!Number.isInteger(id) || id <= 0) return jsonError('utama harus id agent yang valid', 422);
@@ -72,7 +90,7 @@ export async function onRequestPatch({ env, request }) {
 
   try {
     await Promise.all(ops);
-    return jsonOk(await getModeAkun(env));
+    return jsonOk({ ...(await getModeAkun(env)), auto_aktif: (await getSetting(env, 'viralframe_auto_aktif')) === '1' });
   } catch (err) {
     console.error('[vf agent-accounts] PATCH mode', err.message);
     return jsonError('Gagal menyimpan mode akun', 500);

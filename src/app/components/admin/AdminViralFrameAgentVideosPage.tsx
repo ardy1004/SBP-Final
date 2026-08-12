@@ -455,7 +455,7 @@ export default function AdminViralFrameAgentVideosPage() {
 
         {/* Grid video */}
         <div className="flex-1 min-w-0 space-y-3">
-          <SlotIndicatorStrip refreshKey={slotRefreshTick} />
+          {selectedCharId != null && <SlotIndicatorStrip characterId={selectedCharId} refreshKey={slotRefreshTick} />}
           {/* Tab Aktif/Sampah */}
           <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-full p-0.5 w-fit">
             {([{ v: 'active', label: 'Aktif' }, { v: 'trash', label: 'Sampah' }] as const).map(t => (

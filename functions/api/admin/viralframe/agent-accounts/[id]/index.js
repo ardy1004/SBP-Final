@@ -18,7 +18,10 @@ const FIELDS = [
   'gmail',
   'cloudinary_name', 'cloudinary_api_key', 'cloudinary_api_secret',
   'buffer_api_key', 'zernio_api_key',
+  'jam_auto',
 ];
+
+const JAM_RE = /^([01]\d|2[0-3]):(00|30)$/;
 
 const PROVIDERS = ['buffer', 'zernio'];
 
@@ -49,6 +52,20 @@ export async function onRequestPut({ env, request, params }) {
     const bersih = [...new Set(arr.filter(v => typeof v === 'string' && VALID_JENIS.includes(v)))];
     kolom.push('spesialis');
     nilai.push(JSON.stringify(bersih));
+  }
+
+  // Saklar auto per agent — terpisah dari saklar induk, supaya agent yang belum
+  // siap (mis. belum punya kredensial) bisa dimatikan sendiri.
+  if ('auto_aktif' in body) {
+    kolom.push('auto_aktif');
+    nilai.push(body.auto_aktif ? 1 : 0);
+  }
+
+  // Jam submit harus tepat di kelipatan 30 menit: cron menyala tiap :00 dan :30,
+  // jadi jam seperti '01:17' tidak akan pernah cocok dan agent-nya diam selamanya.
+  if (kolom.includes('jam_auto')) {
+    const v = nilai[kolom.indexOf('jam_auto')];
+    if (v && !JAM_RE.test(v)) return jsonError('jam_auto harus HH:00 atau HH:30 (cron menyala tiap 30 menit)', 422);
   }
 
   // channels: { "<platform>": { provider, id } }. Entri tanpa id dibuang —

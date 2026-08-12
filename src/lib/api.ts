@@ -536,11 +536,12 @@ export async function getAiModels(provider: AiProviderId) {
 
 // ── Scheduler ViralFrame (Buffer + Zernio) ──────────────────────────────────
 export type SchedulerProviderId = 'buffer' | 'zernio';
-export interface SchedulePresetRow { slot: number; time: string }
-/** Hanya preset jam yang masih global. Key & channel ID milik masing-masing
- *  agent (migrasi 0037/0038) — lihat AgentAccount di bawah. */
+/** Rentang jam tayang. Menit persisnya diundi ber-seed di dalam rentang ini,
+ *  lalu tiap platform digeser beberapa menit lagi (migrasi 0041). */
+export interface JendelaJam { nama: string; mulai: string; akhir: string }
 export interface SchedulerConfig {
-  viralframe_schedule_preset: SchedulePresetRow[];
+  jendela: JendelaJam[];
+  min_panjang_menit?: number;
 }
 
 /** GET /api/admin/settings/scheduler-config — preset jam posting */
@@ -590,10 +591,22 @@ export interface AgentAccount {
   storage_siap: boolean;
   scheduler_siap: boolean;
   video_aktif: number;
+  /** Jam kirim ke Buffer/Zernio (WIB, kelipatan 30 menit) — BUKAN jam tayang. */
+  jam_auto: string;
+  auto_aktif: boolean;
+  mulai_aktif: string | null;
+  auto_terakhir: string | null;
+  auto_hasil: { terjadwal: number; gagal: number; alasan: string | null } | null;
+  /** Kuota harian efektif: agent utama 3, lainnya naik menurut hari nyata. */
+  kuota: number;
+  hari: number | null;
+  utama: boolean;
 }
 
 export interface AgentAccountInput {
   gmail?: string;
+  jam_auto?: string;
+  auto_aktif?: boolean;
   spesialis?: string[];
   cloudinary_name?: string;
   cloudinary_api_key?: string;
@@ -609,12 +622,15 @@ export type ModeAkun = 'terpusat' | 'per_agent';
 
 /** GET /api/admin/viralframe/agent-accounts */
 export async function getAgentAccounts() {
-  return apiFetch<{ items: AgentAccount[]; mode: ModeAkun; utama: number | null }>('/admin/viralframe/agent-accounts');
+  return apiFetch<{
+    items: AgentAccount[]; mode: ModeAkun; utama: number | null;
+    auto_aktif: boolean; auto_terakhir: string | null;
+  }>('/admin/viralframe/agent-accounts');
 }
 
 /** PATCH /api/admin/viralframe/agent-accounts — mode akun global */
-export async function saveModeAkun(body: { mode?: ModeAkun; utama?: number }) {
-  return apiFetch<{ mode: ModeAkun; utama: number | null }>('/admin/viralframe/agent-accounts', {
+export async function saveModeAkun(body: { mode?: ModeAkun; utama?: number; auto_aktif?: boolean }) {
+  return apiFetch<{ mode: ModeAkun; utama: number | null; auto_aktif: boolean }>('/admin/viralframe/agent-accounts', {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
@@ -629,26 +645,25 @@ export async function saveAgentAccount(characterId: number, body: AgentAccountIn
 }
 
 
-export type ScheduleSlotStatus = 'available' | 'used' | 'passed';
-export interface ScheduleSlotUsedBy {
-  video_id: number;
-  video_type: 'library' | 'agent';
-  video_name: string;
-  platforms: { platform: string; status: 'scheduled' | 'failed'; error: string | null }[];
-}
-export interface ScheduleSlot {
-  slot: number;
-  time_wib: string;
-  base_time: string;
-  scheduled_at: string;
-  status: ScheduleSlotStatus;
-  used_by: ScheduleSlotUsedBy | null;
+/** Status slot harian SATU akun (migrasi 0041). Bentuknya berubah total dari
+ *  versi 5-slot-global: sekarang per akun, berkuota, dan jamnya rentang. */
+export interface StatusSlotAkun {
+  akun_id: number;
+  kuota: number;
+  hari_nyata: number | null;
+  akun_utama: boolean;
+  terisi: number;
+  sisa: number;
+  platform: string[];
+  rencana: { nama: string; waktu: Record<string, string> }[];
+  tersedia: number;
+  gagal: { platform: string; error: string | null }[];
 }
 
-/** GET /api/admin/viralframe/schedule/status — status 5 slot primetime hari ini */
-export async function getScheduleSlotsStatus() {
-  return apiFetch<{ slots: ScheduleSlot[]; drift_minutes: number }>('/admin/viralframe/schedule/status');
+export async function getScheduleSlotsStatus(characterId: number) {
+  return apiFetch<StatusSlotAkun>(`/admin/viralframe/schedule/status?character_id=${characterId}`);
 }
+
 
 /** GET /api/testimonials */
 export async function getTestimonials() {

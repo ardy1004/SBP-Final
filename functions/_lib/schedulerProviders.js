@@ -4,47 +4,8 @@
 // kalau enum/response berubah, errornya tercatat per-baris di
 // viralframe_scheduled_posts, bukan gagal senyap.
 
-import { tanggalWib } from './waktu.js';
 
-// Fallback kalau setting 'viralframe_schedule_preset' kosong/rusak. Satu jam
-// dipakai untuk kelima platform sekaligus (bukan beda per grup platform lagi
-// — lihat diskusi 2026-07-29: drift harian bikin diferensiasi primetime per
-// platform jadi kurang berarti, disederhanakan jadi 1 jam + rotasi).
-export const DEFAULT_SCHEDULE_PRESET = [
-  { slot: 1, time: '06:00' },
-  { slot: 2, time: '09:00' },
-  { slot: 3, time: '12:00' },
-  { slot: 4, time: '17:00' },
-  { slot: 5, time: '19:00' },
-];
-
-// Rotasi harian: jam dasar preset digeser +5 menit tiap hari, maksimal +120
-// menit (slot terakhir 19:00 -> 21:00), lalu reset ke jam dasar (siklus 24
-// hari). Titik jangkar (anchor) sembarang tanggal tetap — cuma dipakai untuk
-// menghitung posisi siklus, bukan tanggal bermakna khusus.
-const ROTATION_ANCHOR_MS = Date.UTC(2026, 6, 1); // 2026-07-01
-const ROTATION_CYCLE_DAYS = 24;
-const ROTATION_STEP_MINUTES = 5;
-
-export function getDriftMinutes(dateWib) {
-  const [y, m, d] = dateWib.split('-').map(Number);
-  const dayMs = Date.UTC(y, m - 1, d);
-  const daysSinceAnchor = Math.round((dayMs - ROTATION_ANCHOR_MS) / 86400000);
-  const cyclePos = ((daysSinceAnchor % ROTATION_CYCLE_DAYS) + ROTATION_CYCLE_DAYS) % ROTATION_CYCLE_DAYS;
-  return cyclePos * ROTATION_STEP_MINUTES;
-}
-
-// Gabungkan tanggal WIB + jam preset + drift jadi SATU datetime ISO ber-offset
-// +07:00, dipakai sama untuk kelima platform. Offset +07:00 eksplisit WAJIB
-// supaya substr(scheduled_at,1,10) langsung jadi tanggal WIB (DATE('now') D1 = UTC).
-export function buildSlotTime(dateWib, presetRow, driftMinutes) {
-  const [h, m] = presetRow.time.split(':').map(Number);
-  const total = h * 60 + m + driftMinutes;
-  const hh = String(Math.floor(total / 60)).padStart(2, '0');
-  const mm = String(total % 60).padStart(2, '0');
-  return `${dateWib}T${hh}:${mm}:00+07:00`;
-}
-
+// Helper setting dipakai lintas modul ViralFrame.
 export async function getSetting(env, key) {
   try {
     const row = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first();
@@ -58,108 +19,56 @@ export async function setSetting(env, key, value) {
   return env.DB.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').bind(key, value).run();
 }
 
-export async function getSchedulePreset(env) {
-  const raw = await getSetting(env, 'viralframe_schedule_preset');
-  if (!raw) return DEFAULT_SCHEDULE_PRESET;
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length === 5) return parsed;
-  } catch { /* fallback ke default di bawah */ }
-  return DEFAULT_SCHEDULE_PRESET;
-}
-
-// Slot 1-5 pertama hari ini yang (a) belum punya baris SUKSES ('scheduled') —
-// gagal total TIDAK menutup slot, bisa dicoba ulang — DAN (b) jamnya masih di
-// masa depan (Buffer/Zernio menolak dueAt/scheduledFor yang sudah lewat).
-// Kalau tidak ada slot hari ini yang lolos, pakai slot 1 besok (pasti future).
-const MIN_LEAD_MS = 5 * 60 * 1000; // minimal 5 menit ke depan, hindari mepet detik terakhir
-
-export async function pickNextSlot(env, preset) {
-  const todayWib = tanggalWib();
-  const driftToday = getDriftMinutes(todayWib);
-  const res = await env.DB.prepare(
-    `SELECT DISTINCT slot_index FROM viralframe_scheduled_posts WHERE substr(scheduled_at,1,10) = ? AND status = 'scheduled'`
-  ).bind(todayWib).all();
-  const used = new Set((res.results ?? []).map(r => r.slot_index));
-  const now = Date.now();
-
-  for (let slot = 1; slot <= 5; slot++) {
-    if (used.has(slot)) continue;
-    const row = preset.find(p => p.slot === slot);
-    if (!row) continue;
-    const iso = buildSlotTime(todayWib, row, driftToday);
-    if (new Date(iso).getTime() > now + MIN_LEAD_MS) return { slotIndex: slot, dateWib: todayWib, driftMinutes: driftToday };
-  }
-  const tomorrowWib = tanggalWib(new Date(), 1);
-  return { slotIndex: 1, dateWib: tomorrowWib, driftMinutes: getDriftMinutes(tomorrowWib) };
-}
-
-// Fan-out inti. Kredensial TIDAK lagi diambil sendiri dari settings global —
-// pemanggil WAJIB mengirim `akun` hasil resolveScheduler() milik agent yang
-// bersangkutan (migrasi 0037). Alasannya di functions/_lib/agentAccounts.js:
-// key yang salah = konten agent A terbit di akun sosmed agent B, dan itu tidak
-// bisa ditarik kembali. Arah impor juga dijaga satu jalur — file ini TIDAK
-// boleh mengimpor agentAccounts.js (agentAccounts yang mengimpor getSetting
-// dari sini).
+// Fan-out inti. Kredensial WAJIB dikirim pemanggil (`akun` hasil
+// resolveScheduler) — file ini tidak boleh mengimpor agentAccounts.js, arah
+// impornya satu jalur. Alasan larangan fallback kredensial ada di sana.
 //
-// Slot harian masih dihitung GLOBAL lintas semua agent (tabel yang sama) —
-// pengaturan slot per agent sengaja ditunda, dibahas terpisah dengan user
-// (2026-08-11).
-export async function scheduleFanOut(env, { assetUrl, caption, akun }) {
+// `waktu` = peta { platform: ISO+07:00 } dari jadwalOtomatis.waktuPerPlatform().
+// Tiap platform punya jamnya SENDIRI sekarang; dulu kelimanya memakai satu
+// timestamp yang sama persis (lihat migrasi 0041).
+export async function scheduleFanOut(env, { assetUrl, caption, akun, waktu, slotIndex = 1 }) {
   const bufferKey = akun?.bufferKey ?? null;
   const zernioKey = akun?.zernioKey ?? null;
   const channels = akun?.channels ?? {};
 
-  const preset = await getSchedulePreset(env);
-  const { slotIndex, dateWib, driftMinutes } = await pickNextSlot(env, preset);
-  const presetRow = preset.find(p => p.slot === slotIndex) ?? preset[0];
-  const scheduledAt = buildSlotTime(dateWib, presetRow, driftMinutes);
-
   // Provider tiap platform dibaca dari konfigurasi akun, TIDAK dipasangkan mati
-  // di kode — lihat migrasi 0038. Buffer dipanggil per channel; Zernio menerima
-  // banyak platform dalam SATU panggilan.
-  const bufferPlatforms = [], zernioPlatforms = [];
+  // di kode — lihat migrasi 0038.
+  const tugas = [];
   for (const [platform, cfg] of Object.entries(channels)) {
     if (!cfg?.id) continue;
-    if (cfg.provider === 'buffer') bufferPlatforms.push({ platform, id: cfg.id });
-    else if (cfg.provider === 'zernio') zernioPlatforms.push({ platform, accountId: cfg.id });
+    const jam = waktu?.[platform];
+    if (!jam) continue; // platform tanpa jadwal (mis. jumlah platform > tangga) dilewati
+    if (cfg.provider === 'buffer') {
+      tugas.push({ platform, provider: 'buffer', scheduledAt: jam,
+        jalan: () => callBufferCreatePost({ apiKey: bufferKey, channelId: cfg.id, assetUrl, dueAt: jam, caption, platform }) });
+    } else if (cfg.provider === 'zernio') {
+      // SATU panggilan per platform, bukan satu panggilan berisi banyak platform
+      // seperti dulu. Perlu supaya tiap platform bisa punya jam sendiri — dan
+      // efek sampingnya bagus: status sukses/gagal FB dan Threads jadi terpisah,
+      // tidak lagi atomik.
+      tugas.push({ platform, provider: 'zernio', scheduledAt: jam,
+        jalan: () => callZernioCreatePost({ apiKey: zernioKey, content: caption, scheduledFor: jam,
+          timezone: 'Asia/Jakarta', platforms: [{ platform, accountId: cfg.id }], mediaUrl: assetUrl }) });
+    }
   }
 
-  const zernioJob = zernioPlatforms.length > 0
-    ? callZernioCreatePost({
-        apiKey: zernioKey, content: caption, scheduledFor: scheduledAt,
-        timezone: 'Asia/Jakarta', platforms: zernioPlatforms, mediaUrl: assetUrl,
-      })
-    : null;
-
-  const [bufferResults, zernioRes] = await Promise.all([
-    Promise.all(bufferPlatforms.map(b =>
-      callBufferCreatePost({ apiKey: bufferKey, channelId: b.id, assetUrl, dueAt: scheduledAt, caption, platform: b.platform })
-    )),
-    zernioJob ?? Promise.resolve(null),
-  ]);
-
-  const rows = [
-    ...bufferPlatforms.map((b, i) => ({ platform: b.platform, provider: 'buffer', scheduledAt, result: bufferResults[i] })),
-    // Satu panggilan Zernio menjadwalkan semua platformnya sekaligus —
-    // sukses/gagalnya atomik, respons Zernio tidak memisahkan status per platform.
-    ...zernioPlatforms.map(z => ({ platform: z.platform, provider: 'zernio', scheduledAt, result: zernioRes })),
-  ];
-
+  const hasil = await Promise.all(tugas.map(t => t.jalan()));
+  const rows = tugas.map((t, i) => ({ platform: t.platform, provider: t.provider, scheduledAt: t.scheduledAt, result: hasil[i] }));
   return { slotIndex, rows };
 }
 
 // Simpan hasil fan-out ke viralframe_scheduled_posts + trash video sumber
 // (tabel & videoType berbeda antara Library dan Konten Agent).
-export async function persistScheduleResult(env, { videoId, videoType, trashTable, slotIndex, rows }) {
+export async function persistScheduleResult(env, { videoId, videoType, trashTable, slotIndex, rows, akunId = null }) {
   await Promise.all(rows.map(r => env.DB.prepare(
-    `INSERT INTO viralframe_scheduled_posts (video_id, video_type, provider, platform, slot_index, scheduled_at, status, remote_post_id, error_message)
-     VALUES (?,?,?,?,?,?,?,?,?)`
+    `INSERT INTO viralframe_scheduled_posts (video_id, video_type, provider, platform, slot_index, scheduled_at, status, remote_post_id, error_message, akun_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`
   ).bind(
     videoId, videoType, r.provider, r.platform, slotIndex, r.scheduledAt,
     r.result.ok ? 'scheduled' : 'failed',
     r.result.ok ? (r.result.remoteId ?? null) : null,
     r.result.ok ? null : (r.result.error ?? 'Gagal tanpa keterangan').slice(0, 500),
+    akunId,
   ).run()));
 
   const anySuccess = rows.some(r => r.result.ok);
