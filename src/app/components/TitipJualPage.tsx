@@ -18,6 +18,9 @@ import {
 import { HARGA_MODE_TOTAL, HARGA_MODE_PER_M2 } from '../../../functions/_lib/hargaTanah.js';
 import Turnstile from './Turnstile';
 import { pageMeta } from '../../lib/pageMeta';
+// Autosave isian ke localStorage. NIK dan foto sengaja TIDAK ikut disimpan —
+// alasannya panjang dan penting, ada di titipJualDraft.ts.
+import { bacaDraft, simpanDraft, hapusDraft } from '../../lib/titipJualDraft';
 
 export const meta = () => pageMeta({
   title: 'Titip Jual Properti Yogyakarta | Salam Bumi Property',
@@ -91,6 +94,17 @@ function convertToWebP(file: File): Promise<string> {
   });
 }
 
+/**
+ * Apakah objek isian punya nilai yang berarti? Dipakai sebagai rem autosave:
+ * tanpa ini, effect autosave menulis objek kosong ~800 ms setelah halaman
+ * dibuka, sehingga bacaDraft() selalu mengembalikan sesuatu dan banner
+ * "isian dipulihkan" muncul pada pengunjung yang belum mengetik apa pun.
+ */
+function adaIsi(obj: Record<string, unknown>): boolean {
+  return Object.values(obj).some(v =>
+    typeof v === 'string' ? v.trim() !== '' : typeof v === 'number' ? true : v === true);
+}
+
 const inputCls = (err?: string) =>
   `w-full border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0] transition-all ${err ? 'border-red-400 bg-red-50' : 'border-gray-200'}`;
 
@@ -140,6 +154,40 @@ const BERTINDAK_OPTIONS = [
   { value: 'lainnya',            label: 'Lainnya' },
 ];
 
+/**
+ * Catat calon penjual ke CRM begitu Step 1 valid — tanpa menunggu Step 2 selesai.
+ *
+ * Sengaja TIDAK di-await oleh pemanggil: kegagalan mencatat prospek tidak boleh
+ * menahan user satu milidetik pun, dan `keepalive` membuat request tetap
+ * terkirim walau tab langsung ditutup setelah klik "Lanjut".
+ *
+ * ⚠️ NIK sengaja tidak ikut. Tabel `leads` tidak terenkripsi — lihat alasan
+ * lengkapnya di functions/api/titip-jual-prospek.js.
+ */
+async function kirimProspek(form: Step1State): Promise<void> {
+  try {
+    const res = await fetch('/api/titip-jual-prospek', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      keepalive: true,
+      body: JSON.stringify({
+        nama:      form.nama_ktp,
+        no_wa:     form.no_wa,
+        kecamatan: form.kecamatan,
+        kabupaten: form.kab_owner,
+        lead_id:   bacaDraft()?.leadId,
+      }),
+    });
+    const json = await bacaJson<{ lead_id: number | null }>(res);
+    const id = json.data?.lead_id;
+    // Simpan id-nya supaya klik "Lanjut" berikutnya memperbarui baris yang sama,
+    // bukan menumpuk prospek duplikat di papan CRM.
+    if (typeof id === 'number') simpanDraft({ leadId: id });
+  } catch {
+    /* diam: prospek adalah jaring pengaman, bukan jalur utama */
+  }
+}
+
 function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
   const [form, setForm] = useState<Step1State>({
     nama_ktp: '', nik: '', rt_rw: '',
@@ -148,6 +196,27 @@ function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
     no_wa: '', no_wa_2: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Pulihkan draft. WAJIB di useEffect, bukan initializer useState: halaman ini
+  // publik dan ikut dirender di server, sedangkan localStorage hanya ada di
+  // client — membacanya saat render = hydration mismatch (aturan CLAUDE.md).
+  // `nik: ''` ditulis eksplisit: NIK memang tidak pernah disimpan, dan penegasan
+  // ini menutup draft lama dari build yang barangkali sempat menyimpannya.
+  useEffect(() => {
+    const d = bacaDraft();
+    if (d?.s1) setForm(p => ({ ...p, ...(d.s1 as Partial<Step1State>), nik: '' }));
+  }, []);
+
+  // Autosave (debounce 800 ms). Efek ini juga jalan saat mount dengan form
+  // kosong, tapi timernya dibatalkan oleh cleanup begitu efek pemulihan di atas
+  // memicu render ulang — jadi draft yang sudah ada tidak tertimpa kosong.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const { nik: _nik, ...tanpaNik } = form;
+      if (adaIsi(tanpaNik)) simpanDraft({ s1: tanpaNik });
+    }, 800);
+    return () => clearTimeout(t);
+  }, [form]);
 
   const f = (k: keyof Step1State, v: string | boolean) =>
     setForm(p => ({ ...p, [k]: v }));
@@ -172,6 +241,8 @@ function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
   const handleNext = () => {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
+    // Tanpa await — Step 2 harus tampil seketika.
+    void kirimProspek(form);
     onNext(form);
   };
 
@@ -371,6 +442,10 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
   const [provId, setProvId] = useState<number | null>(null);
   const [kabId, setKabId]   = useState<number | null>(null);
   const [kecId, setKecId]   = useState<number | null>(null);
+  // kelId ada supaya dropdown Kelurahan bisa jadi controlled seperti tiga
+  // saudaranya — tanpa ini, isian yang dipulihkan dari draft tersimpan benar di
+  // state tapi dropdown-nya tetap menampilkan "-- Pilih Kelurahan --".
+  const [kelId, setKelId]   = useState<number | null>(null);
   const [provList, setProvList] = useState<ApiLocation[]>([]);
   const [kabList, setKabList] = useState<ApiLocation[]>([]);
   const [kecList, setKecList] = useState<ApiLocation[]>([]);
@@ -421,6 +496,10 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [photoFiles, setPhotoFiles]     = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
+  // Berapa foto yang ada di sesi sebelumnya. File-nya sendiri tidak bisa ikut
+  // disimpan di draft, jadi satu-satunya hal jujur yang bisa dilakukan adalah
+  // memberi tahu user berapa yang perlu dipilih ulang.
+  const [fotoPerluUlang, setFotoPerluUlang] = useState(0);
 
   // Consent + submission
   const [consent, setConsent] = useState(false);
@@ -430,6 +509,64 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
   const [apiError, setApiError] = useState<string | null>(null);
 
   const clearErr = (k: string) => setErrors(p => ({ ...p, [k]: '' }));
+
+  // ─── Autosave & pemulihan draft Step 2 ──────────────────────────────────────
+  // Satu snapshot datar berisi seluruh field yang layak dipulihkan. FOTO tidak
+  // ikut — 20 foto base64 (8–11 MB) melewati kuota localStorage dan melempar
+  // QuotaExceededError yang menggagalkan SELURUH autosave, bukan cuma fotonya.
+  // Yang disimpan hanya jumlahnya, supaya UI bisa memberi tahu berapa yang
+  // perlu dipilih ulang. Selengkapnya di lib/titipJualDraft.ts.
+  const snapshotS2 = {
+    provId, kabId, kecId, kelId, provinsi, kabupaten, kecProp, kelProp,
+    judul, jenis, tujuan, harga, hargaSewa, hargaMode, kondisi, alamat,
+    lt, lb, kt, km, lebar_depan, lantai, lebar_jalan,
+    legalitas, statusLeg, bankAgunan, outstanding, lingkungan, gmaps,
+    infoTambahan, alasanJual, jenisKost, jenisHotel, noUnit, kelengkapan,
+    incomePerBulan, pengeluaranPerBulan, sewaKamarBulan,
+  };
+
+  useEffect(() => {
+    const d = bacaDraft();
+    const s = (d?.s2 ?? {}) as Partial<typeof snapshotS2>;
+    const str = (v: unknown, set: (x: string) => void) => { if (typeof v === 'string' && v) set(v); };
+    const num = (v: unknown, set: (x: number | null) => void) => { if (typeof v === 'number') set(v); };
+
+    num(s.provId, setProvId); num(s.kabId, setKabId); num(s.kecId, setKecId); num(s.kelId, setKelId);
+    str(s.provinsi, setProvinsi); str(s.kabupaten, setKabupaten); str(s.kecProp, setKecProp); str(s.kelProp, setKelProp);
+    str(s.judul, setJudul); str(s.jenis, setJenis); str(s.tujuan, setTujuan);
+    str(s.harga, setHarga); str(s.hargaSewa, setHargaSewa); str(s.hargaMode, setHargaMode);
+    str(s.alamat, setAlamat); str(s.lt, setLt); str(s.lb, setLb); str(s.kt, setKt); str(s.km, setKm);
+    str(s.lebar_depan, setLebarDepan); str(s.lantai, setLantai); str(s.lebar_jalan, setLebarJalan);
+    str(s.legalitas, setLegalitas); str(s.bankAgunan, setBankAgunan); str(s.outstanding, setOutstanding);
+    str(s.lingkungan, setLingkungan); str(s.gmaps, setGmaps);
+    str(s.infoTambahan, setInfoTambahan); str(s.alasanJual, setAlasanJual);
+    str(s.jenisKost, setJenisKost); str(s.jenisHotel, setJenisHotel); str(s.noUnit, setNoUnit);
+    str(s.kelengkapan, setKelengkapan);
+    str(s.incomePerBulan, setIncomePerBulan); str(s.pengeluaranPerBulan, setPengeluaranPerBulan);
+    str(s.sewaKamarBulan, setSewaBulan);
+    if (s.kondisi === 'nego' || s.kondisi === 'nett') setKondisi(s.kondisi);
+    if (s.statusLeg === 'on_hand' || s.statusLeg === 'on_bank') setStatusLeg(s.statusLeg);
+
+    if (d?.jumlahFoto) setFotoPerluUlang(d.jumlahFoto);
+    // Sekali saat mount saja — snapshotS2 sengaja tidak jadi dependensi.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // `tujuan`, `hargaMode`, dan `kondisi` SELALU berisi nilai default, jadi tidak
+  // boleh ikut menentukan "sudah ada isian" — kalau ikut, autosave menulis draft
+  // pada setiap pengunjung yang cuma membuka halaman, dan banner pemulihan
+  // muncul tanpa sebab di kunjungan berikutnya.
+  const s2Json = JSON.stringify(snapshotS2);
+  const adaIsiS2 = adaIsi({ ...snapshotS2, tujuan: '', hargaMode: '', kondisi: '' });
+  const jumlahFoto = photoPreviews.length;
+  useEffect(() => {
+    if (!adaIsiS2 && jumlahFoto === 0) return;
+    const t = setTimeout(() => {
+      try { simpanDraft({ s2: JSON.parse(s2Json) as Record<string, unknown>, jumlahFoto }); }
+      catch { /* snapshot tak terbaca — autosave memang best-effort */ }
+    }, 800);
+    return () => clearTimeout(t);
+  }, [s2Json, adaIsiS2, jumlahFoto]);
 
   // Load all provinces
   useEffect(() => {
@@ -441,42 +578,43 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
 
   // Load kabupaten saat provinsi dipilih
   useEffect(() => {
-    if (!provId) { setKabList([]); setKecList([]); setKelList([]); setKabupaten(''); setKecProp(''); setKelProp(''); return; }
+    if (!provId) { setKabList([]); setKecList([]); setKelList([]); setKabupaten(''); setKecProp(''); setKelProp(''); setKelId(null); return; }
     getLocations(provId).then(res => { if (res.success && res.data) setKabList(res.data.items); });
   }, [provId]);
 
   useEffect(() => {
-    if (!kabId) { setKecList([]); setKelList([]); setKecProp(''); setKelProp(''); return; }
+    if (!kabId) { setKecList([]); setKelList([]); setKecProp(''); setKelProp(''); setKelId(null); return; }
     getLocations(kabId).then(res => { if (res.success && res.data) setKecList(res.data.items); });
   }, [kabId]);
 
   useEffect(() => {
-    if (!kecId) { setKelList([]); setKelProp(''); return; }
+    if (!kecId) { setKelList([]); setKelProp(''); setKelId(null); return; }
     getLocations(kecId).then(res => { if (res.success && res.data) setKelList(res.data.items); });
   }, [kecId]);
 
   const handleProvChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const id = parseInt(e.target.value, 10) || null;
     const nama = provList.find(p => p.id === id)?.nama ?? '';
-    setProvId(id); setProvinsi(nama); setKabId(null); setKabupaten(''); setKecId(null); setKecProp(''); setKelProp('');
+    setProvId(id); setProvinsi(nama); setKabId(null); setKabupaten(''); setKecId(null); setKecProp(''); setKelProp(''); setKelId(null);
   }, [provList]);
 
   const handleKabChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const id = parseInt(e.target.value, 10) || null;
     const nama = kabList.find(k => k.id === id)?.nama ?? '';
-    setKabId(id); setKabupaten(nama); setKecId(null); setKecProp(''); setKelProp('');
+    setKabId(id); setKabupaten(nama); setKecId(null); setKecProp(''); setKelProp(''); setKelId(null);
     clearErr('kabupaten');
   }, [kabList]);
 
   const handleKecChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const id = parseInt(e.target.value, 10) || null;
     const nama = kecList.find(k => k.id === id)?.nama ?? '';
-    setKecId(id); setKecProp(nama); setKelProp(''); clearErr('kecamatan_prop');
+    setKecId(id); setKecProp(nama); setKelProp(''); setKelId(null); clearErr('kecamatan_prop');
   }, [kecList]);
 
   const handleKelChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    const nama = kelList.find(k => k.id === parseInt(e.target.value, 10))?.nama ?? '';
-    setKelProp(nama); clearErr('kelurahan_prop');
+    const id = parseInt(e.target.value, 10) || null;
+    const nama = kelList.find(k => k.id === id)?.nama ?? '';
+    setKelId(id); setKelProp(nama); clearErr('kelurahan_prop');
   }, [kelList]);
 
   // Photo handlers
@@ -627,6 +765,9 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         details:           buildDetails(),
         photos:            photoPreviews,
         cf_turnstile_token: turnstileToken || undefined,
+        // Supaya prospek yang dicatat di Step 1 ditandai selesai — kalau tidak,
+        // admin akan mengejar orang yang sebenarnya sudah menyelesaikan formnya.
+        prospek_lead_id:   bacaDraft()?.leadId,
       };
 
       // Remove undefined keys
@@ -658,6 +799,10 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         return;
       }
 
+      // Sudah tersimpan di server — draft lokal tidak lagi diperlukan dan
+      // justru berbahaya kalau tertinggal (submit berikutnya akan dimulai
+      // dengan isian properti lama).
+      hapusDraft();
       onSuccess({ ...json.data!, photos_total_sent: photoPreviews.length });
     } catch {
       setApiError('Koneksi ke server gagal. Periksa koneksi internet Anda dan coba lagi.');
@@ -883,12 +1028,17 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
                 <option value="">-- Pilih Provinsi --</option>
                 {provList.map(p => <option key={p.id} value={p.id}>{p.nama}</option>)}
               </select>
-              <select onChange={handleKabChange} defaultValue="" className={selectCls()} disabled={!provId}>
+              {/* Ketiga select di bawah WAJIB controlled (`value=`), bukan
+                  `defaultValue=""`: isian yang dipulihkan dari draft tersimpan
+                  benar di state, tapi dengan defaultValue dropdown-nya tetap
+                  menampilkan "-- Pilih ... --" sehingga user mengira lokasinya
+                  hilang lalu memilih ulang. */}
+              <select onChange={handleKabChange} value={kabId ?? ''} className={selectCls()} disabled={!provId}>
                 <option value="">-- Pilih Kabupaten --</option>
                 {kabList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
               </select>
               {kabId && (
-                <select onChange={handleKecChange} defaultValue="" className={selectCls()}>
+                <select onChange={handleKecChange} value={kecId ?? ''} className={selectCls()}>
                   <option value="">-- Pilih Kecamatan --</option>
                   {kecList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
                 </select>
@@ -903,7 +1053,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
                   mengikuti form admin. */}
               {kecId && (
                 <>
-                  <select onChange={handleKelChange} defaultValue="" className={selectCls()}>
+                  <select onChange={handleKelChange} value={kelId ?? ''} className={selectCls()}>
                     <option value="">-- Pilih Kelurahan/Desa --</option>
                     {kelList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
                   </select>
@@ -995,6 +1145,19 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
           <input ref={fileInputRef} type="file" accept="image/*"
             multiple className="hidden" onChange={handleFileSelect} />
           <FieldErr msg={errors.photos} />
+
+          {/* Foto tidak ikut tersimpan di draft (terlalu besar untuk
+              localStorage) — katakan terus terang alih-alih membiarkan user
+              mengira fotonya masih ada. */}
+          {fotoPerluUlang > 0 && photoPreviews.length === 0 && (
+            <div className="flex items-start gap-2 p-3 mt-2 bg-amber-50 border border-amber-200 rounded-xl">
+              <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-800">
+                Isian teks Anda berhasil dipulihkan, tetapi <strong>{fotoPerluUlang} foto</strong> perlu
+                dipilih ulang — file foto terlalu besar untuk disimpan di perangkat.
+              </p>
+            </div>
+          )}
 
           {photoPreviews.length > 0 && (
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-3">
@@ -1116,6 +1279,16 @@ export default function TitipJualPage() {
   const handleStep1 = (data: Step1State) => { setStep1Data(data); setStep(2); };
   const handleSuccess = (r: ApiResult) => setResult(r);
 
+  // Banner "isian dipulihkan". Dibaca di useEffect (bukan saat render) karena
+  // halaman ini SSR — localStorage tidak ada di server dan membacanya saat
+  // render menghasilkan hydration mismatch. Efek induk berjalan SETELAH efek
+  // anak, tapi autosave anak di-debounce 800 ms sehingga pembacaan di sini
+  // masih melihat draft lama, bukan tulisan barusan.
+  const [adaDraftPulih, setAdaDraftPulih] = useState(false);
+  useEffect(() => { setAdaDraftPulih(bacaDraft() !== null); }, []);
+
+  const mulaiBaru = () => { hapusDraft(); window.location.reload(); };
+
   // Gulir ke atas tiap ganti step. Formulir ini panjang: tanpa ini user bisa
   // mendarat di tengah halaman dan mengira isiannya hilang — persis persepsi
   // yang sedang diperbaiki. Render pertama dilewati agar tidak mengganggu
@@ -1145,6 +1318,18 @@ export default function TitipJualPage() {
           <h1 className="font-display text-2xl font-bold text-[#0F172A]">Titip Jual Properti</h1>
           <p className="text-[#64748B] text-sm mt-1">Pasarkan properti Anda bersama tim SBP</p>
         </div>
+        {adaDraftPulih && (
+          <div className="flex items-start gap-2 mb-4 p-3 bg-[#E3F2FD] border border-[#90CAF9] rounded-xl">
+            <Check size={16} className="text-[#1565C0] flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-[#0F172A] flex-1">
+              Isian Anda sebelumnya sudah dipulihkan. Demi keamanan, <strong>NIK</strong> dan{' '}
+              <strong>foto</strong> tidak ikut tersimpan — keduanya perlu diisi ulang.
+            </p>
+            <button onClick={mulaiBaru} className="text-xs font-semibold text-[#1565C0] hover:underline flex-shrink-0">
+              Mulai baru
+            </button>
+          </div>
+        )}
         <div className="bg-white rounded-2xl shadow-sm p-6 sm:p-8">
           <Stepper step={step} />
           {/* ⚠️ Kedua step SENGAJA tetap terpasang; yang tidak aktif hanya

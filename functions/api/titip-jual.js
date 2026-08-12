@@ -48,6 +48,17 @@ export async function onRequestPost(context) {
   const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? null;
   const captcha = await verifyTurnstile(body.cf_turnstile_token, env.TURNSTILE_SECRET, ip, new URL(request.url).hostname);
   if (!captcha.ok) {
+    // ⚠️ WAJIB DICATAT. Sampai audit 12 Agu 2026, penolakan 403 dan 422 tidak
+    // meninggalkan jejak APA PUN — hanya error 500 yang memanggil logServerError.
+    // Akibatnya komplain klien "upload gagal" mustahil direproduksi: error_logs
+    // kosong, D1 kosong, dan dari sisi server semuanya tampak sehat. Jangan
+    // hapus dua blok waitUntil ini demi "menghemat baris".
+    context.waitUntil(logServerError(env, {
+      message: `[titip-jual] Ditolak Turnstile (403): ${captcha.error ?? 'tanpa-alasan'}`,
+      url: request.url,
+      userAgent: request.headers.get('User-Agent') ?? undefined,
+      context: { kind: 'turnstile-403', reason: captcha.error ?? null, ada_token: Boolean(body.cf_turnstile_token) },
+    }));
     return jsonError('Verifikasi anti-bot gagal. Silakan muat ulang halaman dan coba lagi.', 403);
   }
 
@@ -174,7 +185,17 @@ export async function onRequestPost(context) {
     }
   }
 
-  if (Object.keys(errors).length > 0) return jsonError('Validasi gagal', 422, errors);
+  if (Object.keys(errors).length > 0) {
+    // Hanya NAMA field yang dicatat, TIDAK PERNAH nilainya — error_logs tidak
+    // terenkripsi dan isian di sini memuat NIK, nama, dan nomor WA.
+    context.waitUntil(logServerError(env, {
+      message: `[titip-jual] Validasi gagal (422): ${Object.keys(errors).join(', ')}`,
+      url: request.url,
+      userAgent: request.headers.get('User-Agent') ?? undefined,
+      context: { kind: 'validasi-422', fields: Object.keys(errors) },
+    }));
+    return jsonError('Validasi gagal', 422, errors);
+  }
 
   if (!env.NIK_ENC_KEY) {
     console.error('[titip-jual] NIK_ENC_KEY tidak terkonfigurasi');
@@ -365,6 +386,26 @@ export async function onRequestPost(context) {
     console.error('[titip-jual] INSERT error:', err.message);
     context.waitUntil(logServerError(env, { message: `[titip-jual] INSERT error: ${err.message}`, stack: err.stack, url: request.url }));
     return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
+  }
+
+  // ─── Tutup prospek Step 1 ─────────────────────────────────────────────────
+  // Baris `leads` yang dibuat saat user menyelesaikan Step 1 (lihat
+  // titip-jual-prospek.js) ditandai selesai + ditautkan ke properti yang lahir.
+  // Tanpa ini admin akan menelepon orang yang justru sudah merampungkan formnya.
+  // Best-effort di waitUntil: gagal menandai TIDAK BOLEH menggagalkan submit
+  // yang datanya sudah aman tersimpan.
+  const prospekLeadId = Number.isInteger(body.prospek_lead_id) && body.prospek_lead_id > 0
+    ? body.prospek_lead_id
+    : null;
+  if (prospekLeadId) {
+    context.waitUntil(
+      env.DB.prepare(`
+        UPDATE leads
+           SET status_pipeline = 'closed', property_id = ?, pesan = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND tipe_pengirim = 'penjual' AND source_page = '/titip-jual'
+      `).bind(property_id, `Titip Jual SELESAI — listing ${kode_listing}.`, prospekLeadId).run()
+        .catch(err => console.error('[titip-jual] tandai prospek selesai gagal:', err.message))
+    );
   }
 
   // ─── Upload foto ke R2 + insert property_images ───────────────────────────
