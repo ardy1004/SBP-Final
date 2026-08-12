@@ -146,7 +146,7 @@ function ukuranBase64(dataUrl: string): number {
  * pemeriksaan di handleSubmit.
  */
 const URUTAN_FIELD_STEP2 = [
-  'harga', 'harga_sewa_tahun', 'jenis', 'gmaps_link', 'legalitas',
+  'harga', 'harga_sewa_tahun', 'jenis', 'lokasi', 'gmaps_link', 'legalitas',
   'photos', 'consent', 'turnstile',
 ];
 
@@ -655,19 +655,20 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     const id = parseInt(e.target.value, 10) || null;
     const nama = provList.find(p => p.id === id)?.nama ?? '';
     setProvId(id); setProvinsi(nama); setKabId(null); setKabupaten(''); setKecId(null); setKecProp(''); setKelProp(''); setKelId(null);
+    clearErr('lokasi');
   }, [provList]);
 
   const handleKabChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const id = parseInt(e.target.value, 10) || null;
     const nama = kabList.find(k => k.id === id)?.nama ?? '';
     setKabId(id); setKabupaten(nama); setKecId(null); setKecProp(''); setKelProp(''); setKelId(null);
-    clearErr('kabupaten');
+    clearErr('kabupaten'); clearErr('lokasi');
   }, [kabList]);
 
   const handleKecChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const id = parseInt(e.target.value, 10) || null;
     const nama = kecList.find(k => k.id === id)?.nama ?? '';
-    setKecId(id); setKecProp(nama); setKelProp(''); setKelId(null); clearErr('kecamatan_prop');
+    setKecId(id); setKecProp(nama); setKelProp(''); setKelId(null); clearErr('kecamatan_prop'); clearErr('lokasi');
   }, [kecList]);
 
   const handleKelChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -753,6 +754,13 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     else if (modePerM2 && (!lt || parseInt(lt) <= 0)) e.harga = 'Mode harga per m² membutuhkan Luas Tanah — isi Luas Tanah dulu atau ganti ke Harga Total';
     if (tujuan === 'dijual_disewa' && (!hargaSewa || parseInt(hargaSewa) <= 0)) e.harga_sewa_tahun = 'Harga sewa/tahun wajib diisi untuk opsi Dijual & Disewakan';
     if (!gmaps.trim()) e.gmaps_link = 'Link Google Maps wajib diisi';
+    // Lokasi properti dulu sepenuhnya opsional, sehingga listing bisa lahir
+    // tanpa lokasi sama sekali — dan judul serta meta SEO-nya lalu jatuh ke
+    // alamat KTP pemilik (lihat komentar di functions/api/titip-jual.js).
+    // Kelurahan tetap opsional: tidak semua kecamatan punya datanya di D1.
+    if (!provinsi || !kabupaten || !kecProp) {
+      e.lokasi = 'Provinsi, Kabupaten/Kota, dan Kecamatan properti wajib dipilih';
+    }
     if (!legalitas) e.legalitas = 'Legalitas wajib dipilih';
     if (!photoPreviews.length) e.photos = 'Minimal 1 foto wajib diupload';
     else {
@@ -1131,13 +1139,13 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         )}
 
         {/* Lokasi cascade */}
-        <div>
-          <label className="block text-xs font-semibold text-[#64748B] mb-2">Lokasi Properti</label>
+        <div id="f-lokasi">
+          <label className="block text-xs font-semibold text-[#64748B] mb-2">Lokasi Properti *</label>
           {locLoading ? (
             <div className="h-10 bg-gray-100 animate-pulse rounded-xl" />
           ) : (
             <div className="space-y-2">
-              <select onChange={handleProvChange} value={provId ?? ''} className={selectCls()}>
+              <select onChange={handleProvChange} value={provId ?? ''} className={selectCls(errors.lokasi)}>
                 <option value="">-- Pilih Provinsi --</option>
                 {provList.map(p => <option key={p.id} value={p.id}>{p.nama}</option>)}
               </select>
@@ -1177,6 +1185,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
               )}
             </div>
           )}
+          <FieldErr msg={errors.lokasi} />
         </div>
 
         {/* Alamat Properti */}

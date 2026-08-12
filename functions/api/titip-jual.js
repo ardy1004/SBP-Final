@@ -35,6 +35,26 @@ function jenisTransaksi(tujuan) {
 }
 
 /**
+ * Judul otomatis saat owner mengosongkan kolom Judul.
+ *
+ * ⚠️ HANYA BOLEH MEMAKAI LOKASI PROPERTI. Versi lama mundur ke `kelurahan_owner`
+ * — itu ALAMAT KTP pemiliknya, bukan letak propertinya. Owner ber-KTP Surabaya
+ * yang menjual rumah di Sleman mendapat judul "Rumah <kelurahan Surabaya>", dan
+ * judul itu ikut jadi slug URL serta meta SEO. Kalau lokasi properti benar-benar
+ * kosong, lebih baik judul tanpa lokasi daripada judul yang menyesatkan.
+ *
+ * Sejak 2026-08-12 kecamatan properti sudah wajib di form, jadi cabang terakhir
+ * praktis tak terpakai — ia tetap ada sebagai jaring pengaman untuk klien lama
+ * yang masih memakai bundle sebelum perubahan itu.
+ */
+function titleOtomatis(titleRaw, jenisProperti, kecamatanProp, kabupatenProp) {
+  if (titleRaw) return titleRaw;
+  const jenis = jenisProperti.charAt(0).toUpperCase() + jenisProperti.slice(1);
+  const lokasi = kecamatanProp || kabupatenProp || '';
+  return lokasi ? `${jenis} ${lokasi}` : jenis;
+}
+
+/**
  * Cari submit yang sudah pernah tersimpan dengan submit_id yang sama.
  *
  * Endpoint ini menulis property+owner+agreement DULU, foto belakangan, dan
@@ -255,9 +275,21 @@ export async function onRequestPost(context) {
   }
 
   // ─── Optional property fields ─────────────────────────────────────────────
-  const provinsi       = sanitize(body.provinsi ?? 'DI Yogyakarta', 100);
+  // ⚠️ `||`, BUKAN `??`. Klien mengirim `provinsi` tanpa syarat dan nilainya
+  // string KOSONG bila user melewati cascade lokasi — sedangkan `??` hanya
+  // menyala untuk null/undefined, sehingga defaultnya tidak pernah terpakai
+  // sekali pun dan properti lahir tanpa provinsi. Kasus keempat dari pola
+  // "placeholder hardcoded membuang data" yang dicatat CLAUDE.md.
+  const provinsi       = sanitize(body.provinsi ?? '', 100) || 'DI Yogyakarta';
   const kabupaten      = sanitize(body.kabupaten ?? '', 100);
   // kecamatan_prop / kelurahan_prop = property location (step 2 cascade)
+  //
+  // Lokasi properti diwajibkan di FORM (Tahap 4, 2026-08-12), SENGAJA tidak di
+  // sini. Menghidupkan syarat server untuk field yang belum tentu dikirim klien
+  // lama persis itulah yang mematikan seluruh submit selama ±3 minggu pada
+  // f7bc909 (lihat catatan nama_pemilik di atas). Klien dengan bundle lama tetap
+  // diterima; yang penting judul & meta SEO tidak lagi jatuh ke alamat KTP —
+  // itu sudah dijamin titleOtomatis() dan blok generateMetaSeo di bawah.
   const kecamatan_prop = sanitize(body.kecamatan_prop ?? '', 100);
   const kelurahan_prop = sanitize(body.kelurahan_prop ?? '', 100);
   const alamat_prop    = sanitize(body.alamat ?? '', 500) || null;
@@ -318,10 +350,9 @@ export async function onRequestPost(context) {
     propSeqN = await nextKodeSeq(env.DB, 'properties', 'kode_listing', `SBP-${date8}-`);
     agrSeqN  = await nextKodeSeq(env.DB, 'agreements', 'kode_perjanjian', `SBP-AGR-${date8}-`);
 
-    const title = title_raw || `${jenis_properti.charAt(0).toUpperCase() + jenis_properti.slice(1)} ${kecamatan_prop || kelurahan_owner}`;
     const suffix = Array.from(crypto.getRandomValues(new Uint8Array(3)))
       .map(b => b.toString(16).padStart(2, '0')).join('');
-    slug = `${slugify(title)}-${suffix}`;
+    slug = `${slugify(titleOtomatis(title_raw, jenis_properti, kecamatan_prop, kabupaten))}-${suffix}`;
   } catch (err) {
     console.error('[titip-jual] Gagal generate kode:', err.message);
     context.waitUntil(logServerError(env, { message: `[titip-jual] Gagal generate kode: ${err.message}`, stack: err.stack, url: request.url }));
@@ -330,7 +361,7 @@ export async function onRequestPost(context) {
   let kode_listing   = `SBP-${date8}-${fmtSeq(propSeqN)}`;
   let kode_perjanjian = `SBP-AGR-${date8}-${fmtSeq(agrSeqN)}`;
 
-  const titleFinal = title_raw || `${jenis_properti.charAt(0).toUpperCase() + jenis_properti.slice(1)} ${kecamatan_prop || kelurahan_owner}`;
+  const titleFinal = titleOtomatis(title_raw, jenis_properti, kecamatan_prop, kabupaten);
 
   const meta = generateMetaSeo({
     jenis_properti, tujuan,
@@ -338,8 +369,14 @@ export async function onRequestPost(context) {
     // ⚠️ hrg.harga (TOTAL), bukan `harga` mentah: pada mode per-m² nilai mentahnya
     // harga per meter, sehingga meta SEO akan mengiklankan harga yang salah.
     harga: tujuan === 'disewa' ? harga_sewa_tahun : hrg.harga,
-    kelurahan: kelurahan_prop || kelurahan_owner,
-    kecamatan: kecamatan_prop || kecamatan_owner,
+    // ⚠️ HANYA lokasi PROPERTI. Dulu di sini ada fallback ke kelurahan_owner /
+    // kecamatan_owner — itu ALAMAT KTP PEMILIK, bukan lokasi properti. Owner
+    // ber-KTP Surabaya yang menjual rumah di Sleman menghasilkan meta_title
+    // "…Surabaya", lalu Google mengindeks halaman itu untuk kota yang salah.
+    // Biarkan kosong bila memang kosong; generateMetaSeo() sudah tahu cara
+    // menyusut. JANGAN kembalikan fallback-nya "supaya tidak kosong".
+    kelurahan: kelurahan_prop,
+    kecamatan: kecamatan_prop,
     kabupaten, luas_tanah, luas_bangunan, nego,
   });
 
