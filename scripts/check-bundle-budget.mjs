@@ -73,7 +73,13 @@ import { join } from 'node:path';
 //             karena metrik yang benar-benar berbahaya tidak bergerak.
 // ─────────────────────────────────────────────────────────────────────────────
 const BUDGET_SSR_MAIN_CHUNK = 560_000;    // 503.003 +11% — headroom nyata, bukan tepi jurang
-const BUDGET_FUNCTIONS_RAW  = 6_050_000;  // 6.001.544 + headroom (naik dari 6.000.000 — tracking lokasi + pengayaan GA4, 2026-08-06)
+// Naik 6.050.000 → 6.150.000 pada 2026-08-12, disetujui user. Sebabnya perbaikan
+// Titip Jual (autosave draft, endpoint prospek, telemetri 403/422, status
+// Turnstile) — sebagian besar pertumbuhannya justru dari TitipJualPage.tsx yang
+// ikut ter-bundle ke Functions lewat SSR, bukan dari kode backend baru.
+// Metrik yang benar-benar berbahaya tidak bergerak: gzip 1,20 MB = 12% dari
+// batas skrip Cloudflare yang sesungguhnya (10 MB).
+const BUDGET_FUNCTIONS_RAW  = 6_150_000;  // 6.050.325 + headroom untuk Tahap 3-4 perbaikan Titip Jual
 const BUDGET_FUNCTIONS_GZIP = 8_000_000;  // jauh di bawah batas 10 MB; alarm jaring pengaman saja
 
 /**

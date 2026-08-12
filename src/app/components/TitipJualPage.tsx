@@ -16,7 +16,7 @@ import {
 // Konversi harga total ↔ per-m² untuk tanah. SATU SUMBER dengan endpoint admin
 // (functions/_lib/hargaTanah.js) — jangan tulis rumus sendiri.
 import { HARGA_MODE_TOTAL, HARGA_MODE_PER_M2 } from '../../../functions/_lib/hargaTanah.js';
-import Turnstile from './Turnstile';
+import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnstile';
 import { pageMeta } from '../../lib/pageMeta';
 // Autosave isian ke localStorage. NIK dan foto sengaja TIDAK ikut disimpan —
 // alasannya panjang dan penting, ada di titipJualDraft.ts.
@@ -103,6 +103,27 @@ function convertToWebP(file: File): Promise<string> {
 function adaIsi(obj: Record<string, unknown>): boolean {
   return Object.values(obj).some(v =>
     typeof v === 'string' ? v.trim() !== '' : typeof v === 'number' ? true : v === true);
+}
+
+/**
+ * Kunci error Step 2 menurut URUTAN TAMPILNYA di layar — perhatikan `jenis`
+ * ada SETELAH `harga`, mengikuti tata letak sebenarnya, bukan urutan
+ * pemeriksaan di handleSubmit.
+ */
+const URUTAN_FIELD_STEP2 = [
+  'harga', 'harga_sewa_tahun', 'jenis', 'gmaps_link', 'legalitas',
+  'photos', 'consent', 'turnstile',
+];
+
+/**
+ * Gulir ke field bermasalah pertama. Memakai id DOM, bukan ref per-field:
+ * titik error tersebar di ±600 baris JSX dan menambahkan delapan ref semata-mata
+ * untuk menggulir jauh lebih berisik daripada satu id di tiap pembungkus.
+ */
+function fokuskanErrorPertama(errs: Record<string, string>): void {
+  const kunci = URUTAN_FIELD_STEP2.find(k => errs[k]);
+  if (!kunci) return;
+  document.getElementById(`f-${kunci}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 const inputCls = (err?: string) =>
@@ -504,6 +525,8 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
   // Consent + submission
   const [consent, setConsent] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileStatus, setTurnstileStatus] = useState<TurnstileStatus>('memuat');
+  const turnstileRef = useRef<TurnstileHandle>(null);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors]   = useState<Record<string, string>>({});
   const [apiError, setApiError] = useState<string | null>(null);
@@ -697,7 +720,25 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     if (!legalitas) e.legalitas = 'Legalitas wajib dipilih';
     if (!photoPreviews.length) e.photos = 'Minimal 1 foto wajib diupload';
     if (!consent) e.consent = 'Persetujuan privasi wajib dicentang';
-    if (Object.keys(e).length) { setErrors(e); return; }
+    // Token anti-bot: backend FAIL-CLOSED, jadi submit tanpa token pasti ditolak
+    // 403 setelah user menunggu seluruh foto terunggah. Hentikan di sini, dengan
+    // pesan yang menyebut tombol "Verifikasi ulang" — bukan "muat ulang halaman".
+    if (!turnstileToken) {
+      e.turnstile = turnstileStatus === 'gagal'
+        ? 'Verifikasi anti-bot gagal dimuat. Klik "Verifikasi ulang" di bawah — bila tetap gagal, matikan penghemat data/pemblokir iklan lalu coba lagi.'
+        : 'Verifikasi anti-bot belum selesai. Tunggu beberapa detik hingga bertanda ✓, lalu tekan Kirim lagi.';
+    }
+    if (Object.keys(e).length) {
+      setErrors(e);
+      // ⚠️ Dulu tombol Kirim di-disable saat form belum lengkap, sehingga
+      // handleSubmit TIDAK PERNAH jalan dan seluruh pesan di atas mustahil
+      // muncul. Form ini tingginya ±1000px: user yang lupa satu centang di
+      // paling bawah hanya melihat tombol abu-abu diam = "upload gagal".
+      // Sekarang tombolnya selalu bisa diklik dan halaman melompat ke masalahnya.
+      setApiError('Ada isian yang belum lengkap — lihat kolom yang ditandai merah.');
+      fokuskanErrorPertama(e);
+      return;
+    }
 
     setLoading(true);
     setApiError(null);
@@ -793,6 +834,17 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
               ? `Ada masalah pada Data Diri (Step 1): ${pesanStep1.join(', ')}. Klik "← Kembali" untuk memperbaikinya.`
               : 'Mohon periksa kembali isian form Anda.'
           );
+          fokuskanErrorPertama(json.details);
+        } else if (res.status === 403) {
+          // Token anti-bot ditolak (paling sering: kedaluwarsa karena form ini
+          // panjang — masa berlaku token hanya ±5 menit). Terbitkan token baru
+          // otomatis dan minta user menekan Kirim sekali lagi. JANGAN menyuruh
+          // muat ulang halaman: isian memang kini terselamatkan autosave, tapi
+          // foto tetap hilang dan itu pekerjaan berat di HP.
+          setTurnstileToken('');
+          turnstileRef.current?.reset();
+          setApiError('Verifikasi anti-bot kedaluwarsa. Kami sudah memperbaruinya — tunggu tanda ✓ hijau di bawah, lalu tekan Kirim sekali lagi. Isian Anda tetap aman.');
+          fokuskanErrorPertama({ turnstile: 'x' });
         } else {
           setApiError(json.error ?? 'Terjadi kesalahan. Silakan coba lagi.');
         }
@@ -810,9 +862,6 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
       setLoading(false);
     }
   };
-
-  const isValid = jenis && harga && parseInt(harga) > 0 && legalitas && photoPreviews.length > 0 && consent
-    && gmaps.trim() && (tujuan !== 'dijual_disewa' || (hargaSewa && parseInt(hargaSewa) > 0));
 
   return (
     <div>
@@ -845,7 +894,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
 
         {/* Harga — tanah boleh diketik per-m² (cara agen mengiklankan tanah),
             jenis lain selalu total. Padanan toggle yang sudah ada di form admin. */}
-        <div>
+        <div id="f-harga">
           {SHOW_HARGA_PER_M2.has(jenis) && tujuan !== 'disewa' && (
             <div className="flex gap-2 mb-2">
               {[{ v: HARGA_MODE_TOTAL, l: 'Harga Total' }, { v: HARGA_MODE_PER_M2, l: 'Harga per m²' }].map(o => (
@@ -872,7 +921,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
 
         {/* Harga Sewa/Tahun (kondisional — Dijual & Disewakan) */}
         {tujuan === 'dijual_disewa' && (
-          <div>
+          <div id="f-harga_sewa_tahun">
             <label className="block text-xs font-semibold text-[#64748B] mb-1">Harga Sewa/Tahun (Rp) *</label>
             <input value={hargaSewa} onChange={e => { setHargaSewa(e.target.value); clearErr('harga_sewa_tahun'); }}
               type="number" placeholder="Contoh: 25000000" className={inputCls(errors.harga_sewa_tahun)} />
@@ -891,7 +940,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         </div>
 
         {/* Jenis Properti */}
-        <div>
+        <div id="f-jenis">
           <label className="block text-xs font-semibold text-[#64748B] mb-1">Jenis Properti *</label>
           <select value={jenis} onChange={e => { setJenis(e.target.value); clearErr('jenis'); }}
             className={selectCls(errors.jenis)}>
@@ -1074,7 +1123,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         </div>
 
         {/* Google Maps Properti */}
-        <div>
+        <div id="f-gmaps_link">
           <label className="block text-xs font-semibold text-[#64748B] mb-1">Link Google Maps Properti *</label>
           <input value={gmaps} onChange={e => { setGmaps(e.target.value); clearErr('gmaps_link'); }}
             placeholder="https://maps.google.com/..." className={inputCls(errors.gmaps_link)} />
@@ -1090,7 +1139,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         </div>
 
         {/* Legalitas */}
-        <div>
+        <div id="f-legalitas">
           <label className="block text-xs font-semibold text-[#64748B] mb-1">Legalitas *</label>
           <select value={legalitas} onChange={e => { setLegalitas(e.target.value); clearErr('legalitas'); }}
             className={selectCls(errors.legalitas)}>
@@ -1131,7 +1180,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         </div>
 
         {/* Upload Foto */}
-        <div>
+        <div id="f-photos">
           <label className="block text-xs font-semibold text-[#64748B] mb-2">
             Upload Foto Properti * <span className="font-normal text-gray-400">({photoPreviews.length}/20 foto)</span>
           </label>
@@ -1192,7 +1241,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         </div>
 
         {/* Consent PDP — PLACEHOLDER: teks dapat disesuaikan dengan kebijakan privasi resmi SBP */}
-        <label className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-all ${errors.consent ? 'border-red-400 bg-red-50' : 'border-gray-200 hover:border-[#1565C0]'}`}>
+        <label id="f-consent" className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-all ${errors.consent ? 'border-red-400 bg-red-50' : 'border-gray-200 hover:border-[#1565C0]'}`}>
           <input type="checkbox" checked={consent} onChange={e => { setConsent(e.target.checked); clearErr('consent'); }}
             className="mt-0.5 w-4 h-4 accent-[#1565C0] flex-shrink-0" />
           <span className="text-xs text-[#64748B] leading-relaxed">
@@ -1202,12 +1251,40 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         </label>
         <FieldErr msg={errors.consent} />
 
-        {/* Anti-bot Turnstile */}
-        <Turnstile
-          onVerify={setTurnstileToken}
-          onExpire={() => setTurnstileToken('')}
-          className="mt-1"
-        />
+        {/* Anti-bot Turnstile — statusnya WAJIB terlihat. Backend fail-closed,
+            jadi widget yang gagal dimuat berarti setiap submit ditolak 403.
+            Sampai audit 12 Agu 2026 kondisi itu sama sekali tidak ditampilkan:
+            user mengisi form, mengunggah 20 foto, lalu ditolak tanpa tahu
+            sebabnya — dan pesan errornya menyuruh "muat ulang halaman" yang
+            justru menghapus seluruh isiannya. */}
+        <div id="f-turnstile" className="mt-1">
+          <Turnstile
+            ref={turnstileRef}
+            onVerify={t => { setTurnstileToken(t); clearErr('turnstile'); }}
+            onExpire={() => setTurnstileToken('')}
+            onStatusChange={setTurnstileStatus}
+          />
+          <div className="flex items-center gap-2 mt-1.5">
+            {turnstileToken ? (
+              <span className="text-xs text-[#10B981] font-medium flex items-center gap-1">
+                <Check size={13} /> Terverifikasi
+              </span>
+            ) : turnstileStatus === 'gagal' ? (
+              <>
+                <span className="text-xs text-red-600 font-medium flex items-center gap-1">
+                  <AlertCircle size={13} /> Verifikasi gagal dimuat
+                </span>
+                <button type="button" onClick={() => turnstileRef.current?.reset()}
+                  className="text-xs font-semibold text-[#1565C0] hover:underline">
+                  Verifikasi ulang
+                </button>
+              </>
+            ) : (
+              <span className="text-xs text-[#64748B]">Memverifikasi bahwa Anda bukan robot…</span>
+            )}
+          </div>
+          <FieldErr msg={errors.turnstile} />
+        </div>
 
         {/* API Error */}
         {apiError && (
@@ -1223,8 +1300,15 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
           className="px-6 py-3 rounded-xl font-semibold border border-gray-200 text-gray-600 hover:border-[#1565C0] transition-colors disabled:opacity-50">
           ← Kembali
         </button>
-        <button onClick={handleSubmit} disabled={!isValid || loading}
-          className={`flex-1 py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all ${isValid && !loading ? 'hover:brightness-110' : 'opacity-60 cursor-not-allowed'}`}
+        {/* ⚠️ JANGAN kembalikan `disabled={!isValid || loading}`. Selama tombol
+            ini mati saat form belum lengkap, handleSubmit tidak pernah jalan,
+            sehingga SELURUH pesan error per-field mustahil muncul untuk field
+            yang justru memblokir. Form ini ±1000px: user yang melewatkan satu
+            centang di paling bawah cuma melihat tombol abu-abu diam, dan itu
+            dilaporkan sebagai "upload gagal". Biarkan diklik — handleSubmit yang
+            menjelaskan apa yang kurang lalu menggulir ke sana. */}
+        <button onClick={handleSubmit} disabled={loading}
+          className={`flex-1 py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all ${loading ? 'opacity-60 cursor-not-allowed' : 'hover:brightness-110'}`}
           style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
           {loading ? (
             <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Memproses...</>
