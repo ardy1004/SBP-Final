@@ -8,6 +8,8 @@ import {
 import { toAttachmentUrl, toImageThumbnailUrl } from '../../lib/cloudinaryUrl';
 import { findArchetype } from './viralframe/archetypes';
 import SlotIndicatorStrip from './viralframe/SlotIndicatorStrip';
+import AkunAgentCard from './AkunAgentCard';
+import JamPrimetimeCard from './JamPrimetimeCard';
 
 // Penanda status properti — MURNI TEKS, dihitung dari flag properti yang sudah
 // ada di baris video. Ini BUKAN sisa fitur badge/logo video (overlay gambar ke
@@ -393,6 +395,14 @@ export default function AdminViralFrameAgentVideosPage() {
         <p className="text-sm text-[#64748B] mt-0.5">
           Video hasil upload manual (Cloudinary), dikelompokkan per karakter/agent — lintas semua properti.
         </p>
+      </div>
+
+      {/* Kendali penjadwalan — dipindah ke sini dari Admin → Pengaturan
+          (2026-08-12) supaya kredensial, saklar auto, jam kirim, dan jam tayang
+          berkumpul di halaman tempat videonya dikelola. Default ciut. */}
+      <div className="space-y-2">
+        <AkunAgentCard />
+        <JamPrimetimeCard />
       </div>
 
       {aksiError && (

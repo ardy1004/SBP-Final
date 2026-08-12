@@ -33,10 +33,10 @@ export async function onRequestPost(context) {
   const namaAkun = targetId === video.character_id ? `Agent "${video.character_nama}"` : 'Agent utama (mode Terpusat)';
 
   if (!akun.bufferKey && !akun.zernioKey) {
-    return jsonError(`${namaAkun} belum punya kredensial scheduler. Isi dulu di Admin → Pengaturan → Akun Agent.`, 422);
+    return jsonError(`${namaAkun} belum punya kredensial scheduler. Isi dulu di Admin → Konten Agent → Akun Agent.`, 422);
   }
   if (Object.keys(akun.channels).length === 0) {
-    return jsonError(`${namaAkun} belum punya channel sosmed. Buka Pengaturan → Akun Agent → "Ambil dari API", lalu Simpan.`, 422);
+    return jsonError(`${namaAkun} belum punya channel sosmed. Buka Konten Agent → Akun Agent → "Ambil dari API", lalu Simpan.`, 422);
   }
 
   // Kuota dihitung pada AKUN TUJUAN, bukan agent asal — di mode Terpusat semua

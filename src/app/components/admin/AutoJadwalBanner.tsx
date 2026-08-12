@@ -54,7 +54,7 @@ export default function AutoJadwalBanner() {
       <div className="flex-1 text-sm text-amber-800">
         {pesan.map((p, i) => <div key={i}>{p}</div>)}
       </div>
-      <Link to="/admin/pengaturan" className="text-xs font-semibold text-amber-800 underline flex-shrink-0">Buka Pengaturan</Link>
+      <Link to="/admin/viralframe/agent-videos" className="text-xs font-semibold text-amber-800 underline flex-shrink-0">Buka Konten Agent</Link>
     </div>
   );
 }

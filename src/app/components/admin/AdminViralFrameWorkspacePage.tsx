@@ -1794,12 +1794,12 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
         )}
         {modeAkun === 'terpusat' && (
           <p className="text-[11px] text-[#94A3B8] mt-1">
-            Mode Terpusat aktif — video mendarat di storage agent utama apa pun agent yang dipilih. Ubah di Pengaturan → Akun Agent.
+            Mode Terpusat aktif — video mendarat di storage agent utama apa pun agent yang dipilih. Ubah di Konten Agent → Akun Agent.
           </p>
         )}
         {modeAkun === 'per_agent' && agentTerpilih && !agentTerpilih.storage_siap && (
           <p className="text-[11px] text-[#94A3B8] mt-1">
-            {agentTerpilih.nama} belum punya Cloudinary sendiri — video akan masuk ke akun global. Atur di Pengaturan → Akun Agent.
+            {agentTerpilih.nama} belum punya Cloudinary sendiri — video akan masuk ke akun global. Atur di Konten Agent → Akun Agent.
           </p>
         )}
       </div>

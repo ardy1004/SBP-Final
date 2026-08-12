@@ -39,7 +39,7 @@ export async function onRequestPost(context) {
 
   const creds = await resolveCloudinary(env, Number.isInteger(characterId) ? characterId : null);
   if (!creds) {
-    return jsonError('Cloudinary belum dikonfigurasi — isi di Admin → Pengaturan → Akun Agent, atau set CLOUDINARY_* di Cloudflare', 500);
+    return jsonError('Cloudinary belum dikonfigurasi — isi di Admin → Konten Agent → Akun Agent, atau set CLOUDINARY_* di Cloudflare', 500);
   }
 
   const explicitFolder = typeof body.folder === 'string' && body.folder.startsWith('sbp-viralframe/') ? body.folder.slice(0, 200) : null;

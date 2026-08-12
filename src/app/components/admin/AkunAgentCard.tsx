@@ -11,7 +11,7 @@
 // ter-mask, jadi tidak ada cara tidak sengaja mengosongkan key yang sudah ada.
 
 import { useState, useEffect, useCallback } from 'react';
-import { Users, CheckCircle, XCircle, RefreshCw, Save, Play, Pause } from 'lucide-react';
+import { Users, CheckCircle, XCircle, RefreshCw, Save, Play, Pause, ChevronDown, ChevronRight } from 'lucide-react';
 import {
   getAgentAccounts, saveAgentAccount, saveModeAkun, getSchedulerAccounts,
   type AgentAccount, type AgentAccountInput, type AgentChannels, type ModeAkun,
@@ -46,6 +46,7 @@ function formDari(a: AgentAccount): FormState {
 
 const INPUT_CLS = 'w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0]/30';
 const LABEL_CLS = 'block text-xs font-semibold text-[#334155] mb-1';
+const CIUT_KEY = 'sbp_akun_agent_ciut';
 
 function Lencana({ ok, teks }: { ok: boolean; teks: string }) {
   return (
@@ -67,6 +68,16 @@ export default function AkunAgentCard() {
   const [autoAktif, setAutoAktif] = useState(false);
   const [utama, setUtama] = useState<number | null>(null);
   const [ubahMode, setUbahMode] = useState(false);
+  // Default CIUT: halaman ini tujuan utamanya mengelola video, kredensial jarang
+  // disentuh setelah terpasang. Ringkasan di header yang menjaga statusnya tetap
+  // terbaca tanpa perlu dibuka.
+  const [ciut, setCiut] = useState(true);
+  useEffect(() => { try { setCiut(localStorage.getItem(CIUT_KEY) !== '0'); } catch { /* noop */ } }, []);
+  const toggleCiut = () => setCiut(c => {
+    const next = !c;
+    try { localStorage.setItem(CIUT_KEY, next ? '1' : '0'); } catch { /* noop */ }
+    return next;
+  });
 
   const muat = useCallback(async () => {
     const r = await getAgentAccounts();
@@ -167,15 +178,30 @@ export default function AkunAgentCard() {
 
   const namaUtama = items?.find(a => a.character_id === utama)?.nama ?? 'agent utama';
 
+  // Ringkasan yang tampil saat kartu tertutup. Tanpa ini, saklar auto yang mati
+  // atau agent yang bermasalah jadi tak terlihat sama sekali begitu diciutkan.
+  const siap = items?.filter(a => a.storage_siap && a.scheduler_siap).length ?? 0;
+  const perluPerhatian = items?.filter(a => a.auto_aktif && ((a.auto_hasil?.gagal ?? 0) > 0 || a.video_aktif === 0)).length ?? 0;
+
   return (
-    <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 overflow-y-auto h-full">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#F0FDF4]"><Users size={17} color="#059669" /></div>
-        <div>
-          <h2 className="font-display font-semibold text-[#0F172A]">Akun Agent (Storage &amp; Scheduler)</h2>
-          <p className="text-xs text-[#64748B]">Tiap agent punya Cloudinary + Buffer/Zernio sendiri. Kosongkan storage = ikut akun global.</p>
-        </div>
-      </div>
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      <button type="button" onClick={toggleCiut} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-left">
+        {ciut ? <ChevronRight size={16} className="text-[#94A3B8]" /> : <ChevronDown size={16} className="text-[#94A3B8]" />}
+        <Users size={16} className="text-[#059669]" />
+        <span className="text-sm font-semibold text-[#0F172A]">Akun Agent (Storage &amp; Scheduler)</span>
+        {items && (
+          <span className="text-[11px] text-[#64748B] truncate">
+            {siap} siap · {mode === 'terpusat' ? 'Terpusat' : 'Per agent'} · auto {autoAktif ? 'AKTIF' : 'MATI'}
+          </span>
+        )}
+        {perluPerhatian > 0 && (
+          <span className="text-[11px] font-semibold text-amber-600">· {perluPerhatian} perlu perhatian</span>
+        )}
+        <span className="ml-auto" />
+      </button>
+
+      {!ciut && (
+      <div className="px-5 pb-5 pt-1">
 
       {/* Saklar induk auto-jadwal. Ini MENGIRIM KE Buffer/Zernio pada jam dini
           hari; yang menerbitkan ke medsos tetap Buffer/Zernio di jam primetime. */}
@@ -376,6 +402,8 @@ export default function AkunAgentCard() {
           );
         })}
       </div>
+      </div>
+      )}
     </div>
   );
 }
