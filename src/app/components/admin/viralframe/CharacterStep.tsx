@@ -193,13 +193,19 @@ export default function CharacterStep({ value, onChange }: {
   };
 
   const handleDelete = async (c: Character) => {
-    if (!window.confirm(`Hapus karakter "${c.nama}" dari library?`)) return;
+    if (!window.confirm(`Hapus karakter "${c.nama}"? Kredensial storage & scheduler-nya (kalau ada) ikut terhapus permanen. Ditolak kalau karakter ini masih punya video atau sedang jadi agent utama.`)) return;
     setDeletingId(c.id);
     try {
       const res = await fetch(`/api/admin/viralframe/characters/${c.id}`, {
         method: 'DELETE', credentials: 'include',
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Server menolak dengan alasan spesifik (mis. "masih ada N video", "ini
+      // agent utama") lewat body JSON `{error}` — HTTP ${status} generik dulu
+      // membuang pesan itu, jadi user tak pernah tahu KENAPA ditolak.
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error || `HTTP ${res.status}`);
+      }
       if (value.characterId === c.id) onChange({ characterId: null, character: null });
       await fetchChars();
     } catch (err: unknown) {

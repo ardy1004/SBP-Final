@@ -97,6 +97,16 @@ export async function onRequestPatch(context) {
   return jsonOk({ pesan: 'Karakter berhasil diperbarui', karakter: updated });
 }
 
+// ⚠️ `viralframe_agent_accounts.character_id` DAN `viralframe_agent_videos.character_id`
+// keduanya ON DELETE CASCADE (migrasi 0037, 0018) — DELETE di sini otomatis
+// menghancurkan kredensial storage/scheduler agent itu DAN semua baris video-nya
+// (aset Cloudinary video-video itu TIDAK ikut dibersihkan, jadi orphan permanen
+// kalau dibiarkan lolos). Kalau yang dihapus itu agent utama, `viralframe_akun_utama`
+// di settings tetap menunjuk id yang sudah tidak ada — resolveAkunTarget() tidak
+// pernah memvalidasi keberadaannya, jadi SELURUH mode Terpusat kehilangan
+// kredensial scheduler tanpa pesan yang mengarah ke akar masalah. Dua guardrail
+// di bawah (bukan agent utama, nol video sama sekali) mencegah keduanya sebelum
+// DELETE dieksekusi — audit 2026-08-15.
 export async function onRequestDelete(context) {
   const { env, params } = context;
 
@@ -109,6 +119,21 @@ export async function onRequestDelete(context) {
       .bind(id)
       .first();
     if (!existing) return jsonError('Karakter tidak ditemukan', 404);
+
+    const utamaRow = await env.DB.prepare(`SELECT value FROM settings WHERE key = 'viralframe_akun_utama'`).first();
+    if (utamaRow?.value && parseInt(utamaRow.value, 10) === id) {
+      return jsonError('Tidak bisa menghapus agent utama. Pindahkan status agent utama ke agent lain dulu sebelum menghapus karakter ini.', 422);
+    }
+
+    // Video APA PUN, bukan cuma yang aktif — video di Sampah yang belum di-purge
+    // juga akan ikut ke-cascade-hapus baris DB-nya tanpa aset Cloudinary-nya
+    // dibersihkan kalau dibiarkan lolos.
+    const videoCount = await env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM viralframe_agent_videos WHERE character_id = ?'
+    ).bind(id).first();
+    if ((videoCount?.n ?? 0) > 0) {
+      return jsonError(`Masih ada ${videoCount.n} video (termasuk di Sampah) milik karakter ini — hapus atau pindahkan dulu videonya sebelum menghapus karakter.`, 422);
+    }
 
     await env.DB
       .prepare('DELETE FROM viralframe_characters WHERE id = ?')
