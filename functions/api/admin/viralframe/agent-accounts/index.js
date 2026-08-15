@@ -84,6 +84,22 @@ export async function onRequestPatch({ env, request }) {
     if (!Number.isInteger(id) || id <= 0) return jsonError('utama harus id agent yang valid', 422);
     const ada = await env.DB.prepare('SELECT id FROM viralframe_characters WHERE id = ?').bind(id).first().catch(() => null);
     if (!ada) return jsonError('Agent utama tidak ditemukan', 404);
+
+    // Endpoint ini belum pernah dipanggil UI mana pun (satu-satunya jalur
+    // memindah agent utama sekarang) — kalau dipanggil langsung (mis. lewat API
+    // tool) tanpa peringatan, preset jam posting (5-slot) & kuota dinamisnya
+    // ikut pindah diam-diam ke agent baru, karena keduanya dihitung murni dari
+    // `akunId === akunUtamaId`, bukan milik agent tertentu (audit 2026-08-15).
+    const { utama: utamaSekarang } = await getModeAkun(env);
+    if (utamaSekarang && utamaSekarang !== id && body.confirm !== true) {
+      const [presetTersimpan, videoRow] = await Promise.all([
+        getSetting(env, 'viralframe_preset_utama'),
+        env.DB.prepare('SELECT COUNT(*) AS n FROM viralframe_agent_videos WHERE character_id = ? AND trashed_at IS NULL').bind(utamaSekarang).first().catch(() => null),
+      ]);
+      if (presetTersimpan || (videoRow?.n ?? 0) > 0) {
+        return jsonError('Memindahkan agent utama akan ikut memindahkan preset jam posting (5-slot) dan kuota dinamisnya ke agent baru. Kirim ulang dengan { "confirm": true } untuk melanjutkan.', 422);
+      }
+    }
     ops.push(setSetting(env, 'viralframe_akun_utama', String(id)));
   }
   if (ops.length === 0) return jsonError('Tidak ada yang diubah', 400);
