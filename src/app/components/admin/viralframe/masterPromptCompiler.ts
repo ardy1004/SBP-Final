@@ -20,7 +20,7 @@ import {
   REALISM_QUALITY_CUES, REALISM_BANNED_QUALITY_PHRASES,
   MAX_REF_IMAGES_PER_PART, buildZipNames, slugifyLabel,
   totalDurationOfParts, sumDurasiCuts,
-  getEmotionForRole, PERFORMANCE_INTENT_BY_ROLE,
+  partDuties, getEmotionForDuties, getIntentForDuties,
   VOICE_PERSONA_HINT, VOICE_PRIORITY_NOTE,
   BANNED_HOOK_OPENERS, HOOK_OPENER_EXAMPLE, PROPERTY_STRUCTURAL_NEGATIVES,
   type PartDef, type ZipSourceImage,
@@ -466,10 +466,12 @@ export function compileMasterPrompt(
   // Arahan konkret utk eskalasi energi di atas — sebelumnya klaim "eskalasi"
   // tidak pernah diterjemahkan jadi instruksi konkret per Part (audit 2026-08-04).
   const baseExpr = EXPRESSION_EN[s3.expression] ?? EXPRESSION_EN.auto;
+  const hasCtaRolePart = parts.some(p => p.role === 'CTA');
   L.push('ARAHAN EMOSI & INTENT AKTING PER PART (konkret — terapkan ke ekspresi wajah, tone dialog, dan energi tubuh):');
   parts.forEach((p, pi) => {
-    const emosi = getEmotionForRole(p.role, baseExpr) ?? baseExpr;
-    const intent = PERFORMANCE_INTENT_BY_ROLE[p.role] ?? '';
+    const duties = partDuties(p.role, pi, parts.length, hasCtaRolePart);
+    const emosi = getEmotionForDuties(duties, baseExpr) ?? baseExpr;
+    const intent = getIntentForDuties(duties);
     L.push(`  PART ${pi + 1} (${p.role}): Ekspresi: ${emosi}.${intent ? ` Intent akting: ${intent}.` : ''}`);
   });
   L.push('');

@@ -47,7 +47,7 @@ const REQUIRED_IMPORTS = {
     // Diimpor lewat re-export './options' (frontend), bukan langsung dari
     // viralframe-shared.js — VERIFIKASI ke masterPromptCompiler.ts kalau nama
     // re-export berubah.
-    'getEmotionForRole', 'PERFORMANCE_INTENT_BY_ROLE', 'VOICE_PERSONA_HINT',
+    'VOICE_PERSONA_HINT',
     // Contoh kalimat CTA terucap — label kategori saja membuat model menulis ajakan
     // umum yang tidak menyebut objeknya sama sekali (audit 2026-08-04).
     'CTA_SPOKEN_EXAMPLE',
@@ -55,16 +55,23 @@ const REQUIRED_IMPORTS = {
     // hook generik ("Halo guys, saya...") + larangan mengarang elemen struktur
     // properti (lantai/kolam/jendela tambahan) di deskripsi visual cut.
     'BANNED_HOOK_OPENERS', 'HOOK_OPENER_EXAMPLE', 'PROPERTY_STRUCTURAL_NEGATIVES',
+    // Peran EFEKTIF per Part (2026-08-16) — gantikan getEmotionForRole/
+    // PERFORMANCE_INTENT_BY_ROLE langsung di 2 jalur ini (kini dipakai internal
+    // via viralframe-shared.js saja): Part tunggal/penutup tanpa Part ber-role
+    // CTA WAJIB dapat instruksi emosi/intent GABUNGAN (hook→cta), bukan arc
+    // Hook datar sepanjang durasi — lihat komentar panjang di viralframe-shared.js.
+    'partDuties', 'getEmotionForDuties', 'getIntentForDuties',
   ],
   'functions/api/admin/viralframe/ai-generate.js': [
     'REALISM_QUALITY_CUES', 'REALISM_BANNED_QUALITY_PHRASES', 'NEGATIVE_PROMPT_VIDEO', 'RULEBOOK_VERSION',
-    'getEmotionForRole', 'PERFORMANCE_INTENT_BY_ROLE', 'buildDeliveryClause',
+    'buildDeliveryClause',
     'VOICE_PERSONA_HINT', 'VOICE_PRIORITY_NOTE',
     'BANNED_HOOK_OPENERS', 'HOOK_OPENER_EXAMPLE', 'PROPERTY_STRUCTURAL_NEGATIVES',
+    'partDuties', 'getEmotionForDuties', 'getIntentForDuties',
   ],
   'functions/api/admin/viralframe/youtube-long.js': [
     'REALISM_QUALITY_CUES', 'REALISM_BANNED_QUALITY_PHRASES', 'NEGATIVE_PROMPT_VIDEO', 'RULEBOOK_VERSION',
-    // Jalur ini TIDAK butuh getEmotionForRole/PERFORMANCE_INTENT_BY_ROLE/
+    // Jalur ini TIDAK butuh partDuties/getEmotionForDuties/getIntentForDuties/
     // buildDeliveryClause (skema dialogue-nya beda, tidak berbasis Part/peran) —
     // yang wajib disamakan hanya karakter suara & prioritas mixing audio.
     // BANNED_HOOK_OPENERS juga SENGAJA tidak wajib di sini: video YouTube long-form

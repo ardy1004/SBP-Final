@@ -20,7 +20,7 @@
 // sama sekali tidak mengimpor REALISM_* saat itu ditambahkan ke 2 jalur lain —
 // dicegah terulang lewat scripts/check-viralframe-rulebook.mjs (jalankan sebelum
 // deploy, sama seperti check-bundle-budget.mjs).
-export const RULEBOOK_VERSION = '2026-08-16.1';
+export const RULEBOOK_VERSION = '2026-08-16.2';
 
 // Tabel lipsync (PRD 3.8) — sinkronisasi durasi klip ↔ jumlah kata narasi.
 //
@@ -298,6 +298,56 @@ export const PERFORMANCE_INTENT_BY_ROLE = {
   Body: 'she talks like she is personally showing a friend around her own home',
   CTA:  'she talks like she is personally recommending a valuable opportunity',
 };
+
+// ════════════════════════════════════════════════════════════════════════════
+// PERAN EFEKTIF PART (2026-08-16) — beda dari `role` mentah (Hook/Body/CTA,
+// satu nilai eksklusif)
+// ════════════════════════════════════════════════════════════════════════════
+// Kedua jalur prompt-engine SUDAH lama memaksa duti PENUTUP (ajakan CTA) ke
+// Part TERAKHIR apa pun `role`-nya: "Part ber-role CTA, ATAU Part TERAKHIR bila
+// tidak ada Part ber-role CTA, WAJIB memakai gaya ajakan X" (hookLine/ctaLine
+// ai-generate.js, ARAHAN CTA TERUCAP masterPromptCompiler.ts). Tapi instruksi
+// EMOSI/INTENT AKTING selama ini masih murni dibaca dari `role` mentah lewat
+// getEmotionForRole()/PERFORMANCE_INTENT_BY_ROLE[role] — KONTRADIKSI nyata saat
+// hanya ada 1 Part: kontennya dipaksa menutup dengan CTA, tapi emosinya tetap
+// arc "Hook" datar sepanjang durasi tanpa sinyal eskalasi. Dilaporkan user
+// 2026-08-16: Part tunggal 10 detik berlabel "Hook" saja, padahal semestinya
+// sekaligus mengandung hook awal + body + penutup CTA di dalam cuts-nya sendiri.
+//
+// `partDuties()` menghitung peran EFEKTIF (bisa gabungan) dari posisi Part,
+// bukan cuma label mentahnya — untuk kasus normal (Hook di Part 1, CTA di Part
+// terakhir, Body di tengah) hasilnya SAMA PERSIS seperti sebelumnya (masing-
+// masing Part cuma dapat satu duty true, nol regresi). Hanya saat sebuah Part
+// SEKALIGUS jadi posisi pertama dan posisi penutup (paling umum: total 1 Part)
+// duti-nya jadi gabungan.
+export function partDuties(role, index, totalParts, hasCtaRolePart) {
+  return {
+    hook: role === 'Hook' || index === 0,
+    cta: role === 'CTA' || (index === totalParts - 1 && !hasCtaRolePart),
+  };
+}
+
+/**
+ * Ekspresi/emosi untuk peran EFEKTIF — pola sama seperti getEmotionForRole()
+ * (menggabung, bukan mengganti, ekspresi dasar pilihan user), tapi saat duti-nya
+ * gabungan (hook+cta), instruksinya eksplisit menyuruh energi BERGESER di
+ * dalam cuts Part itu sendiri alih-alih satu arc statis sepanjang durasi.
+ */
+export function getEmotionForDuties(duties, baseExpressionEn) {
+  if (duties.hook && duties.cta) {
+    if (!baseExpressionEn) return baseExpressionEn;
+    return `${baseExpressionEn}; for this Part: starts ${EMOTION_ARC_BY_ROLE.Hook}, escalating by the final cuts to ${EMOTION_ARC_BY_ROLE.CTA} — energy must visibly shift across this Part's own cuts, not stay flat`;
+  }
+  return getEmotionForRole(duties.cta ? 'CTA' : duties.hook ? 'Hook' : 'Body', baseExpressionEn);
+}
+
+/** Intent akting untuk peran EFEKTIF — pola sama dengan getEmotionForDuties(). */
+export function getIntentForDuties(duties) {
+  if (duties.hook && duties.cta) {
+    return `${PERFORMANCE_INTENT_BY_ROLE.Hook} — then, as the Part reaches its final cuts, ${PERFORMANCE_INTENT_BY_ROLE.CTA}`;
+  }
+  return duties.cta ? PERFORMANCE_INTENT_BY_ROLE.CTA : duties.hook ? PERFORMANCE_INTENT_BY_ROLE.Hook : PERFORMANCE_INTENT_BY_ROLE.Body;
+}
 
 // Karakter suara narator (selaras dengan pola "dialogue.voice" di
 // youtube-long.js, yang sudah terbukti dipakai di produksi). JANGAN bikin gaya

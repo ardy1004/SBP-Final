@@ -19,6 +19,9 @@ import {
   EMOTION_ARC_BY_ROLE as SHARED_EMOTION_ARC_BY_ROLE,
   getEmotionForRole as sharedGetEmotionForRole,
   PERFORMANCE_INTENT_BY_ROLE as SHARED_PERFORMANCE_INTENT_BY_ROLE,
+  partDuties as sharedPartDuties,
+  getEmotionForDuties as sharedGetEmotionForDuties,
+  getIntentForDuties as sharedGetIntentForDuties,
   VOICE_PERSONA_HINT as SHARED_VOICE_PERSONA_HINT,
   CTA_SPOKEN_EXAMPLE as SHARED_CTA_SPOKEN_EXAMPLE,
   defaultVoDurationSec as sharedDefaultVoDurationSec,
@@ -685,6 +688,12 @@ export const namaFileKarakter: (nama: string) => string = sharedNamaFileKarakter
 export const EMOTION_ARC_BY_ROLE: Record<string, string> = SHARED_EMOTION_ARC_BY_ROLE;
 export const getEmotionForRole: (role: string, baseExpressionEn?: string) => string | undefined = sharedGetEmotionForRole;
 export const PERFORMANCE_INTENT_BY_ROLE: Record<string, string> = SHARED_PERFORMANCE_INTENT_BY_ROLE;
+/** Peran EFEKTIF Part (bisa gabungan hook+cta pada Part tunggal/penutup tanpa
+ * Part ber-role CTA) — beda dari `role` mentah, lihat viralframe-shared.js. */
+export interface PartDuties { hook: boolean; cta: boolean }
+export const partDuties: (role: string, index: number, totalParts: number, hasCtaRolePart: boolean) => PartDuties = sharedPartDuties;
+export const getEmotionForDuties: (duties: PartDuties, baseExpressionEn?: string) => string | undefined = sharedGetEmotionForDuties;
+export const getIntentForDuties: (duties: PartDuties) => string = sharedGetIntentForDuties;
 export const VOICE_PERSONA_HINT: string = SHARED_VOICE_PERSONA_HINT;
 /** Contoh KALIMAT TERUCAP per tipe CTA (keyed by CTA_TYPES.value). Dikirim ke
  * backend bersama label — label saja membuat AI mengarang ajakan kabur yang tidak

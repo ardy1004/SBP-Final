@@ -35,7 +35,7 @@ import {
   isNativeAudioTool, getClipMaxSec, NEGATIVE_PROMPT_VIDEO,
   REALISM_QUALITY_CUES, REALISM_BANNED_QUALITY_PHRASES, RULEBOOK_VERSION,
   namaFileKarakter, MAX_REF_IMAGES_PER_PART,
-  getEmotionForRole, PERFORMANCE_INTENT_BY_ROLE, buildDeliveryClause,
+  partDuties, getEmotionForDuties, getIntentForDuties, buildDeliveryClause,
   VOICE_PERSONA_HINT, VOICE_PRIORITY_NOTE,
   BANNED_HOOK_OPENERS, HOOK_OPENER_EXAMPLE, PROPERTY_STRUCTURAL_NEGATIVES,
 } from '../../../_lib/viralframe-shared.js';
@@ -363,6 +363,12 @@ Versi simplified (jumlah scene ≤ 3 — TANPA open loop/rehook, ruang terlalu s
   • Scene 1: field 'kamera' HARUS berupa pattern interrupt (gerakan/angle yang langsung menarik perhatian di detik pertama).
   • Scene tengah: sisipkan MINIMAL 1 micro-reward konkret (fakta/angka nyata properti yang terasa seperti temuan baru).
   • Scene terakhir: payoff singkat (tegaskan nilai properti) LANGSUNG diikuti CTA — JANGAN buka open loop baru yang tidak terjawab.
+${jumlahPart === 1 ? `
+CATATAN PART TUNGGAL (jumlahPart = 1 — WAJIB): hanya ada SATU scene, jadi pola di atas diterapkan pada CUTS DI DALAM scene itu sendiri, bukan pada scene lain yang tidak ada:
+  • Cut pertama (lihat DAFTAR CUT di user prompt): pattern interrupt (lihat instruksi 'kamera' di atas).
+  • Cut(-cut) tengah: micro-reward konkret.
+  • Cut terakhir: payoff singkat diikuti CTA.
+Jangan biarkan scene ini terasa datar dari awal sampai akhir — energi & isi WAJIB berkembang seiring cut demi cut, persis seperti kalau ini 3 scene terpisah, hanya saja dirangkai dalam SATU panggilan generate.` : ''}
 
 `
     : `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -684,10 +690,13 @@ function buildUserPrompt({ property, karakterDesc, karakterNama, expressionLabel
   // kontrak keras: AI wajib mengembalikan `cuts` dengan jumlah, urutan, dan nama
   // file yang SAMA PERSIS — itulah yang menjaga prompt tetap sinkron dengan foto
   // yang dilampirkan user di Google Flow.
+  // Dipakai partDuties() — Part TERAKHIR tanpa Part ber-role CTA mana pun WAJIB
+  // ikut memikul duti penutup (lihat catatan panjang di viralframe-shared.js).
+  const hasCtaRolePart = [...roleByPart.values()].includes('CTA');
   const partLines = partAssignments
     .slice()
     .sort((a, b) => a.part - b.part)
-    .map(a => {
+    .map((a, idx, arr) => {
       const kameraHint = cameraByPart.get(a.part) || KAMERA_PER_LABEL[a.cuts?.[0]?.foto_label] || KAMERA_PER_LABEL.lainnya;
       const role = roleByPart.get(a.part) ?? 'Body';
       const d = durasiByPart.get(a.part) ?? durasiDetik;
@@ -702,10 +711,12 @@ function buildUserPrompt({ property, karakterDesc, karakterNama, expressionLabel
         .join('\n');
       const refFiles = [...new Set((a.cuts ?? []).map(c => c.foto_file))];
       // Delivery klausa TERHITUNG dari durasi VO Part ini (busur emosi & intent
-      // akting juga per peran) — audit 2026-08-04, lihat viralframe-shared.js.
+      // akting juga per peran EFEKTIF — audit 2026-08-04 & 2026-08-16, lihat
+      // viralframe-shared.js).
       const delivery = buildDeliveryClause(karakterNama, durVo).replace('[VOICE_PERSONA]', 'suara narator (lihat System Prompt [5])');
-      const emosi = getEmotionForRole(role, expressionLabel);
-      const intent = PERFORMANCE_INTENT_BY_ROLE[role] ?? PERFORMANCE_INTENT_BY_ROLE.Body;
+      const duties = partDuties(role, idx, arr.length, hasCtaRolePart);
+      const emosi = getEmotionForDuties(duties, expressionLabel);
+      const intent = getIntentForDuties(duties);
       return `PART ${a.part} (${role}) — durasi ${d} detik, voiceover ${durVo} detik:
   Kamera        : ${kameraHint}
   Emosi         : ${emosi}
