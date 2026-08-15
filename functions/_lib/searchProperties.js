@@ -1,7 +1,7 @@
 // Reusable property search untuk dipakai chat endpoint + future use.
 // Logic filter diadaptasi dari functions/api/properties/index.js.
 
-import { LANDMARK_RADIUS_KM, findLandmark, resolveApproxCoord, haversineKm } from './geoLandmarks.js';
+import { findLandmark, peringkatDekatLandmark } from './geoLandmarks.js';
 
 const VALID_JENIS  = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
 const VALID_TUJUAN = ['dijual','disewa','dijual_disewa'];
@@ -98,10 +98,17 @@ export async function searchProperties(env, params = {}) {
   const limit   = Math.min(Math.max(1, parseInt(params.limit, 10) || 5), 10);
   const where   = conditions.join(' AND ');
 
-  // Mode landmark: ambil kandidat lebih luas (radius yang menyaring, bukan
-  // LIMIT SQL) — filter & urut jarak dilakukan di JS di bawah, sama seperti
+  // Mode landmark: ambil SELURUH kandidat (radius + judul yang menyaring, bukan
+  // LIMIT SQL) — filter & urut dilakukan di JS di bawah, sama seperti
   // sitemap.xml.js (D1/SQLite standar tidak punya fungsi trig untuk haversine).
-  const fetchLimit = landmark ? 60 : limit;
+  //
+  // ⚠️ Batas ini dulu 60 dan itu MEMOTONG DIAM-DIAM: inventori kost saja 184
+  // baris, jadi chatbot hanya pernah menimbang 60 baris sembarang (urutan
+  // orderBy) sebelum menyaring jarak — sementara halaman SEO memindai semuanya
+  // dan karena itu melaporkan angka yang berbeda untuk pertanyaan yang sama.
+  // 600 di atas total listing published (538) sehingga praktis "semua", tapi
+  // tetap berpagar supaya tidak ikut membengkak kalau inventori melonjak.
+  const fetchLimit = landmark ? 600 : limit;
 
   const sql = `
     SELECT
@@ -125,20 +132,11 @@ export async function searchProperties(env, params = {}) {
     const rows = res.results ?? [];
     if (!landmark) return rows;
 
-    // Radius asli, bukan batas kecamatan — buang yang tak ada info lokasi
-    // sama sekali, urutkan terdekat dulu (override `sort` user: relevansi
-    // jarak jadi prioritas begitu landmark disebut).
-    return rows
-      .map(row => {
-        const coord = resolveApproxCoord(row);
-        if (!coord) return null;
-        const jarak = haversineKm(coord.lat, coord.lon, landmark.lat, landmark.lon);
-        if (jarak > LANDMARK_RADIUS_KM) return null;
-        return { ...row, jarak_km: Math.round(jarak * 10) / 10, lokasi_approx: coord.approx };
-      })
-      .filter(Boolean)
-      .sort((a, b) => a.jarak_km - b.jarak_km)
-      .slice(0, limit);
+    // Radius + sebutan di judul, bukan batas kecamatan — diperingkat oleh
+    // helper bersama supaya chatbot dan halaman SEO tidak pernah lagi menjawab
+    // beda untuk pertanyaan yang sama (override `sort` user: relevansi landmark
+    // jadi prioritas begitu landmark disebut).
+    return peringkatDekatLandmark(rows, landmark).slice(0, limit);
   } catch (err) {
     console.error('[searchProperties] DB error:', err.message);
     return [];

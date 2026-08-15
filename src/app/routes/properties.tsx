@@ -6,7 +6,7 @@ import { normalizeProperty, type NormalizedProperty } from "../../lib/api";
 import { parseProgrammaticSlug } from "../../lib/programmaticSeo";
 // functions/_lib import bersama backend↔frontend (lihat CLAUDE.md) — sama pola
 // dgn generateMetaSeo di AdminPropertyDetailPage.tsx.
-import { parseLandmarkSlug, resolveApproxCoord, haversineKm, LANDMARK_RADIUS_KM } from "../../../functions/_lib/geoLandmarks.js";
+import { parseLandmarkSlug, peringkatDekatLandmark, LANDMARK_RADIUS_KM } from "../../../functions/_lib/geoLandmarks.js";
 import { isInertParam } from "../../../functions/_lib/queryParams.js";
 import { buildPropertyUrl } from "../../../functions/_lib/propertyUrl.js";
 import { cfImg } from "../../lib/img";
@@ -376,12 +376,17 @@ function buildLandmarkSeo(parsed: LandmarkParsed, total: number, slug: string, p
   const heading = `${jenisLabel} Dekat ${landmark.label}`;
   return {
     title: `${heading} — ${countPart}${sufiksHalaman(page)} | Salam Bumi Property`,
-    description: `Cari ${jenisLabel.toLowerCase()} dekat ${landmark.label} (radius ±${LANDMARK_RADIUS_KM} km) di Yogyakarta. Semua listing dikurasi & diverifikasi langsung oleh tim Salam Bumi Property.`,
+    description: `Cari ${jenisLabel.toLowerCase()} dekat ${landmark.label} di Yogyakarta — dalam radius ±${LANDMARK_RADIUS_KM} km maupun yang disebut dekat ${landmark.label} di judul listing. Semua listing dikurasi & diverifikasi langsung oleh tim Salam Bumi Property.`,
     canonical: `${ORIGIN}${urlHalaman(`/${slug}`, page)}`,
     heading,
+    // ⚠️ Sejak 2026-08-12 daftar ini TIDAK lagi murni radius: listing yang
+    // judulnya menyebut landmark ikut masuk walau centroid kecamatannya di luar
+    // cincin. Kalimat lama ("dalam radius ±3,5 km") karena itu jadi klaim yang
+    // tidak lagi benar untuk seluruh isi halaman — dan di /kost-dekat-uii
+    // justru TIDAK BENAR SAMA SEKALI, karena ke-30 listingnya masuk lewat judul.
     subheading: total > 0
-      ? `${countPart} dalam radius ±${LANDMARK_RADIUS_KM} km dari ${landmark.label} — jarak estimasi per area (kecamatan), bukan lokasi presisi GPS.`
-      : `Belum ada listing dalam radius ±${LANDMARK_RADIUS_KM} km dari ${landmark.label} saat ini.`,
+      ? `${countPart} di sekitar ${landmark.label} — dihimpun dari radius ±${LANDMARK_RADIUS_KM} km per area (kecamatan, bukan GPS presisi) dan dari listing yang menyebut ${landmark.label} di judulnya.`
+      : `Belum ada listing di sekitar ${landmark.label} saat ini.`,
   };
 }
 
@@ -417,20 +422,16 @@ async function loadLandmarkPage(env: { DB: D1Database }, parsed: LandmarkParsed,
     `).bind(parsed.jenis).all();
 
     const rows = (dataRes.results ?? []) as Record<string, unknown>[];
-    const { lat: lmLat, lon: lmLon } = parsed.landmark;
 
-    // Filter jarak (Haversine) — resolveApproxCoord pakai koordinat properti asli
-    // bila ada, fallback centroid kecamatan (approx=true). Array.sort JS stabil →
-    // urutan SQL di atas (prioritas badge/tanggal) tetap terjaga untuk jarak sama.
-    const withinRadius = rows
-      .map(row => {
-        const coord = resolveApproxCoord(row);
-        if (!coord) return null;
-        const distanceKm = haversineKm(coord.lat, coord.lon, lmLat, lmLon);
-        return { row, distanceKm };
-      })
-      .filter((x): x is { row: Record<string, unknown>; distanceKm: number } => x !== null && x.distanceKm <= LANDMARK_RADIUS_KM)
-      .sort((a, b) => a.distanceKm - b.distanceKm);
+    // Peringkat "dekat landmark" — SATU SUMBER dengan chatbot
+    // (functions/_lib/searchProperties.js) sejak 2026-08-12. Sebelumnya halaman
+    // ini punya salinan haversine sendiri dan keduanya sudah menyimpang.
+    // Selain radius, sebutan landmark DI JUDUL kini ikut dihitung: 0 dari 184
+    // kost punya koordinat asli sehingga radius sebenarnya cuma proksi
+    // kecamatan — /kost-dekat-uii 404 dengan nol hasil padahal 30 kost menyebut
+    // UII di judulnya. Array.sort JS stabil → urutan SQL (badge/tanggal) tetap
+    // terjaga di dalam lapis yang sama.
+    const withinRadius = peringkatDekatLandmark(rows, parsed.landmark);
 
     const total = withinRadius.length;
     const totalPages = Math.max(1, Math.ceil(total / SSR_LIMIT));
@@ -450,7 +451,7 @@ async function loadLandmarkPage(env: { DB: D1Database }, parsed: LandmarkParsed,
       // melihat irisan dengan ApiPropertyListItem — lewat `unknown` dulu, sesuai
       // saran compiler. Bentuknya dijamin oleh SELECT di atas yang kolomnya
       // sengaja disamakan dengan GET /api/properties.
-      .map(x => normalizeProperty(x.row as unknown as Parameters<typeof normalizeProperty>[0]));
+      .map(x => normalizeProperty(x as unknown as Parameters<typeof normalizeProperty>[0]));
 
     return {
       ssr: true as const,
