@@ -13,6 +13,7 @@ import { cfImg } from '../../lib/img';
 import { urlHalaman, deretHalaman, type PaginationInfo } from '../../lib/pagination';
 import { parseSmartQuery, type LocationIndex, type FlatLoc, type SmartFilters } from './smartSearchParser';
 import { trackEvent } from '../../lib/tracking';
+import { TAMPILKAN_PETA_PUBLIK } from '../../lib/fiturPublik';
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
 
@@ -742,15 +743,17 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
                   <button onClick={() => setViewMode('list')} className={`p-1.5 rounded-lg ${viewMode === 'list' ? 'bg-[#1565C0] text-white' : 'text-gray-400'}`}>
                     <List size={16} />
                   </button>
-                  <button onClick={() => setViewMode('map')} className={`p-1.5 rounded-lg ${viewMode === 'map' ? 'bg-[#1565C0] text-white' : 'text-gray-400'}`} title="Tampilan Peta">
-                    <Map size={16} />
-                  </button>
+                  {TAMPILKAN_PETA_PUBLIK && (
+                    <button onClick={() => setViewMode('map')} className={`p-1.5 rounded-lg ${viewMode === 'map' ? 'bg-[#1565C0] text-white' : 'text-gray-400'}`} title="Tampilan Peta">
+                      <Map size={16} />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
 
             {/* ─── Tampilan Peta ─── */}
-            {viewMode === 'map' && isMounted && (
+            {TAMPILKAN_PETA_PUBLIK && viewMode === 'map' && isMounted && (
               <Suspense fallback={<div className="h-[560px] rounded-2xl bg-gray-50 flex items-center justify-center"><p className="text-gray-400 text-sm">Memuat peta…</p></div>}>
                 <LazyPropertyMap filters={{ tujuan, jenis: selectedJenis, kabupaten }} />
               </Suspense>

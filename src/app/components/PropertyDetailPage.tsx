@@ -10,6 +10,7 @@ import {
 } from '../../lib/api';
 import { formatRibuan } from '../../lib/format';
 import { trackEvent } from '../../lib/tracking';
+import { TAMPILKAN_PETA_PUBLIK } from '../../lib/fiturPublik';
 import { cfImg, cfSrcSet } from '../../lib/img';
 // KPRCalculator dimuat hanya di klien — recharts akses window saat import, crash SSR.
 // Pola mounted-flag: server & render-klien-pertama tampilkan placeholder identik → no hydration mismatch.
@@ -615,24 +616,26 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
               </div>
             )}
 
-            {/* Lokasi — lat/lng dari API */}
-            <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm">
-              <h2 className="font-display font-bold text-[#0F172A] mb-3">📍 Lokasi Properti</h2>
-              <div className="bg-[#E3F2FD] rounded-xl h-48 flex flex-col items-center justify-center gap-2">
-                <MapPin size={32} className="text-[#1565C0]" />
-                <p className="text-[#1565C0] font-semibold text-sm">{property.kecamatan}, {property.kabupaten}</p>
-                {(property.latitude || property.gmaps_link) && (
-                  <a
-                    href={property.gmaps_link ?? `https://maps.google.com?q=${property.latitude},${property.longitude}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-[#1565C0] underline hover:text-[#1E88E5]"
-                  >
-                    Buka di Google Maps ↗
-                  </a>
-                )}
+            {/* Lokasi — lat/lng dari API. Disembunyikan sementara (lihat fiturPublik.ts). */}
+            {TAMPILKAN_PETA_PUBLIK && (
+              <div className="bg-white rounded-2xl p-5 mb-5 shadow-sm">
+                <h2 className="font-display font-bold text-[#0F172A] mb-3">📍 Lokasi Properti</h2>
+                <div className="bg-[#E3F2FD] rounded-xl h-48 flex flex-col items-center justify-center gap-2">
+                  <MapPin size={32} className="text-[#1565C0]" />
+                  <p className="text-[#1565C0] font-semibold text-sm">{property.kecamatan}, {property.kabupaten}</p>
+                  {(property.latitude || property.gmaps_link) && (
+                    <a
+                      href={property.gmaps_link ?? `https://maps.google.com?q=${property.latitude},${property.longitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-[#1565C0] underline hover:text-[#1E88E5]"
+                    >
+                      Buka di Google Maps ↗
+                    </a>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Video YouTube jika ada */}
             {property.video_youtube && (
