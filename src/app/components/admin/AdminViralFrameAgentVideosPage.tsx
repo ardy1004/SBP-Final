@@ -10,6 +10,7 @@ import { findArchetype } from './viralframe/archetypes';
 import SlotIndicatorStrip from './viralframe/SlotIndicatorStrip';
 import AkunAgentCard from './AkunAgentCard';
 import JamPrimetimeCard from './JamPrimetimeCard';
+import PresetUtamaCard from './PresetUtamaCard';
 
 // Penanda status properti — MURNI TEKS, dihitung dari flag properti yang sudah
 // ada di baris video. Ini BUKAN sisa fitur badge/logo video (overlay gambar ke
@@ -403,6 +404,7 @@ export default function AdminViralFrameAgentVideosPage() {
       <div className="space-y-2">
         <AkunAgentCard />
         <JamPrimetimeCard />
+        <PresetUtamaCard />
       </div>
 
       {aksiError && (

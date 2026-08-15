@@ -6,7 +6,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { resolveScheduler, resolveAkunTarget, getModeAkun } from '../../../../_lib/agentAccounts.js';
-import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai } from '../../../../_lib/jadwalOtomatis.js';
+import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai, getPresetUtama } from '../../../../_lib/jadwalOtomatis.js';
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -43,20 +43,23 @@ export async function onRequestPost(context) {
   // agent bermuara ke satu akun, dan menghitung per agent membuat akun itu
   // diam-diam melewati batas hariannya.
   const { utama } = await getModeAkun(env);
-  const [{ kuota }, terpakai, jendela, dipakai] = await Promise.all([
+  const [{ kuota }, terpakai, jendela, dipakai, preset] = await Promise.all([
     kuotaAkun(env, targetId, utama),
     slotTerpakaiHariIni(env, targetId),
     getJendela(env),
     slotDipakai(env, targetId),
+    getPresetUtama(env),
   ]);
   if (terpakai >= kuota) {
     return jsonError(`Kuota harian ${namaAkun} sudah penuh (${terpakai}/${kuota}). Coba lagi besok.`, 409);
   }
 
   // Slot ditentukan oleh jendela mana yang MASIH KOSONG (dipakai), bukan oleh
-  // posisi ke-`terpakai` — lihat catatan di slotTersedia().
+  // posisi ke-`terpakai` — lihat catatan di slotTersedia(). akunUtamaId+preset
+  // dipakai jadwalkanVideo untuk memilih mode preset (khusus akun utama) vs
+  // mode jendela (agent lain).
   const hasil = await jadwalkanVideo(env, {
-    video: { ...video, caption }, akun, targetId, kuota, jendela, dipakai,
+    video: { ...video, caption }, akun, targetId, akunUtamaId: utama, kuota, jendela, preset, dipakai,
   });
   if (!hasil.ok) return jsonError(`Gagal menjadwalkan: ${hasil.alasan}`, 422);
 

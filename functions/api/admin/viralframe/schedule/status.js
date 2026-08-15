@@ -9,7 +9,7 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
-import { kuotaAkun, slotTersedia, pilihJendela, waktuPerPlatform, getJendela, slotDipakai } from '../../../../_lib/jadwalOtomatis.js';
+import { kuotaAkun, slotTersedia, pilihJendela, waktuPerPlatform, getJendela, slotDipakai, getPresetUtama, slotPresetHariIni } from '../../../../_lib/jadwalOtomatis.js';
 import { resolveAkunTarget, resolveScheduler, getModeAkun } from '../../../../_lib/agentAccounts.js';
 import { tanggalWib } from '../../../../_lib/waktu.js';
 
@@ -20,8 +20,9 @@ export async function onRequestGet({ env, request }) {
   try {
     const { utama } = await getModeAkun(env);
     const { targetId } = await resolveAkunTarget(env, characterId);
-    const [jendela, akun, { kuota, hari, utama: iaUtama }, dipakai] = await Promise.all([
+    const [jendela, preset, akun, { kuota, hari, utama: iaUtama }, dipakai] = await Promise.all([
       getJendela(env),
+      getPresetUtama(env),
       resolveScheduler(env, characterId),
       kuotaAkun(env, targetId, utama),
       slotDipakai(env, targetId),
@@ -42,14 +43,23 @@ export async function onRequestGet({ env, request }) {
     // Jam rencana hari ini menurut mesin — ditampilkan apa adanya supaya admin
     // bisa melihat jadwal SEBELUM apa pun dikirim.
     //
-    // `terpakai` dihitung PER JENDELA, bukan "n pertama sudah terisi". Jendela
-    // yang terisi tidak selalu berurutan: penjadwalan siang hari melewatkan
-    // jendela pagi, dan baris lama memakai penomoran slot preset 5-jam.
-    const rencana = pilihJendela(targetId, hariIni, kuota, jendela).map(j => ({
-      nama: j.nama,
-      terpakai: dipakai.has(`${hariIni}|${j.index + 1}`),
-      waktu: platforms.length ? waktuPerPlatform(targetId, hariIni, j, platforms) : {},
-    }));
+    // `terpakai` dihitung PER JENDELA/SLOT, bukan "n pertama sudah terisi".
+    // Yang terisi tidak selalu berurutan: penjadwalan siang hari melewatkan
+    // slot pagi, dan baris lama memakai penomoran slot preset 5-jam.
+    //
+    // Akun utama pakai mode PRESET (N slot tetap + drift) — lihat
+    // slotPresetHariIni; agent lain tetap mode jendela seperti sebelumnya.
+    const rencana = iaUtama
+      ? slotPresetHariIni(targetId, hariIni, preset, platforms).map(s => ({
+          nama: s.nama,
+          terpakai: dipakai.has(`${hariIni}|${s.index + 1}`),
+          waktu: s.waktu,
+        }))
+      : pilihJendela(targetId, hariIni, kuota, jendela).map(j => ({
+          nama: j.nama,
+          terpakai: dipakai.has(`${hariIni}|${j.index + 1}`),
+          waktu: platforms.length ? waktuPerPlatform(targetId, hariIni, j, platforms) : {},
+        }));
 
     const terisi = videoSukses.size;
     return jsonOk({
@@ -63,7 +73,7 @@ export async function onRequestGet({ env, request }) {
       rencana,
       // `dipakai` wajib ikut: tanpa itu angka ini menghitung jendela yang
       // sebenarnya sudah terisi, jadi UI menjanjikan slot yang akan ditolak.
-      tersedia: slotTersedia({ akunId: targetId, kuota, platforms, jendela, dipakai }).length,
+      tersedia: slotTersedia({ akunId: targetId, akunUtamaId: utama, kuota, platforms, jendela, preset, dipakai }).length,
       gagal: baris.filter(b => b.status === 'failed').map(b => ({ platform: b.platform, error: b.error_message })),
     });
   } catch (err) {

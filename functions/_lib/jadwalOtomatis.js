@@ -22,6 +22,53 @@ export const JENDELA_DEFAULT = [
   { nama: 'Malam', mulai: '19:00', akhir: '21:30' },
 ];
 
+// ── Mode PRESET (khusus akun agent utama, 2026-08-15) ───────────────────────
+// User minta mekanisme LAMA (sebelum migrasi 0041, lihat git show b2f907b)
+// dikembalikan HANYA untuk akun utama: N slot jam tetap + drift linear
+// (+intervalMenit tiap hari) — bukan jendela+menit ber-seed. Formula persis,
+// tapi jam/jumlah slot/interval sekarang EDITABLE dari UI, bukan konstanta.
+//
+// Kenapa aman dipakai bersamaan dengan mode jendela (bukan gantikan total):
+// semua slot preset pada HARI YANG SAMA bergeser dengan drift yang SAMA
+// (bukan per-slot independen) — jadi jarak antar-slot tidak pernah berubah,
+// tidak ada risiko tabrakan antar-slot akibat drift berapa pun besarnya.
+export const PRESET_UTAMA_DEFAULT = { slots: ['06:00', '09:00', '12:00', '17:00', '19:00'], intervalMenit: 5 };
+
+// Cap drift maksimal — konstanta internal, TIDAK diekspos ke UI. Murni "jangan
+// drift terlalu jauh dari makna jam aslinya" (mis. 06:00 tidak sampai bergeser
+// ke siang), bukan pencegah tabrakan (lihat catatan di atas). Nilai sama
+// seperti formula lama (120 menit, siklus 24 hari saat interval=5).
+const MAKS_DRIFT_PRESET_MENIT = 120;
+// Titik jangkar siklus — dipertahankan dari kode lama, tanggal sembarang tetap,
+// cuma dipakai menghitung posisi siklus.
+const ROTATION_ANCHOR_MS = Date.UTC(2026, 6, 1); // 2026-07-01
+
+export async function getPresetUtama(env) {
+  const raw = await getSetting(env, 'viralframe_preset_utama');
+  if (!raw) return PRESET_UTAMA_DEFAULT;
+  try {
+    const v = JSON.parse(raw);
+    if (Array.isArray(v?.slots) && v.slots.length > 0 && v.slots.every(s => JAM_RE.test(s))
+        && Number.isInteger(v.intervalMenit) && v.intervalMenit >= 0) {
+      return { slots: v.slots, intervalMenit: v.intervalMenit };
+    }
+  } catch { /* pakai default */ }
+  return PRESET_UTAMA_DEFAULT;
+}
+
+// Drift (menit) untuk SEMUA slot preset pada satu tanggal WIB. intervalMenit=0
+// -> cycleDays dipaksa 1 (drift selalu 0, tidak pernah rotasi) supaya tidak
+// pernah dibagi nol.
+function driftMenitPreset(tanggalWib_, intervalMenit) {
+  if (intervalMenit <= 0) return 0;
+  const cycleDays = Math.max(1, Math.ceil(MAKS_DRIFT_PRESET_MENIT / intervalMenit));
+  const [y, m, d] = tanggalWib_.split('-').map(Number);
+  const dayMs = Date.UTC(y, m - 1, d);
+  const daysSinceAnchor = Math.round((dayMs - ROTATION_ANCHOR_MS) / 86400000);
+  const cyclePos = ((daysSinceAnchor % cycleDays) + cycleDays) % cycleDays;
+  return cyclePos * intervalMenit;
+}
+
 // Tangga geseran platform (menit). Jaraknya >= 4 menit supaya dua platform tidak
 // pernah tabrakan, dan rentangnya <= 19 menit supaya semuanya tetap di dalam
 // jendela primetime yang sama.
@@ -112,16 +159,41 @@ const isoWib = (tanggal, totalMenit) => {
   return `${tanggal}T${hh}:${mm}:00+07:00`;
 };
 
+// Terapkan tangga geseran platform ke SATU menit dasar. Dipakai bersama oleh
+// mode jendela (waktuPerPlatform) dan mode preset (slotPresetHariIni) — supaya
+// logika ladder-nya satu sumber, tidak diduplikasi.
+function terapkanTanggaPlatform(akunId, tanggalWib_, indexSlot, dasarMenit, platforms) {
+  const urut = kocokDeterministik(TANGGA_PLATFORM, akunId, tanggalWib_, indexSlot, 'plat');
+  const out = {};
+  platforms.forEach((p, i) => {
+    out[p] = isoWib(tanggalWib_, dasarMenit + urut[i % urut.length]);
+  });
+  return out;
+}
+
 // Waktu tayang per platform untuk SATU slot. Urutan tangga dikocok per
 // (akun, tanggal, jendela) — jadi platform mana yang duluan berubah tiap hari.
 export function waktuPerPlatform(akunId, tanggalWib_, jendelaTerpilih, platforms) {
   const dasar = menitDasar(akunId, tanggalWib_, jendelaTerpilih.index, jendelaTerpilih);
-  const urut = kocokDeterministik(TANGGA_PLATFORM, akunId, tanggalWib_, jendelaTerpilih.index, 'plat');
-  const out = {};
-  platforms.forEach((p, i) => {
-    out[p] = isoWib(tanggalWib_, dasar + urut[i % urut.length]);
+  return terapkanTanggaPlatform(akunId, tanggalWib_, jendelaTerpilih.index, dasar, platforms);
+}
+
+// ── Slot mode preset (khusus akun utama) ────────────────────────────────────
+// Sejajar peran dengan pilihJendela+waktuPerPlatform, tapi SEMUA slot preset
+// dipakai (bukan subset dirotasi) — kuota akun utama = persis jumlah slotnya.
+// `nama` = jam ASLI sebelum drift (stabil, jadi label UI tidak ikut bergeser
+// tiap hari) — sama seperti "Pagi"/"Siang"/"Malam" stabil di mode jendela
+// walau menit di dalamnya berubah.
+export function slotPresetHariIni(akunId, tanggalWib_, preset, platforms) {
+  const drift = driftMenitPreset(tanggalWib_, preset.intervalMenit);
+  return preset.slots.map((jam, index) => {
+    const dasar = keMenit(jam) + drift;
+    return {
+      index,
+      nama: jam,
+      waktu: terapkanTanggaPlatform(akunId, tanggalWib_, index, dasar, platforms),
+    };
   });
-  return out;
 }
 
 // ── Kuota harian ─────────────────────────────────────────────────────────────
@@ -148,10 +220,14 @@ export function kuotaRamp(hari) {
   return KUOTA_MAKS;
 }
 
-// Kuota akun untuk hari ini. Agent utama akun mapan -> langsung plafon, tidak
-// ikut ramp. Selebihnya naik bertahap menurut hari nyata.
+// Kuota akun untuk hari ini. Agent utama -> jumlah slot preset-nya (dinamis,
+// ikut berubah kalau user tambah/hapus baris jam di UI) — BUKAN lagi KUOTA_MAKS
+// tetap. Selebihnya naik bertahap menurut hari nyata (ramp, tidak disentuh).
 export async function kuotaAkun(env, akunId, akunUtamaId) {
-  if (akunUtamaId && akunId === akunUtamaId) return { kuota: KUOTA_MAKS, hari: null, utama: true };
+  if (akunUtamaId && akunId === akunUtamaId) {
+    const preset = await getPresetUtama(env);
+    return { kuota: preset.slots.length, hari: null, utama: true };
+  }
   const hari = await hariPosting(env, akunId);
   return { kuota: kuotaRamp(hari), hari, utama: false };
 }
@@ -203,16 +279,27 @@ export async function slotDipakai(env, akunId, sekarang = Date.now()) {
 // MENIT YANG SAMA besok pagi, karena penghitung kuota cuma melihat hari ini
 // sehingga indeksnya tak pernah naik; (2) sesudah satu jendela lewat, indeks
 // bergeser dan jendela kosong di tengah dilompati, jadi kuota 3 cuma terisi 2.
-export function slotTersedia({ akunId, kuota, platforms, jendela = JENDELA_DEFAULT, sekarang = Date.now(), dipakai = new Set() }) {
+//
+// `akunUtamaId`+`preset`: kalau `akunId === akunUtamaId`, dipakai mode PRESET
+// (N slot tetap + drift, lihat slotPresetHariIni) — bukan jendela+seed. Cabang
+// jendela di bawah TIDAK diubah sama sekali (disalin apa adanya) supaya 6
+// agent lain nol risiko regresi.
+export function slotTersedia({ akunId, akunUtamaId, kuota, platforms, jendela = JENDELA_DEFAULT, preset, sekarang = Date.now(), dipakai = new Set() }) {
   // Tanpa platform tidak ada jam yang bisa dihitung; Math.min(...[]) = Infinity
   // akan lolos filter waktu dan melaporkan slot yang sebenarnya tidak ada.
   if (!platforms?.length) return [];
+  const modePreset = akunUtamaId != null && akunId === akunUtamaId;
   for (let hariKe = 0; hariKe <= 1; hariKe++) {
     const tanggal = tanggalWib(new Date(sekarang), hariKe);
-    const layak = pilihJendela(akunId, tanggal, kuota, jendela)
-      .filter(j => !dipakai.has(`${tanggal}|${j.index + 1}`))
-      .map(j => ({ jendela: j, tanggal, waktu: waktuPerPlatform(akunId, tanggal, j, platforms) }))
-      .filter(s => Math.min(...Object.values(s.waktu).map(t => new Date(t).getTime())) > sekarang + MIN_LEAD_MS);
+    const layak = modePreset
+      ? slotPresetHariIni(akunId, tanggal, preset ?? PRESET_UTAMA_DEFAULT, platforms)
+          .filter(s => !dipakai.has(`${tanggal}|${s.index + 1}`))
+          .map(s => ({ jendela: { nama: s.nama, index: s.index }, tanggal, waktu: s.waktu }))
+          .filter(s => Math.min(...Object.values(s.waktu).map(t => new Date(t).getTime())) > sekarang + MIN_LEAD_MS)
+      : pilihJendela(akunId, tanggal, kuota, jendela)
+          .filter(j => !dipakai.has(`${tanggal}|${j.index + 1}`))
+          .map(j => ({ jendela: j, tanggal, waktu: waktuPerPlatform(akunId, tanggal, j, platforms) }))
+          .filter(s => Math.min(...Object.values(s.waktu).map(t => new Date(t).getTime())) > sekarang + MIN_LEAD_MS);
     if (layak.length > 0) return layak;
   }
   return [];
@@ -230,12 +317,12 @@ export function slotTersedia({ akunId, kuota, platforms, jendela = JENDELA_DEFAU
 //
 // `dryRun` mengembalikan jam yang AKAN dipakai tanpa menyentuh Buffer/Zernio —
 // itu yang dipakai admin untuk memeriksa jadwal sebelum menyalakan otomatis.
-export async function jadwalkanVideo(env, { video, akun, targetId, kuota, jendela, dipakai, dryRun = false }) {
+export async function jadwalkanVideo(env, { video, akun, targetId, akunUtamaId, kuota, jendela, preset, dipakai, dryRun = false }) {
   const platforms = Object.keys(akun.channels ?? {});
   if (platforms.length === 0) return { ok: false, alasan: 'akun belum punya channel sosmed' };
 
   const klaim = dipakai ?? await slotDipakai(env, targetId);
-  const slot = slotTersedia({ akunId: targetId, kuota, platforms, jendela, dipakai: klaim })[0];
+  const slot = slotTersedia({ akunId: targetId, akunUtamaId, kuota, platforms, jendela, preset, dipakai: klaim })[0];
   if (!slot) return { ok: false, alasan: 'tidak ada jendela kosong yang tersisa' };
   klaim.add(`${slot.tanggal}|${slot.jendela.index + 1}`);
 

@@ -18,7 +18,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { getSetting, setSetting } from '../../../_lib/schedulerProviders.js';
 import { resolveScheduler, resolveAkunTarget, getModeAkun } from '../../../_lib/agentAccounts.js';
-import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai } from '../../../_lib/jadwalOtomatis.js';
+import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai, getPresetUtama } from '../../../_lib/jadwalOtomatis.js';
 import { tanggalWib } from '../../../_lib/waktu.js';
 
 // Jam WIB sekarang, dibulatkan ke bawah ke kelipatan 30 menit — dipakai
@@ -53,7 +53,7 @@ export async function onRequestPost({ request, env }) {
   if (agents.length === 0) return jsonOk({ jam_slot: jamSlot, dilewati: 'tidak ada agent pada jam ini' });
 
   const { utama } = await getModeAkun(env);
-  const jendela = await getJendela(env);
+  const [jendela, preset] = await Promise.all([getJendela(env), getPresetUtama(env)]);
   const laporan = [];
   // Klaim slot dibagi PER AKUN TUJUAN, bukan per agent: di mode terpusat
   // beberapa agent bermuara ke akun yang sama, dan saat dry-run tidak ada baris
@@ -96,7 +96,7 @@ export async function onRequestPost({ request, env }) {
 
     for (let i = 0; i < videos.length; i++) {
       const r = await jadwalkanVideo(env, {
-        video: videos[i], akun, targetId, kuota, jendela, dipakai, dryRun: dry,
+        video: videos[i], akun, targetId, akunUtamaId: utama, kuota, jendela, preset, dipakai, dryRun: dry,
       });
       if (!r.ok) { hasilAgent.gagal++; hasilAgent.detail.push({ video_id: videos[i].id, alasan: r.alasan }); continue; }
       if (dry) { hasilAgent.detail.push({ video_id: videos[i].id, jendela: r.jendela, waktu: r.waktu }); hasilAgent.terjadwal++; continue; }

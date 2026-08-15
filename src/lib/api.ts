@@ -539,9 +539,13 @@ export type SchedulerProviderId = 'buffer' | 'zernio';
 /** Rentang jam tayang. Menit persisnya diundi ber-seed di dalam rentang ini,
  *  lalu tiap platform digeser beberapa menit lagi (migrasi 0041). */
 export interface JendelaJam { nama: string; mulai: string; akhir: string }
+/** Preset akun utama (2026-08-15): N jam posting tetap + drift linear per hari
+ *  — mekanisme lama, editable, menggantikan jendela+seed KHUSUS akun utama. */
+export interface PresetUtama { slots: string[]; intervalMenit: number }
 export interface SchedulerConfig {
   jendela: JendelaJam[];
   min_panjang_menit?: number;
+  preset_utama?: PresetUtama;
 }
 
 /** GET /api/admin/settings/scheduler-config — preset jam posting */
@@ -549,9 +553,11 @@ export async function getSchedulerConfig() {
   return apiFetch<SchedulerConfig>('/admin/settings/scheduler-config');
 }
 
-/** PATCH /api/admin/settings/scheduler-config */
+/** PATCH /api/admin/settings/scheduler-config — balasan cuma berisi field yang
+ *  dikirim (jendela ATAU preset_utama, nilai yang sudah dinormalisasi server:
+ *  diurutkan/di-dedupe), bukan objek statis "{updated:true}". */
 export async function saveSchedulerConfig(body: Partial<SchedulerConfig>) {
-  return apiFetch<{ updated: true }>('/admin/settings/scheduler-config', {
+  return apiFetch<Partial<SchedulerConfig>>('/admin/settings/scheduler-config', {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
