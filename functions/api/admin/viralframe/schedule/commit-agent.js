@@ -7,6 +7,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { resolveScheduler, resolveAkunTarget, getModeAkun } from '../../../../_lib/agentAccounts.js';
 import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai, getPresetUtama } from '../../../../_lib/jadwalOtomatis.js';
+import { adaJadwalTertunda } from '../../../../_lib/schedulerProviders.js';
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -25,6 +26,13 @@ export async function onRequestPost(context) {
   if (!video) return jsonError('Video tidak ditemukan', 404);
   if (video.trashed_at) return jsonError('Video sudah ada di Sampah', 409);
   if (!video.cloudinary_url) return jsonError('Video belum punya URL Cloudinary', 422);
+  // Video yang berhasil dijadwalkan otomatis masuk Sampah (persistScheduleResult),
+  // tapi kalau di-restore lalu diklik lagi, cek trashed_at di atas tidak lagi
+  // menangkapnya — tanpa ini video bisa terkirim DUA KALI ke Buffer/Zernio
+  // (audit 2026-08-15).
+  if (await adaJadwalTertunda(env, videoId)) {
+    return jsonError('Video ini masih ditunggu tayang dari jadwal sebelumnya — menjadwalkan lagi akan membuatnya posting dua kali.', 409);
+  }
 
   const akun = await resolveScheduler(env, video.character_id);
   const { targetId } = await resolveAkunTarget(env, video.character_id);

@@ -4,6 +4,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { destroyByCloudName } from '../../../../_lib/cloudinary.js';
+import { adaJadwalTertunda } from '../../../../_lib/schedulerProviders.js';
 
 export async function onRequestDelete(context) {
   const { env, params } = context;
@@ -12,6 +13,11 @@ export async function onRequestDelete(context) {
 
   const row = await env.DB.prepare('SELECT cloudinary_public_id, cloudinary_name, resource_type FROM viralframe_agent_videos WHERE id = ?').bind(id).first().catch(() => null);
   if (!row) return jsonError('Video tidak ditemukan', 404);
+  // Video yang masih ditunggu tayang Buffer/Zernio tidak boleh dihapus sekarang
+  // — link medianya akan mati sebelum sempat tayang (audit 2026-08-15).
+  if (await adaJadwalTertunda(env, id)) {
+    return jsonError('Video ini masih ditunggu tayang dari jadwal sebelumnya — hapus setelah waktu tayangnya lewat.', 409);
+  }
 
   // Hapus di cloud tempat aset ini tersimpan (bisa berbeda dari akun agent
   // sekarang kalau agent-nya pernah pindah akun) — migrasi 0037.

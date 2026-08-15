@@ -314,9 +314,30 @@ export default function AdminViralFrameAgentVideosPage() {
     setAksiError('');
     setBulkBusy(true);
     const label = action === 'trash' ? 'Pindah ke Sampah' : action === 'restore' ? 'Pulihkan' : 'Hapus permanen';
-    await kirimAksi('/api/admin/viralframe/agent-videos/bulk',
-      { method: 'POST', headers: JSON_HEADER, body: JSON.stringify({ ids, action }) },
-      `${label} ${ids.length} video`);
+    // action 'delete' dibaca langsung (bukan lewat kirimAksi) karena perlu
+    // field `skipped_pending` dari body respons — sebagian video bisa dilewati
+    // server (masih ditunggu tayang Buffer/Zernio) tanpa membuat request itu
+    // sendiri gagal, jadi admin perlu tahu kenapa jumlahnya berkurang, bukan
+    // diam saja seolah semuanya terhapus (audit 2026-08-15).
+    if (action === 'delete') {
+      try {
+        const res = await fetch('/api/admin/viralframe/agent-videos/bulk', {
+          method: 'POST', headers: JSON_HEADER, credentials: 'include',
+          body: JSON.stringify({ ids, action }),
+        });
+        const j = await bacaJson<{ affected: number; failed: number[]; skipped_not_trashed: number; skipped_pending: number[] }>(res);
+        if (!j.success) setAksiError(`${label} ${ids.length} video gagal: ${j.error ?? `HTTP ${res.status}`}`);
+        else if (j.data?.skipped_pending?.length) {
+          setAksiError(`${j.data.skipped_pending.length} video dilewati — masih ditunggu tayang dari jadwal sebelumnya, hapus setelah waktu tayangnya lewat.`);
+        }
+      } catch (err: unknown) {
+        setAksiError(`${label} ${ids.length} video gagal: ${err instanceof Error ? err.message : 'koneksi bermasalah'}`);
+      }
+    } else {
+      await kirimAksi('/api/admin/viralframe/agent-videos/bulk',
+        { method: 'POST', headers: JSON_HEADER, body: JSON.stringify({ ids, action }) },
+        `${label} ${ids.length} video`);
+    }
     setBulkBusy(false);
     clearSelection();
     setContextMenu(null);

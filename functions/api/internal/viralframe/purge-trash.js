@@ -9,6 +9,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { destroyByCloudName } from '../../../_lib/cloudinary.js';
 import { logServerError } from '../../../_lib/logError.js';
+import { adaJadwalTertunda } from '../../../_lib/schedulerProviders.js';
 
 // Batas D1 = 100 bound parameter per query, dan DELETE di bawah memakai
 // `IN (?, ?, ...)` sebanyak jumlah baris. Nilai 200 yang lama membuat cron GAGAL
@@ -30,8 +31,17 @@ export async function onRequestPost(context) {
        WHERE trashed_at IS NOT NULL AND trashed_at <= datetime('now', '-30 days')
        LIMIT ?`
     ).bind(PURGE_LIMIT_PER_RUN).all();
-    const rows = res.results ?? [];
-    if (rows.length === 0) return jsonOk({ purged: 0 });
+    const semuaKandidat = res.results ?? [];
+    if (semuaKandidat.length === 0) return jsonOk({ purged: 0 });
+
+    // Video yang masih ditunggu tayang Buffer/Zernio dilewati SAAT INI (bukan
+    // dianggap gagal) — akan dicoba lagi run berikutnya setelah scheduled_at-nya
+    // lewat. Menghapusnya sekarang mematikan link media sebelum sempat tayang
+    // (audit 2026-08-15).
+    const statusTertunda = await Promise.all(semuaKandidat.map(row => adaJadwalTertunda(env, row.id)));
+    const rows = semuaKandidat.filter((_, i) => !statusTertunda[i]);
+    const skippedPending = statusTertunda.filter(Boolean).length;
+    if (rows.length === 0) return jsonOk({ purged: 0, skipped_pending: skippedPending });
 
     // HANYA row yang destroy Cloudinary-nya sukses (atau tidak punya file untuk
     // dihapus) yang lanjut dihapus dari D1. Sebelumnya kegagalan Cloudinary
@@ -65,6 +75,7 @@ export async function onRequestPost(context) {
     return jsonOk({
       purged: deletable.length + videosResult.purged,
       failed: (rows.length - deletable.length) + videosResult.failed,
+      skipped_pending: skippedPending,
     });
   } catch (err) {
     console.error('[purge-trash]', err.message);

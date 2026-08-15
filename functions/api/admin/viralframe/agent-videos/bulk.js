@@ -7,6 +7,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { destroyByCloudName } from '../../../../_lib/cloudinary.js';
 import { logServerError } from '../../../../_lib/logError.js';
+import { adaJadwalTertunda } from '../../../../_lib/schedulerProviders.js';
 
 const VALID_ACTIONS = ['trash', 'restore', 'delete'];
 const MAX_IDS = 100;
@@ -42,8 +43,15 @@ export async function onRequestPost(context) {
     const rows = await env.DB.prepare(
       `SELECT id, cloudinary_public_id, cloudinary_name, resource_type FROM viralframe_agent_videos WHERE id IN (${placeholders}) AND trashed_at IS NOT NULL`
     ).bind(...ids).all();
-    const candidates = rows.results ?? [];
-    const skippedNotTrashed = ids.length - candidates.length;
+    const semuaTrashed = rows.results ?? [];
+    const skippedNotTrashed = ids.length - semuaTrashed.length;
+
+    // Video yang masih ditunggu tayang oleh Buffer/Zernio (scheduled_at di masa
+    // depan) dilewati dari penghapusan — kalau dihapus sekarang, link medianya
+    // mati sebelum sempat tayang (audit 2026-08-15).
+    const statusTertunda = await Promise.all(semuaTrashed.map(row => adaJadwalTertunda(env, row.id)));
+    const candidates = semuaTrashed.filter((_, i) => !statusTertunda[i]);
+    const skippedPending = semuaTrashed.filter((_, i) => statusTertunda[i]).map(row => row.id);
 
     // Hapus file Cloudinary tiap row dulu — HANYA row yang destroy-nya sukses (atau
     // tidak punya file untuk dihapus) yang lanjut dihapus dari D1. Sebelumnya
@@ -71,7 +79,7 @@ export async function onRequestPost(context) {
       const delPlaceholders = deletable.map(() => '?').join(',');
       await env.DB.prepare(`DELETE FROM viralframe_agent_videos WHERE id IN (${delPlaceholders})`).bind(...deletable).run();
     }
-    return jsonOk({ affected: deletable.length, failed, skipped_not_trashed: skippedNotTrashed });
+    return jsonOk({ affected: deletable.length, failed, skipped_not_trashed: skippedNotTrashed, skipped_pending: skippedPending });
   } catch (err) {
     console.error('[vf agent-videos bulk]', action, err.message);
     return jsonError('Gagal menjalankan aksi massal', 500);
