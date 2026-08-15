@@ -146,9 +146,30 @@ export default function ChatWidget() {
             {messages.length === 0 ? (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px 16px', textAlign: 'center' }}>
                 <Sparkles size={32} color="#1565C0" style={{ marginBottom: 10, opacity: 0.7 }} />
+                {/* ⚠️ CONTOH DI SINI WAJIB MENGEMBALIKAN HASIL NYATA — ini
+                    kalimat pertama yang dibaca pengunjung, jadi kalimat inilah
+                    yang paling sering mereka ketik ulang.
+
+                    Contoh lama "kost dekat UGM budget 1jt" salah dua kali
+                    (diukur ke D1 produksi 2026-08-12):
+                    1. Hasilnya NOL. Kost dekat UGM ada 104 listing, tapi yang
+                       termurah Rp 1,6 MILIAR (median Rp 3,7 M) — "1jt" meleset
+                       ~1.600×, dan bahkan batas Rp 1 miliar pun 0 hasil.
+                    2. Bertentangan dengan prompt kita sendiri: SYSTEM_PROMPT di
+                       functions/api/chat.js justru menginstruksikan bot MENOLAK
+                       pola 'kost budget 1jt' dan menjelaskan bahwa SBP menjual
+                       bangunan kost utuh untuk investasi, bukan kamar sewaan.
+                       Jadi kita mengundang pengunjung mengetik satu-satunya
+                       kalimat yang dijamin dijawab "itu bukan yang kami jual".
+
+                    Pengganti sudah diuji dengan logika pencarian ASLI
+                    (geoLandmarks.js, radius 3,5 km) atas data produksi:
+                      "kost dekat UGM di bawah 3M" →  42 hasil
+                      "rumah Sleman 3 kamar"       → 210 hasil
+                    Kalau contoh ini diganti lagi, UKUR DULU. Jangan menebak. */}
                 <p style={{ margin: 0, fontSize: 13, color: '#6b7280', lineHeight: 1.6 }}>
                   Halo! Saya Asisten SBP 👋<br />
-                  Tanya saya tentang properti yang kamu cari — misal <em>&quot;kost dekat UGM budget 1jt&quot;</em> atau <em>&quot;rumah Sleman 3 kamar&quot;</em>.
+                  Tanya saya tentang properti yang kamu cari — misal <em>&quot;kost dekat UGM di bawah 3M&quot;</em> atau <em>&quot;rumah Sleman 3 kamar&quot;</em>.
                 </p>
                 <div style={{ marginTop: 14 }}>
                   <Turnstile onVerify={setTurnstileToken} onExpire={() => setTurnstileToken('')} />
