@@ -33,8 +33,11 @@ export default function SlotIndicatorStrip({ characterId, refreshKey }: { charac
           SLOT HARI INI — {data.terisi}/{data.kuota} terpakai
         </div>
         <div className="text-[10px] text-[#94A3B8]">
+          {/* "Kuota penuh" salah sejak 2026-08-15: kuota akun utama sekarang
+              dinamis (jumlah slot preset yang diatur admin), bukan lagi
+              KUOTA_MAKS tetap — tampilkan angkanya, bukan klaim "penuh". */}
           {data.akun_utama
-            ? 'Akun utama · kuota penuh'
+            ? `Akun utama · kuota ${data.kuota}/hari`
             : `${data.hari_nyata ?? 0} hari nyata · kuota ${data.kuota}/hari`}
         </div>
       </div>

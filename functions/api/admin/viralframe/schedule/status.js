@@ -1,11 +1,11 @@
 // GET /api/admin/viralframe/schedule/status?character_id= — status slot hari
 // ini untuk SATU akun. Dipakai SlotIndicatorStrip.
 //
-// Sejak migrasi 0041 slot tidak lagi global dan tidak lagi berjam tetap: tiap
-// akun punya kuota sendiri (agent utama 3, agent lain naik bertahap menurut
-// hari nyata) dan jamnya diundi ber-seed di dalam jendela primetime. Slot
-// dianggap terpakai hanya kalau ada baris SUKSES — percobaan gagal total tidak
-// menutup slot, jadi bisa dicoba ulang.
+// Sejak migrasi 0041 slot tidak lagi global. Akun utama (2026-08-15): kuota =
+// jumlah slot preset yang diatur admin (dinamis), jam PERSIS + drift linear.
+// Agent lain: kuota naik bertahap menurut hari nyata, jam diundi ber-seed di
+// dalam jendela primetime. Slot dianggap terpakai hanya kalau ada baris
+// SUKSES — percobaan gagal total tidak menutup slot, jadi bisa dicoba ulang.
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';

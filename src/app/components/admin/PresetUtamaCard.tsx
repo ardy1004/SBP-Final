@@ -22,13 +22,24 @@ const CIUT_KEY = 'sbp_preset_utama_ciut';
 export default function PresetUtamaCard() {
   const [ciut, setCiut] = useState(true);
   const [preset, setPreset] = useState<PresetUtama>(PRESET_DEFAULT);
+  // Teks mentah input interval — TERPISAH dari preset.intervalMenit. Kalau
+  // input dibind langsung ke angka, mengosongkan field untuk mengetik ulang
+  // (mis. ganti "5" jadi "15") membuat React membalikkan DOM ke nilai lama
+  // di tengah pengetikan (parseInt('')=NaN -> state tidak berubah -> React
+  // memaksa value kembali) sehingga keystroke berikutnya menempel di angka
+  // lama ("51" bukan "15"). String bebas di sini, dikunci ke angka valid
+  // terakhir hanya saat blur.
+  const [intervalText, setIntervalText] = useState(String(PRESET_DEFAULT.intervalMenit));
   const [menyimpan, setMenyimpan] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; teks: string } | null>(null);
 
   useEffect(() => {
     try { setCiut(localStorage.getItem(CIUT_KEY) !== '0'); } catch { /* noop */ }
     getSchedulerConfig().then(r => {
-      if (r.success && r.data?.preset_utama?.slots?.length) setPreset(r.data.preset_utama);
+      if (r.success && r.data?.preset_utama?.slots?.length) {
+        setPreset(r.data.preset_utama);
+        setIntervalText(String(r.data.preset_utama.intervalMenit));
+      }
     });
   }, []);
 
@@ -44,10 +55,14 @@ export default function PresetUtamaCard() {
     setPreset(p => ({ ...p, slots: p.slots.map((s, idx) => (idx === i ? v : s)) }));
   const hapus = (i: number) => setPreset(p => ({ ...p, slots: p.slots.filter((_, idx) => idx !== i) }));
   const tambah = () => setPreset(p => ({ ...p, slots: [...p.slots, '12:00'] }));
-  const ubahInterval = (v: string) => {
+  const ubahIntervalText = (v: string) => {
+    setIntervalText(v);
     const n = parseInt(v, 10);
-    setPreset(p => ({ ...p, intervalMenit: Number.isInteger(n) && n >= 0 ? n : p.intervalMenit }));
+    if (Number.isInteger(n) && n >= 0 && n <= 1440) setPreset(p => ({ ...p, intervalMenit: n }));
   };
+  // Saat blur, kunci tampilan ke nilai valid terakhir yang tersimpan di
+  // preset — membersihkan input yang ditinggal dalam keadaan kosong/tak valid.
+  const kunciInterval = () => setIntervalText(String(preset.intervalMenit));
 
   const simpan = async () => {
     setMenyimpan(true); setMsg(null);
@@ -55,6 +70,7 @@ export default function PresetUtamaCard() {
     setMenyimpan(false);
     if (r.success && r.data?.preset_utama) {
       setPreset(r.data.preset_utama);
+      setIntervalText(String(r.data.preset_utama.intervalMenit));
       setMsg({ ok: true, teks: 'Jam posting agent utama tersimpan.' });
     } else {
       setMsg({ ok: false, teks: r.error ?? 'Gagal menyimpan' });
@@ -101,8 +117,8 @@ export default function PresetUtamaCard() {
 
           <div className="flex items-center gap-2 pt-1">
             <label className="text-xs text-[#334155]">Interval kenaikan per hari</label>
-            <input type="number" min={0} max={1440} value={preset.intervalMenit} onChange={e => ubahInterval(e.target.value)}
-              className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs" />
+            <input type="number" min={0} max={1440} value={intervalText} onChange={e => ubahIntervalText(e.target.value)}
+              onBlur={kunciInterval} className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs" />
             <span className="text-xs text-[#64748B]">menit</span>
           </div>
 
