@@ -242,7 +242,12 @@ export async function listZernioAccounts(apiKey) {
     const id = pickString(a.accountId, a.id, a._id, a.account_id, a.profileId);
     const name = pickString(a.name, a.username, a.displayName, a.display_name, a.pageName);
     const platform = pickString(a.platform, a.type);
-    return { id, platform, name, raw: (id && name) ? undefined : a };
+    // Dulu mengirim objek MENTAH dari Zernio (`a`) ke browser saat id/name tidak
+    // terbaca — cukup untuk debug pola field, tapi ikut membawa apa pun yang
+    // ada di dalamnya tanpa disaring. Nama field saja sudah cukup untuk
+    // menyesuaikan pickString() di atas, tanpa membawa nilainya ke browser
+    // (audit 2026-08-15).
+    return { id, platform, name, raw: (id && name) ? undefined : Object.keys(a ?? {}) };
   });
   return { ok: true, accounts };
 }
