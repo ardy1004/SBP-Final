@@ -2755,6 +2755,11 @@ export default function AdminViralFrameWorkspacePage() {
             talkingHead: s1.cutawayExcluded.includes(i + 1),
           })),
           archetype: s1.archetype,
+          // Sama persis dengan yang sudah dikirim ke ai-generate.js (baris ~677) —
+          // TANPA ini sutradara AI tidak tahu arketipe hybrid (mis. selfie_luxury_hybrid)
+          // butuh minimal 2 cut per Part (BAGIAN 1 selfie + BAGIAN 2 b-roll), dan
+          // cenderung merancang 1 cut saja (dilaporkan user 2026-08-16).
+          multi_shot_scene: findArchetype(s1.archetype)?.allowMultiShotPerScene === true,
           register: s1.register,
           character_photo_url: s3.useCharacter ? (s3.character?.foto_url ?? undefined) : undefined,
           ai_tool: s1.aiTool,

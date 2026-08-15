@@ -85,6 +85,13 @@ export async function onRequestPost(context) {
   }
 
   const archetype = typeof body.archetype === 'string' ? body.archetype.slice(0, 60) : '';
+  // Sama persis dengan kontrak ai-generate.js (`body.multi_shot_scene`) — arketipe
+  // hybrid (mis. selfie_luxury_hybrid) SECARA STRUKTURAL butuh minimal 2 cut per
+  // Part (BAGIAN 1 selfie/talking-head + BAGIAN 2 b-roll cutaway). Sebelum ini,
+  // flag itu TIDAK PERNAH sampai ke endpoint ini — sutradara AI bebas merancang
+  // 1 cut saja, dan hasil hybrid-nya jadi tidak punya cukup materi untuk dibagi
+  // 2 bagian di ai-generate.js/masterPromptCompiler.ts (dilaporkan user 2026-08-16).
+  const multiShotScene = body.multi_shot_scene === true;
   const register = typeof body.register === 'string' ? body.register.slice(0, 40) : '';
   const chosenProvider = PROVIDER_ORDER.includes(body.provider) ? body.provider : 'gemini';
   // Model spesifik pilihan user — kontraknya sama persis dengan ai-generate.js:
@@ -209,11 +216,36 @@ export async function onRequestPost(context) {
   ];
 
   const daftarLabelTeks = uniqueLabels.map((l, i) => `${i + 1}. ${l}`).join('\n');
+  // Anotasi jumlah cut MINIMAL per Part — tanpa ini AI bebas merancang 1 cut
+  // saja (dilaporkan user 2026-08-16), yang PATAH untuk 2 kelas Part:
+  //   (a) arketipe hybrid (multiShotScene) — butuh 2 cut untuk 2 BAGIAN visual;
+  //   (b) Part tunggal (satu-satunya Part video) — butuh cukup cut untuk
+  //       menanggung hook+isi+penutup sekaligus (selaras fix partDuties() 1c13a76).
+  // Floor umum (non-hybrid, non-solo) SENGAJA soft (kalimat anjuran, tidak
+  // divalidasi keras) — properti dengan sedikit foto berlabel tidak boleh gagal
+  // generate cuma karena tidak punya cukup variasi foto. Hybrid TETAP keras
+  // (lihat validasi cutsRaw.length di bawah) karena kontraknya struktural, bukan gaya.
+  function anotasiMinimalCut(p) {
+    // Dipanggil hanya untuk Part BUKAN talking-head (lihat pemanggil `th` di bawah,
+    // talking-head selalu memakai teks TALKING-HEAD SAJA, tidak pernah sampai sini).
+    const bagianHybrid = multiShotScene
+      ? ' [HYBRID: Part ini WAJIB minimal 2 cut — BAGIAN 1 (selfie/talking-head) dan BAGIAN 2 (b-roll cutaway), boleh label sama atau beda.]'
+      : '';
+    let catatan = '';
+    if (partsInput.length === 1) {
+      const minSolo = Math.min(3, uniqueLabels.length);
+      catatan = ` Part ini SATU-SATUNYA Part video, WAJIB berfungsi sebagai hook+isi+penutup sekaligus: minimal ${minSolo} cut mewakili awal (hook kuat)/tengah (isi)/akhir (penutup ajakan).`;
+    } else if (p.durationSec >= 4) {
+      const minUmum = Math.min(p.durationSec >= 8 ? 3 : 2, uniqueLabels.length);
+      if (minUmum >= 2) catatan = ` Sebaiknya minimal ${minUmum} cut dengan foto BERBEDA — tunjukkan lebih dari satu sisi properti dalam Part ini.`;
+    }
+    return `${bagianHybrid}${catatan}`;
+  }
   const partsSpecTeks = partsInput.map((p, i) => {
     const sisaVo = p.durationSec - p.voDurationSec;
     const th = p.talkingHead
       ? ` [TALKING-HEAD SAJA: presenter tetap di frame sepanjang Part, TANPA cutaway b-roll. Pakai TEPAT SATU cut sepanjang ${p.durationSec} detik, dengan SATU label ruangan sebagai LATAR tempat presenter berdiri/berbicara.]`
-      : '';
+      : anotasiMinimalCut(p);
     return `PART ${i + 1} — role ${p.role}, durasi TOTAL ${p.durationSec} detik, voiceover ${p.voDurationSec} detik (sisa ${sisaVo} detik tanpa VO untuk hook text/transisi/end card)${p.label ? `, tema "${p.label}"` : ''}.${th}`;
   }).join('\n');
   // ⚠️ Foto karakter TIDAK boleh disebut sebagai label. Ia dilampirkan OTOMATIS ke
@@ -410,6 +442,19 @@ Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama s
         const cutsRaw = Array.isArray(src?.cuts) ? src.cuts : [];
         if (cutsRaw.length === 0) {
           send({ done: true, error: `Part ${i + 1} (${partsInput[i].role}): AI tidak memberi cut sama sekali. Coba lagi.` });
+          return;
+        }
+        // Kontrak STRUKTURAL arketipe hybrid (bukan sekadar gaya) — BAGIAN 1
+        // (selfie/talking-head) + BAGIAN 2 (b-roll cutaway) butuh materi 2 cut
+        // minimal, kalau tidak ai-generate.js/masterPromptCompiler.ts tidak
+        // pernah dapat titik potong yang masuk akal untuk 2 bagian itu (lihat
+        // gabungDuaBagian() di archetypes.ts). Ini DIVALIDASI KERAS (beda dari
+        // anjuran umum non-hybrid di anotasiMinimalCut(), yang sengaja soft).
+        if (multiShotScene && !partsInput[i].talkingHead && cutsRaw.length < 2) {
+          send({
+            done: true,
+            error: `Part ${i + 1} (${partsInput[i].role}): AI cuma memberi ${cutsRaw.length} cut, arketipe hybrid ini butuh minimal 2 (BAGIAN 1 selfie/talking-head + BAGIAN 2 b-roll cutaway). Coba lagi.`,
+          });
           return;
         }
 
