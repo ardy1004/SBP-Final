@@ -18,8 +18,10 @@ export async function onRequestPost(context) {
   if (!Number.isInteger(videoId) || videoId <= 0) return jsonError('video_id wajib', 422);
   const caption = typeof body.caption === 'string' ? body.caption.slice(0, 2000) : '';
 
+  // v.hashtags WAJIB diikutkan — tanpa ini hashtag tersimpan di DB tapi tidak
+  // pernah ikut terkirim ke Buffer/Zernio (dilaporkan user 2026-08-15).
   const video = await env.DB.prepare(
-    `SELECT v.id, v.cloudinary_url, v.trashed_at, v.character_id, c.nama AS character_nama
+    `SELECT v.id, v.cloudinary_url, v.trashed_at, v.character_id, v.hashtags, c.nama AS character_nama
      FROM viralframe_agent_videos v JOIN viralframe_characters c ON c.id = v.character_id
      WHERE v.id = ?`
   ).bind(videoId).first().catch(() => null);

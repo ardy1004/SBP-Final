@@ -84,9 +84,11 @@ export async function onRequestPost({ request, env }) {
     const butuh = Math.max(0, kuota - terpakai);
     if (butuh === 0) { hasilAgent.alasan = 'kuota hari ini sudah penuh'; laporan.push(hasilAgent); continue; }
 
-    // FIFO: video terlama yang diupload lebih dulu.
+    // FIFO: video terlama yang diupload lebih dulu. hashtags WAJIB diikutkan —
+    // tanpa ini hashtag tersimpan di DB tapi tidak pernah ikut terkirim ke
+    // Buffer/Zernio (dilaporkan user 2026-08-15, sama seperti jalur manual).
     const antre = await env.DB.prepare(
-      `SELECT id, cloudinary_url, caption FROM viralframe_agent_videos
+      `SELECT id, cloudinary_url, caption, hashtags FROM viralframe_agent_videos
        WHERE character_id = ? AND trashed_at IS NULL AND cloudinary_url IS NOT NULL
        ORDER BY created_at ASC, id ASC LIMIT ?`
     ).bind(ag.id, butuh).all().catch(() => null);

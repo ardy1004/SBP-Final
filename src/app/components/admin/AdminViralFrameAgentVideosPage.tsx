@@ -793,7 +793,16 @@ function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo
           <>
             <p className="text-xs text-[#64748B] mb-3">Video akan dijadwalkan otomatis ke 5 akun (YT Shorts, TikTok, Threads, FB Pages, Instagram) pada slot jam primetime berikutnya yang masih kosong hari ini.</p>
             <textarea value={caption} onChange={e => setCaption(e.target.value)} rows={3} placeholder="Caption / deskripsi post…"
-              className="w-full text-sm px-3 py-2 border border-gray-200 rounded-xl outline-none focus:border-[#1565C0] mb-3" />
+              className="w-full text-sm px-3 py-2 border border-gray-200 rounded-xl outline-none focus:border-[#1565C0] mb-2" />
+            {/* Hashtag tersimpan terpisah dari caption (kolom sendiri di DB) dan
+                ditambahkan otomatis oleh server saat dikirim ke Buffer/Zernio —
+                ditampilkan di sini supaya admin tahu itu akan ikut terkirim,
+                bukan kejutan diam-diam (dilaporkan user 2026-08-15: hashtag
+                tidak ikut ter-upload). Edit hashtag lewat kartu video di grid,
+                bukan di sini — modal ini cuma pratinjau. */}
+            {video.hashtags && (
+              <p className="text-[11px] text-[#1565C0] font-medium mb-3">{video.hashtags}</p>
+            )}
             {errorMsg && <p className="text-xs text-red-600 mb-3">{errorMsg}</p>}
             <button onClick={submit} className="w-full py-2.5 rounded-xl text-sm font-semibold text-white bg-[#1565C0] hover:bg-[#1565C0]/90">
               Jadwalkan Sekarang

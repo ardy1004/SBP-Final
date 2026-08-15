@@ -317,6 +317,19 @@ export function slotTersedia({ akunId, akunUtamaId, kuota, platforms, jendela = 
 //
 // `dryRun` mengembalikan jam yang AKAN dipakai tanpa menyentuh Buffer/Zernio —
 // itu yang dipakai admin untuk memeriksa jadwal sebelum menyalakan otomatis.
+// Gabungkan caption + hashtags jadi SATU teks — Buffer (`text`) dan Zernio
+// (`content`) sama-sama cuma punya satu field teks, tidak ada parameter
+// hashtag terpisah. Dulu cuma `video.caption` yang dikirim (baik jalur manual
+// maupun cron) — `hashtags` tersimpan di DB tapi tidak pernah ikut ke
+// Buffer/Zernio sama sekali (dilaporkan user 2026-08-15). Pola gabung sama
+// dengan yang sudah dipakai di AdminViralFrameWorkspacePage.tsx (preview ZIP).
+function gabungCaptionHashtag(caption, hashtags) {
+  const c = (caption ?? '').trim();
+  const h = (hashtags ?? '').trim();
+  if (!h) return c;
+  return c ? `${c}\n\n${h}` : h;
+}
+
 export async function jadwalkanVideo(env, { video, akun, targetId, akunUtamaId, kuota, jendela, preset, dipakai, dryRun = false }) {
   const platforms = Object.keys(akun.channels ?? {});
   if (platforms.length === 0) return { ok: false, alasan: 'akun belum punya channel sosmed' };
@@ -329,7 +342,7 @@ export async function jadwalkanVideo(env, { video, akun, targetId, akunUtamaId, 
   if (dryRun) return { ok: true, dry: true, tanggal: slot.tanggal, jendela: slot.jendela.nama, waktu: slot.waktu };
 
   const { rows } = await scheduleFanOut(env, {
-    assetUrl: video.cloudinary_url, caption: video.caption ?? '', akun,
+    assetUrl: video.cloudinary_url, caption: gabungCaptionHashtag(video.caption, video.hashtags), akun,
     waktu: slot.waktu, slotIndex: slot.jendela.index + 1,
   });
 
