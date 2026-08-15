@@ -37,6 +37,7 @@ import {
   namaFileKarakter, MAX_REF_IMAGES_PER_PART,
   getEmotionForRole, PERFORMANCE_INTENT_BY_ROLE, buildDeliveryClause,
   VOICE_PERSONA_HINT, VOICE_PRIORITY_NOTE,
+  BANNED_HOOK_OPENERS, HOOK_OPENER_EXAMPLE, PROPERTY_STRUCTURAL_NEGATIVES,
 } from '../../../_lib/viralframe-shared.js';
 import { PROVIDERS, getProviderKey, callChatCompletion } from '../../../_lib/aiProviders.js';
 
@@ -177,6 +178,10 @@ ${VOICE_PRIORITY_NOTE} — sisipkan sebagai instruksi mixing di prompt agar VO t
     // masuk, struktur kalimat, dan diksi — supaya video ke-N tidak terasa
     // fotokopi video ke-1 meskipun tipe hook-nya sengaja sama.
     : `Scene berperan HOOK WAJIB memakai gaya opening: ${hookType}. Tipe ini WAJIB dipertahankan, TAPI eksekusinya WAJIB terasa baru: ubah sudut masuk, struktur kalimat, dan pilihan kata dibanding video sebelumnya — jangan sekadar menyusun ulang kalimat yang sama.\n`;
+  // Larangan pembuka generik — berlaku terlepas dari hook_type auto/manual.
+  // Tipe hook menentukan KATEGORI-nya (fakta/pertanyaan/pernyataan), bukan izin
+  // membuka dengan sapaan/perkenalan diri yang membuang detik pertama.
+  const hookOpenerGuard = `Scene berperan HOOK DILARANG dibuka dengan pola berikut, apa pun gaya opening yang dipakai:\n${BANNED_HOOK_OPENERS.map(p => `  ✗ ${p}`).join('\n')}\n  ✗ SALAH: "${HOOK_OPENER_EXAMPLE.salah}"\n  ✓ BENAR: "${HOOK_OPENER_EXAMPLE.benar}"\nDetik pertama adalah hook, bukan salam — masuk langsung ke substansi.\n`;
   const ctaLine = isAutoValue(ctaType)
     ? (excludedCtas?.length
         ? `Scene berperan CTA: pilih gaya ajakan yang paling sesuai dengan properti ini, TAPI JANGAN memakai gaya yang baru dipakai di video-video sebelumnya: ${excludedCtas.join(', ')}. Variasikan supaya konten tidak terasa monoton/generik.\n`
@@ -201,7 +206,7 @@ ${VOICE_PRIORITY_NOTE} — sisipkan sebagai instruksi mixing di prompt agar VO t
   const openingLine = excludedOpenings?.length
     ? `JANGAN mengulang atau memparafrase kalimat pembuka yang sudah dipakai di video-video sebelumnya:\n${excludedOpenings.map(o => `  - "${o}"`).join('\n')}\nKalimat pembuka Part pertama WAJIB benar-benar baru.\n`
     : '';
-  const toneStyleSection = (toneLine + visualStyleLine + hookLine + ctaLine + openingLine).trim();
+  const toneStyleSection = (toneLine + visualStyleLine + hookLine + hookOpenerGuard + ctaLine + openingLine).trim();
   const toneStyleBlock = toneStyleSection
     ? `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n[2b] TONE, GAYA VISUAL & PERAN SCENE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${toneStyleSection}\nSetiap scene punya peran (Hook/Body/CTA, lihat "Role" di user prompt) — sesuaikan penekanan narasi dengan peran itu.\n`
     : '';
@@ -238,6 +243,7 @@ Setiap Part dieksekusi dengan BEBERAPA gambar terlampir sekaligus (maks ${MAX_RE
   • SETIAP field 'prompt' WAJIB memuat frasa anchoring karakter: 'the exact same person as the attached character reference image — identical face, hair or head covering, and outfit' (boleh diparafrase tipis, kata 'reference' wajib ada).
     ⚠️ TULIS 'hair or head covering' (ATAU sebut penutup kepala yang benar-benar terlihat, mis. 'hijab'), JANGAN 'hair' saja. Banyak talent memakai hijab/peci/topi; menyuruh model menyamakan "rambut" yang tidak terlihat di foto referensi adalah instruksi yang BERTENTANGAN dengan gambar, dan mendorong model mengarang rambut terurai → wajah/kepala morphing.
   • DILARANG mengarang kata sifat skala/arsitektur yang tidak terverifikasi dari foto: massive, huge, grand, towering, spacious, multi-story, modern facade, dsb. Cukup sebut jenis area sesuai label + rujuk ke reference image.
+  • DILARANG mengarang ELEMEN STRUKTUR yang tidak ada di foto — kelas berbeda dari kata sifat di atas: ${PROPERTY_STRUCTURAL_NEGATIVES.join(', ')}. Foto referensi adalah otoritas tunggal bentuk properti; kamu hanya menambahkan aksi/gerak, bukan elemen bangunan baru.
   • Aksi/gerak karakter dan kamera = satu-satunya hal yang kamu tambahkan di atas foto referensi.
   • ⚠️ PERANGKAT REKAM — DILARANG KERAS. Framing selfie/vlog adalah POSISI KAMERA, BUKAN aksi subjek.
     JANGAN PERNAH menulis karakter sedang memegang/mengoperasikan kamera, HP, GoPro, gimbal, tripod, atau tongsis.

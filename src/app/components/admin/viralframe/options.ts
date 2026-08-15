@@ -23,6 +23,9 @@ import {
   CTA_SPOKEN_EXAMPLE as SHARED_CTA_SPOKEN_EXAMPLE,
   defaultVoDurationSec as sharedDefaultVoDurationSec,
   VOICE_PRIORITY_NOTE as SHARED_VOICE_PRIORITY_NOTE,
+  BANNED_HOOK_OPENERS as SHARED_BANNED_HOOK_OPENERS,
+  HOOK_OPENER_EXAMPLE as SHARED_HOOK_OPENER_EXAMPLE,
+  PROPERTY_STRUCTURAL_NEGATIVES as SHARED_PROPERTY_STRUCTURAL_NEGATIVES,
 } from '../../../../../functions/_lib/viralframe-shared.js';
 
 export interface Opt { value: string; label: string }
@@ -691,6 +694,15 @@ export const CTA_SPOKEN_EXAMPLE: Record<string, string> = SHARED_CTA_SPOKEN_EXAM
  * Dulu nilainya = durasi penuh, sehingga model disuruh bicara tanpa henti. */
 export const defaultVoDurationSec: (durationSec: number) => number = sharedDefaultVoDurationSec;
 export const VOICE_PRIORITY_NOTE: string = SHARED_VOICE_PRIORITY_NOTE;
+/** Pola pembuka hook generik yang DILARANG (sapaan/perkenalan diri) — hook_type
+ * pilihan user sudah menentukan KATEGORI-nya, ini melarang default LLM yang
+ * membuang jatah waktu hook dengan basa-basi. */
+export const BANNED_HOOK_OPENERS: string[] = SHARED_BANNED_HOOK_OPENERS;
+export const HOOK_OPENER_EXAMPLE: { salah: string; benar: string } = SHARED_HOOK_OPENER_EXAMPLE;
+/** Elemen struktur properti yang DILARANG dikarang saat mendeskripsikan visual
+ * cut (lantai, kolam renang, jendela, atap tambahan) — beda kelas dari kata
+ * sifat skala yang sudah dilarang di anchoring reference-image. */
+export const PROPERTY_STRUCTURAL_NEGATIVES: string[] = SHARED_PROPERTY_STRUCTURAL_NEGATIVES;
 
 // ─── Penamaan file aset (dipakai Master Prompt + ZIP export) ─────────────────
 // PENTING: ZIP generation WAJIB memakai buildZipNames() (foto properti) &

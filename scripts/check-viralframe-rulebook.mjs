@@ -51,17 +51,25 @@ const REQUIRED_IMPORTS = {
     // Contoh kalimat CTA terucap — label kategori saja membuat model menulis ajakan
     // umum yang tidak menyebut objeknya sama sekali (audit 2026-08-04).
     'CTA_SPOKEN_EXAMPLE',
+    // Adopsi pola storyboard ChatGPT rujukan user (2026-08-16): larangan pembuka
+    // hook generik ("Halo guys, saya...") + larangan mengarang elemen struktur
+    // properti (lantai/kolam/jendela tambahan) di deskripsi visual cut.
+    'BANNED_HOOK_OPENERS', 'HOOK_OPENER_EXAMPLE', 'PROPERTY_STRUCTURAL_NEGATIVES',
   ],
   'functions/api/admin/viralframe/ai-generate.js': [
     'REALISM_QUALITY_CUES', 'REALISM_BANNED_QUALITY_PHRASES', 'NEGATIVE_PROMPT_VIDEO', 'RULEBOOK_VERSION',
     'getEmotionForRole', 'PERFORMANCE_INTENT_BY_ROLE', 'buildDeliveryClause',
     'VOICE_PERSONA_HINT', 'VOICE_PRIORITY_NOTE',
+    'BANNED_HOOK_OPENERS', 'HOOK_OPENER_EXAMPLE', 'PROPERTY_STRUCTURAL_NEGATIVES',
   ],
   'functions/api/admin/viralframe/youtube-long.js': [
     'REALISM_QUALITY_CUES', 'REALISM_BANNED_QUALITY_PHRASES', 'NEGATIVE_PROMPT_VIDEO', 'RULEBOOK_VERSION',
     // Jalur ini TIDAK butuh getEmotionForRole/PERFORMANCE_INTENT_BY_ROLE/
     // buildDeliveryClause (skema dialogue-nya beda, tidak berbasis Part/peran) —
     // yang wajib disamakan hanya karakter suara & prioritas mixing audio.
+    // BANNED_HOOK_OPENERS juga SENGAJA tidak wajib di sini: video YouTube long-form
+    // punya blok "opening" host yang legitimately butuh intro (beda konteks dari
+    // hook 3-detik short-form vertikal) — lihat catatan di ai-generate.js.
     'VOICE_PERSONA_HINT', 'VOICE_PRIORITY_NOTE',
   ],
 };

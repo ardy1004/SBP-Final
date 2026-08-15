@@ -20,7 +20,7 @@
 // sama sekali tidak mengimpor REALISM_* saat itu ditambahkan ke 2 jalur lain —
 // dicegah terulang lewat scripts/check-viralframe-rulebook.mjs (jalankan sebelum
 // deploy, sama seperti check-bundle-budget.mjs).
-export const RULEBOOK_VERSION = '2026-08-04.1';
+export const RULEBOOK_VERSION = '2026-08-16.1';
 
 // Tabel lipsync (PRD 3.8) — sinkronisasi durasi klip ↔ jumlah kata narasi.
 //
@@ -369,3 +369,48 @@ export function buildDeliveryClause(nama, voDurasiDetik) {
   const { pace, instruksi } = getLipsync(voDurasiDetik);
   return `${nama} ([VOICE_PERSONA]), durasi VO ${voDurasiDetik} detik, pace ${pace}: ${instruksi}, mengatakan:`;
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// HOOK: LARANGAN PEMBUKA GENERIK (2026-08-16 — adopsi pola storyboard ChatGPT
+// rujukan user, folder "Format Struktur Promp Chat GPT" / Series A)
+// ════════════════════════════════════════════════════════════════════════════
+// Storyboard rujukan itu eksplisit melarang membuka video dengan sapaan/
+// perkenalan diri ("Halo guys, saya Lisa...") karena 2-3 detik pertama video
+// ADALAH hook-nya — basa-basi di situ membuang jatah waktu paling berharga dan
+// membuat video terasa seperti iklan, bukan konten organik yang di-scroll orang
+// dengan sukarela. HOOK_TYPES kita (options.ts: open_question, curiosity_gap,
+// shocking_fact, dst) sudah menyediakan KATEGORI pembuka yang tepat — yang
+// belum ada adalah larangan eksplisit untuk pola pembuka generik yang sering
+// jadi default sebuah LLM kalau tidak dilarang gamblang, apa pun tipe hook yang
+// dipilih user.
+export const BANNED_HOOK_OPENERS = [
+  'Halo guys / hai semua / halo teman-teman (sapaan generik tanpa substansi)',
+  'Perkenalkan, saya [nama] (perkenalan diri di awal video)',
+  'Hari ini saya mau kasih tahu kalian tentang... (basa-basi sebelum masuk isi)',
+  'Selamat datang di video/channel saya (pembuka gaya channel intro)',
+];
+
+export const HOOK_OPENER_EXAMPLE = {
+  salah: 'Halo guys, kenalin aku Lisa, hari ini aku mau kasih tau kalian soal rumah bagus ini.',
+  benar: 'Rumah 4,5 miliar ini... sebenarnya dapat apa aja?',
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// FIDELITAS STRUKTUR PROPERTI (2026-08-16 — sumber rujukan sama)
+// ════════════════════════════════════════════════════════════════════════════
+// [1] ANTI-HALUSINASI (ai-generate.js) sudah melarang mengarang FITUR dari data
+// properti (landmark, furnished, dst — lihat CLAUDE.md "Pola berulang:
+// PLACEHOLDER HARDCODED"). Storyboard rujukan menunjukkan kelas halusinasi yang
+// bersebelahan: bukan fakta dari data, tapi ELEMEN ARSITEKTUR yang dikarang saat
+// mendeskripsikan VISUAL cut (menambah lantai, kolam renang, mengubah jumlah
+// jendela/bentuk atap). Ini wajar terjadi karena anchoring reference-image
+// (ai-generate.js [2d]) bekerja TEXT-ONLY — AI penulis prompt tidak melihat
+// fotonya — sehingga rentan "memperkaya" prosa dengan elemen yang tidak pasti
+// ada. Aturan anchoring yang sudah ada melarang KATA SIFAT skala yang tidak
+// terverifikasi (massive/huge/grand); daftar ini melarang ELEMEN STRUKTUR yang
+// dikarang — kelas berbeda yang belum tercakup.
+export const PROPERTY_STRUCTURAL_NEGATIVES = [
+  'add floors', 'remove floors', 'add a swimming pool',
+  'change the number or shape of windows', 'change the roof shape or the facade',
+  'invent additional rooms', 'invent furniture not implied by the photo label',
+];

@@ -22,6 +22,7 @@ import {
   totalDurationOfParts, sumDurasiCuts,
   getEmotionForRole, PERFORMANCE_INTENT_BY_ROLE,
   VOICE_PERSONA_HINT, VOICE_PRIORITY_NOTE,
+  BANNED_HOOK_OPENERS, HOOK_OPENER_EXAMPLE, PROPERTY_STRUCTURAL_NEGATIVES,
   type PartDef, type ZipSourceImage,
 } from './options';
 import { findArchetype, compileCameraChoreography } from './archetypes';
@@ -445,6 +446,12 @@ export function compileMasterPrompt(
   L.push('  8. CTA yang jelas dan mendesak.');
   L.push('  9. Loop-bait ending — lihat instruksi LOOP EDIT di bawah (WAJIB, bukan opsional, terlepas dari 4 elemen minimum di atas).');
   L.push('');
+  L.push('LARANGAN PEMBUKA HOOK GENERIK (WAJIB — hook_type di atas menentukan KATEGORI-nya, bukan izin memakai basa-basi berikut di kalimat pembuka Part Hook):');
+  for (const pola of BANNED_HOOK_OPENERS) L.push(`  ✗ ${pola}`);
+  L.push(`  ✗ SALAH: "${HOOK_OPENER_EXAMPLE.salah}"`);
+  L.push(`  ✓ BENAR: "${HOOK_OPENER_EXAMPLE.benar}"`);
+  L.push('  Detik pertama adalah hook, bukan salam — masuk langsung ke substansi sesuai gaya hook yang dipilih.');
+  L.push('');
   L.push('LOOP EDIT (WAJIB — meningkatkan rewatch & autoplay loop di TikTok/Reels/Shorts):');
   L.push(`  Frame PENUTUP Part terakhir (CTA) WAJIB disusun agar secara visual "menyambung" ke frame PEMBUKA Part pertama (Hook) — komposisi, sudut kamera, atau elemen visual yang mirip/echo, sehingga saat platform me-replay video secara otomatis (autoplay loop), transisi akhir→awal terasa MULUS seperti satu gerakan berkelanjutan, bukan potongan patah. Jangan tutup video dengan frame yang terasa "final"/statis (mis. black screen, freeze frame). Sebutkan strategi loop ini secara eksplisit di production_notes.editing_sequence.`);
   L.push('');
@@ -477,6 +484,7 @@ export function compileMasterPrompt(
   L.push('GUARDRAIL SBP (DIPERTEGAS — TIDAK BOLEH DILANGGAR):');
   L.push('  - WORD COUNT WAJIB: field "dialog" setiap Part HARUS dalam rentang ±10% dari max_words BUDGET NARASI PER PART di atas (BUKAN sekadar di bawah maksimal — target presisi agar durasi ucapan PAS dengan voDurationSec Part).');
   L.push('  - SETIAP cut WAJIB ground pada foto referensinya (lihat BLOK 3b) — gambarkan ruangan/area konkret dan AKURAT, bukan generik.');
+  L.push(`  - FIDELITAS STRUKTUR PROPERTI: dilarang mengarang elemen struktur yang tidak ada di foto referensi — ${PROPERTY_STRUCTURAL_NEGATIVES.join(', ')}. Foto referensi adalah otoritas tunggal bentuk properti, bukan titik awal untuk "diperkaya".`);
   L.push('  - DESKRIPSI KARAKTER: jika ada karakter, COPY EXACT STRING [CHARACTER_SPEC] dari BLOK 3 ke setiap Part yang menampilkannya — TIDAK ADA variasi kata sedikit pun.');
   L.push('  - TRANSISI: field "transition_to_next" tiap Part harus EKSPLISIT (hard cut / zoom punch / whip pan / dissolve + audio cue) agar editor dapat menyambung Part menjadi satu video utuh tanpa miss.');
   if (nativeAudio) {
@@ -640,7 +648,10 @@ export function compileNaturalPrompt(
     });
     L.push('');
     L.push(`FRAMING: ${kamera}.`);
-    if (p.role === 'Hook') L.push(`  Opening style: ${labelOf(HOOK_TYPES, s1.hookType)}.`);
+    if (p.role === 'Hook') {
+      L.push(`  Opening style: ${labelOf(HOOK_TYPES, s1.hookType)}.`);
+      L.push(`  Jangan buka dengan sapaan/perkenalan diri (mis. "${HOOK_OPENER_EXAMPLE.salah}") — langsung ke substansi (mis. "${HOOK_OPENER_EXAMPLE.benar}").`);
+    }
     if (p.role === 'CTA') L.push(`  Closing/CTA style: ${labelOf(CTA_TYPES, s1.ctaType)}${s1.ctaType === 'comment_keyword' && s1.ctaKeyword ? ` (keyword: "${s1.ctaKeyword}")` : ''}.`);
     L.push('');
     L.push(`TEXT OVERLAY: [isi teks on-screen untuk Part ini, ditambahkan editor — bukan dibakar AI].`);
