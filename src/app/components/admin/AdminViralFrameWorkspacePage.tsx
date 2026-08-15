@@ -3701,6 +3701,12 @@ export default function AdminViralFrameWorkspacePage() {
                       <button type="button" onClick={() => removePart(idx)}
                         className="text-xs text-red-500 hover:text-red-700 shrink-0">Hapus</button>
                     </div>
+                    {s1.parts.length === 1 && (
+                      <p className="text-[11px] text-[#94A3B8]">
+                        Part tunggal ini otomatis diperlakukan sebagai Hook + Body + CTA sekaligus dalam satu klip —
+                        energi & ajakan penutup tetap disisipkan AI di cuts terakhir, walau label di atas cuma "Hook".
+                      </p>
+                    )}
                   </div>
                 );
               })}
