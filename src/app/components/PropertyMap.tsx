@@ -66,7 +66,8 @@ function MapPopup({ pin }: { pin: MapPinItem }) {
     : pin.tujuan === 'disewa' ? 'Disewa' : 'Dijual';
   const tujuanBg = pin.tujuan === 'dijual' ? '#1565C0' : '#047857';
 
-  const perM2 = pin.luas_tanah && pin.luas_tanah > 0
+  // Harga per m² cuma relevan untuk Tanah — jenis lain dijual gelondongan.
+  const perM2 = pin.jenis_properti === 'tanah' && pin.luas_tanah && pin.luas_tanah > 0
     ? Math.round(pin.harga / pin.luas_tanah) : null;
 
   const hasSpecs = pin.luas_tanah || pin.luas_bangunan || pin.jumlah_kamar_tidur || pin.jumlah_kamar_mandi;

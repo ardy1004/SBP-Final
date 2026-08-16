@@ -451,7 +451,11 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
   if (notFound || !property) return <PropertyNotFound />;
 
   const images = property.images.length > 0 ? property.images : [''];
-  const hargaPerM2 = property.harga_per_m2 ?? (property.luas_tanah ? Math.round(property.harga / property.luas_tanah) : null);
+  // Harga per m² cuma relevan untuk Tanah — jenis lain dijual gelondongan.
+  const isTanah = (property.jenisRaw ?? property.jenis).toLowerCase() === 'tanah';
+  const hargaPerM2 = isTanah
+    ? (property.harga_per_m2 ?? (property.luas_tanah ? Math.round(property.harga / property.luas_tanah) : null))
+    : null;
   // Tanah diiklankan per meter — saat harga_mode 'per_m2', angka per-m2 jadi
   // headline dan total turun ke baris kedua. Kolom `harga` tetap total.
   const utamakanPerM2 = property.harga_mode === 'per_m2' && hargaPerM2 != null;

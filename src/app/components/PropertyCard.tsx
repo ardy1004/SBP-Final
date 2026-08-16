@@ -59,7 +59,9 @@ export default function PropertyCard({ property, className = '' }: Props) {
     ? `/disewa/${jenisSlug}/${property.provinsi.toLowerCase().replace(/\s+/g, '-')}/${property.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${kec}/${property.slug}`
     : `/dijual/${jenisSlug}/${property.provinsi.toLowerCase().replace(/\s+/g, '-')}/${property.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${kec}/${property.slug}`;
 
-  const hargaPerM2 = property.luas_tanah && property.harga
+  // Harga per m² cuma relevan untuk Tanah — jenis lain dijual gelondongan.
+  const isTanah = jenisSlug === 'tanah';
+  const hargaPerM2 = isTanah && property.luas_tanah && property.harga
     ? Math.round(property.harga / property.luas_tanah)
     : null;
 
