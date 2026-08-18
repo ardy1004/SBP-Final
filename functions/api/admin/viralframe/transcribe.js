@@ -66,8 +66,17 @@ export async function onRequestPost(context) {
     let groqJson;
     try {
       groqJson = await groqRes.json();
-    } catch {
-      return jsonError('Groq return non-JSON saat status 200', 502);
+    } catch (err) {
+      // Header sudah sukses (groqRes.ok di atas) tapi AbortSignal.timeout bisa
+      // memutus SAAT body masih dibaca — beda dari JSON yang benar-benar rusak
+      // (lihat kasus serupa di aiProviders.js callChatCompletion).
+      const isAbort = err?.name === 'AbortError' || /abort|timeout/i.test(err?.message || '');
+      return jsonError(
+        isAbort
+          ? 'Groq timeout saat membaca hasil transkrip (audio mungkin terlalu panjang untuk diproses dalam waktu tersedia). Coba dengan audio lebih pendek atau ulangi.'
+          : 'Groq return non-JSON saat status 200',
+        502
+      );
     }
 
     const words = Array.isArray(groqJson.words)

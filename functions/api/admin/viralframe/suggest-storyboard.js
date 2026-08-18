@@ -346,8 +346,11 @@ Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama s
         if (r.ok) { raw = r.content; used = prov; usedVision = true; break; }
         lastErr = r.error;
         if (r.quotaExhausted) kuotaHabis.add(prov);
-        // status 0 = fetch melempar (abort/jaringan), yaitu gagal karena waktu.
-        else if (r.status === 0) gagalKarenaWaktu.add(prov);
+        // status 0 = fetch melempar sebelum header (abort/jaringan). timedOut =
+        // header sukses diterima tapi AbortSignal.timeout memutus SAAT body
+        // masih dibaca (lihat aiProviders.js) — keduanya SAMA-SAMA gagal karena
+        // waktu dari sudut pandang penjadwalan Fase 2, bukan gagal karena format.
+        else if (r.status === 0 || r.timedOut) gagalKarenaWaktu.add(prov);
         console.error(`[suggest-storyboard] vision ${prov} gagal:`, r.error?.slice(0, 120));
       }
 

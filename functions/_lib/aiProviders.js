@@ -242,7 +242,28 @@ export async function callChatCompletion({ provider, apiKey, model, systemPrompt
 
   let json;
   try { json = await res.json(); }
-  catch { return { ok: false, status: res.status, error: `${cfg.label} return non-JSON` }; }
+  catch (err) {
+    // Header sudah sukses (res.ok=true di atas) tapi AbortSignal.timeout bisa
+    // memutus SAAT body masih di-stream (mis. OpenRouter mengirim whitespace
+    // keep-alive padding sambil menunggu upstream model, baru menyusul JSON
+    // asli belakangan — diverifikasi 2026-08-18: TTFB 1,6s tapi body lengkap
+    // baru di 14,9s untuk prompt sepanjang storyboard). res.status TETAP 200 di
+    // kasus ini, jadi tidak bisa dibedakan dari JSON yang BENAR-BENAR rusak
+    // tanpa flag terpisah — caller (suggest-storyboard.js gagalKarenaWaktu)
+    // butuh field ini supaya provider lambat digeser ke belakang, bukan
+    // dikira gagal karena format salah.
+    const isAbort = err?.name === 'AbortError' || /abort|timeout/i.test(err?.message || '');
+    if (isAbort) {
+      return {
+        ok: false,
+        status: res.status,
+        timedOut: true,
+        error: `${cfg.label} timeout saat membaca respons (header diterima tapi body belum selesai)`,
+        quotaExhausted: false,
+      };
+    }
+    return { ok: false, status: res.status, error: `${cfg.label} return non-JSON`, quotaExhausted: false };
+  }
 
   const content = (json.choices?.[0]?.message?.content ?? '').trim();
   if (!content) return { ok: false, status: res.status, error: `${cfg.label} mengembalikan respons kosong` };
