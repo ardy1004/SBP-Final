@@ -3850,8 +3850,9 @@ export default function AdminViralFrameWorkspacePage() {
                 {suggestModels.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
               <p className="text-[10px] text-[#94A3B8] mt-1">
-                Hanya <strong>Gemini</strong> yang bisa melihat foto. Provider lain tetap bisa merancang, tapi dari label foto saja.
-                Kalau pilihanmu gagal/kehabisan kuota, sistem otomatis mencoba provider lain.
+                Hanya <strong>Gemini</strong> yang bisa melihat foto. Provider lain merancang dari label foto saja.
+                Jika provider bervisi gagal/kehabisan kuota, sistem otomatis mencoba provider lain — dan bila tak ada
+                yang berhasil, turun ke mode teks (merancang tanpa melihat foto). Badge hasil menunjukkan mana yang terjadi.
               </p>
             </div>
 
@@ -3869,8 +3870,9 @@ export default function AdminViralFrameWorkspacePage() {
             </div>
             <p className="text-[11px] text-[#64748B]">
               Jalankan <strong>setelah</strong> semua parameter di atas terisi — AI membaca gaya, platform,
-              tipe hook, tone, gaya bahasa, dan tipe CTA yang kamu pilih, lalu melihat foto berlabel
-              (bervisi bila tersedia) untuk menentukan cuts &amp; foto referensi tiap Part.
+              tipe hook, tone, gaya bahasa, dan tipe CTA yang kamu pilih, lalu (bila provider bervisi berhasil)
+              melihat foto berlabel untuk menentukan cuts &amp; foto referensi tiap Part. Bila tidak, sistem
+              otomatis turun ke mode teks (label saja).
             </p>
             {suggestError && <p className="text-xs text-red-500">{suggestError}</p>}
 

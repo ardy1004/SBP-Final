@@ -1,8 +1,9 @@
 // POST /api/admin/viralframe/suggest-storyboard — Sutradara AI BERVISI
 // (refactor Tahap 2, 2026-08-01): AI melihat langsung foto berlabel properti
-// (URL publik /api/media?key=..., BUKAN base64 — hemat CPU Worker) dan merancang
-// isi tiap Part (1 Part = 1 generate call, lihat PartDef di options.ts):
-// berapa CUT di dalamnya, foto referensi mana, dan alasan singkatnya.
+// (base64 DATA URI yang dibaca dari R2 — since 2026-08-19; dulu URL publik
+// /api/media yang DITOLAK Gemini, lihat penjelasan lengkap di bacaMediaDataUri)
+// dan merancang isi tiap Part (1 Part = 1 generate call, lihat PartDef di
+// options.ts): berapa CUT di dalamnya, foto referensi mana, dan alasan singkatnya.
 //
 // Model Part-as-Generate-Unit (kontrak baru Agent 1 Gelombang 1):
 //   PartDef { role, durationSec, voDurationSec, refPhotoIds[], cuts[], label?, rationale? }
@@ -30,6 +31,13 @@ import { MAX_REF_IMAGES_PER_PART, getClipMaxSec } from '../../../_lib/viralframe
 const PROVIDER_ORDER = ['gemini', 'groq', 'openrouter', 'deepseek'];
 const MAKS_PART = 8;
 const DUR_PART_FALLBACK_MAKS = 300; // dipakai hanya bila ai_tool tak dikenal/kosong
+// Prefix key R2 yang bisa dibaca langsung (selaras PUBLIC_PREFIXES di media.js).
+const MEDIA_PREFIXES = ['property-photos/', 'viralframe-characters/'];
+// Cap foto RUANGAN yang dikirim ke vision AI (keputusan user 2026-08-19). Foto
+// karakter di luar hitungan ini (total maksimal 7 gambar: 6 ruangan + 1 karakter).
+// Diukur: 6 foto ruangan + 1 karakter = 2,3-3,8 s, payload ~1,1 MB — jauh di
+// bawah CAP_FASE1_MS 14 detik.
+const MAKS_FOTO_RUANGAN_VISI = 6;
 
 // Anggaran waktu TOTAL untuk seluruh rantai fallback (vision + teks), di bawah
 // wall-clock 30s Workers. Request bervisi ke Gemini bisa lebih lambat dari
@@ -119,20 +127,68 @@ export async function onRequestPost(context) {
       : [],
   };
 
-  // URL publik untuk dikirim ke vision AI. Foto sudah publik lewat
-  // /api/media?key=... (PUBLIC_PREFIXES mencakup property-photos/ &
-  // viralframe-characters/, lihat functions/api/media.js) — JANGAN base64 di
-  // Worker, boros CPU dalam anggaran 10ms/request Cloudflare FREE tier.
-  const origin = new URL(request.url).origin;
-  function publicMediaUrl(rawKeyOrUrl) {
-    if (!rawKeyOrUrl) return null;
-    const s = String(rawKeyOrUrl).trim();
-    if (!s) return null;
-    if (/^https?:\/\//i.test(s)) return s;
-    if (s.startsWith('/')) return origin + s; // sudah bentuk "/api/media?key=..."
-    return `${origin}/api/media?key=${encodeURIComponent(s)}`;
+  // ── FOTO → BASE64 DATA URI untuk vision AI ─────────────────────────────────
+  // Gemini (endpoint OpenAI-compat) MENOLAK `image_url` berisi URL remote —
+  // selalu HTTP 400. Diukur ke API dengan key produksi 2026-08-19: URL Wikipedia
+  // pun 400, 2 model 400, tanpa `reasoning_effort` tetap 400. Yang DITERIMA hanya
+  // base64 data URI — diukur OK 3,6 s dan benar-benar melihat (menjawab
+  // "area garasi atau carport" untuk foto berlabel "Carport/Garasi").
+  //
+  // Dulu komentar di sini melarang base64 dengan alasan "boros CPU dalam anggaran
+  // 10ms/request Cloudflare FREE tier". Angka itu kadaluarsa: (a) akun sudah
+  // Workers Paid sejak 2026-08-01 (batas CPU 30 detik, 10ms tidak berlaku lagi),
+  // dan (b) encode base64 terukur ~1 ms. Seluruh larangan dihapus.
+  //
+  // Byte dibaca LANGSUNG dari R2 lewat env.MEDIA.get(key), bukan fetch HTTP ke
+  // /api/media — kolom `url_webp` memang menyimpan key R2 (`property-photos/…`),
+  // jadi tidak ada round-trip jaringan (hemat ~2 detik terukur).
+  function toDataUri(ct, buf) {
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    return `data:${ct};base64,${btoa(bin)}`;
   }
-  const characterUrl = publicMediaUrl(typeof body.character_photo_url === 'string' ? body.character_photo_url : null);
+  // Terima key R2 mentah, URL penuh, atau "/api/media?key=…"; hasilkan data URI
+  // base64. Foto yang gagal dibaca dilewati diam-diam (return null), tidak pernah
+  // menggagalkan seluruh request.
+  async function bacaMediaDataUri(raw) {
+    if (!raw) return null;
+    const s = String(raw).trim();
+    if (!s) return null;
+    let key = null;
+    if (MEDIA_PREFIXES.some(p => s.startsWith(p))) {
+      key = s; // key R2 mentah (url_webp / karakter foto_url)
+    } else if (s.startsWith('/')) {
+      try { key = new URL(s, 'http://x').searchParams.get('key'); } catch { key = null; }
+    } else if (/^https?:\/\//i.test(s)) {
+      // URL penuh — coba derivasi jadi key R2 dari path; kalau tidak, fetch.
+      try {
+        const path = decodeURIComponent(new URL(s).pathname.replace(/^\//, ''));
+        if (MEDIA_PREFIXES.some(p => path.startsWith(p))) key = path;
+      } catch { /* bukan URL valid */ }
+      if (!key) {
+        try {
+          const res = await fetch(s, { signal: AbortSignal.timeout(8000) });
+          if (!res.ok) return null;
+          return toDataUri(res.headers.get('content-type') || 'image/webp', await res.arrayBuffer());
+        } catch { return null; }
+      }
+    } else {
+      key = s; // bentuk plain key lain — coba R2 langsung
+    }
+    if (!key) return null;
+    try {
+      const obj = await env.MEDIA.get(key);
+      if (!obj) return null;
+      return toDataUri(obj.httpMetadata?.contentType ?? 'image/webp', await obj.arrayBuffer());
+    } catch { return null; }
+  }
+  const characterUrl = typeof body.character_photo_url === 'string' && body.character_photo_url.trim()
+    ? body.character_photo_url.trim()
+    : null;
 
   let rows;
   try {
@@ -210,12 +266,37 @@ export async function onRequestPost(context) {
     return jsonError(`MAX_REF_IMAGES_PER_PART (${MAX_REF_IMAGES_PER_PART}) terlalu kecil untuk menyisakan slot foto ruangan setelah foto karakter.`, 422);
   }
 
-  const imageUrls = [
-    ...(characterUrl ? [characterUrl] : []),
-    ...uniqueLabels.map(l => publicMediaUrl(byLabel.get(l).url_webp)).filter(Boolean),
-  ];
+  // Bangun daftar data URI base64 untuk vision AI: foto karakter (bila ada)
+  // dulu, lalu foto ruangan sampai batas MAKS_FOTO_RUANGAN_VISI. Properti dengan
+  // lebih banyak label memakai N teratas sesuai preferensi yang sudah ada
+  // (byLabel sudah memilih per label; urutan antar-label dipertahankan). Foto
+  // yang gagal dibaca dari R2 dilewati diam-diam.
+  const imageUrls = [];
+  // ⚠️ `karakterTerlampir` dan `labelVisi` mencatat apa yang BENAR-BENAR masuk ke
+  // imageUrls — bukan apa yang DIMINTA. Keduanya wajib dipakai saat menyusun
+  // prompt VISI, karena prompt itu menyatakan pemetaan posisi gambar ke label
+  // ("gambar pertama = karakter, gambar setelahnya berurutan sama dengan daftar
+  // label"). Kalau prompt memakai daftar yang lebih panjang daripada gambar yang
+  // dilampirkan, pemetaannya meleset DAN AI ditawari ruangan yang tidak pernah
+  // ia lihat — diukur 2026-08-19: 3 dari 3 percobaan memilih ruangan tanpa foto
+  // (Ruang Keluarga/Balkon/Ruang Tamu) padahal system prompt menyuruhnya
+  // merancang "berdasarkan apa yang BENAR-BENAR kamu lihat". Itu persis kelas
+  // halusinasi yang jadi alasan seluruh perbaikan base64 ini.
+  let karakterTerlampir = false;
+  if (characterUrl) {
+    const uri = await bacaMediaDataUri(characterUrl);
+    if (uri) { imageUrls.push(uri); karakterTerlampir = true; }
+  }
+  const labelVisi = [];
+  for (const l of uniqueLabels.slice(0, MAKS_FOTO_RUANGAN_VISI)) {
+    const uri = await bacaMediaDataUri(byLabel.get(l).url_webp);
+    if (uri) { imageUrls.push(uri); labelVisi.push(l); }
+  }
 
-  const daftarLabelTeks = uniqueLabels.map((l, i) => `${i + 1}. ${l}`).join('\n');
+  // Fase 2 (teks-saja) TIDAK melampirkan foto sama sekali, jadi di sana seluruh
+  // label sah ditawarkan — tidak ada pemetaan gambar yang bisa meleset.
+  const daftarLabelTeksLengkap = uniqueLabels.map((l, i) => `${i + 1}. ${l}`).join('\n');
+  const daftarLabelTeksVisi = labelVisi.map((l, i) => `${i + 1}. ${l}`).join('\n');
   // Anotasi jumlah cut MINIMAL per Part — tanpa ini AI bebas merancang 1 cut
   // saja (dilaporkan user 2026-08-16), yang PATAH untuk 2 kelas Part:
   //   (a) arketipe hybrid (multiShotScene) — butuh 2 cut untuk 2 BAGIAN visual;
@@ -275,8 +356,13 @@ export async function onRequestPost(context) {
   ].filter(Boolean).join('\n');
 
   function buatPrompt(usingVision) {
+    // Daftar label WAJIB mengikuti gambar yang benar-benar dilampirkan saat visi,
+    // supaya pemetaan posisi gambar↔label tetap benar dan AI tidak pernah
+    // ditawari ruangan yang fotonya tidak ada (lihat catatan di labelVisi).
+    const daftarLabelTeks = usingVision ? daftarLabelTeksVisi : daftarLabelTeksLengkap;
+    const jumlahLabel = usingVision ? labelVisi.length : uniqueLabels.length;
     const system = usingVision
-      ? `Kamu sutradara video pendek properti Indonesia yang MELIHAT foto-foto berikut secara visual (gambar dilampirkan sesuai urutan: ${characterUrl ? 'gambar pertama = foto KARAKTER/talent, gambar setelahnya berurutan sama dengan daftar label ruangan' : 'urutan sama dengan daftar label ruangan'} di bawah). Rancang storyboard berdasarkan apa yang BENAR-BENAR kamu lihat (pencahayaan, suasana, ukuran ruang, furnitur, detail nyata) — jangan mengarang detail yang tidak ada di foto. Jangan pernah menyebut label ruangan di luar daftar yang diberikan. Jangan pernah mengklaim tahu data algoritma/tren medsos terkini. Output HANYA JSON valid, tanpa markdown, tanpa teks lain.`
+      ? `Kamu sutradara video pendek properti Indonesia yang MELIHAT foto-foto berikut secara visual (gambar dilampirkan sesuai urutan: ${karakterTerlampir ? 'gambar pertama = foto KARAKTER/talent, gambar setelahnya berurutan sama dengan daftar label ruangan' : 'urutan sama dengan daftar label ruangan'} di bawah). Rancang storyboard berdasarkan apa yang BENAR-BENAR kamu lihat (pencahayaan, suasana, ukuran ruang, furnitur, detail nyata) — jangan mengarang detail yang tidak ada di foto. Jangan pernah menyebut label ruangan di luar daftar yang diberikan. Jangan pernah mengklaim tahu data algoritma/tren medsos terkini. Output HANYA JSON valid, tanpa markdown, tanpa teks lain.`
       : `Kamu sutradara video pendek properti Indonesia. Kamu HANYA menerima daftar LABEL RUANGAN (teks), bukan foto — jangan pernah mengarang label baru di luar daftar. Jangan pernah mengklaim tahu data algoritma/tren medsos terkini. Output HANYA JSON valid, tanpa markdown, tanpa teks lain.`;
 
     const user = `Rancang storyboard tiap PART (babak) video properti ini. Properti sudah difoto per ruangan/aspek berikut:
@@ -292,7 +378,7 @@ Tugas untuk TIAP Part:
 3. ${kuotaRefTeks} Kumpulkan foto UNIK (tanpa duplikat) yang benar-benar dipakai Part ini ke dalam "ref_photo_labels" (urutan = urutan dilampirkan sebagai reference image).
 4. Pilih foto yang paling mendukung role Part (Hook = paling menarik/fasad/first impression kuat; Body = tur isi ruangan utama; CTA = penutup/kesan tinggal/lingkungan sekitar).
    ⚠️ PART TERAKHIR selalu berfungsi sebagai PENUTUP, apa pun role yang tertulis. Pilih latar yang enak dipandang & mengundang untuk ajakan penutup (fasad, taman, ruang tamu, balkon, area yang lapang/terang) — HINDARI ruang utilitas seperti carport/garasi, gudang, atau ruang cuci sebagai latar Part terakhir, kecuali memang tidak ada pilihan lain.
-5. Semua label WAJIB persis salah satu string dari daftar 1-${uniqueLabels.length} di atas — JANGAN mengarang label baru, jangan ubah ejaan.
+5. Semua label WAJIB persis salah satu string dari daftar 1-${jumlahLabel} di atas — JANGAN mengarang label baru, jangan ubah ejaan.
 6. Beri "rationale" singkat (1-2 kalimat, jujur & spesifik) alasan susunan Part ini — supaya keputusanmu bisa dikoreksi manual oleh user, bukan kotak hitam.
 7. Fokus alasan pada craft naratif/pacing/framing sinematik SAJA — jangan mengklaim mengetahui data algoritma atau tren medsos real-time (kamu tidak punya akses itu).
 
@@ -313,9 +399,10 @@ Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama s
     const heartbeat = setInterval(() => send({ status: 'progress' }), 2000);
     try {
       let raw = null, used = null, lastErr = null, usedVision = false;
-      // Provider yang GAGAL KARENA WAKTU di Fase 1. Dipakai menggeser urutan Fase 2 —
+      // Provider yang gagal di Fase 1 karena sebab apa pun SELAIN kuota (timeout,
+      // 400/404, format, dsb.). Dipakai menggeser urutan Fase 2 ke belakang —
       // lihat alasan lengkapnya di komentar Fase 2 di bawah.
-      const gagalKarenaWaktu = new Set();
+      const geserKeBelakang = new Set();
       // Provider yang kehabisan kuota — dipakai menyusun pesan error yang jujur.
       const kuotaHabis = new Set();
 
@@ -323,6 +410,11 @@ Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama s
       // preferensi user. Kalau tak satupun provider bervisi punya key
       // ter-konfigurasi, fase ini tidak menghasilkan apa-apa (bukan error) —
       // lanjut ke Fase 2 (degradasi teks-saja).
+      //
+      // Kalau imageUrls KOSONG (semua foto gagal dibaca dari R2), lewati Fase 1
+      // sepenuhnya — memakai prompt visi yang mengklaim "Kamu MELIHAT foto"
+      // sambil melampirkan nol gambar tidak jujur dan memboroskan anggaran.
+      if (imageUrls.length > 0) {
       const { system: sysVision, user: userVision } = buatPrompt(true);
       for (const prov of tryOrder) {
         if (!PROVIDERS[prov].supportsVision) continue;
@@ -345,14 +437,22 @@ Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama s
         });
         if (r.ok) { raw = r.content; used = prov; usedVision = true; break; }
         lastErr = r.error;
-        if (r.quotaExhausted) kuotaHabis.add(prov);
-        // status 0 = fetch melempar sebelum header (abort/jaringan). timedOut =
-        // header sukses diterima tapi AbortSignal.timeout memutus SAAT body
-        // masih dibaca (lihat aiProviders.js) — keduanya SAMA-SAMA gagal karena
-        // waktu dari sudut pandang penjadwalan Fase 2, bukan gagal karena format.
-        else if (r.status === 0 || r.timedOut) gagalKarenaWaktu.add(prov);
+        if (r.quotaExhausted) {
+          kuotaHabis.add(prov);
+        } else {
+          // Geser ke belakang semua kegagalan KERAS (status 0 = fetch melempar
+          // sebelum header/abort/jaringan; timedOut = header sukses tapi
+          // AbortSignal.timeout memutus saat body masih dibaca — lihat
+          // aiProviders.js; 400/404/format dsb. juga gagal nyata). Provider yang
+          // baru saja gagal di Fase 1 tidak boleh dicoba paling depan lagi di
+          // Fase 2 selagi anggaran menipis. Kuota TIDAK ikut digeser — permintaan
+          // bervisi jauh lebih berat daripada teks, jadi kuota bisa menolak yang
+          // bervisi tapi meloloskan yang teks (alasan lama tetap sah).
+          geserKeBelakang.add(prov);
+        }
         console.error(`[suggest-storyboard] vision ${prov} gagal:`, r.error?.slice(0, 120));
       }
+      } // endif imageUrls.length > 0
 
       // Fase 2 — degradasi teks-saja (label saja, TANPA foto). Kuota/keyless
       // provider bervisi TIDAK BOLEH mematikan fitur ini; provider apa pun
@@ -372,15 +472,18 @@ Format JSON WAJIB (jumlah elemen "parts" HARUS ${partsInput.length}, urut sama s
         // Gejalanya ke user: "Gagal menghubungi Gemini: aborted due to timeout",
         // seolah tidak ada alternatif — padahal ada dua yang siap.
         //
-        // Yang digeser ke belakang HANYA yang gagal karena WAKTU. Provider yang
-        // gagal karena KUOTA tetap di depan, karena alasan lamanya masih sah:
-        // permintaan bervisi jauh lebih berat daripada teks-saja, jadi kuota bisa
-        // menolak yang bervisi tapi meloloskan yang teks. Provider yang tidak
-        // sanggup menjawab dalam 18 detik tidak akan sanggup dalam 7 detik —
-        // itu beda yang membuat aturan ini benar, bukan sekadar "coba yang lain".
+        // Yang digeser ke belakang: SEMUA yang gagal di Fase 1 karena sebab apa
+        // pun SELAIN kuota (diperluas 2026-08-19 dari yang semula hanya timeout —
+        // lihat audit: provider yang gagal keras 400/404 di Fase 1 juga tidak
+        // boleh dicoba paling depan lagi di Fase 2 selagi anggaran menipis).
+        // Provider yang gagal karena KUOTA tetap di depan, karena alasan lamanya
+        // masih sah: permintaan bervisi jauh lebih berat daripada teks-saja, jadi
+        // kuota bisa menolak yang bervisi tapi meloloskan yang teks. Provider
+        // yang tidak sanggup menjawab tidak akan sanggup di sisa waktu yang lebih
+        // kecil — itu beda yang membuat aturan ini benar, bukan sekadar "coba yang lain".
         const urutanFase2 = [
-          ...tryOrder.filter(p => !gagalKarenaWaktu.has(p)),
-          ...tryOrder.filter(p => gagalKarenaWaktu.has(p)),
+          ...tryOrder.filter(p => !geserKeBelakang.has(p)),
+          ...tryOrder.filter(p => geserKeBelakang.has(p)),
         ];
 
         for (const prov of urutanFase2) {

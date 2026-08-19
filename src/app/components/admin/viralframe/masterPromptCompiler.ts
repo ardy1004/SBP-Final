@@ -421,7 +421,7 @@ export function compileMasterPrompt(
       L.push(`  Cut ${ci + 1} — Foto: ${cut.label} (${hint}). File: ${fileName}. Durasi cut: ${cut.durasiDetik} detik.${cut.aksi ? ` Aksi/kamera: ${cut.aksi}.` : ''}`);
     });
     if (toolSpec?.supportsRefImage) {
-      L.push(`  Tool ini MENDUKUNG reference image. Storyboard (Tahap Sutradara AI bervisi) sudah MELIHAT foto-foto ini — deskripsi visual tiap cut WAJIB AKURAT terhadap apa yang benar-benar terlihat di foto (warna, material, tata letak, pencahayaan), JANGAN mengarang elemen yang tidak ada DAN JANGAN menghindari mendeskripsikannya. Fokuskan tetap pada MOTION/ACTION/CAMERA yang terjadi PADA foto referensi tersebut, tapi grounding visualnya harus presisi, bukan generik.`);
+      L.push(`  Tool ini MENDUKUNG reference image. Foto-foto di atas dilampirkan ke tool sebagai reference image dan akan dibaca oleh model video saat generate — deskripsi visual tiap cut WAJIB AKURAT terhadap apa yang benar-benar terlihat di foto tersebut (warna, material, tata letak, pencahayaan), JANGAN mengarang elemen yang tidak ada DAN JANGAN menghindari mendeskripsikannya. Fokuskan tetap pada MOTION/ACTION/CAMERA yang terjadi PADA foto referensi tersebut, tapi grounding visualnya harus presisi, bukan generik.`);
     } else {
       L.push(`  Tool ini TIDAK mendukung reference image (text-to-video murni) — foto di atas adalah RUJUKAN INTERNAL (tidak diupload ke AI). Deskripsikan visual SEDETAIL MUNGKIN dan AKURAT agar hasil generate semirip mungkin dengan foto: sebutkan elemen ruangan, warna dominan, sudut pandang, pencahayaan secara konkret.`);
     }

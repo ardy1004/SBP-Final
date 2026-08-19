@@ -8,12 +8,19 @@
 // `supportsVision`: model DEFAULT provider ini menerima content multimodal
 // (array [{type:'text'},{type:'image_url'}]) lewat endpoint chat/completions
 // OpenAI-compatible-nya. HANYA Gemini yang `true` (model default
-// `gemini-3.5-flash-lite` multimodal) — Groq/OpenRouter/DeepSeek model DEFAULT-nya
-// teks saja (provider itu mungkin PUNYA model lain yang bervisi, tapi model
-// default yang dipakai ViralFrame bukan itu; jangan overengineer per-model).
+// `gemini-3.1-flash-lite` — sejak 2026-08-04, bukan lagi `3.5-flash-lite`)
+// multimodal — Groq/OpenRouter/DeepSeek model DEFAULT-nya teks saja (provider itu
+// mungkin PUNYA model lain yang bervisi, tapi model default yang dipakai
+// ViralFrame bukan itu; jangan overengineer per-model).
 // Dipakai oleh suggest-storyboard.js untuk memilih provider yang dicoba duluan
 // saat mengirim `imageUrls`, dengan degradasi ke teks-saja bila tak ada yang
 // bervisi/punya key (lihat callChatCompletion di bawah).
+//
+// ⚠️ KLAIM "model default menerima content multimodal" HANYA benar bila `url`
+// di `image_url` adalah base64 DATA URI. Endpoint OpenAI-compat Gemini MENOLAK
+// URL remote (selalu HTTP 400 — diukur 2026-08-19, bahkan URL Wikipedia pun 400);
+// yang diterima hanya base64 data URI (diukur OK 3,6 s dan benar-benar melihat).
+// Pemanggil vision (suggest-storyboard.js) sudah mengirim data URI, bukan URL.
 export const PROVIDERS = {
   gemini: {
     label: 'Gemini',
@@ -99,7 +106,15 @@ export const PROVIDERS = {
     settingKey: 'groq_api_key',
     envFallback: 'GROQ_API_KEY',
     base: 'https://api.groq.com/openai/v1',
-    defaultModel: 'llama-3.3-70b-versatile',
+    // ⚠️ DIGANTI 2026-08-19: `llama-3.3-70b-versatile` → `openai/gpt-oss-120b`.
+    // Model lama sudah DIHAPUS dari katalog Groq (404 dalam ~150 ms) — ini
+    // mematikan fallback ViralFrame tercepat sekaligus widget G-CHAT publik.
+    // Pengganti diuji ke API dengan key produksi, 3/3 sukses di dua peran:
+    //   function calling .... 751-877 ms, konversi "2M" → 2000000000 benar
+    //   storyboard teks ..... 2,8-3,4 s, JSON bersih
+    // Kandidat lain GAGAL: gpt-oss-20b & qwen3.6-27b tidak memanggil tool;
+    // groq/compound* menolak tool calling (HTTP 400).
+    defaultModel: 'openai/gpt-oss-120b',
     quota: null,
     supportsVision: false,
   },
@@ -154,9 +169,13 @@ function isQuotaError(status, bodyText) {
 /**
  * Panggil chat completion OpenAI-compat.
  *
- * `imageUrls` (opsional): array URL foto publik. Bila diisi (non-kosong), pesan
- * user dikirim sebagai content MULTIMODAL bergaya OpenAI:
+ * `imageUrls` (opsional): array foto sebagai base64 DATA URI
+ * (mis. `data:image/webp;base64,…`). Bila diisi (non-kosong), pesan user dikirim
+ * sebagai content MULTIMODAL bergaya OpenAI:
  *   [{type:'text', text: userPrompt}, {type:'image_url', image_url:{url}}, ...]
+ * ⚠️ JANGAN kirim URL remote ke Gemini — endpoint OpenAI-compat-nya menolak
+ * (HTTP 400, diukur 2026-08-19); HANYA base64 data URI yang diterima.
+ * Pemanggil vision (suggest-storyboard.js) yang menyediakan data URI.
  * Bila tidak diisi/kosong, `content` TETAP string biasa seperti sebelumnya —
  * WAJIB backward-compatible, seluruh caller lain (ai-generate.js, youtube-long.js,
  * captions.js, generate-naskah.js, dll) tidak pernah mengirim `imageUrls` dan

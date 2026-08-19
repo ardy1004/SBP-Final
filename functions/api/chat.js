@@ -7,7 +7,11 @@ import { getProviderKey } from '../_lib/aiProviders.js';
 import { LANDMARKS } from '../_lib/geoLandmarks.js';
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL    = 'llama-3.3-70b-versatile';
+// Model lama `llama-3.3-70b-versatile` sudah DIHAPUS dari katalog Groq (404).
+// Pengganti `openai/gpt-oss-120b` diuji 2026-08-19: function calling 3/3 sukses
+// (751-877 ms) termasuk konversi notasi harga Indonesia ("2M" -> 2000000000),
+// dan storyboard teks prompt penuh 3/3 sukses (2,8-3,4 s, JSON bersih).
+const MODEL    = 'openai/gpt-oss-120b';
 
 const SYSTEM_PROMPT = `Kamu adalah Asisten SBP (Salam Bumi Property), asisten AI yang membantu calon pembeli/penyewa mencari properti di Yogyakarta. Gunakan tool search_properties untuk mencari listing berdasarkan kriteria yang disebutkan user (lokasi, jenis properti, budget, jumlah kamar, dll). JANGAN mengarang informasi properti yang tidak ada di hasil tool — hanya rekomendasikan dari hasil pencarian. Jika hasil kosong, sampaikan dengan jujur dan tawarkan kriteria alternatif. Jawab singkat, ramah, dan natural dalam Bahasa Indonesia.
 
@@ -130,7 +134,7 @@ async function callGroq(apiKey, messages, useTools) {
 
   if (!res.ok) {
     const txt = await res.text().catch(() => '');
-    console.error(`[chat] Groq error ${res.status}:`, txt.slice(0, 200));
+    console.error(`[chat] Groq error provider=groq model=${MODEL} status=${res.status}:`, txt.slice(0, 200));
     throw new Error(`Groq ${res.status}`);
   }
 
@@ -319,7 +323,7 @@ export async function onRequestPost(context) {
     });
 
   } catch (err) {
-    console.error('[chat] Error:', err.message);
+    console.error(`[chat] Error provider=groq model=${MODEL}:`, err.message);
     return jsonError('Maaf, asisten sedang tidak tersedia', 503);
   }
 }
