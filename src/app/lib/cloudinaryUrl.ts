@@ -1,30 +1,39 @@
-// Dua penyisip transformasi Cloudinary yang MURAH dan masih dipakai Konten Agent.
+// Sisa transformasi Cloudinary yang masih dibutuhkan — HANYA untuk baris lama
+// (`storage = 'cloudinary'`). Video baru mendarat di R2 dan tidak pernah lewat
+// sini sama sekali (migrasi 0043).
 //
-// Menggantikan cloudinaryOverlay.ts yang dihapus bersama fitur badge/logo video
-// (2026-08-11). Alasan penghapusan, supaya tidak dibangun ulang tanpa sadar:
-// tiap overlay badge memaksa Cloudinary me-render ULANG video utuh (~4,1 MB per
-// salinan). Terukur di akun produksi: 437 dari 464 derived resource berasal dari
-// overlay badge (0,64 GB), dan transformasi video ditagih menurut durasi —
-// itulah yang membuat angka transformasi menembus 14.556 alias 62% dari kuota
-// free tier, bukan storage-nya. Kalau suatu saat badge dibutuhkan lagi, bakar di
-// hulu (Google Flow) atau di browser lewat ffmpeg.wasm seperti fitur Caption —
-// dua-duanya nol biaya Cloudinary karena terjadi sebelum file diupload.
+// Riwayat yang penting supaya tidak dibangun ulang tanpa sadar:
+//
+// 1. `cloudinaryOverlay.ts` dihapus bersama fitur badge/logo video (2026-08-11).
+//    Tiap overlay badge memaksa Cloudinary me-render ULANG video utuh (~4,1 MB
+//    per salinan): 437 dari 464 derived resource berasal dari situ.
+//
+// 2. `toAttachmentUrl()` (`fl_attachment`) dihapus 2026-08-22. Tidak ada
+//    padanannya di R2, dan memang tidak perlu — unduhan sekarang lewat blob di
+//    `posterVideo.ts` (`unduhVideo`), yang bekerja untuk kedua backend.
+//
+// 3. `toImageThumbnailUrl()` di bawah adalah SEBAB kuota free tier jebol.
+//    Komentar lama di sini menyebutnya "satu turunan per video, jadi jauh lebih
+//    murah daripada overlay" — benar secara relatif, tapi menyesatkan: yang
+//    menentukan harga bukan JUMLAH turunannya, melainkan DURASI video sumbernya.
 
-// Sisipkan fl_attachment supaya browser men-download file alih-alih memutarnya —
-// atribut `download` pada <a> diabaikan untuk URL cross-origin (Cloudinary),
-// jadi pemaksaan attachment harus dari sisi server Cloudinary via transformasi ini.
-export function toAttachmentUrl(url: string): string {
-  const marker = '/upload/';
-  const idx = url.indexOf(marker);
-  if (idx === -1) return url;
-  const insertAt = idx + marker.length;
-  return url.slice(0, insertAt) + 'fl_attachment/' + url.slice(insertAt);
-}
-
-// Ganti ekstensi video jadi .jpg — Cloudinary otomatis render 1 frame video jadi
-// gambar statis, dipakai sebagai poster <video> supaya kartu tidak perlu memuat
-// videonya dulu. Satu turunan per video, bukan per kombinasi, jadi jauh lebih
-// murah daripada overlay.
+/**
+ * Ganti ekstensi video jadi `.jpg` — Cloudinary merender 1 frame video jadi
+ * gambar statis, dipakai sebagai poster `<video>`.
+ *
+ * ⚠️ JANGAN dipakai untuk baris `storage = 'r2'`, dan jangan dipakai untuk apa
+ * pun yang baru. Cloudinary menagih ini sebagai transformasi VIDEO **per detik
+ * durasi sumber**, dikali bobot resolusi (SD ×2, HD ×4, 4K ×8 per detik) — bukan
+ * satu transformasi gambar seperti yang terlihat dari bentuk URL-nya.
+ *
+ * Terukur ke akun produksi 2026-08-20:
+ *   884 + 2900×2 (SD) + 202×4 (HD) + 905×8 (4K) = 14.732 unit
+ * — identik dengan `transformations.usage` dari Admin API, alias **51,3% dari
+ * seluruh kuota 25 credits**, hanya untuk 160 gambar sampul berukuran ~46 KB.
+ *
+ * Penggantinya untuk video baru: `buatPosterDariVideo()` di
+ * `src/app/lib/posterVideo.ts` — dibuat di browser dengan `<canvas>`, nol biaya.
+ */
 export function toImageThumbnailUrl(videoUrl: string): string {
   return videoUrl.replace(/\.(mp4|mov|webm|mkv|avi)(\?.*)?$/i, '.jpg$2');
 }

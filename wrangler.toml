@@ -35,6 +35,20 @@ binding = "MEDIA"
 bucket_name = "sbp-media"
 
 # =============================================================================
+# R2 BUCKET — sbp-video  (binding "VIDEO" = env.VIDEO)
+# Menyimpan: video Konten Agent + poster .jpg-nya. Migrasi 0043.
+#
+# ⚠️ SENGAJA BUCKET TERPISAH dari sbp-media, bukan folder di dalamnya.
+# Bucket ini DIBUKA KE PUBLIK lewat custom domain (media.salambumi.xyz) karena
+# Buffer/Zernio harus bisa mengunduh videonya tanpa autentikasi. sbp-media berisi
+# signatures/ (NIK terdekripsi) dan arsip kontrak — membukanya ke publik akan
+# membocorkan semuanya sekaligus.
+# =============================================================================
+[[r2_buckets]]
+binding = "VIDEO"
+bucket_name = "sbp-video"
+
+# =============================================================================
 # ENVIRONMENT VARIABLES (non-secret, safe untuk commit)
 # Secret seperti API key / JWT secret -> simpan via 'wrangler secret put'
 # =============================================================================
@@ -48,6 +62,23 @@ ADMIN_EMAIL = "salambumiproperty@gmail.com"
 # WAJIB juga di-set manual di Dashboard > Pages > sbp-final > Settings > Environment Variables
 # (Production + Preview) dengan nama ALLOWED_ORIGIN = https://salambumi.xyz.
 ALLOWED_ORIGIN = "https://salambumi.xyz"
+# ⚠️ R2_PUBLIC_BASE SENGAJA TIDAK DIDAFTARKAN DI SINI.
+#
+# Basis URL publik bucket sbp-video (https://media.salambumi.xyz) sudah di-set
+# lewat `wrangler pages secret put` untuk Production DAN Preview. Menuliskannya
+# juga sebagai [vars] di file ini membuat `wrangler pages deploy` GAGAL:
+#   "Binding name 'R2_PUBLIC_BASE' already in use."
+# Sebabnya bentrok TIPE — var di wrangler.toml vs secret_text di Dashboard.
+# (ALLOWED_ORIGIN di atas tidak bentrok karena di Dashboard tipenya plain_text.)
+#
+# Untuk `wrangler pages dev` lokal, taruh di .dev.vars bersama kredensial S3:
+#   R2_PUBLIC_BASE="https://media.salambumi.xyz"
+#
+# R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY juga TIDAK di sini —
+# kredensial S3 untuk presigned PUT, set via:
+#   wrangler pages secret put R2_ACCESS_KEY_ID --project-name sbp-final
+# Token S3-nya HARUS dibuat lewat Dashboard (R2 > Manage API tokens); OAuth
+# wrangler tidak berwenang membuat API token akun (terverifikasi: HTTP 403).
 # NIK_ENC_KEY TIDAK DI SINI — set via .dev.vars (lokal) atau: wrangler secret put NIK_ENC_KEY (produksi)
 # TURNSTILE_SECRET — secret CAPTCHA anti-bot (titip-jual, leads, chat). Set via
 #   `wrangler secret put TURNSTILE_SECRET` (Production + Preview). Selama BELUM di-set,

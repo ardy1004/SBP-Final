@@ -5,7 +5,8 @@ import {
   Users, Loader2, Download, Trash2, Pencil, Check, X, Copy,
   Archive, RotateCcw, CheckCircle2, Circle, Send, BarChart3,
 } from 'lucide-react';
-import { toAttachmentUrl, toImageThumbnailUrl } from '../../lib/cloudinaryUrl';
+import { toImageThumbnailUrl } from '../../lib/cloudinaryUrl';
+import { unduhVideo } from '../../lib/posterVideo';
 import { findArchetype } from './viralframe/archetypes';
 import SlotIndicatorStrip from './viralframe/SlotIndicatorStrip';
 import AkunAgentCard from './AkunAgentCard';
@@ -65,7 +66,13 @@ interface AgentVideo {
   property_id: number;
   caption: string | null;
   hashtags: string | null;
+  /** URL PUBLIK video — R2 (baru) atau Cloudinary (lama). Lihat migrasi 0043. */
   cloudinary_url: string;
+  /** 'r2' | 'cloudinary'. Menentukan asal poster & cara file ini dihapus. */
+  storage: string | null;
+  r2_key: string | null;
+  /** Poster .jpg yang dibuat di browser saat upload. NULL = baris lama Cloudinary. */
+  poster_url: string | null;
   resource_type: string;
   duration_sec: number | null;
   bytes: number | null;
@@ -310,7 +317,7 @@ export default function AdminViralFrameAgentVideosPage() {
   // ── Aksi bulk (dipakai toolbar & context menu) ──
   const bulkAction = async (action: 'trash' | 'restore' | 'delete', ids: number[]) => {
     if (ids.length === 0) return;
-    if (action === 'delete' && !window.confirm(`Hapus permanen ${ids.length} video? File Cloudinary ikut terhapus, tidak bisa dipulihkan.`)) return;
+    if (action === 'delete' && !window.confirm(`Hapus permanen ${ids.length} video? File di storage ikut terhapus, tidak bisa dipulihkan.`)) return;
     setAksiError('');
     setBulkBusy(true);
     const label = action === 'trash' ? 'Pindah ke Sampah' : action === 'restore' ? 'Pulihkan' : 'Hapus permanen';
@@ -358,10 +365,23 @@ export default function AdminViralFrameAgentVideosPage() {
     refreshAfterAction();
   };
   const deletePermanentOne = async (id: number) => {
-    if (!window.confirm('Hapus permanen video ini? File di Cloudinary juga akan dihapus, tidak bisa dipulihkan.')) return;
+    if (!window.confirm('Hapus permanen video ini? File di storage juga akan dihapus, tidak bisa dipulihkan.')) return;
     setAksiError('');
     await kirimAksi(`/api/admin/viralframe/agent-videos/${id}`, { method: 'DELETE' }, 'Hapus permanen');
     refreshAfterAction();
+  };
+
+  // Unduh lewat blob, bukan <a download> langsung: atribut `download` diabaikan
+  // browser untuk URL lintas-origin, dan storage video (R2 maupun Cloudinary)
+  // selalu di host lain. Dulu ini diakali `fl_attachment` — transformasi
+  // Cloudinary yang tidak punya padanan di R2.
+  const unduhSatu = async (v: AgentVideo) => {
+    setAksiError('');
+    try {
+      await unduhVideo(v.cloudinary_url, `${v.kode_listing}-${v.id}.${v.format ?? 'mp4'}`);
+    } catch (err: unknown) {
+      setAksiError(err instanceof Error ? err.message : 'Gagal mengunduh video');
+    }
   };
 
   const saveEdit = async (id: number) => {
@@ -580,7 +600,13 @@ export default function AdminViralFrameAgentVideosPage() {
                   <div key={v.id} onContextMenu={e2 => openContextMenu(e2, v.id)}
                     className={`border rounded-2xl overflow-hidden bg-white flex flex-col transition-colors ${selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-gray-100'}`}>
                     <div className="relative">
-                      <video key={v.cloudinary_url} src={v.cloudinary_url} poster={toImageThumbnailUrl(v.cloudinary_url)} controls preload="none" className="w-full bg-black"
+                      {/* poster_url = .jpg yang sudah jadi di R2 (nol biaya).
+                          Fallback ke turunan Cloudinary HANYA untuk baris lama —
+                          turunan itu ditagih per detik durasi video, jadi jangan
+                          pernah dipakai untuk baris R2 (lihat cloudinaryUrl.ts). */}
+                      <video key={v.cloudinary_url} src={v.cloudinary_url}
+                        poster={v.poster_url ?? (v.storage === 'r2' ? undefined : toImageThumbnailUrl(v.cloudinary_url))}
+                        controls preload="none" className="w-full bg-black"
                         style={{ aspectRatio: v.width && v.height ? `${v.width} / ${v.height}` : '16 / 9', objectFit: 'contain' }} />
                       <button onClick={() => toggleSelect(v.id)}
                         className="absolute top-2 left-2 w-6 h-6 rounded-full bg-black/50 hover:bg-black/70 flex items-center justify-center text-white"
@@ -619,7 +645,7 @@ export default function AdminViralFrameAgentVideosPage() {
                               <BarChart3 size={14} />
                             </button>
                           )}
-                          <a href={toAttachmentUrl(v.cloudinary_url)} className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download"><Download size={14} /></a>
+                          <button onClick={() => unduhSatu(v)} className="p-1.5 rounded-lg text-[#1565C0] hover:bg-[#F0F7FF]" title="Download"><Download size={14} /></button>
                           {view === 'active' ? (
                             <button onClick={() => trashOne(v.id)} className="p-1.5 rounded-lg text-[#64748B] hover:bg-gray-100" title="Pindahkan ke Sampah"><Archive size={14} /></button>
                           ) : (

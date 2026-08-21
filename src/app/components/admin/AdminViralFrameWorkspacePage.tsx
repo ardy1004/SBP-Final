@@ -26,6 +26,7 @@ import { readNdjsonFinal } from '../../../lib/ndjson';
 const CharacterStep = memo(CharacterStepBase);
 import { ARCHETYPES, findArchetype, ARCHETYPE_CUSTOM_ID, compileCameraChoreography } from './viralframe/archetypes';
 import { cfImg } from '../../../lib/img';
+import { buatPosterDariVideo } from '../../lib/posterVideo';
 import { getAiModels, getAiStatus, type AiProviderId, type AiStatusInfo, bacaJson } from '../../../lib/api';
 
 const AI_PROVIDER_LIST: { id: AiProviderId; label: string }[] = [
@@ -1281,10 +1282,35 @@ interface CharacterOption {
   spesialis?: string[];
   storage_siap?: boolean;
 }
-interface CloudinaryUploadResult {
-  public_id: string; secure_url: string; resource_type?: string; duration?: number; bytes?: number; format?: string;
-  width?: number; height?: number;
-  error?: { message: string };
+// Hasil /api/admin/viralframe/r2-sign — presigned PUT ke bucket sbp-video.
+// Menggantikan CloudinaryUploadResult (migrasi 0043): R2 tidak mengembalikan
+// metadata apa pun soal isi file, jadi width/height/duration sekarang dibaca di
+// browser lewat buatPosterDariVideo().
+interface R2SignResult {
+  key: string; posterKey: string;
+  uploadUrl: string; posterUploadUrl: string;
+  publicUrl: string; posterPublicUrl: string;
+}
+
+// PUT langsung ke R2. Content-Type WAJIB diisi — objek R2 menyimpannya apa
+// adanya, dan platform sosmed menolak media yang content-type-nya salah.
+// Tanda tangan presign memakai signQuery, jadi header ini tidak ikut
+// ditandatangani dan aman dikirim dari browser.
+function putKeR2(url: string, body: Blob, contentType: string, onProgress?: (pct: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    xhr.setRequestHeader('Content-Type', contentType);
+    if (onProgress) {
+      xhr.upload.onprogress = (ev) => { if (ev.lengthComputable) onProgress(Math.round((ev.loaded / ev.total) * 100)); };
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`Upload ke R2 gagal (HTTP ${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error('Koneksi ke R2 gagal'));
+    xhr.send(body);
+  });
 }
 
 // Agent tanpa spesialis (mis. Monica Vera "All Properties") sengaja TIDAK
@@ -1316,10 +1342,14 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
   const [progress, setProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  // Upload berhasil tapi ada bagian yang tidak sempurna (mis. poster gagal
+  // dibuat). Dipisah dari `error` supaya kegagalan sebagian tidak terlihat
+  // seperti upload yang batal — tapi juga tidak lewat diam-diam.
+  const [peringatan, setPeringatan] = useState('');
   const [success, setSuccess] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // ── Backsound (opsional) — diterapkan ke `file` SEBELUM upload ke Cloudinary,
+  // ── Backsound (opsional) — diterapkan ke `file` SEBELUM upload,
   // jadi video yang mendarat di Konten Agent sudah "matang" dengan musik latar.
   // Volume "ingat nilai terakhir" via localStorage — bukan preset bernama, sesuai
   // permintaan user (2026-07-28): cukup supaya tidak perlu geser ulang tiap kali.
@@ -1552,54 +1582,57 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
   const upload = async () => {
     if (!file) { setError('Pilih file video dulu'); return; }
     if (!characterId) { setError('Pilih karakter/agent dulu'); return; }
-    setUploading(true); setError(''); setSuccess(false); setProgress(0);
+    setUploading(true); setError(''); setPeringatan(''); setSuccess(false); setProgress(0);
     try {
-      // character_id WAJIB dikirim: dialah yang menentukan akun Cloudinary mana
-      // yang dipakai (migrasi 0037). Tanpa itu semua video kembali mendarat di
-      // akun global.
-      const signRes = await fetch('/api/admin/viralframe/cloudinary-sign', {
+      // character_id WAJIB dikirim: dialah yang menentukan gerbang spesialis
+      // (migrasi 0037) sebelum tanda tangan upload diberikan.
+      const signRes = await fetch('/api/admin/viralframe/r2-sign', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ property_id: propertyId, character_id: characterId }),
       });
-      const signJson = await bacaJson(signRes);
-      if (!signJson.success) throw new Error(signJson.error ?? 'Gagal menyiapkan upload');
-      const { cloudName, apiKey, timestamp, folder, signature } = signJson.data;
+      const signJson = await bacaJson<R2SignResult>(signRes);
+      if (!signJson.success || !signJson.data) throw new Error(signJson.error ?? 'Gagal menyiapkan upload');
+      const { key, uploadUrl, posterUploadUrl, publicUrl, posterPublicUrl } = signJson.data;
 
       // Backsound & caption (opsional) sudah "dipanggang" SEBELUM upload ini —
-      // Cloudinary/Konten Agent menerima file final, tidak pernah tahu prosesnya.
-      // Caption dibakar PALING TERAKHIR (di atas mergedBlob), jadi diprioritaskan.
+      // Konten Agent menerima file final, tidak pernah tahu prosesnya. Caption
+      // dibakar PALING TERAKHIR (di atas mergedBlob), jadi diprioritaskan.
       const finalBlob = captionedBlob ?? mergedBlob;
-      const uploadFile = finalBlob ? new File([finalBlob], file.name, { type: 'video/mp4' }) : file;
-      const form = new FormData();
-      form.append('file', uploadFile);
-      form.append('api_key', apiKey);
-      form.append('timestamp', String(timestamp));
-      form.append('folder', folder);
-      form.append('signature', signature);
+      const uploadFile: Blob = finalBlob ?? file;
 
-      const cloudinaryResult = await new Promise<CloudinaryUploadResult>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', `https://api.cloudinary.com/v1_1/${cloudName}/video/upload`);
-        xhr.upload.onprogress = (ev) => { if (ev.lengthComputable) setProgress(Math.round((ev.loaded / ev.total) * 100)); };
-        xhr.onload = () => {
-          try {
-            const j = JSON.parse(xhr.responseText);
-            if (xhr.status >= 200 && xhr.status < 300) resolve(j); else reject(new Error(j.error?.message ?? 'Upload Cloudinary gagal'));
-          } catch { reject(new Error('Respons Cloudinary tidak valid')); }
-        };
-        xhr.onerror = () => reject(new Error('Koneksi ke Cloudinary gagal'));
-        xhr.send(form);
-      });
+      // Poster + width/height/duration dibaca dari file yang PERSIS akan diupload.
+      // Sejak pindah ke R2 ini satu-satunya sumber ketiganya — dulu datang dari
+      // respons upload Cloudinary. Gagal di sini TIDAK membatalkan upload (video
+      // tetap bisa diposting), tapi wajib kelihatan: tanpa width/height filter
+      // rasio di Konten Agent kehilangan dasar klasifikasinya.
+      let poster: { posterBlob: Blob; width: number; height: number; durationSec: number } | null = null;
+      try {
+        poster = await buatPosterDariVideo(uploadFile);
+      } catch (e: unknown) {
+        console.warn('[upload] poster gagal dibuat', e);
+        setPeringatan(
+          `Poster & dimensi video gagal dibaca browser (${e instanceof Error ? e.message : 'tidak diketahui'}). ` +
+          'Video tetap diupload, tapi kartunya tampil tanpa sampul dan tidak ikut filter rasio.',
+        );
+      }
+
+      await putKeR2(uploadUrl, uploadFile, 'video/mp4', setProgress);
+      if (poster) {
+        // Poster ±50 KB — tidak perlu progress bar sendiri.
+        await putKeR2(posterUploadUrl, poster.posterBlob, 'image/jpeg');
+      }
 
       const saveRes = await fetch('/api/admin/viralframe/agent-videos', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           character_id: characterId, property_id: propertyId, caption: caption || null, hashtags: hashtags || null,
-          cloudinary_public_id: cloudinaryResult.public_id, cloudinary_url: cloudinaryResult.secure_url,
-          cloudinary_name: cloudName,
-          resource_type: cloudinaryResult.resource_type ?? 'video', duration_sec: cloudinaryResult.duration ?? null,
-          bytes: cloudinaryResult.bytes ?? null, format: cloudinaryResult.format ?? null,
-          width: cloudinaryResult.width ?? null, height: cloudinaryResult.height ?? null,
+          storage: 'r2', r2_key: key,
+          cloudinary_url: publicUrl, // = URL publik video (lihat migrasi 0043)
+          poster_url: poster ? posterPublicUrl : null,
+          resource_type: 'video',
+          duration_sec: poster ? Math.round(poster.durationSec * 100) / 100 : null,
+          bytes: uploadFile.size, format: 'mp4',
+          width: poster?.width ?? null, height: poster?.height ?? null,
           gaya: gaya || null,
         }),
       });
@@ -1836,6 +1869,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
           <Link to="/admin/viralframe/agent-videos" className="font-semibold underline hover:text-emerald-700">Lihat di halaman Konten Agent →</Link>
         </p>
       )}
+      {peringatan && <p className="text-xs text-amber-600">⚠️ {peringatan}</p>}
 
       {uploading && (
         <div className="w-full h-2 rounded-full bg-gray-100 overflow-hidden">
@@ -1854,7 +1888,7 @@ function UploadAgentVideo({ propertyId, kodeListing, defaultCharacterId, platfor
         )}
       </div>
 
-      <p className="text-[11px] text-[#94A3B8]">Batas ukuran file mengikuti kuota akun Cloudinary yang terpasang (free tier ±100MB/file).</p>
+      <p className="text-[11px] text-[#94A3B8]">Video disimpan di Cloudflare R2 (bucket sbp-video) — tanpa batas ukuran per file, dan biaya pengiriman ke sosmed nol.</p>
     </div>
   );
 }

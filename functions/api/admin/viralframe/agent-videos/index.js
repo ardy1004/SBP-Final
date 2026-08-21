@@ -1,19 +1,23 @@
 // GET  /api/admin/viralframe/agent-videos?character_id=&property_id=&limit=&offset=
-//   List video "Konten Agent" (upload manual, Cloudinary) — join karakter + properti.
+//   List video "Konten Agent" (upload manual) — join karakter + properti.
 // POST /api/admin/viralframe/agent-videos
-//   Body JSON (bytes video sudah terupload ke Cloudinary langsung dari browser via
-//   /cloudinary-sign, endpoint ini hanya mencatat metadata):
-//   { character_id, property_id, caption?, hashtags?, cloudinary_public_id,
-//     cloudinary_url, resource_type?, duration_sec?, bytes?, format? }
+//   Body JSON (bytes video sudah terupload langsung dari browser, endpoint ini
+//   hanya mencatat metadata). Dua bentuk yang diterima:
+//   • R2 (baru, via /r2-sign):
+//     { character_id, property_id, storage: 'r2', r2_key, cloudinary_url (URL publik R2),
+//       poster_url?, duration_sec?, bytes?, format?, width?, height?, caption?, hashtags? }
+//   • Cloudinary (lama, via /cloudinary-sign): sama tapi dengan
+//     { cloudinary_public_id, cloudinary_name } dan tanpa storage/r2_key.
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
-import { destroyByCloudName } from '../../../../_lib/cloudinary.js';
 import { resolveCloudinaryByCloudName, cloudNameDariUrl, cekSpesialis } from '../../../../_lib/agentAccounts.js';
+import { hapusAsetVideo } from '../../../../_lib/videoStorage.js';
 
 const SELECT_COLS = `
   v.id, v.character_id, v.property_id, v.caption, v.hashtags,
   v.cloudinary_public_id, v.cloudinary_url, v.cloudinary_name, v.resource_type,
+  v.storage, v.r2_key, v.poster_url,
   v.duration_sec, v.bytes, v.format, v.width, v.height,
   v.status, v.scheduled_at, v.posted_at,
   v.post_url, v.platform_targets, v.trashed_at, v.created_at,
@@ -31,7 +35,13 @@ const SELECT_COLS = `
 const BACKFILL_MAX_PER_REQUEST = 10;
 
 async function backfillDimensions(env, rows) {
-  const missing = rows.filter(r => r.width == null || r.height == null).slice(0, BACKFILL_MAX_PER_REQUEST);
+  // HANYA untuk baris Cloudinary — baris R2 tidak punya akun Cloudinary untuk
+  // ditanyai, dan dimensinya memang sudah dibaca di browser saat upload
+  // (src/app/lib/posterVideo.ts). Tanpa filter ini setiap list akan menembak
+  // Admin API untuk baris yang mustahil ditemukan di sana.
+  const missing = rows
+    .filter(r => r.storage !== 'r2' && (r.width == null || r.height == null))
+    .slice(0, BACKFILL_MAX_PER_REQUEST);
   if (missing.length === 0) return;
 
   // Tiap agent bisa punya cloud sendiri (migrasi 0037), jadi kredensialnya
@@ -132,15 +142,32 @@ export async function onRequestPost(context) {
   if (!Number.isInteger(characterId) || characterId <= 0) return jsonError('character_id wajib', 422);
   if (!Number.isInteger(propertyId) || propertyId <= 0) return jsonError('property_id wajib', 422);
 
-  const cloudinaryPublicId = typeof body.cloudinary_public_id === 'string' ? body.cloudinary_public_id.slice(0, 300) : '';
+  // `cloudinary_url` = URL PUBLIK video untuk kedua backend (lihat migrasi 0043).
+  // Namanya dipertahankan supaya commit-agent.js, jadwalOtomatis.js & analytics.js
+  // tidak perlu disentuh; baca sebagai "URL publik", bukan "URL Cloudinary".
   const cloudinaryUrl = typeof body.cloudinary_url === 'string' ? body.cloudinary_url.slice(0, 1000) : '';
-  if (!cloudinaryPublicId || !cloudinaryUrl) return jsonError('cloudinary_public_id dan cloudinary_url wajib', 422);
+  if (!cloudinaryUrl) return jsonError('cloudinary_url (URL publik video) wajib', 422);
 
-  // Cloud tempat file benar-benar mendarat. Diambil dari URL Cloudinary itu
-  // sendiri (sumber paling tepercaya — client tidak bisa salah lapor), dengan
-  // nilai kiriman client sebagai cadangan kalau bentuk URL-nya tak terduga.
-  const cloudinaryName = cloudNameDariUrl(cloudinaryUrl)
-    ?? (typeof body.cloudinary_name === 'string' ? body.cloudinary_name.slice(0, 100) || null : null);
+  const storage = body.storage === 'r2' ? 'r2' : 'cloudinary';
+
+  let cloudinaryPublicId = null;
+  let cloudinaryName = null;
+  let r2Key = null;
+
+  if (storage === 'r2') {
+    r2Key = typeof body.r2_key === 'string' ? body.r2_key.slice(0, 300) : '';
+    if (!r2Key) return jsonError('r2_key wajib untuk storage r2', 422);
+  } else {
+    cloudinaryPublicId = typeof body.cloudinary_public_id === 'string' ? body.cloudinary_public_id.slice(0, 300) : '';
+    if (!cloudinaryPublicId) return jsonError('cloudinary_public_id wajib', 422);
+    // Cloud tempat file benar-benar mendarat. Diambil dari URL Cloudinary itu
+    // sendiri (sumber paling tepercaya — client tidak bisa salah lapor), dengan
+    // nilai kiriman client sebagai cadangan kalau bentuk URL-nya tak terduga.
+    cloudinaryName = cloudNameDariUrl(cloudinaryUrl)
+      ?? (typeof body.cloudinary_name === 'string' ? body.cloudinary_name.slice(0, 100) || null : null);
+  }
+
+  const posterUrl = typeof body.poster_url === 'string' ? body.poster_url.slice(0, 1000) || null : null;
 
   const caption = typeof body.caption === 'string' ? body.caption.slice(0, 1000) || null : null;
   const hashtags = typeof body.hashtags === 'string' ? body.hashtags.slice(0, 500) || null : null;
@@ -168,15 +195,15 @@ export async function onRequestPost(context) {
   try {
     const res = await env.DB.prepare(
       `INSERT INTO viralframe_agent_videos
-        (character_id, property_id, caption, hashtags, cloudinary_public_id, cloudinary_url, cloudinary_name, resource_type, duration_sec, bytes, format, width, height, gaya)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).bind(characterId, propertyId, caption, hashtags, cloudinaryPublicId, cloudinaryUrl, cloudinaryName, resourceType, durationSec, bytes, format, width, height, gaya).run();
+        (character_id, property_id, caption, hashtags, cloudinary_public_id, cloudinary_url, cloudinary_name, storage, r2_key, poster_url, resource_type, duration_sec, bytes, format, width, height, gaya)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(characterId, propertyId, caption, hashtags, cloudinaryPublicId, cloudinaryUrl, cloudinaryName, storage, r2Key, posterUrl, resourceType, durationSec, bytes, format, width, height, gaya).run();
     return jsonOk({ id: res.meta?.last_row_id }, 201);
   } catch (err) {
     console.error('[vf agent-videos] insert', err.message);
-    // Bersihkan aset yatim di Cloudinary (best-effort) supaya storage tidak terisi
-    // file tanpa catatan DB
-    try { await destroyByCloudName(env, cloudinaryName, cloudinaryPublicId, resourceType); }
+    // Bersihkan aset yatim (best-effort) supaya storage tidak terisi file tanpa
+    // catatan DB. hapusAsetVideo() memilih backend dari `storage`.
+    try { await hapusAsetVideo(env, { storage, r2_key: r2Key, cloudinary_public_id: cloudinaryPublicId, cloudinary_name: cloudinaryName, resource_type: resourceType }); }
     catch (e) { console.error('[vf agent-videos] cleanup orphan', e.message); }
     return jsonError('Gagal mencatat video ke DB — upload dibatalkan, silakan coba lagi', 500);
   }

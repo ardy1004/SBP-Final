@@ -3,7 +3,7 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
-import { destroyByCloudName } from '../../../../_lib/cloudinary.js';
+import { hapusAsetVideo } from '../../../../_lib/videoStorage.js';
 import { adaJadwalTertunda } from '../../../../_lib/schedulerProviders.js';
 
 export async function onRequestDelete(context) {
@@ -11,7 +11,7 @@ export async function onRequestDelete(context) {
   const id = parseInt(params.id, 10);
   if (!Number.isInteger(id) || id <= 0) return jsonError('id tidak valid', 400);
 
-  const row = await env.DB.prepare('SELECT cloudinary_public_id, cloudinary_name, resource_type FROM viralframe_agent_videos WHERE id = ?').bind(id).first().catch(() => null);
+  const row = await env.DB.prepare('SELECT storage, r2_key, cloudinary_public_id, cloudinary_name, resource_type FROM viralframe_agent_videos WHERE id = ?').bind(id).first().catch(() => null);
   if (!row) return jsonError('Video tidak ditemukan', 404);
   // Video yang masih ditunggu tayang Buffer/Zernio tidak boleh dihapus sekarang
   // — link medianya akan mati sebelum sempat tayang (audit 2026-08-15).
@@ -19,10 +19,11 @@ export async function onRequestDelete(context) {
     return jsonError('Video ini masih ditunggu tayang dari jadwal sebelumnya — hapus setelah waktu tayangnya lewat.', 409);
   }
 
-  // Hapus di cloud tempat aset ini tersimpan (bisa berbeda dari akun agent
-  // sekarang kalau agent-nya pernah pindah akun) — migrasi 0037.
-  try { await destroyByCloudName(env, row.cloudinary_name, row.cloudinary_public_id, row.resource_type); }
-  catch (err) { console.error('[vf agent-videos] cloudinary destroy', err.message); }
+  // Hapus di tempat aset ini benar-benar tersimpan: bucket R2 (migrasi 0043)
+  // atau cloud Cloudinary yang tercatat di barisnya — yang terakhir bisa berbeda
+  // dari akun agent sekarang kalau agent-nya pernah pindah akun (migrasi 0037).
+  try { await hapusAsetVideo(env, row); }
+  catch (err) { console.error('[vf agent-videos] destroy aset', err.message); }
 
   try {
     await env.DB.prepare('DELETE FROM viralframe_agent_videos WHERE id = ?').bind(id).run();

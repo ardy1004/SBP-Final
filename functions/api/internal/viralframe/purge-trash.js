@@ -7,7 +7,7 @@
 // Auth: header X-Purge-Secret harus sama persis dengan env.VIRALFRAME_PURGE_SECRET.
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
-import { destroyByCloudName } from '../../../_lib/cloudinary.js';
+import { hapusAsetVideo } from '../../../_lib/videoStorage.js';
 import { logServerError } from '../../../_lib/logError.js';
 import { adaJadwalTertunda } from '../../../_lib/schedulerProviders.js';
 
@@ -27,7 +27,7 @@ export async function onRequestPost(context) {
 
   try {
     const res = await env.DB.prepare(
-      `SELECT id, cloudinary_public_id, cloudinary_name, resource_type FROM viralframe_agent_videos
+      `SELECT id, storage, r2_key, cloudinary_public_id, cloudinary_name, resource_type FROM viralframe_agent_videos
        WHERE trashed_at IS NOT NULL AND trashed_at <= datetime('now', '-30 days')
        LIMIT ?`
     ).bind(PURGE_LIMIT_PER_RUN).all();
@@ -43,24 +43,29 @@ export async function onRequestPost(context) {
     const skippedPending = statusTertunda.filter(Boolean).length;
     if (rows.length === 0) return jsonOk({ purged: 0, skipped_pending: skippedPending });
 
-    // HANYA row yang destroy Cloudinary-nya sukses (atau tidak punya file untuk
-    // dihapus) yang lanjut dihapus dari D1. Sebelumnya kegagalan Cloudinary
-    // ditelan lalu row D1 tetap dihapus tanpa syarat — asset Cloudinary jadi
-    // orphan PERMANEN tanpa jejak untuk retry, karena baris D1 (satu-satunya
-    // penanda "video ini ada") sudah lenyap (audit 2026-07-28). Row yang gagal
-    // dibiarkan di Sampah — cron run berikutnya akan mencobanya lagi.
+    // HANYA row yang destroy asetnya sukses (atau tidak punya file untuk dihapus)
+    // yang lanjut dihapus dari D1. Sebelumnya kegagalan Cloudinary ditelan lalu
+    // row D1 tetap dihapus tanpa syarat — asset jadi orphan PERMANEN tanpa jejak
+    // untuk retry, karena baris D1 (satu-satunya penanda "video ini ada") sudah
+    // lenyap (audit 2026-07-28). Row yang gagal dibiarkan di Sampah — cron run
+    // berikutnya akan mencobanya lagi.
+    //
+    // ⚠️ hapusAsetVideo() memeriksa `row.storage` LEBIH DULU. Guard lama di sini
+    // berbunyi `if (!row.cloudinary_public_id) → tidak ada file, buang baris D1`;
+    // baris R2 memang selalu punya kolom itu NULL, jadi tanpa pemeriksaan backend
+    // cron ini akan menghapus catatannya dan meninggalkan objek R2 selamanya
+    // (migrasi 0043).
     const deletable = [];
     await Promise.all(rows.map(async row => {
-      if (!row.cloudinary_public_id) { deletable.push(row.id); return; }
       try {
-        await destroyByCloudName(env, row.cloudinary_name, row.cloudinary_public_id, row.resource_type);
+        await hapusAsetVideo(env, row);
         deletable.push(row.id);
       } catch (err) {
-        console.error('[purge-trash] cloudinary destroy', row.id, err.message);
+        console.error('[purge-trash] destroy aset', row.id, err.message);
         await logServerError(env, {
-          message: `Gagal destroy Cloudinary asset saat cron purge-trash agent-video #${row.id}: ${err.message}`,
+          message: `Gagal hapus aset ${row.storage === 'r2' ? 'R2' : 'Cloudinary'} saat cron purge-trash agent-video #${row.id}: ${err.message}`,
           source: 'server',
-          context: { endpoint: 'internal/viralframe/purge-trash', id: row.id, cloudinary_public_id: row.cloudinary_public_id },
+          context: { endpoint: 'internal/viralframe/purge-trash', id: row.id, storage: row.storage, r2_key: row.r2_key, cloudinary_public_id: row.cloudinary_public_id },
         });
       }
     }));
