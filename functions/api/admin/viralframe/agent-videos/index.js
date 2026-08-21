@@ -13,6 +13,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { resolveCloudinaryByCloudName, cloudNameDariUrl, cekSpesialis } from '../../../../_lib/agentAccounts.js';
 import { hapusAsetVideo } from '../../../../_lib/videoStorage.js';
+import { logServerError } from '../../../../_lib/logError.js';
 
 const SELECT_COLS = `
   v.id, v.character_id, v.property_id, v.caption, v.hashtags,
@@ -157,6 +158,14 @@ export async function onRequestPost(context) {
   if (storage === 'r2') {
     r2Key = typeof body.r2_key === 'string' ? body.r2_key.slice(0, 300) : '';
     if (!r2Key) return jsonError('r2_key wajib untuk storage r2', 422);
+    // `cloudinary_public_id` NOT NULL sejak migrasi 0018 — jauh sebelum R2 ada.
+    // Melonggarkannya butuh MEMBANGUN ULANG tabel (SQLite tidak punya ALTER
+    // COLUMN), dan pola RENAME→CREATE→DROP itu persis yang nyaris menghapus data
+    // di migrasi 0022. Jadi kolomnya diisi key R2-nya: maknanya tetap konsisten,
+    // "identitas objek di storage-nya" — sejalan dengan `cloudinary_url` yang
+    // juga sudah berarti "URL publik apa pun backend-nya" (migrasi 0043).
+    // `r2_key` tetap kolom resmi yang dibaca hapusAsetVideo().
+    cloudinaryPublicId = r2Key;
   } else {
     cloudinaryPublicId = typeof body.cloudinary_public_id === 'string' ? body.cloudinary_public_id.slice(0, 300) : '';
     if (!cloudinaryPublicId) return jsonError('cloudinary_public_id wajib', 422);
@@ -201,11 +210,24 @@ export async function onRequestPost(context) {
     return jsonOk({ id: res.meta?.last_row_id }, 201);
   } catch (err) {
     console.error('[vf agent-videos] insert', err.message);
+    // Dicatat ke error_logs, bukan cuma console.error — kegagalan INSERT di sini
+    // TIDAK terlihat di mana pun sebelumnya, sehingga pelanggaran constraint
+    // (mis. cloudinary_public_id NOT NULL untuk baris R2, 2026-08-22) hanya bisa
+    // didiagnosa dengan menebak-nebak skema. Sekarang muncul di Admin → Error Logs.
+    await logServerError(env, {
+      message: `INSERT viralframe_agent_videos gagal (storage=${storage}): ${err.message}`,
+      source: 'server',
+      context: { endpoint: 'admin/viralframe/agent-videos', storage, r2_key: r2Key, character_id: characterId, property_id: propertyId },
+    });
+
     // Bersihkan aset yatim (best-effort) supaya storage tidak terisi file tanpa
     // catatan DB. hapusAsetVideo() memilih backend dari `storage`.
     try { await hapusAsetVideo(env, { storage, r2_key: r2Key, cloudinary_public_id: cloudinaryPublicId, cloudinary_name: cloudinaryName, resource_type: resourceType }); }
     catch (e) { console.error('[vf agent-videos] cleanup orphan', e.message); }
-    return jsonError('Gagal mencatat video ke DB — upload dibatalkan, silakan coba lagi', 500);
+
+    // Sebabnya ikut dikirim: endpoint ini admin-only, dan tanpa itu pesan
+    // "silakan coba lagi" mengajak mengulang kegagalan yang pasti terulang.
+    return jsonError(`Gagal mencatat video ke DB: ${String(err.message).slice(0, 200)}`, 500);
   }
 }
 
