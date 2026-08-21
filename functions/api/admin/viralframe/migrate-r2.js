@@ -52,7 +52,7 @@ export async function onRequestPost(context) {
   const batch = Math.min(parseInt(url.searchParams.get('batch') ?? '', 10) || BATCH_DEFAULT, BATCH_MAX);
 
   if (!r2Siap(env)) {
-    return jsonError('Storage R2 belum dikonfigurasi — set binding VIDEO + R2_PUBLIC_BASE di Cloudflare', 500);
+    return jsonError('Binding R2 "VIDEO" tidak ada di deployment ini — cek Dashboard → Pages → sbp-final → Settings → Functions → R2 bindings', 500);
   }
 
   try {

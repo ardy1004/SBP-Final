@@ -36,14 +36,30 @@ export function posterKeyDari(videoKey) {
   return videoKey.replace(/\.[^./]+$/, '') + '.jpg';
 }
 
+// Domain publik bucket sbp-video, ditulis sebagai KONSTANTA — bukan hanya env var.
+//
+// Alasannya bukan kemalasan. 2026-08-22 `wrangler pages deploy` MENGHAPUS secret
+// R2_PUBLIC_BASE dari project config produksi setelah namanya sempat bentrok
+// dengan [vars] di wrangler.toml ("Binding name already in use"). Deploy kedua
+// sukses, semua gate hijau, smoke 0/320 — dan fitur upload tetap MATI di
+// produksi, karena satu kunci env lenyap tanpa jejak. Terbukti: production turun
+// 21→20 entri, preview (tak pernah dideploy) masih utuh.
+//
+// Nilai ini muncul di setiap URL video yang dikirim ke Buffer/Zernio, jadi tidak
+// ada alasan keamanan untuk menyembunyikannya. env.R2_PUBLIC_BASE tetap
+// dihormati sebagai override kalau domainnya suatu saat berubah.
+const BASE_BAWAAN = 'https://media.salambumi.xyz';
+
 export function urlPublik(env, key) {
-  const base = (env.R2_PUBLIC_BASE ?? '').replace(/\/+$/, '');
-  if (!base || !key) return null;
+  if (!key) return null;
+  const base = (env?.R2_PUBLIC_BASE || BASE_BAWAAN).replace(/\/+$/, '');
   return `${base}/${key}`;
 }
 
+// Hanya binding yang benar-benar bisa hilang; basis URL selalu ada lewat
+// konstanta di atas.
 export function r2Siap(env) {
-  return !!(env.VIDEO && env.R2_PUBLIC_BASE);
+  return !!env?.VIDEO;
 }
 
 // Hapus aset milik satu baris viralframe_agent_videos, apa pun backend-nya.

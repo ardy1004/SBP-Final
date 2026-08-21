@@ -29,11 +29,16 @@ export async function onRequestPost(context) {
   const characterId = parseInt(body.character_id, 10);
   const propertyId = parseInt(body.property_id, 10);
 
-  if (!r2Siap(env)) {
-    return jsonError('Storage R2 belum dikonfigurasi — set binding VIDEO + R2_PUBLIC_BASE di Cloudflare', 500);
-  }
-  if (!env.R2_ACCOUNT_ID || !env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY) {
-    return jsonError('Kredensial S3 R2 belum di-set (R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY)', 500);
+  // Pesan menyebut PERSIS apa yang hilang. Versi lama menulis "binding VIDEO +
+  // R2_PUBLIC_BASE" padahal yang kosong cuma salah satunya — itu mengirim
+  // diagnosa ke arah yang salah selama satu putaran penuh (2026-08-22).
+  const kurang = [];
+  if (!r2Siap(env)) kurang.push('binding R2 "VIDEO" (Dashboard → Pages → sbp-final → Settings → Functions → R2 bindings)');
+  if (!env.R2_ACCOUNT_ID) kurang.push('R2_ACCOUNT_ID');
+  if (!env.R2_ACCESS_KEY_ID) kurang.push('R2_ACCESS_KEY_ID');
+  if (!env.R2_SECRET_ACCESS_KEY) kurang.push('R2_SECRET_ACCESS_KEY');
+  if (kurang.length > 0) {
+    return jsonError(`Storage R2 belum siap — yang belum ada: ${kurang.join(', ')}`, 500);
   }
 
   // Cek kecocokan spesialis SEBELUM tanda tangan diberikan — kalau ditolak di
