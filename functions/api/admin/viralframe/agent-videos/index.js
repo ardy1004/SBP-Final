@@ -6,8 +6,11 @@
 //   • R2 (baru, via /r2-sign):
 //     { character_id, property_id, storage: 'r2', r2_key, cloudinary_url (URL publik R2),
 //       poster_url?, duration_sec?, bytes?, format?, width?, height?, caption?, hashtags? }
-//   • Cloudinary (lama, via /cloudinary-sign): sama tapi dengan
-//     { cloudinary_public_id, cloudinary_name } dan tanpa storage/r2_key.
+//   • Cloudinary (lama): sama tapi dengan { cloudinary_public_id, cloudinary_name }
+//     dan tanpa storage/r2_key. TIDAK ADA LAGI endpoint yang menghasilkan bentuk
+//     ini — /cloudinary-sign dihapus 2026-08-22. Cabangnya dipertahankan hanya
+//     supaya tab admin lama yang masih memegang bundle JS sebelum migrasi tidak
+//     menabrak error yang membingungkan.
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
@@ -196,7 +199,7 @@ export async function onRequestPost(context) {
   const property = await env.DB.prepare('SELECT id, jenis_properti FROM properties WHERE id = ?').bind(propertyId).first().catch(() => null);
   if (!property) return jsonError('Properti tidak ditemukan', 404);
 
-  // Gerbang spesialis yang sebenarnya (cloudinary-sign cuma menolak lebih awal
+  // Gerbang spesialis yang sebenarnya (r2-sign cuma menolak lebih awal
   // demi UX — endpoint ini bisa dipanggil langsung tanpa lewat sana).
   const cek = await cekSpesialis(env, characterId, property.jenis_properti);
   if (!cek.boleh) return jsonError(cek.pesan, 422);

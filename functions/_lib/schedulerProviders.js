@@ -252,28 +252,11 @@ export async function listZernioAccounts(apiKey) {
   return { ok: true, accounts };
 }
 
-export async function zernioPresign({ apiKey, filename, contentType }) {
-  if (!apiKey) return { ok: false, error: 'Zernio API key belum diatur' };
-
-  let res;
-  try {
-    res = await fetch('https://zernio.com/api/v1/media/presign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ filename, contentType }),
-      signal: AbortSignal.timeout(15000),
-    });
-  } catch (err) {
-    return { ok: false, error: `Gagal menghubungi Zernio (presign): ${err.message}` };
-  }
-
-  const json = await res.json().catch(() => null);
-  if (!res.ok || !json) return { ok: false, error: `Zernio presign HTTP ${res.status}` };
-  const uploadUrl = json.uploadUrl ?? json.data?.uploadUrl;
-  const publicUrl = json.publicUrl ?? json.data?.publicUrl;
-  if (!uploadUrl || !publicUrl) return { ok: false, error: 'Zernio presign tidak mengembalikan uploadUrl/publicUrl' };
-  return { ok: true, uploadUrl, publicUrl };
-}
+// zernioPresign() DIHAPUS 2026-08-22 — nol pemanggil sejak Content Library
+// dibongkar. Namanya sempat menyiratkan Zernio bisa dititipi SALINAN file;
+// kenyataannya jalur itu tidak pernah dipakai. Zernio (dan Buffer) hanya
+// menerima URL dan mengunduhnya sendiri saat waktu tayang — itulah sebabnya
+// menghapus aset sebelum post terbit mematikan link medianya.
 
 export async function callZernioCreatePost({ apiKey, content, scheduledFor, timezone, platforms, mediaUrl }) {
   if (!apiKey) return { ok: false, error: 'Zernio API key belum diatur' };
