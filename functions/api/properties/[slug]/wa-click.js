@@ -5,7 +5,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { buildPropertyUrl } from '../../../_lib/propertyUrl.js';
-import { sendCapiEvent } from '../../../_lib/metaCapi.js';
+import { sendCapiEvent, extractMetaIdentity } from '../../../_lib/metaCapi.js';
 import { SQL_TANGGAL_WIB } from '../../../_lib/waktu.js';
 import { extractGeo } from '../../../_lib/geoRequest.js';
 
@@ -97,7 +97,10 @@ export async function onRequestPost(context) {
           eventName:      'Contact',
           eventId:        contactEventId,
           eventSourceUrl: propUrl,
+          // Klik WA anonim (sticky bar mobile) — tanpa PII, jadi ClickID/fbp/
+          // IP/UA satu-satunya identitas event ini.
           userData:       {},
+          identity:       extractMetaIdentity(request),
           customData:     { content_ids: [propertyKode], value: propertyHarga, currency: 'IDR' },
         })));
       }

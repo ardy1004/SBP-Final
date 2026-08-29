@@ -52,7 +52,7 @@ export default function PrivacyPage() {
               },
               {
                 title: '8. Berbagi Data dengan Pihak Ketiga',
-                content: 'Kami tidak menjual data pribadi Anda. Data dapat dibagikan kepada notaris/PPAT rekanan (hanya data yang diperlukan untuk proses hukum) dan penyedia layanan teknis yang terikat perjanjian kerahasiaan. Tidak ada pembagian data untuk keperluan pemasaran pihak ketiga.',
+                content: 'Kami tidak menjual data pribadi Anda. Data dapat dibagikan kepada notaris/PPAT rekanan (hanya data yang diperlukan untuk proses hukum) dan penyedia layanan teknis yang terikat perjanjian kerahasiaan.\n\nUntuk mengukur hasil iklan kami, sebagian data dikirim ke platform periklanan (Meta/Facebook): penanda teknis dari cookie iklan dan perangkat Anda, serta nomor WhatsApp dalam bentuk teracak satu arah (hash SHA-256) yang tidak dapat dikembalikan ke nomor aslinya. Pengiriman ini hanya untuk mencocokkan konversi dengan iklan kami — kami tidak mengirimkan nama, alamat, maupun isi pesan Anda, dan tidak membagikan data Anda kepada pemasar pihak ketiga lain.',
               },
               {
                 title: '9. Kontak Data Protection',

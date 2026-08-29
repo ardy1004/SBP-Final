@@ -1,5 +1,5 @@
 import { buildPropertyUrl } from './propertyUrl.js';
-import { sendCapiEvent } from './metaCapi.js';
+import { sendCapiEvent, extractMetaIdentity } from './metaCapi.js';
 import { normalizeWA, isValidWA } from './waUtils.js';
 
 function sanitize(val, maxLen = 500) {
@@ -114,6 +114,7 @@ export async function createLead(env, context, params = {}) {
             eventId:        leadEventId,
             eventSourceUrl: source_page,
             userData:       { ph: no_wa },
+            identity:       extractMetaIdentity(context?.request, source_page),
             customData:     {
               content_ids:      [propertyKode],
               content_category: tipe,

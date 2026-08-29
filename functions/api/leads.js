@@ -1,6 +1,6 @@
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { buildPropertyUrl } from '../_lib/propertyUrl.js';
-import { sendCapiEvent } from '../_lib/metaCapi.js';
+import { sendCapiEvent, extractMetaIdentity } from '../_lib/metaCapi.js';
 import { verifyTurnstile } from '../_lib/turnstile.js';
 import { normalizeWA, isValidWA } from '../_lib/waUtils.js';
 import { logServerError } from '../_lib/logError.js';
@@ -174,6 +174,7 @@ export async function onRequestPost(context) {
           eventId:        leadEventId,
           eventSourceUrl: source_page,
           userData:       no_wa ? { ph: no_wa } : {},
+          identity:       extractMetaIdentity(request, source_page),
           customData:     {
             content_ids:      [propertyKode],
             content_category: tipe,

@@ -12,6 +12,60 @@ function normalizePhone(raw) {
   return d;
 }
 
+/**
+ * Ambil pengidentifikasi TEKNIS dari request untuk user_data CAPI.
+ *
+ * ⚠️ KEEMPATNYA DIKIRIM MENTAH — JANGAN DI-HASH. Berbeda dengan em/ph, Meta
+ * mencocokkan fbc/fbp/client_* apa adanya; meng-hash-nya justru mematikan
+ * pencocokan tanpa error apa pun. Ini jebakan yang mudah "dirapikan" orang
+ * berikutnya karena tetangganya (hashUserData) memang di-hash.
+ *
+ * `fbc` = ClickID Meta, pengikat konversi ke KLIK IKLAN tertentu. Sampai
+ * 2026-08-29 tidak pernah dikirim sama sekali, dan Events Manager menandainya
+ * sebagai tindakan prioritas tertinggi ("Kirim ClickID Meta untuk meningkatkan
+ * pelaporan konversi"). Tanpa ini Meta tidak tahu lead berasal dari iklan mana.
+ *
+ * @param {Request} request
+ * @param {string} [eventSourceUrl] - dipakai untuk fallback fbclid
+ * @returns {Record<string, string>} hanya field yang benar-benar ada
+ */
+export function extractMetaIdentity(request, eventSourceUrl = '') {
+  const out = {};
+  try {
+    const h = request?.headers;
+    if (!h) return out;
+
+    const ip = h.get('CF-Connecting-IP') ?? h.get('X-Forwarded-For');
+    if (ip) out.client_ip_address = ip.split(',')[0].trim();
+
+    const ua = h.get('User-Agent');
+    if (ua) out.client_user_agent = ua;
+
+    // Cookie _fbp/_fbc ditulis oleh pixel browser di domain kita sendiri, jadi
+    // ikut terkirim ke Worker. Belum ada helper cookie di repo (jwt.js hanya
+    // MENULIS cookie), jadi parser kecil di sini — satu tempat, 4 pemanggil.
+    const cookies = {};
+    for (const bagian of (h.get('Cookie') ?? '').split(';')) {
+      const i = bagian.indexOf('=');
+      if (i > 0) cookies[bagian.slice(0, i).trim()] = bagian.slice(i + 1).trim();
+    }
+    if (cookies._fbp) out.fbp = cookies._fbp;
+    if (cookies._fbc) out.fbc = cookies._fbc;
+
+    // Fallback: pixel browser diblokir (adblock/JS mati) sehingga _fbc tak
+    // pernah ditulis, padahal URL iklannya utuh. Bentuk `fb.1.<ms>.<fbclid>`
+    // sesuai spesifikasi Meta. Aman dipakai: edgeCache membuang param pelacak
+    // hanya dari KUNCI cache (objek Request terpisah), bukan dari request asli.
+    if (!out.fbc && eventSourceUrl) {
+      try {
+        const fbclid = new URL(eventSourceUrl).searchParams.get('fbclid');
+        if (fbclid) out.fbc = `fb.1.${Date.now()}.${fbclid}`;
+      } catch { /* eventSourceUrl bukan URL absolut (mis. 'contact') — lewati */ }
+    }
+  } catch { /* header tidak terbaca -> kirim tanpa identitas, jangan melempar */ }
+  return out;
+}
+
 /** SHA-256 hex via Web Crypto API (tersedia di Cloudflare Workers) */
 async function sha256hex(str) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
@@ -47,12 +101,20 @@ async function hashUserData(rawData) {
  * @param {string} opts.eventId - untuk dedup dengan client-side Pixel
  * @param {string} [opts.eventSourceUrl]
  * @param {{ ph?: string, em?: string }} [opts.userData] - PII mentah, akan di-hash
+ * @param {Record<string, string>} [opts.identity] - hasil extractMetaIdentity();
+ *        fbc/fbp/client_ip_address/client_user_agent, dikirim MENTAH (jangan di-hash)
  * @param {Record<string, unknown>} [opts.customData]
  * @returns {Promise<{ success: boolean, error?: string }>}
  */
-export async function sendCapiEvent(_env, { pixelId, accessToken, eventName, eventId, eventSourceUrl, userData = {}, customData = {} }) {
+export async function sendCapiEvent(_env, { pixelId, accessToken, eventName, eventId, eventSourceUrl, userData = {}, identity = {}, customData = {} }) {
   try {
+    // PII di-hash, pengidentifikasi teknis TIDAK — lihat catatan di
+    // extractMetaIdentity(). Nilai kosong dibuang: Meta menurunkan kualitas
+    // pencocokan bila menerima field bernilai null/string kosong.
     const hashedUser = await hashUserData(userData);
+    for (const [k, v] of Object.entries(identity)) {
+      if (v) hashedUser[k] = v;
+    }
 
     const payload = {
       data: [{

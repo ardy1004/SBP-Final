@@ -14,7 +14,7 @@
 // browser Meta — lihat gotcha CLAUDE.md).
 
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
-import { sendCapiEvent } from '../_lib/metaCapi.js';
+import { sendCapiEvent, extractMetaIdentity } from '../_lib/metaCapi.js';
 
 // Lead quick_wa umum volumenya rendah. Cap ini jauh di atas trafik wajar tapi
 // menutup skenario flood — endpoint publik tanpa CAPTCHA yang menulis ke leads.
@@ -92,7 +92,11 @@ export async function onRequestPost(context) {
           eventName:      'Contact',
           eventId,
           eventSourceUrl: `${appUrl}/${source}`,
+          // Klik WA anonim — tidak ada PII sama sekali, jadi ClickID/fbp/IP/UA
+          // inilah SATU-SATUNYA identitas event ini. Sebelumnya userData kosong
+          // total sehingga Meta praktis tidak bisa mencocokkannya ke siapa pun.
           userData:       {},
+          identity:       extractMetaIdentity(request),
           customData:     { content_category: source },
         })));
       }
