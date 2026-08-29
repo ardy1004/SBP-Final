@@ -89,7 +89,7 @@ export async function scheduleFanOut(env, { assetUrl, caption, akun, waktu, slot
       // efek sampingnya bagus: status sukses/gagal FB dan Threads jadi terpisah,
       // tidak lagi atomik.
       tugas.push({ platform, provider: 'zernio', scheduledAt: jam,
-        jalan: () => callZernioCreatePost({ apiKey: zernioKey, content: caption, scheduledFor: jam,
+        jalan: () => callZernioCreatePost({ env, apiKey: zernioKey, content: caption, scheduledFor: jam,
           timezone: 'Asia/Jakarta', platforms: [{ platform, accountId: cfg.id }], mediaUrl: assetUrl }) });
     }
   }
@@ -324,7 +324,9 @@ export async function listZernioAccounts(apiKey) {
 // menerima URL dan mengunduhnya sendiri saat waktu tayang — itulah sebabnya
 // menghapus aset sebelum post terbit mematikan link medianya.
 
-export async function callZernioCreatePost({ apiKey, content, scheduledFor, timezone, platforms, mediaUrl }) {
+// `env` cuma dipakai untuk logServerError saat id tidak terbaca — opsional supaya
+// fungsi ini tetap bisa diuji terpisah tanpa binding D1.
+export async function callZernioCreatePost({ env, apiKey, content, scheduledFor, timezone, platforms, mediaUrl }) {
   if (!apiKey) return { ok: false, error: 'Zernio API key belum diatur' };
   if (!platforms?.length) return { ok: false, error: 'Tidak ada akun Zernio yang dikonfigurasi' };
 
@@ -355,6 +357,27 @@ export async function callZernioCreatePost({ apiKey, content, scheduledFor, time
     const detail = json?.message ?? json?.error ?? json?.detail ?? json?.errors?.[0]?.message ?? raw.slice(0, 300);
     return { ok: false, error: `Zernio HTTP ${res.status}: ${detail}`.trim() };
   }
-  const id = json.id ?? json.data?.id ?? json.postId;
+  // ⚠️ Bentuk respons Zernio: { message, post: { _id, ... } } — id-nya `_id` di
+  // DALAM `post`, bukan di root. Jalur lama (json.id / json.data.id / json.postId)
+  // tidak pernah cocok sekali pun: 316 dari 316 baris Zernio di produksi punya
+  // remote_post_id NULL, sementara Buffer 473/473 terisi (audit 2026-08-29).
+  // Akibatnya endpoint /posts/{id}/retry, /unpublish dan /edit mustahil dipakai.
+  const id = json.post?._id ?? json.post?.id ?? json.id ?? json.data?.id ?? json.postId;
+
+  // ⚠️ SENGAJA tetap ok:true walau id tidak terbaca — BEDA dengan cabang Buffer
+  // di atas, dan bedanya penting. Di sini res.ok sudah true, artinya Zernio
+  // kemungkinan besar SUDAH membuat post-nya. Menandainya gagal akan membuat
+  // jalur ulangi-platform-gagal mengirimnya lagi -> post dobel di akun sosmed
+  // nyata, dan post yang sudah tayang tidak bisa ditarik. Lebih baik kehilangan
+  // id-nya (cuma melemahkan verifikasi) daripada memposting dua kali.
+  // Jangan "dirapikan" jadi seragam dengan Buffer.
+  if (!id) {
+    await logServerError(env, {
+      source: 'server',
+      message: '[scheduler] Zernio membalas 2xx tanpa post id yang bisa dibaca — post kemungkinan tetap dibuat, tapi tidak bisa diverifikasi',
+      url: 'https://zernio.com/api/v1/posts',
+      context: { field_tersedia: Object.keys(json ?? {}), field_post: Object.keys(json?.post ?? {}) },
+    });
+  }
   return { ok: true, remoteId: id ? String(id) : null };
 }
