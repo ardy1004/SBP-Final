@@ -16,6 +16,14 @@ export interface ApiResponse<T> {
   data?: T;
   error?: string;
   details?: Record<string, string>;
+  /**
+   * HTTP status respons, diisi oleh apiFetch(). Bukan bagian dari amplop yang
+   * dikirim backend — ditambahkan di klien supaya pemanggil bisa membedakan
+   * jenis kegagalan (mis. 403 anti-bot yang perlu token baru) tanpa mencocokkan
+   * teks pesan error, yang rapuh terhadap perubahan kata.
+   * Tidak terisi kalau request gagal sebelum ada respons (jaringan putus).
+   */
+  status?: number;
 }
 
 /**
@@ -390,7 +398,7 @@ async function apiFetch<T>(
       ...init,
     });
     const json = await res.json() as ApiResponse<T>;
-    return json;
+    return { ...json, status: res.status };
   } catch (err) {
     return { success: false, error: String(err) };
   }

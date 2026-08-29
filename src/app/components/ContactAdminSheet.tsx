@@ -1,8 +1,8 @@
-import { useState } from 'react';
-import { MessageCircle, X, Star } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { MessageCircle, X, Star, Check, AlertCircle } from 'lucide-react';
 import { postLead, formatRupiah, type NormalizedPropertyDetail, bacaJson } from '../../lib/api';
 import { trackEvent } from '../../lib/tracking';
-import Turnstile from './Turnstile';
+import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnstile';
 import { cfImg } from '../../lib/img';
 
 const RENCANA_MAP: Record<string, 'hard_cash' | 'soft_cash' | 'kpr'> = {
@@ -32,6 +32,13 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
   const [apiError, setApiError] = useState<string | null>(null);
   const [skipLoading, setSkipLoading] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState('');
+  // Status widget WAJIB dilacak. Backend fail-closed (TURNSTILE_SECRET terpasang
+  // di produksi), jadi widget yang gagal dimuat = setiap kiriman ditolak 403.
+  // Tanpa ini user hanya melihat "Verifikasi anti-bot gagal" tanpa tahu apa yang
+  // harus dilakukan — persis kegagalan yang sudah diperingatkan di Turnstile.tsx
+  // dan sudah diperbaiki di TitipJualPage, tapi form ini ketinggalan.
+  const [turnstileStatus, setTurnstileStatus] = useState<TurnstileStatus>('memuat');
+  const turnstileRef = useRef<TurnstileHandle>(null);
   // Lazy-mount: sheet (termasuk widget Turnstile + gambar agen) baru dirender
   // setelah pertama kali dibuka — hindari load script challenges.cloudflare.com
   // di initial page load (Lighthouse: unused JS + third-party cookies).
@@ -42,6 +49,21 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
 
   const handleSubmit = async () => {
     if (!isValid || sending) return;
+
+    // Hentikan di sini, JANGAN kirim ke server. Tanpa token, /api/leads pasti
+    // membalas 403 — memanggilnya hanya menukar penjelasan yang berguna dengan
+    // pesan generik setelah menunggu jaringan. "Langsung WA" disebut karena
+    // jalur itu (wa-click) memang tanpa CAPTCHA, jadi tetap jalan walau
+    // challenges.cloudflare.com diblokir pemblokir iklan.
+    if (!turnstileToken) {
+      setApiError(
+        turnstileStatus === 'gagal'
+          ? 'Verifikasi anti-bot gagal dimuat. Klik "Verifikasi ulang" di bawah — bila tetap gagal, matikan penghemat data/pemblokir iklan, atau pakai tombol "Langsung WA" di atas.'
+          : 'Verifikasi anti-bot belum selesai. Tunggu beberapa detik hingga bertanda ✓, lalu tekan tombol ini lagi.',
+      );
+      return;
+    }
+
     setSending(true);
     setApiError(null);
     const res = await postLead({
@@ -67,6 +89,14 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
         currency: 'IDR',
       }, { eventID: res.data.event_id });
       window.location.href = res.data.wa_url;
+    } else if (res.status === 403) {
+      // Token Turnstile hanya berlaku ±5 menit, jadi form yang lama diisi tetap
+      // bisa ditolak walau tadinya sudah ✓. Terbitkan token baru otomatis dan
+      // minta tekan Kirim sekali lagi — JANGAN menyuruh muat ulang halaman,
+      // itu menghapus seluruh isian yang sudah diketik.
+      setTurnstileToken('');
+      turnstileRef.current?.reset();
+      setApiError('Verifikasi anti-bot kedaluwarsa. Kami sudah memperbaruinya — tunggu tanda ✓ di bawah, lalu tekan tombol ini sekali lagi. Isian Anda tetap aman.');
     } else {
       setApiError(res.error ?? 'Gagal menyimpan pesan. Coba lagi.');
     }
@@ -262,8 +292,36 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
             <p className="text-xs text-[#EF4444] text-center mb-3 bg-red-50 rounded-xl px-3 py-2">⚠️ {apiError}</p>
           )}
 
-          <div className="flex justify-center mb-3">
-            <Turnstile onVerify={setTurnstileToken} onExpire={() => setTurnstileToken('')} />
+          {/* Anti-bot Turnstile — statusnya WAJIB terlihat. Backend fail-closed,
+              jadi widget yang gagal dimuat berarti setiap kiriman ditolak 403.
+              Sampai 29 Agu 2026 kondisi itu tidak ditampilkan sama sekali: user
+              mengisi form lalu ditolak tanpa tahu sebabnya, dan pesannya menyuruh
+              "muat ulang halaman" yang justru menghapus isiannya. */}
+          <div className="flex flex-col items-center gap-1.5 mb-3">
+            <Turnstile
+              ref={turnstileRef}
+              onVerify={t => { setTurnstileToken(t); setApiError(null); }}
+              onExpire={() => setTurnstileToken('')}
+              onStatusChange={setTurnstileStatus}
+            />
+            {turnstileToken ? (
+              <span className="text-xs text-[#10B981] font-medium flex items-center gap-1">
+                <Check size={13} /> Terverifikasi
+              </span>
+            ) : turnstileStatus === 'gagal' ? (
+              <span className="text-xs text-red-600 font-medium flex items-center gap-1">
+                <AlertCircle size={13} /> Verifikasi gagal dimuat
+                <button
+                  type="button"
+                  onClick={() => turnstileRef.current?.reset()}
+                  className="font-semibold text-[#1565C0] hover:underline ml-1"
+                >
+                  Verifikasi ulang
+                </button>
+              </span>
+            ) : (
+              <span className="text-xs text-[#64748B]">Memverifikasi bahwa Anda bukan robot…</span>
+            )}
           </div>
 
           <button

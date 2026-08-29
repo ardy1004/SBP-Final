@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useLocation } from 'react-router';
 import { MessageCircle, Sparkles, X, Send, CheckCircle } from 'lucide-react';
 import ChatPropertyCard, { type ChatPropItem } from './ChatPropertyCard';
-import Turnstile from './Turnstile';
+import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnstile';
 import { formatRupiah, bacaJson } from '../../lib/api';
 import { trackWaClick } from '../../lib/waTrack';
 
@@ -35,8 +35,17 @@ export default function ChatWidget() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileStatus, setTurnstileStatus] = useState<TurnstileStatus>('memuat');
+  // ⚠️ Cerminan state dari chatPassRef, khusus untuk RENDER. chatPassRef sengaja
+  // ref (lihat catatan di sendMessage), tapi ref tidak memicu render — padahal
+  // widget Turnstile harus HILANG begitu tiket dipegang dan TETAP ADA selama
+  // belum. Dulu widget hanya dirender saat messages.length === 0, sehingga
+  // pesan pertama yang gagal (token belum terbit) menghapus widget SELAMANYA:
+  // user tidak akan pernah bisa memperoleh token lagi di sesi itu.
+  const [punyaTiket, setPunyaTiket] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const chatPassRef = useRef<string>('');
+  const turnstileRef = useRef<TurnstileHandle>(null);
   const inputRef  = useRef<HTMLInputElement>(null);
 
   // Sembunyikan di halaman detail properti (sudah punya CTA WA sendiri) dan di
@@ -60,6 +69,21 @@ export default function ChatWidget() {
   async function sendMessage() {
     const text = input.trim();
     if (!text || loading) return;
+
+    // Tanpa token DAN tanpa tiket, /api/chat pasti membalas 403. Tahan di sini
+    // supaya pertanyaan user tidak hangus: teksnya tetap di kotak input, tinggal
+    // tekan kirim lagi setelah widget bertanda ✓. Sebelumnya pesan terkirim,
+    // ditolak, lalu dibalas "Maaf, terjadi gangguan" yang menyembunyikan sebab.
+    if (!turnstileToken && !chatPassRef.current) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: turnstileStatus === 'gagal'
+          ? 'Verifikasi anti-bot gagal dimuat, jadi saya belum bisa menerima pesan. Klik "Verifikasi ulang" di bawah — bila tetap gagal, matikan penghemat data atau pemblokir iklan.'
+          : 'Sebentar ya, verifikasi anti-bot belum selesai. Tunggu tanda ✓ di bawah, lalu kirim pertanyaanmu lagi.',
+        properties: [],
+      }]);
+      return;
+    }
 
     const newMessages: ChatMsg[] = [...messages, { role: 'user', content: text }];
     setMessages(newMessages);
@@ -92,13 +116,26 @@ export default function ChatWidget() {
         // Server hanya menerbitkan tiket pada giliran yang lolos CAPTCHA.
         // Disimpan di ref, bukan state: nilainya tidak memengaruhi render dan
         // harus langsung terbaca oleh request berikutnya tanpa menunggu render.
-        if (json.data.chat_pass) chatPassRef.current = json.data.chat_pass;
+        if (json.data.chat_pass) { chatPassRef.current = json.data.chat_pass; setPunyaTiket(true); }
         setMessages(prev => [...prev, {
           role: 'assistant',
           content: json.data!.reply,
           properties: json.data!.properties ?? [],
           leadSubmitted: json.data!.leadSubmitted ?? false,
           waUrl: json.data!.waUrl ?? null,
+        }]);
+      } else if (res.status === 403) {
+        // Ditolak anti-bot — token belum ada, kedaluwarsa (±5 menit), atau
+        // tiketnya habis masa berlaku (2 jam). Terbitkan token baru dan katakan
+        // apa adanya; "terjadi gangguan" membuat user mengulang hal yang sama.
+        setTurnstileToken('');
+        setPunyaTiket(false);
+        chatPassRef.current = '';
+        turnstileRef.current?.reset();
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: 'Verifikasi anti-bot kedaluwarsa. Saya sudah memperbaruinya — tunggu tanda ✓ di bawah, lalu kirim pertanyaanmu sekali lagi.',
+          properties: [],
         }]);
       } else {
         throw new Error(json.error ?? 'unknown');
@@ -171,9 +208,6 @@ export default function ChatWidget() {
                   Halo! Saya Asisten SBP 👋<br />
                   Tanya saya tentang properti yang kamu cari — misal <em>&quot;kost dekat UGM di bawah 3M&quot;</em> atau <em>&quot;rumah Sleman 3 kamar&quot;</em>.
                 </p>
-                <div style={{ marginTop: 14 }}>
-                  <Turnstile onVerify={setTurnstileToken} onExpire={() => setTurnstileToken('')} />
-                </div>
               </div>
             ) : (
               messages.map((msg, i) => (
@@ -243,6 +277,37 @@ export default function ChatWidget() {
             )}
             <div ref={bottomRef} />
           </div>
+
+          {/* Anti-bot — DI LUAR cabang "belum ada pesan". Selama tiket belum
+              dipegang, widget wajib tetap ada supaya percobaan yang gagal masih
+              bisa dipulihkan. Begitu server menerbitkan chat_pass, blok ini
+              hilang sendiri dan chat berjalan tanpa gangguan visual. */}
+          {!punyaTiket && (
+            <div style={{ padding: '8px 12px', borderTop: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+              <Turnstile
+                ref={turnstileRef}
+                onVerify={setTurnstileToken}
+                onExpire={() => setTurnstileToken('')}
+                onStatusChange={setTurnstileStatus}
+              />
+              {turnstileToken ? (
+                <span style={{ fontSize: 11, color: '#10B981', fontWeight: 500 }}>✓ Terverifikasi</span>
+              ) : turnstileStatus === 'gagal' ? (
+                <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 500 }}>
+                  Verifikasi gagal dimuat
+                  <button
+                    type="button"
+                    onClick={() => turnstileRef.current?.reset()}
+                    style={{ marginLeft: 6, background: 'none', border: 'none', padding: 0, color: '#1565C0', fontWeight: 600, fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
+                  >
+                    Verifikasi ulang
+                  </button>
+                </span>
+              ) : (
+                <span style={{ fontSize: 11, color: '#64748B' }}>Memverifikasi bahwa Anda bukan robot…</span>
+              )}
+            </div>
+          )}
 
           {/* Input area */}
           <div style={{ padding: '8px', borderTop: '1px solid #f1f5f9', display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
