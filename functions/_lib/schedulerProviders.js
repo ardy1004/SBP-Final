@@ -1,8 +1,21 @@
-// Integrasi scheduler sosmed — Buffer (GraphQL) untuk YT Shorts/TikTok/Threads,
-// Zernio (REST) untuk FB Pages/Instagram. Kredensial di tabel settings D1
-// (pola functions/_lib/aiProviders.js). Buffer GraphQL API masih public beta —
-// kalau enum/response berubah, errornya tercatat per-baris di
-// viralframe_scheduled_posts, bukan gagal senyap.
+// Integrasi scheduler sosmed — dua provider: Buffer (GraphQL) dan Zernio (REST).
+//
+// ⚠️ TIDAK ADA pemetaan tetap platform→provider. Provider ditentukan PER PLATFORM
+// PER AKUN lewat `channels_json` tiap agent, dibaca `parseChannels()` di
+// functions/_lib/agentAccounts.js. Header file ini dulu berbunyi "Buffer untuk
+// YT/TikTok/Threads, Zernio untuk FB/Instagram" seolah itu aturan universal —
+// padahal itu cuma pemetaan milik Monica. Tujuh agent lain justru KEBALIKANNYA
+// (Instagram di Buffer, Threads di Zernio). Asumsi salah itulah yang membuat
+// cabang metadata Instagram di callBufferCreatePost() tidak pernah terpikirkan
+// sampai jalurnya gagal 14 dari 14 (audit 2026-08-29). Jangan tulis ulang
+// pemetaan satu akun sebagai kalimat umum di sini.
+//
+// Kredensial per agent (bukan tabel settings global sejak migrasi 0037/0038).
+// Buffer GraphQL API masih public beta — kalau enum/response berubah, errornya
+// tercatat per-baris di viralframe_scheduled_posts DAN di error_logs
+// (lihat catatKegagalanPlatform di jadwalOtomatis.js).
+
+import { logServerError } from './logError.js';
 
 
 // Helper setting dipakai lintas modul ViralFrame.
@@ -89,16 +102,35 @@ export async function scheduleFanOut(env, { assetUrl, caption, akun, waktu, slot
 // Simpan hasil fan-out ke viralframe_scheduled_posts + trash video sumber
 // (tabel & videoType berbeda antara Library dan Konten Agent).
 export async function persistScheduleResult(env, { videoId, videoType, trashTable, slotIndex, rows, akunId = null }) {
-  await Promise.all(rows.map(r => env.DB.prepare(
-    `INSERT INTO viralframe_scheduled_posts (video_id, video_type, provider, platform, slot_index, scheduled_at, status, remote_post_id, error_message, akun_id)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`
-  ).bind(
-    videoId, videoType, r.provider, r.platform, slotIndex, r.scheduledAt,
-    r.result.ok ? 'scheduled' : 'failed',
-    r.result.ok ? (r.result.remoteId ?? null) : null,
-    r.result.ok ? null : (r.result.error ?? 'Gagal tanpa keterangan').slice(0, 500),
-    akunId,
-  ).run()));
+  // ⚠️ Gagal MENCATAT tidak boleh membatalkan penjadwalan yang sudah benar-benar
+  // terkirim ke provider. Tanpa try/catch ini, satu INSERT yang ditolak D1
+  // melempar sampai ke onRequestPost dan MEMATIKAN SELURUH putaran cron — agent
+  // yang antre di belakang tidak pernah diproses, dan tidak ada jejak apa pun
+  // karena baris jadwalnya justru yang gagal ditulis (audit 2026-08-29).
+  try {
+    await Promise.all(rows.map(r => env.DB.prepare(
+      `INSERT INTO viralframe_scheduled_posts (video_id, video_type, provider, platform, slot_index, scheduled_at, status, remote_post_id, error_message, akun_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`
+    ).bind(
+      videoId, videoType, r.provider, r.platform, slotIndex, r.scheduledAt,
+      r.result.ok ? 'scheduled' : 'failed',
+      r.result.ok ? (r.result.remoteId ?? null) : null,
+      r.result.ok ? null : (r.result.error ?? 'Gagal tanpa keterangan').slice(0, 500),
+      akunId,
+    ).run()));
+  } catch (err) {
+    // Post-nya SUDAH terkirim ke Buffer/Zernio dan tetap akan tayang; yang hilang
+    // cuma catatannya. Itu berarti pengaman anti-dobel (adaJadwalTertunda) dan
+    // penghitung kuota jadi buta untuk video ini — layak dicatat keras.
+    console.error('[persistScheduleResult] insert gagal', err.message);
+    await logServerError(env, {
+      source: 'server',
+      message: `[scheduler] gagal mencatat hasil penjadwalan video ${videoId} — post sudah terkirim ke provider tapi tidak tercatat di D1: ${err.message}`,
+      stack: err.stack,
+      url: '/api/internal/viralframe/auto-schedule',
+      context: { video_id: videoId, video_type: videoType, akun_id: akunId, slot_index: slotIndex, jumlah_baris: rows.length },
+    });
+  }
 
   const anySuccess = rows.some(r => r.result.ok);
   if (anySuccess) {

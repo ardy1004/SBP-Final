@@ -15,6 +15,7 @@
 
 import { tanggalWib } from './waktu.js';
 import { getSetting, scheduleFanOut, persistScheduleResult } from './schedulerProviders.js';
+import { logServerError } from './logError.js';
 
 export const JENDELA_DEFAULT = [
   { nama: 'Pagi', mulai: '06:30', akhir: '08:30' },
@@ -330,6 +331,41 @@ function gabungCaptionHashtag(caption, hashtags) {
   return c ? `${c}\n\n${h}` : h;
 }
 
+// Kegagalan per platform WAJIB sampai ke Admin → Error Logs, bukan cuma mengendap
+// di kolom error_message. Instagram gagal 14 dari 14 selama berhari-hari tanpa
+// ada yang tahu justru karena tidak ada satu pun logServerError di jalur ini
+// (audit 2026-08-29) — penyebab teknisnya sudah diperbaiki, kelas bugnya belum.
+//
+// source tetap 'server', BUKAN 'scheduler': filter di
+// functions/api/admin/errors/index.js cuma menerima 'client'|'server', jadi
+// nilai lain akan LENYAP begitu admin memfilter "server" — persis kebalikan dari
+// tujuan fungsi ini. Penandanya ditaruh di awal message.
+//
+// Satu baris per VIDEO, bukan per platform: satu video gagal di 5 platform itu
+// satu peristiwa, dan 5 baris identik cuma menenggelamkan error lain.
+async function catatKegagalanPlatform(env, { rows, videoId, targetId, slot }) {
+  const gagal = (rows ?? []).filter(r => !r.result.ok);
+  if (gagal.length === 0) return;
+
+  const semua = gagal.length === (rows ?? []).length;
+  const daftar = gagal.map(r => r.platform).join(', ');
+  await logServerError(env, {
+    source: 'server',
+    message: semua
+      ? `[scheduler] SEMUA ${gagal.length} platform gagal dijadwalkan (${daftar}) — video ${videoId} tidak terbit di mana pun`
+      : `[scheduler] ${gagal.length} platform gagal dijadwalkan (${daftar}) — video ${videoId}`,
+    url: '/api/internal/viralframe/auto-schedule',
+    context: {
+      video_id: videoId,
+      akun_id: targetId,
+      tanggal: slot?.tanggal ?? null,
+      jendela: slot?.jendela?.nama ?? null,
+      total_platform: (rows ?? []).length,
+      gagal: gagal.map(r => ({ platform: r.platform, provider: r.provider, error: r.result.error })),
+    },
+  });
+}
+
 export async function jadwalkanVideo(env, { video, akun, targetId, akunUtamaId, kuota, jendela, preset, dipakai, dryRun = false }) {
   const platforms = Object.keys(akun.channels ?? {});
   if (platforms.length === 0) return { ok: false, alasan: 'akun belum punya channel sosmed' };
@@ -350,6 +386,8 @@ export async function jadwalkanVideo(env, { video, akun, targetId, akunUtamaId, 
     videoId: video.id, videoType: 'agent', trashTable: 'viralframe_agent_videos',
     slotIndex: slot.jendela.index + 1, rows, akunId: targetId,
   });
+
+  await catatKegagalanPlatform(env, { rows, videoId: video.id, targetId, slot });
 
   // Tandai kapan akun ini PERTAMA KALI benar-benar menerbitkan lewat dirinya
   // sendiri — jadi patokan ramp-up, dan hanya diisi sekali.

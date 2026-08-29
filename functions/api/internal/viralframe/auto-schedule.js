@@ -20,6 +20,7 @@ import { getSetting, setSetting } from '../../../_lib/schedulerProviders.js';
 import { resolveScheduler, resolveAkunTarget, getModeAkun } from '../../../_lib/agentAccounts.js';
 import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai, getPresetUtama } from '../../../_lib/jadwalOtomatis.js';
 import { tanggalWib } from '../../../_lib/waktu.js';
+import { logServerError } from '../../../_lib/logError.js';
 
 // Jam WIB sekarang, dibulatkan ke bawah ke kelipatan 30 menit — dipakai
 // mencocokkan jam_auto agent. Runtime Worker selalu UTC, WIB = UTC+7.
@@ -97,17 +98,33 @@ export async function onRequestPost({ request, env }) {
     if (videos.length < butuh) hasilAgent.alasan = `stok kurang (${videos.length} dari ${butuh})`;
 
     for (let i = 0; i < videos.length; i++) {
-      const r = await jadwalkanVideo(env, {
-        video: videos[i], akun, targetId, akunUtamaId: utama, kuota, jendela, preset, dipakai, dryRun: dry,
-      });
-      if (!r.ok) { hasilAgent.gagal++; hasilAgent.detail.push({ video_id: videos[i].id, alasan: r.alasan }); continue; }
-      if (dry) { hasilAgent.detail.push({ video_id: videos[i].id, jendela: r.jendela, waktu: r.waktu }); hasilAgent.terjadwal++; continue; }
-      const gagalPlatform = (r.rows ?? []).filter(x => !x.result.ok);
-      if (r.adaSukses) hasilAgent.terjadwal++; else hasilAgent.gagal++;
-      hasilAgent.detail.push({
-        video_id: videos[i].id, jendela: r.jendela,
-        gagal_platform: gagalPlatform.map(x => `${x.platform}: ${x.result.error}`),
-      });
+      // ⚠️ try/catch WAJIB per video. Sebelumnya satu exception (mis. D1 menolak
+      // INSERT) naik sampai ke sini dan mematikan SELURUH putaran — agent yang
+      // antre di belakang tidak pernah diproses, tanpa jejak (audit 2026-08-29).
+      try {
+        const r = await jadwalkanVideo(env, {
+          video: videos[i], akun, targetId, akunUtamaId: utama, kuota, jendela, preset, dipakai, dryRun: dry,
+        });
+        if (!r.ok) { hasilAgent.gagal++; hasilAgent.detail.push({ video_id: videos[i].id, alasan: r.alasan }); continue; }
+        if (dry) { hasilAgent.detail.push({ video_id: videos[i].id, jendela: r.jendela, waktu: r.waktu }); hasilAgent.terjadwal++; continue; }
+        const gagalPlatform = (r.rows ?? []).filter(x => !x.result.ok);
+        if (r.adaSukses) hasilAgent.terjadwal++; else hasilAgent.gagal++;
+        hasilAgent.detail.push({
+          video_id: videos[i].id, jendela: r.jendela,
+          gagal_platform: gagalPlatform.map(x => `${x.platform}: ${x.result.error}`),
+        });
+      } catch (err) {
+        hasilAgent.gagal++;
+        hasilAgent.detail.push({ video_id: videos[i].id, alasan: `error tak terduga: ${err.message}` });
+        console.error('[auto-schedule] video', videos[i].id, err.message);
+        await logServerError(env, {
+          source: 'server',
+          message: `[scheduler] error tak terduga saat menjadwalkan video ${videos[i].id} (agent ${ag.nama}): ${err.message}`,
+          stack: err.stack,
+          url: '/api/internal/viralframe/auto-schedule',
+          context: { video_id: videos[i].id, character_id: ag.id, akun_id: targetId },
+        });
+      }
     }
 
     if (!dry) {
