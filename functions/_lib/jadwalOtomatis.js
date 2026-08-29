@@ -75,6 +75,35 @@ function driftMenitPreset(tanggalWib_, intervalMenit) {
 // jendela primetime yang sama.
 export const TANGGA_PLATFORM = [0, 4, 9, 14, 19];
 
+// ⚠️ Tangga ini punya PASANGAN yang tidak dijaga apa pun: PLATFORMS di
+// functions/_lib/agentAccounts.js. Keduanya kebetulan sama-sama 5 entri, tapi
+// hidup di file berbeda tanpa pengikat. terapkanTanggaPlatform() memakai
+// `urut[i % urut.length]`, jadi platform ke-6 MEMBUNGKUS dan mendapat menit yang
+// sama persis dengan platform pertama — dua post ke akun berbeda pada detik yang
+// sama. Diukur di simulasi: 6 platform -> cuma 5 jam unik, tanpa error apa pun.
+// LinkedIn/Bluesky/Pinterest semuanya didukung Buffer, jadi ini tinggal menunggu.
+//
+// Perpanjangannya deterministik dan HANYA aktif kalau platformnya memang lebih
+// dari 5 — jalur 5 platform wajib mengembalikan array yang identik supaya jam
+// yang sudah berjalan di produksi tidak bergeser sedikit pun.
+const JARAK_TAMBAHAN_MENIT = 5;
+
+export function tanggaUntuk(jumlah) {
+  if (!Number.isInteger(jumlah) || jumlah <= TANGGA_PLATFORM.length) return TANGGA_PLATFORM;
+  const out = [...TANGGA_PLATFORM];
+  while (out.length < jumlah) out.push(out[out.length - 1] + JARAK_TAMBAHAN_MENIT);
+  return out;
+}
+
+// Panjang minimal sebuah jendela primetime. Diturunkan dari tangga, BUKAN angka
+// terpisah — jendela harus punya ruang untuk platform paling belakang plus
+// sedikit sisa untuk diundi. Dipakai bersama oleh jalur tulis
+// (api/admin/settings/scheduler-config.js) dan jalur baca (getJendela) supaya
+// keduanya mustahil berbeda.
+export function minPanjangJendela(jumlahPlatform = TANGGA_PLATFORM.length) {
+  return Math.max(...tanggaUntuk(jumlahPlatform)) + 10;
+}
+
 export const KUOTA_MAKS = 3;
 const MIN_LEAD_MS = 5 * 60 * 1000; // Buffer/Zernio menolak jadwal < beberapa menit ke depan
 
@@ -82,12 +111,34 @@ const JAM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 // Jendela tersimpan di settings, bisa diedit admin. Bentuk rusak -> default,
 // jangan pernah melempar: ini dipanggil di jalur cron yang tidak ada yang menonton.
+// ⚠️ Format jam saja TIDAK CUKUP. Jalur tulis (scheduler-config.js) menolak
+// jendela yang lebih pendek dari minPanjangJendela() dan yang terbalik, tapi
+// jalur baca ini dulu memakai nilainya apa adanya — jadi nilai yang masuk lewat
+// jalur lain (d1 execute langsung, atau tersimpan sebelum validasi tulis ada)
+// dipakai tanpa perlawanan. Diukur: jendela 23:50-23:59 menghasilkan 00:04 dan
+// 00:09 pada TANGGAL YANG SAMA, yaitu ~24 jam di masa lalu, karena isoWib()
+// melakukan % 24 tanpa menaikkan tanggal. Buffer/Zernio menolaknya sebagai
+// "dueAt must be in the future" — kalau beruntung.
+function jendelaMasukAkal(j) {
+  if (!JAM_RE.test(j?.mulai) || !JAM_RE.test(j?.akhir)) return false;
+  return keMenit(j.akhir) - keMenit(j.mulai) >= minPanjangJendela();
+}
+
 export async function getJendela(env) {
   const raw = await getSetting(env, 'viralframe_jendela');
   if (!raw) return JENDELA_DEFAULT;
   try {
     const v = JSON.parse(raw);
-    if (Array.isArray(v) && v.length > 0 && v.every(j => JAM_RE.test(j?.mulai) && JAM_RE.test(j?.akhir))) return v;
+    if (Array.isArray(v) && v.length > 0 && v.every(jendelaMasukAkal)) return v;
+    // Diam-diam jatuh ke default itu sendiri yang membuat masalah sulit dilacak:
+    // admin melihat jendela tersimpan di UI, tapi jam yang keluar memakai nilai
+    // lain. Catat supaya selisihnya kelihatan.
+    await logServerError(env, {
+      source: 'server',
+      message: '[scheduler] setting viralframe_jendela ditolak saat dibaca (jendela terlalu pendek, terbalik, atau format salah) — memakai JENDELA_DEFAULT',
+      url: '/api/admin/settings/scheduler-config',
+      context: { tersimpan: String(raw).slice(0, 500), min_panjang_menit: minPanjangJendela() },
+    });
   } catch { /* pakai default */ }
   return JENDELA_DEFAULT;
 }
@@ -146,10 +197,14 @@ export function pilihJendela(akunId, tanggalWib_, kuota, jendela = JENDELA_DEFAU
 // yang kebagian geseran +19 menit bisa terlempar KELUAR jendela — terlihat saat
 // uji pertama: jendela Pagi 06:30-08:30 menghasilkan 08:38. Dengan pengurangan
 // ini, platform paling belakang pun tetap mendarat tepat di batas akhir.
-export function menitDasar(akunId, tanggalWib_, indexJendela, jendela) {
+// `tanggaMaks` wajib ikut jumlah platform sebenarnya. Kalau tangganya diperpanjang
+// (>5 platform) tapi pengurangan di sini tetap memakai 19, platform paling
+// belakang terlempar KELUAR jendela — persis bug yang dulu menghasilkan 08:38 di
+// jendela 06:30-08:30. Default-nya dipertahankan supaya pemanggil lama (dan uji
+// yang sudah ada) berperilaku sama persis.
+export function menitDasar(akunId, tanggalWib_, indexJendela, jendela, tanggaMaks = Math.max(...TANGGA_PLATFORM)) {
   const awal = keMenit(jendela.mulai);
   const akhir = keMenit(jendela.akhir);
-  const tanggaMaks = Math.max(...TANGGA_PLATFORM);
   const panjang = Math.max(0, (akhir - awal) - tanggaMaks);
   return awal + Math.floor(seed01(akunId, tanggalWib_, indexJendela) * (panjang + 1));
 }
@@ -164,7 +219,7 @@ const isoWib = (tanggal, totalMenit) => {
 // mode jendela (waktuPerPlatform) dan mode preset (slotPresetHariIni) — supaya
 // logika ladder-nya satu sumber, tidak diduplikasi.
 function terapkanTanggaPlatform(akunId, tanggalWib_, indexSlot, dasarMenit, platforms) {
-  const urut = kocokDeterministik(TANGGA_PLATFORM, akunId, tanggalWib_, indexSlot, 'plat');
+  const urut = kocokDeterministik(tanggaUntuk(platforms.length), akunId, tanggalWib_, indexSlot, 'plat');
   const out = {};
   platforms.forEach((p, i) => {
     out[p] = isoWib(tanggalWib_, dasarMenit + urut[i % urut.length]);
@@ -175,7 +230,7 @@ function terapkanTanggaPlatform(akunId, tanggalWib_, indexSlot, dasarMenit, plat
 // Waktu tayang per platform untuk SATU slot. Urutan tangga dikocok per
 // (akun, tanggal, jendela) — jadi platform mana yang duluan berubah tiap hari.
 export function waktuPerPlatform(akunId, tanggalWib_, jendelaTerpilih, platforms) {
-  const dasar = menitDasar(akunId, tanggalWib_, jendelaTerpilih.index, jendelaTerpilih);
+  const dasar = menitDasar(akunId, tanggalWib_, jendelaTerpilih.index, jendelaTerpilih, Math.max(...tanggaUntuk(platforms.length)));
   return terapkanTanggaPlatform(akunId, tanggalWib_, jendelaTerpilih.index, dasar, platforms);
 }
 

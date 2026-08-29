@@ -16,14 +16,17 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { setSetting } from '../../../_lib/schedulerProviders.js';
-import { TANGGA_PLATFORM, getJendela, getPresetUtama } from '../../../_lib/jadwalOtomatis.js';
+import { minPanjangJendela, getJendela, getPresetUtama } from '../../../_lib/jadwalOtomatis.js';
 
 const JAM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const keMenit = (j) => Number(j.slice(0, 2)) * 60 + Number(j.slice(3));
 
 // Jendela harus lebih panjang dari tangga geseran platform, kalau tidak platform
 // paling belakang tidak punya ruang dan semuanya menumpuk di batas akhir.
-const MIN_PANJANG = Math.max(...TANGGA_PLATFORM) + 10;
+// Ambangnya DITURUNKAN dari tangga di jadwalOtomatis.js, bukan dihitung ulang di
+// sini — jalur baca (getJendela) memakai fungsi yang sama persis, jadi mustahil
+// ada nilai yang lolos disimpan tapi ditolak saat dipakai.
+const MIN_PANJANG = minPanjangJendela();
 
 export async function onRequestGet({ env }) {
   const [jendela, presetUtama] = await Promise.all([getJendela(env), getPresetUtama(env)]);
