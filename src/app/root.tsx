@@ -83,8 +83,28 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const fbVerif = tracking?.facebook_domain_verification ?? null;
 
   // Meta Pixel init + PageView untuk semua pixel aktif yang punya 'PageView'
+  //
+  // ⚠️ BAGIAN PEMUAT fbevents.js SENGAJA DIBUANG dari snippet resmi Meta, dan
+  // JANGAN DIKEMBALIKAN. Aslinya berbunyi:
+  //     t=b.createElement(e);t.async=!0;t.src=v;
+  //     s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)
+  // yaitu menyisipkan <script src=fbevents.js> TEPAT SEBELUM script pertama di
+  // dokumen — dan itu terjadi saat parsing, SEBELUM React hydrate. Di halaman
+  // yang punya JSON-LD, script pertama adalah <script type="application/ld+json">
+  // milik <Meta />, sehingga React menemukan node bertipe null di posisi yang
+  // ia harapkan "application/ld+json":
+  //     Warning: Prop `type` did not match. Server: "null" Client: "application/ld+json"
+  // Akibatnya hydration gagal (#418 ×6-8 lalu #423) dan SELURUH root dirender
+  // ulang di klien — terjadi di /, /properties, /faq, detail properti, dan
+  // /blog/<slug>; halaman tanpa JSON-LD lolos karena script pertamanya berbeda.
+  //
+  // Snippet Meta menganggap halamannya non-SSR, jadi bebas mengobok-obok DOM.
+  // Di sini fbevents.js dirender React sebagai <script async> di bawah, supaya
+  // React TAHU node itu ada. Perilaku pixel tidak berubah: stub fbq() di bawah
+  // ini tetap dieksekusi lebih dulu (inline, sinkron, urutannya lebih awal) dan
+  // meng-antre init+PageView; fbevents.js memproses antrean itu saat termuat.
   const pixelScript = pageViewPixels.length > 0 ? [
-    `!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');`,
+    `!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[]}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');`,
     `window._sbpTracking=${JSON.stringify({ pixels: tracking?.pixels ?? [], ga4_measurement_id: ga4Id })};`,
     ...pageViewPixels.map(p => `fbq('init','${p.pixel_id}');`),
     `fbq('track','PageView');`,
@@ -130,6 +150,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
             Facebook tanpa menjalankan JS sama sekali. */}
         {fbVerif && <meta name="facebook-domain-verification" content={fbVerif} suppressHydrationWarning />}
         {pixelScript && <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: pixelScript }} />}
+        {/* fbevents.js dirender di sini, BUKAN disisipkan sendiri oleh snippet
+            Meta — lihat alasan lengkap di komentar pixelScript di atas. Wajib
+            SESUDAH script stub di atasnya supaya fbq() sudah terdefinisi. */}
+        {pixelScript && <script async src="https://connect.facebook.net/en_US/fbevents.js" />}
         {gtagScript && <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: gtagScript }} />}
         {gtmHeadScript && <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: gtmHeadScript }} />}
         {deferredLoaderScript && <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: deferredLoaderScript }} />}
