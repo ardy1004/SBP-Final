@@ -23,6 +23,14 @@
  * bersih. Kalau suatu saat SEMUA halaman merah, kemungkinan besar yang rusak
  * adalah script ini atau jaringan — bukan aplikasinya.
  *
+ * ⚠️ KENAPA ADA ASERSI POSITIF (2026-08-30): versi pertama penjaga ini hanya
+ * menghitung error, jadi ia LULUS pada halaman yang tidak hydrate SAMA SEKALI —
+ * dibuktikan dengan memblokir bundel aplikasi: nol error, verdik "LULUS", React
+ * tidak pernah jalan. Itu justru kegagalan yang paling mungkin terjadi di sini,
+ * karena CLAUDE.md sendiri mencatat hash manifest server/klien bisa tidak
+ * sinkron kalau build tidak bersih. "Tidak ada error" BUKAN bukti sehat; yang
+ * jadi bukti adalah React benar-benar memasang fiber-nya ke DOM.
+ *
  * Pemakaian:  node scripts/check-hydration.mjs [baseUrl]
  *             default https://salambumi.xyz — bisa diarahkan ke preview.
  */
@@ -116,17 +124,42 @@ for (const h of HALAMAN) {
   try {
     const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
     status = res?.status() ?? 0;
-    await page.waitForTimeout(3000);
+    // 4,5 detik, bukan 3: pemuat gtag/GTM tertunda menyisipkan <script> pada
+    // detik ke-4 (deferredLoaderScript di src/app/root.tsx). Menunggu 3 detik
+    // membuat jalur penyisipan itu berada DI LUAR jendela pengamatan penjaga —
+    // padahal penyisipan node persis itulah yang dulu merusak hydration.
+    await page.waitForTimeout(4500);
   } catch (err) {
     gagal.push(`${h.path}: tidak bisa dibuka — ${err.message.slice(0, 90)}`);
     await ctx.close();
     continue;
   }
 
-  const ok = errs.length === 0 && status === 200;
-  console.log(`  ${ok ? '✓' : '✗'} ${String(h.label).padEnd(22)} HTTP ${status}  error hydration: ${errs.length}`);
+  // Bukti POSITIF: React memasang properti fiber (__reactFiber$… /
+  // __reactProps$…) pada node yang ia kelola. Ada = hydrateRoot benar-benar
+  // berjalan. Tidak ada = halaman cuma HTML statis, dan nol error di atas tidak
+  // berarti apa-apa. Lihat catatan di kepala file.
+  let hydrated = false;
+  try {
+    hydrated = await page.evaluate(() => {
+      const kandidat = [document.documentElement, document.body, ...document.body.children];
+      return kandidat.some(el => el && Object.keys(el).some(k => k.startsWith('__react')));
+    });
+  } catch { /* evaluate gagal -> biarkan false, dilaporkan sebagai tidak hydrate */ }
+
+  const ok = errs.length === 0 && status === 200 && hydrated;
+  console.log(
+    `  ${ok ? '✓' : '✗'} ${String(h.label).padEnd(22)} HTTP ${status}  ` +
+    `hydrate: ${hydrated ? 'ya ' : 'TIDAK'}  error hydration: ${errs.length}`,
+  );
   if (status !== 200) gagal.push(`${h.path}: HTTP ${status} (bukan 200)`);
-  else if (errs.length > 0) {
+  else if (!hydrated) {
+    gagal.push(
+      `${h.path}: React TIDAK PERNAH hydrate (nol error di sini bukan kabar baik) — ` +
+      `curigai bundel klien gagal dimuat atau hash manifest server/klien tidak sinkron; ` +
+      `clean build wajib: Remove-Item -Recurse -Force dist, .react-router && npm run build`,
+    );
+  } else if (errs.length > 0) {
     gagal.push(`${h.path}: ${errs.length} error hydration${h.kontrol ? ' — ini halaman KONTROL, curigai script penjaga/jaringan lebih dulu' : ''}`);
   }
   await ctx.close();

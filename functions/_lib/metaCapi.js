@@ -56,11 +56,36 @@ export function extractMetaIdentity(request, eventSourceUrl = '') {
     // pernah ditulis, padahal URL iklannya utuh. Bentuk `fb.1.<ms>.<fbclid>`
     // sesuai spesifikasi Meta. Aman dipakai: edgeCache membuang param pelacak
     // hanya dari KUNCI cache (objek Request terpisah), bukan dari request asli.
-    if (!out.fbc && eventSourceUrl) {
-      try {
-        const fbclid = new URL(eventSourceUrl).searchParams.get('fbclid');
-        if (fbclid) out.fbc = `fb.1.${Date.now()}.${fbclid}`;
-      } catch { /* eventSourceUrl bukan URL absolut (mis. 'contact') — lewati */ }
+    //
+    // ⚠️ `Referer` WAJIB ikut diperiksa, bukan pelengkap (audit 2026-08-30).
+    // Dengan hanya eventSourceUrl, fallback ini mati di 4 dari 6 pemanggil:
+    //   · ContactPage mengirim source_page 'contact'  -> bukan URL, new URL() melempar
+    //   · chat mengirim 'chat'                        -> idem
+    //   · kedua wa-click.js tidak mengoper apa pun    -> justru event TANPA PII,
+    //     satu-satunya identitasnya memang fbc/fbp/IP/UA
+    // Dan pada leads.js pun source_page sudah dipotong 300 karakter (sanitize),
+    // sedangkan URL detail properti terpanjang saat ini 145 karakter — satu
+    // fbclid modern (~150-180) sudah cukup menembus batas itu dan memotong
+    // ClickID di tengah, menghasilkan fbc yang TIDAK BISA dicocokkan Meta tanpa
+    // error apa pun. Referer datang dari browser, utuh, tak terpotong.
+    //
+    // Sah dipakai: Referrer-Policy situs = strict-origin-when-cross-origin,
+    // yang mengirim URL PENUH untuk request same-origin (form kita sendiri).
+    //
+    // ⚠️ URUTANNYA PENTING: Referer DULU, baru eventSourceUrl. Kalau dibalik,
+    // source_page yang sudah dipotong 300 karakter akan memberi fbclid yang
+    // TERPOTONG — nilai itu truthy, jadi ia menang dan Referer tidak pernah
+    // dibaca; hasilnya fbc rusak yang diterima Meta tanpa error apa pun.
+    // Diukur: URL 145 char + fbclid 140 char = 313 -> 13 karakter ClickID
+    // hilang. Referer datang langsung dari browser dan tidak pernah dipotong.
+    if (!out.fbc) {
+      for (const kandidat of [h.get('Referer'), eventSourceUrl]) {
+        if (!kandidat) continue;
+        try {
+          const fbclid = new URL(kandidat).searchParams.get('fbclid');
+          if (fbclid) { out.fbc = `fb.1.${Date.now()}.${fbclid}`; break; }
+        } catch { /* bukan URL absolut (mis. 'contact') — coba kandidat berikutnya */ }
+      }
     }
   } catch { /* header tidak terbaca -> kirim tanpa identitas, jangan melempar */ }
   return out;
