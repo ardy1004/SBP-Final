@@ -29,10 +29,12 @@ export interface TrackingConfig {
   ga4_measurement_id: string | null;
   gtm_container_id: string | null;
   search_console_verification: string | null;
+  facebook_domain_verification: string | null;
 }
 
 const TRACKING_FALLBACK: TrackingConfig = {
   pixels: [], ga4_measurement_id: null, gtm_container_id: null, search_console_verification: null,
+  facebook_domain_verification: null,
 };
 
 // SSR loader — query DB langsung (tanpa HTTP round-trip ke /api/tracking-config)
@@ -45,7 +47,7 @@ export async function loader({ context }: LoaderFunctionArgs): Promise<TrackingC
 
     const [pixelRes, settingRes] = await Promise.all([
       env.DB.prepare("SELECT pixel_id, events_enabled FROM pixel_configs WHERE is_active = 1 ORDER BY id").all(),
-      env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('ga4_measurement_id','gtm_container_id','search_console_verification')").all(),
+      env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('ga4_measurement_id','gtm_container_id','search_console_verification','facebook_domain_verification')").all(),
     ]);
 
     const pixels = (pixelRes.results ?? []).map((r: Record<string, string>) => ({
@@ -62,6 +64,7 @@ export async function loader({ context }: LoaderFunctionArgs): Promise<TrackingC
       ga4_measurement_id:          sm.ga4_measurement_id          ?? null,
       gtm_container_id:            sm.gtm_container_id            ?? null,
       search_console_verification: sm.search_console_verification ?? null,
+      facebook_domain_verification: sm.facebook_domain_verification ?? null,
     };
   } catch {
     return TRACKING_FALLBACK;
@@ -77,6 +80,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const ga4Id   = tracking?.ga4_measurement_id   ?? null;
   const gtmId   = tracking?.gtm_container_id     ?? null;
   const scVerif = tracking?.search_console_verification ?? null;
+  const fbVerif = tracking?.facebook_domain_verification ?? null;
 
   // Meta Pixel init + PageView untuk semua pixel aktif yang punya 'PageView'
   const pixelScript = pageViewPixels.length > 0 ? [
@@ -120,6 +124,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Meta />
         <Links />
         {scVerif && <meta name="google-site-verification" content={scVerif} suppressHydrationWarning />}
+        {/* Verifikasi domain Meta. WAJIB ada di <head> HTML MENTAH — Meta
+            menolak tag yang disuntikkan JavaScript. Ditempatkan di sini (bukan
+            lewat script) supaya ikut ter-render SSR dan terbaca crawler
+            Facebook tanpa menjalankan JS sama sekali. */}
+        {fbVerif && <meta name="facebook-domain-verification" content={fbVerif} suppressHydrationWarning />}
         {pixelScript && <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: pixelScript }} />}
         {gtagScript && <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: gtagScript }} />}
         {gtmHeadScript && <script suppressHydrationWarning dangerouslySetInnerHTML={{ __html: gtmHeadScript }} />}

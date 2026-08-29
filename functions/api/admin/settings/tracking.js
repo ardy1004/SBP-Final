@@ -1,4 +1,4 @@
-// GET  /api/admin/settings/tracking — baca ga4_measurement_id, ga4_property_id, gtm_container_id, search_console_verification
+// GET  /api/admin/settings/tracking — baca ga4_measurement_id, ga4_property_id, gtm_container_id, search_console_verification, facebook_domain_verification
 // PATCH /api/admin/settings/tracking — simpan / hapus key-key tersebut
 // Auth: dilindungi _middleware.js
 //
@@ -9,7 +9,11 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 
-const TRACKING_KEYS = ['ga4_measurement_id', 'ga4_property_id', 'gtm_container_id', 'search_console_verification'];
+// facebook_domain_verification: nilai content= dari Business Manager →
+// Pengaturan → Domain. WAJIB terbit sebagai <meta> di <head> HTML MENTAH —
+// Meta menolak tag yang disuntikkan JavaScript. Aman di sini karena halaman
+// publik di-SSR (root.tsx), jadi crawler Facebook melihatnya tanpa menjalankan JS.
+const TRACKING_KEYS = ['ga4_measurement_id', 'ga4_property_id', 'gtm_container_id', 'search_console_verification', 'facebook_domain_verification'];
 
 export async function onRequestGet({ env }) {
   try {

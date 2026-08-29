@@ -36,7 +36,7 @@ const STATUS_COLOR: Record<'green' | 'yellow' | 'red', string> = {
 interface AdminUser { sub: number; email: string; nama: string; role: string; }
 interface PasswordForm { password_lama: string; password_baru: string; password_baru_konfirmasi: string; }
 interface PixelConfig { id: number; label: string; pixel_id: string; is_active: number; events_enabled: string; created_at: string; has_capi_token: 0 | 1; }
-interface TrackingSettings { ga4_measurement_id: string; ga4_property_id: string; gtm_container_id: string; search_console_verification: string; }
+interface TrackingSettings { ga4_measurement_id: string; ga4_property_id: string; gtm_container_id: string; search_console_verification: string; facebook_domain_verification: string; }
 interface PixelFormState { mode: 'add' | 'edit'; id?: number; label: string; pixel_id: string; events: string[]; capi_access_token: string; }
 interface Msg { type: 'success' | 'error'; text: string; }
 
@@ -116,7 +116,7 @@ export default function AdminSettingsPage() {
   const [savingPixel, setSavingPixel] = useState(false);
   const [showCapiToken, setShowCapiToken] = useState(false);
 
-  const [tracking, setTracking] = useState<TrackingSettings>({ ga4_measurement_id: '', ga4_property_id: '', gtm_container_id: '', search_console_verification: '' });
+  const [tracking, setTracking] = useState<TrackingSettings>({ ga4_measurement_id: '', ga4_property_id: '', gtm_container_id: '', search_console_verification: '', facebook_domain_verification: '' });
   const [savingTracking, setSavingTracking] = useState(false);
   const [trackingMsg, setTrackingMsg] = useState<Msg | null>(null);
 
@@ -161,6 +161,7 @@ export default function AdminSettingsPage() {
           ga4_property_id:             tRes.data.ga4_property_id             ?? '',
           gtm_container_id:            tRes.data.gtm_container_id            ?? '',
           search_console_verification: tRes.data.search_console_verification ?? '',
+          facebook_domain_verification: tRes.data.facebook_domain_verification ?? '',
         });
       }
     }).catch(console.error).finally(() => setPixelsLoading(false));
@@ -452,6 +453,11 @@ export default function AdminSettingsPage() {
             <h3 className="text-sm font-semibold text-[#0F172A] mb-1">Google Search Console <span className="text-[#94A3B8] font-normal">(opsional)</span></h3>
             <input value={tracking.search_console_verification} onChange={e => setTracking(t => ({ ...t, search_console_verification: e.target.value }))} placeholder="Meta tag content value" className={inputClassNoPR} />
             <p className="text-[10px] text-[#94A3B8] mt-0.5">Search Console → Settings → Ownership verification → HTML tag → copy nilai content="..."</p>
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-[#0F172A] mb-1">Verifikasi Domain Meta <span className="text-[#94A3B8] font-normal">(opsional)</span></h3>
+            <input value={tracking.facebook_domain_verification} onChange={e => setTracking(t => ({ ...t, facebook_domain_verification: e.target.value }))} placeholder="Meta tag content value" className={inputClassNoPR} />
+            <p className="text-[10px] text-[#94A3B8] mt-0.5">Business Manager → Pengaturan → Domain → Tambahkan meta-tag → copy nilai content="..." saja (tanpa tag &lt;meta&gt;). Simpan, tunggu deploy, lalu klik "Verifikasi domain" di Meta.</p>
           </div>
           <MsgBox msg={trackingMsg} />
           <button onClick={handleSaveTracking} disabled={savingTracking} className="w-full bg-[#F97316] hover:bg-[#EA6C00] disabled:opacity-50 text-white rounded-xl py-2.5 text-sm font-semibold transition-colors">

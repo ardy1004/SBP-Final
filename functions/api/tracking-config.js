@@ -5,11 +5,11 @@
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 
 export async function onRequestGet({ env }) {
-  const fallback = { pixels: [], ga4_measurement_id: null, gtm_container_id: null, search_console_verification: null };
+  const fallback = { pixels: [], ga4_measurement_id: null, gtm_container_id: null, search_console_verification: null, facebook_domain_verification: null };
   try {
     const [pixelRes, settingRes] = await Promise.all([
       env.DB.prepare("SELECT pixel_id, events_enabled FROM pixel_configs WHERE is_active = 1 ORDER BY id").all(),
-      env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('ga4_measurement_id','gtm_container_id','search_console_verification')").all(),
+      env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('ga4_measurement_id','gtm_container_id','search_console_verification','facebook_domain_verification')").all(),
     ]);
 
     const pixels = (pixelRes.results ?? []).map(r => ({
@@ -24,6 +24,7 @@ export async function onRequestGet({ env }) {
       ga4_measurement_id:          sm.ga4_measurement_id          ?? null,
       gtm_container_id:            sm.gtm_container_id            ?? null,
       search_console_verification: sm.search_console_verification ?? null,
+      facebook_domain_verification: sm.facebook_domain_verification ?? null,
     });
   } catch (err) {
     console.error('[tracking-config GET]', err.message);
