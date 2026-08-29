@@ -22,6 +22,20 @@ import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai
 import { tanggalWib } from '../../../_lib/waktu.js';
 import { logServerError } from '../../../_lib/logError.js';
 
+// ⚠️ Anggaran wall-clock. Cloudflare membunuh Worker di 30 detik, dan putaran
+// ini MEMANGGIL PROVIDER BERURUTAN: agent utama menjadwalkan 5 video, tiap video
+// fan-out ke 5 platform dengan timeout provider 20 detik masing-masing. Latensi
+// normal memang aman (Buffer 318–1336 ms, Zernio 538–669 ms), tapi timeout
+// Zernio SUDAH benar-benar terjadi di produksi (5 baris "The operation was
+// aborted", 2026-08-24 & 2026-08-28) — jadi ini bukan skenario hipotetis.
+//
+// Dibunuh di tengah = setStatusAgent tidak pernah ditulis dan sebagian video
+// terjadwal tanpa catatan. Berhenti lebih awal jauh lebih aman: kuota dihitung
+// dari slotTerpakaiHariIni, jadi putaran berikutnya melanjutkan tanpa pernah
+// melebihi kuota. Pola sama seperti anggaran 26s di ai-generate.js; di sini
+// lebih ketat karena masih ada setStatusAgent + setSetting di ekor.
+const ANGGARAN_MS = 20000;
+
 // Jam WIB sekarang, dibulatkan ke bawah ke kelipatan 30 menit — dipakai
 // mencocokkan jam_auto agent. Runtime Worker selalu UTC, WIB = UTC+7.
 function slotJamWib(sekarang = Date.now()) {
@@ -35,6 +49,9 @@ export async function onRequestPost({ request, env }) {
   const secret = env.VIRALFRAME_PURGE_SECRET;
   const header = request.headers.get('X-Purge-Secret');
   if (!secret || header !== secret) return jsonError('Forbidden', 403);
+
+  const mulai = Date.now();
+  const anggaranHabis = () => Date.now() - mulai > ANGGARAN_MS;
 
   const dry = new URL(request.url).searchParams.get('dry') === '1';
   const paksaAgent = parseInt(new URL(request.url).searchParams.get('character_id') ?? '', 10);
@@ -51,7 +68,13 @@ export async function onRequestPost({ request, env }) {
   ).bind(Number.isInteger(paksaAgent) && paksaAgent > 0 ? paksaAgent : jamSlot).all().catch(() => null);
 
   const agents = kandidat?.results ?? [];
-  if (agents.length === 0) return jsonOk({ jam_slot: jamSlot, dilewati: 'tidak ada agent pada jam ini' });
+  if (agents.length === 0) {
+    // Tetap tandai cron-nya JALAN. Dulu return ini melewati setSetting di ekor,
+    // jadi 'viralframe_auto_terakhir' tidak bergerak di slot yang kebetulan
+    // tidak ada agentnya — terbaca seolah cron mati padahal sehat.
+    if (!dry) await setSetting(env, 'viralframe_auto_terakhir', new Date().toISOString());
+    return jsonOk({ jam_slot: jamSlot, dilewati: 'tidak ada agent pada jam ini' });
+  }
 
   const { utama } = await getModeAkun(env);
   const [jendela, preset] = await Promise.all([getJendela(env), getPresetUtama(env)]);
@@ -61,9 +84,18 @@ export async function onRequestPost({ request, env }) {
   // DB yang menahan mereka agar tidak memilih jendela yang sama.
   const klaimPerAkun = new Map();
 
+  let terpotong = false;
+
   for (const ag of agents) {
     const hasilAgent = { agent: ag.nama, character_id: ag.id, terjadwal: 0, gagal: 0, detail: [] };
 
+    // Dry-run tidak menyentuh provider sama sekali, jadi tidak perlu dibatasi.
+    if (!dry && anggaranHabis()) {
+      terpotong = true;
+      hasilAgent.alasan = 'anggaran waktu habis — agent ini belum diproses';
+      laporan.push(hasilAgent);
+      continue;
+    }
     if (!dry && ag.auto_aktif !== 1) { hasilAgent.alasan = 'auto agent ini dimatikan'; laporan.push(hasilAgent); continue; }
 
     const akun = await resolveScheduler(env, ag.id);
@@ -98,6 +130,11 @@ export async function onRequestPost({ request, env }) {
     if (videos.length < butuh) hasilAgent.alasan = `stok kurang (${videos.length} dari ${butuh})`;
 
     for (let i = 0; i < videos.length; i++) {
+      if (!dry && anggaranHabis()) {
+        terpotong = true;
+        hasilAgent.detail.push({ video_id: videos[i].id, alasan: 'anggaran waktu habis' });
+        break;
+      }
       // ⚠️ try/catch WAJIB per video. Sebelumnya satu exception (mis. D1 menolak
       // INSERT) naik sampai ke sini dan mematikan SELURUH putaran — agent yang
       // antre di belakang tidak pernah diproses, tanpa jejak (audit 2026-08-29).
@@ -134,7 +171,20 @@ export async function onRequestPost({ request, env }) {
   }
 
   if (!dry) await setSetting(env, 'viralframe_auto_terakhir', new Date().toISOString());
-  return jsonOk({ jam_slot: jamSlot, dry, tanggal: tanggalWib(), laporan });
+
+  // Terpotong = putaran ini TIDAK menyelesaikan rencananya. Bukan error fatal
+  // (sisanya aman diambil putaran berikutnya), tapi kalau sering muncul artinya
+  // provider sedang lambat atau jumlah agent per slot sudah terlalu padat.
+  if (terpotong) {
+    await logServerError(env, {
+      source: 'server',
+      message: `[scheduler] putaran auto-schedule berhenti karena anggaran waktu ${ANGGARAN_MS} ms terlampaui — sebagian agent/video belum diproses`,
+      url: '/api/internal/viralframe/auto-schedule',
+      context: { jam_slot: jamSlot, durasi_ms: Date.now() - mulai, jumlah_agent: agents.length },
+    });
+  }
+
+  return jsonOk({ jam_slot: jamSlot, dry, tanggal: tanggalWib(), durasi_ms: Date.now() - mulai, terpotong, laporan });
 }
 
 async function setStatusAgent(env, characterId, hasil) {
