@@ -1,6 +1,7 @@
 import { bacaJson } from '../../lib/api';
-import { useState } from 'react';
-import { Phone, Mail, MapPin, Clock, MessageCircle, Send, AlertCircle } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Phone, Mail, MapPin, Clock, MessageCircle, Send, AlertCircle, Check } from 'lucide-react';
+import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnstile';
 import { useContactEmail } from './useContactEmail';
 import { pageMeta } from '../../lib/pageMeta';
 import { trackWaClick } from '../../lib/waTrack';
@@ -27,6 +28,13 @@ export default function ContactPage() {
   const [sent, setSent]     = useState(false);
   const [error, setError]   = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // ⚠️ Form ini memanggil /api/leads langsung lewat fetch, bukan postLead —
+  // itulah sebabnya ia terlewat dari sapuan perbaikan 985b0b0 yang menelusuri
+  // pemanggil postLead(. /api/leads sudah fail-closed sejak 11 Juli (b3f9d8c),
+  // jadi tanpa token SETIAP kiriman ditolak 403 selama 49 hari.
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileStatus, setTurnstileStatus] = useState<TurnstileStatus>('memuat');
+  const turnstileRef = useRef<TurnstileHandle>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,6 +43,16 @@ export default function ContactPage() {
     const waDigits = normalizeWA(noWa);
     if (!/^628[0-9]{8,12}$/.test(waDigits)) {
       setError('Nomor WhatsApp tidak valid. Gunakan format 0812xxxx atau +6282xxxx.');
+      return;
+    }
+
+    // Tanpa token, /api/leads pasti membalas 403. Hentikan sebelum jaringan.
+    if (!turnstileToken) {
+      setError(
+        turnstileStatus === 'gagal'
+          ? 'Verifikasi anti-bot gagal dimuat. Klik "Verifikasi ulang" di bawah — bila tetap gagal, matikan penghemat data atau pemblokir iklan, atau pakai tombol WhatsApp di samping.'
+          : 'Verifikasi anti-bot belum selesai. Tunggu beberapa detik hingga bertanda ✓, lalu tekan Kirim lagi.',
+      );
       return;
     }
 
@@ -49,8 +67,19 @@ export default function ContactPage() {
           pesan,
           tipe_pengirim:  'pembeli',
           source_page:    'contact',
+          cf_turnstile_token: turnstileToken,
         }),
       });
+
+      // 403 ditangani TERPISAH sebelum throw generik: token hanya berlaku
+      // ±5 menit, jadi ini kegagalan yang bisa dipulihkan sendiri oleh user —
+      // bukan "Terjadi kesalahan, coba lagi" yang tidak memberi jalan keluar.
+      if (res.status === 403) {
+        setTurnstileToken('');
+        turnstileRef.current?.reset();
+        setError('Verifikasi anti-bot kedaluwarsa. Kami sudah memperbaruinya — tunggu tanda ✓ di bawah, lalu tekan Kirim sekali lagi. Isian Anda tetap aman.');
+        return;
+      }
 
       if (!res.ok) {
         const data = await bacaJson(res).catch(() => ({}));
@@ -160,6 +189,37 @@ export default function ContactPage() {
                       placeholder="Tulis pesan Anda..."
                       className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0] resize-none" />
                   </div>
+                  {/* Anti-bot — statusnya wajib terlihat. Backend fail-closed,
+                      jadi widget yang gagal dimuat berarti setiap kiriman
+                      ditolak 403. Form ini selalu tampil (tanpa `hidden lg:*`),
+                      jadi widget boleh dirender bersama form. */}
+                  <div className="flex flex-col items-center gap-1.5">
+                    <Turnstile
+                      ref={turnstileRef}
+                      onVerify={t => { setTurnstileToken(t); setError(null); }}
+                      onExpire={() => setTurnstileToken('')}
+                      onStatusChange={setTurnstileStatus}
+                    />
+                    {turnstileToken ? (
+                      <span className="text-xs text-[#10B981] font-medium flex items-center gap-1">
+                        <Check size={13} /> Terverifikasi
+                      </span>
+                    ) : turnstileStatus === 'gagal' ? (
+                      <span className="text-xs text-red-600 font-medium flex items-center gap-1">
+                        <AlertCircle size={13} /> Verifikasi gagal dimuat
+                        <button
+                          type="button"
+                          onClick={() => turnstileRef.current?.reset()}
+                          className="font-semibold text-[#1565C0] hover:underline ml-1"
+                        >
+                          Verifikasi ulang
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-[#64748B]">Memverifikasi bahwa Anda bukan robot…</span>
+                    )}
+                  </div>
+
                   <div className="flex gap-3">
                     <button type="submit" disabled={loading}
                       className="flex-1 py-3 rounded-xl font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-60"

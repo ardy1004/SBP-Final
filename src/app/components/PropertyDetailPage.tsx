@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type ComponentType } from 'react';
 import { useParams, Link } from 'react-router';
-import { MapPin, Eye, Calendar, Share2, Heart, BedDouble, Bath, Maximize2, ChevronLeft, ChevronRight, X, MessageCircle, Star, TrendingUp, Clock, BarChart2, Home, Search } from 'lucide-react';
+import { MapPin, Eye, Calendar, Share2, Heart, BedDouble, Bath, Maximize2, ChevronLeft, ChevronRight, X, MessageCircle, Star, TrendingUp, Clock, BarChart2, Home, Search, Check, AlertCircle } from 'lucide-react';
 import useEmblaCarousel from 'embla-carousel-react';
 import {
   getPropertyBySlug, getProperties, normalizeProperty, normalizePropertyDetail,
@@ -28,6 +28,7 @@ function KPRCalculatorClient({ defaultHarga }: { defaultHarga: number }) {
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
 import ContactAdminSheet from './ContactAdminSheet';
+import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnstile';
 
 // Jenis properti yang menghasilkan income sewa — analisis investasi relevan di sini
 const INCOME_TYPES = ['kost', 'hotel', 'homestay', 'villa', 'apartment', 'gudang', 'komersial'];
@@ -99,12 +100,34 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
   const [submitted, setSubmitted] = useState(false);
   const [sending, setSending] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  // ⚠️ Form ini SAMA SEKALI tidak punya Turnstile sampai 29 Agu 2026, padahal
+  // /api/leads sudah fail-closed sejak 11 Juli (b3f9d8c). Commit itu memasang
+  // widget di ChatWidget/ContactAdminSheet/TitipJualPage tapi melewatkan dua
+  // pemanggil /api/leads lainnya — form ini dan ContactPage. Akibatnya SETIAP
+  // kiriman ditolak 403 selama 49 hari, dan karena trackEvent('Lead') ada di
+  // dalam if(res.success), Meta Pixel juga tidak pernah menerima konversi dari
+  // corong utama. Dijaga sekarang oleh scripts/check-turnstile-callers.mjs.
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileStatus, setTurnstileStatus] = useState<TurnstileStatus>('memuat');
+  const turnstileRef = useRef<TurnstileHandle>(null);
 
   const isValid = Boolean(tipe && nama && no_wa.trim() && asal && (tipe !== 'pembeli' || (budget && rencana)));
 
   // K6 KRITIS: POST /api/leads dulu → simpan lead ke DB → baru buka wa_url dari response
   const handleWA = async () => {
     if (!isValid || sending) return;
+
+    // Tanpa token, /api/leads pasti membalas 403. Hentikan di sini dengan
+    // penjelasan, jangan tukar dengan pesan generik setelah menunggu jaringan.
+    if (!turnstileToken) {
+      setApiError(
+        turnstileStatus === 'gagal'
+          ? 'Verifikasi anti-bot gagal dimuat. Klik "Verifikasi ulang" di bawah — bila tetap gagal, matikan penghemat data atau pemblokir iklan lalu coba lagi.'
+          : 'Verifikasi anti-bot belum selesai. Tunggu beberapa detik hingga bertanda ✓, lalu tekan tombol ini lagi.',
+      );
+      return;
+    }
+
     setSending(true);
     setApiError(null);
 
@@ -118,6 +141,7 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
       budget: budget || undefined,
       rencana_pembayaran: RENCANA_MAP[rencana] ?? undefined,
       pesan: pesan || undefined,
+      cf_turnstile_token: turnstileToken || undefined,
     });
 
     setSending(false);
@@ -133,6 +157,13 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
       }, { eventID: res.data.event_id });
       // Gunakan location.href (bukan window.open) agar tidak diblokir in-app browser (Meta Ads, IG)
       window.location.href = res.data.wa_url;
+    } else if (res.status === 403) {
+      // Token Turnstile hanya berlaku ±5 menit. Terbitkan yang baru dan minta
+      // tekan Kirim sekali lagi — JANGAN menyuruh muat ulang halaman, itu
+      // menghapus seluruh isian yang sudah diketik.
+      setTurnstileToken('');
+      turnstileRef.current?.reset();
+      setApiError('Verifikasi anti-bot kedaluwarsa. Kami sudah memperbaruinya — tunggu tanda ✓ di bawah, lalu tekan tombol ini sekali lagi. Isian Anda tetap aman.');
     } else {
       setApiError(res.error ?? 'Gagal menyimpan pesan. Coba lagi.');
     }
@@ -232,6 +263,41 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
             <textarea value={pesan} onChange={e => setPesan(e.target.value)} rows={3}
               placeholder="Tulis pesan Anda..."
               className={`${inputClass} resize-none`} />
+          </div>
+
+          {/* Anti-bot — SENGAJA di dalam blok `tipe &&`, bukan di luar. Wadah
+              form ini `hidden lg:block`, jadi di mobile ia tetap ter-mount walau
+              tak terlihat; merendernya lebih awal akan memuat
+              challenges.cloudflare.com di setiap kunjungan mobile yang formnya
+              mustahil dipakai (membatalkan optimasi "lazy Turnstile" 0604b62)
+              dan bisa memunculkan widget kedua saat bottom sheet dibuka.
+              Karena `tipe` mustahil dipilih pada elemen display:none, gating ini
+              efektif berarti "hanya saat form benar-benar dipakai". */}
+          <div className="flex flex-col items-center gap-1.5 mb-3">
+            <Turnstile
+              ref={turnstileRef}
+              onVerify={t => { setTurnstileToken(t); setApiError(null); }}
+              onExpire={() => setTurnstileToken('')}
+              onStatusChange={setTurnstileStatus}
+            />
+            {turnstileToken ? (
+              <span className="text-xs text-[#10B981] font-medium flex items-center gap-1">
+                <Check size={13} /> Terverifikasi
+              </span>
+            ) : turnstileStatus === 'gagal' ? (
+              <span className="text-xs text-red-600 font-medium flex items-center gap-1">
+                <AlertCircle size={13} /> Verifikasi gagal dimuat
+                <button
+                  type="button"
+                  onClick={() => turnstileRef.current?.reset()}
+                  className="font-semibold text-[#1565C0] hover:underline ml-1"
+                >
+                  Verifikasi ulang
+                </button>
+              </span>
+            ) : (
+              <span className="text-xs text-[#64748B]">Memverifikasi bahwa Anda bukan robot…</span>
+            )}
           </div>
         </>
       )}
