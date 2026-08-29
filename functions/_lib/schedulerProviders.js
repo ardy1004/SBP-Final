@@ -113,6 +113,20 @@ export async function persistScheduleResult(env, { videoId, videoType, trashTabl
 // YouTube mewajibkan categoryId untuk tiap post (lihat YoutubePostMetadataInput).
 const YOUTUBE_DEFAULT_CATEGORY_ID = '22';
 
+// Video ViralFrame selalu vertikal 9:16 dan ≤60 detik, jadi 'reel'. Pilihan lain
+// tidak cocok: 'post' membuat Instagram memotong ke persegi, 'story' hilang
+// setelah 24 jam. Enum lengkap PostType (introspeksi skema Buffer 2026-08-29):
+// carousel|event|ghost_post|offer|post|reel|short|story|thread|whats_new.
+const INSTAGRAM_POST_TYPE = 'reel';
+
+// ⚠️ WAJIB, bukan opsional — `InstagramPostMetadataInput.shouldShareToFeed` bertipe
+// `Boolean!`. Introspeksi biasa TIDAK menampakkannya (pembungkus NON_NULL mudah
+// terlewat kalau hanya membaca `type.name`); ketahuan saat menguji koersi
+// variabel: "Field shouldShareToFeed of required type Boolean! was not provided".
+// true = Reel ikut tampil di grid profil, bukan cuma di tab Reels — yang
+// diinginkan untuk akun pemasaran properti.
+const INSTAGRAM_SHARE_TO_FEED = true;
+
 export async function callBufferCreatePost({ apiKey, channelId, assetUrl, dueAt, caption, platform }) {
   if (!apiKey) return { ok: false, error: 'Buffer API key belum diatur' };
   if (!channelId) return { ok: false, error: 'Buffer channel ID belum diatur' };
@@ -126,6 +140,29 @@ export async function callBufferCreatePost({ apiKey, channelId, assetUrl, dueAt,
       ... on MutationError { message }
     }
   }`;
+  // Metadata WAJIB untuk sebagian platform; Buffer MENOLAK post tanpa itu, dan
+  // penolakannya cuma terlihat di `error_message` baris jadwal — tidak ada gate
+  // yang bisa menangkapnya. Bentuk keduanya diverifikasi lewat introspeksi skema
+  // Buffer (2026-08-29), bukan tebakan.
+  //
+  // ⚠️ Cabang Instagram SEMPAT TIDAK ADA berbulan-bulan tanpa ketahuan: Instagram
+  // milik Monica — satu-satunya agent yang aktif saat itu — ada di ZERNIO, jadi
+  // jalur Buffer→Instagram tidak pernah dijalankan sekali pun. Begitu 7 agent
+  // lain menyala (2026-08-27), ketujuhnya gagal 14/14 dengan pesan
+  // "Instagram posts require a type (post, story, or reel)". Pelajarannya:
+  // provider berbeda per platform per akun berarti sebuah jalur bisa mati total
+  // sementara semua metrik terlihat hijau.
+  const metadata =
+    platform === 'youtube'
+      ? { youtube: { title: (caption || 'Video Properti').slice(0, 95), categoryId: YOUTUBE_DEFAULT_CATEGORY_ID } }
+      : platform === 'instagram'
+        ? { instagram: { type: INSTAGRAM_POST_TYPE, shouldShareToFeed: INSTAGRAM_SHARE_TO_FEED } }
+        : null;
+  // Catatan untuk nanti: `FacebookPostMetadataInput.type` juga WAJIB. Belum
+  // dibuatkan cabang karena Facebook SEMUA agent lewat Zernio, jadi jalur
+  // Buffer→Facebook tidak pernah dipakai. Kalau suatu saat ada agent yang
+  // memindahkan Facebook ke Buffer, ia akan gagal persis seperti Instagram dulu.
+
   const variables = {
     input: {
       channelId,
@@ -134,10 +171,7 @@ export async function callBufferCreatePost({ apiKey, channelId, assetUrl, dueAt,
       dueAt,
       schedulingType: 'automatic',
       mode: 'customScheduled',
-      // YouTube wajib title + categoryId (YoutubePostMetadataInput) — platform lain tidak butuh ini.
-      ...(platform === 'youtube' ? {
-        metadata: { youtube: { title: (caption || 'Video Properti').slice(0, 95), categoryId: YOUTUBE_DEFAULT_CATEGORY_ID } },
-      } : {}),
+      ...(metadata ? { metadata } : {}),
     },
   };
 
