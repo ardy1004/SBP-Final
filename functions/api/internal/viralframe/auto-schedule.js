@@ -18,7 +18,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { getSetting, setSetting } from '../../../_lib/schedulerProviders.js';
 import { resolveScheduler, resolveAkunTarget, getModeAkun } from '../../../_lib/agentAccounts.js';
-import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai, getPresetUtama } from '../../../_lib/jadwalOtomatis.js';
+import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai, getPresetUtama, ulangiPlatformGagal } from '../../../_lib/jadwalOtomatis.js';
 import { tanggalWib } from '../../../_lib/waktu.js';
 import { logServerError } from '../../../_lib/logError.js';
 
@@ -115,19 +115,26 @@ export async function onRequestPost({ request, env }) {
     // dijalankan dua kali, atau bercampur dengan klik manual, tidak pernah
     // melebihi kuota harian.
     const butuh = Math.max(0, kuota - terpakai);
-    if (butuh === 0) { hasilAgent.alasan = 'kuota hari ini sudah penuh'; laporan.push(hasilAgent); continue; }
+    if (butuh === 0) hasilAgent.alasan = 'kuota hari ini sudah penuh';
 
-    // FIFO: video terlama yang diupload lebih dulu. hashtags WAJIB diikutkan —
-    // tanpa ini hashtag tersimpan di DB tapi tidak pernah ikut terkirim ke
-    // Buffer/Zernio (dilaporkan user 2026-08-15, sama seperti jalur manual).
-    const antre = await env.DB.prepare(
-      `SELECT id, cloudinary_url, caption, hashtags FROM viralframe_agent_videos
-       WHERE character_id = ? AND trashed_at IS NULL AND cloudinary_url IS NOT NULL
-       ORDER BY created_at ASC, id ASC LIMIT ?`
-    ).bind(ag.id, butuh).all().catch(() => null);
-    const videos = antre?.results ?? [];
-    if (videos.length === 0) { hasilAgent.alasan = 'stok video habis'; laporan.push(hasilAgent); continue; }
-    if (videos.length < butuh) hasilAgent.alasan = `stok kurang (${videos.length} dari ${butuh})`;
+    // ⚠️ "kuota penuh" dan "stok habis" TIDAK lagi `continue` — keduanya justru
+    // kondisi paling wajar untuk menjalankan ulangi-platform-gagal di bawah.
+    // Dulu keduanya melompati sisa badan loop, jadi jalur pemulihan tidak akan
+    // pernah jalan untuk agent yang stoknya habis.
+    let videos = [];
+    if (butuh > 0) {
+      // FIFO: video terlama yang diupload lebih dulu. hashtags WAJIB diikutkan —
+      // tanpa ini hashtag tersimpan di DB tapi tidak pernah ikut terkirim ke
+      // Buffer/Zernio (dilaporkan user 2026-08-15, sama seperti jalur manual).
+      const antre = await env.DB.prepare(
+        `SELECT id, cloudinary_url, caption, hashtags FROM viralframe_agent_videos
+         WHERE character_id = ? AND trashed_at IS NULL AND cloudinary_url IS NOT NULL
+         ORDER BY created_at ASC, id ASC LIMIT ?`
+      ).bind(ag.id, butuh).all().catch(() => null);
+      videos = antre?.results ?? [];
+      if (videos.length === 0) hasilAgent.alasan = 'stok video habis';
+      else if (videos.length < butuh) hasilAgent.alasan = `stok kurang (${videos.length} dari ${butuh})`;
+    }
 
     for (let i = 0; i < videos.length; i++) {
       if (!dry && anggaranHabis()) {
@@ -160,6 +167,29 @@ export async function onRequestPost({ request, env }) {
           stack: err.stack,
           url: '/api/internal/viralframe/auto-schedule',
           context: { video_id: videos[i].id, character_id: ag.id, akun_id: targetId },
+        });
+      }
+    }
+
+    // Pemulihan dijalankan SETELAH video baru, memakai Set klaim yang sama —
+    // supaya retry tidak pernah merebut jendela yang sudah dipesan video baru
+    // hari itu. Efek sampingnya (baris retry ikut terhitung di
+    // slotTerpakaiHariIni besok) memang diinginkan: total post per hari tetap
+    // terkurung kuota.
+    if (!anggaranHabis()) {
+      try {
+        const ulang = await ulangiPlatformGagal(env, {
+          akun, targetId, akunUtamaId: utama, kuota, jendela, preset, dipakai, dryRun: dry,
+        });
+        if (ulang.diulang > 0 || ulang.dilewati > 0) hasilAgent.ulangi = ulang;
+      } catch (err) {
+        console.error('[auto-schedule] ulangi', ag.id, err.message);
+        await logServerError(env, {
+          source: 'server',
+          message: `[scheduler] error saat mengulang platform gagal untuk agent ${ag.nama}: ${err.message}`,
+          stack: err.stack,
+          url: '/api/internal/viralframe/auto-schedule',
+          context: { character_id: ag.id, akun_id: targetId },
         });
       }
     }

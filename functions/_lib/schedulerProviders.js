@@ -133,7 +133,10 @@ export async function persistScheduleResult(env, { videoId, videoType, trashTabl
   }
 
   const anySuccess = rows.some(r => r.result.ok);
-  if (anySuccess) {
+  // trashTable null = pemanggil sengaja tidak mau memindahkan video ke Sampah.
+  // Dipakai jalur ulangi-platform-gagal: videonya SUDAH di Sampah, dan menulis
+  // ulang trashed_at justru MENGATUR ULANG jam purge 30 harinya.
+  if (anySuccess && trashTable) {
     await env.DB.prepare(`UPDATE ${trashTable} SET trashed_at = datetime('now') WHERE id = ?`).bind(videoId).run().catch(err => {
       console.error('[scheduleFanOut] trash video', err.message);
     });

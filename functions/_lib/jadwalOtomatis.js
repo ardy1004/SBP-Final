@@ -421,6 +421,128 @@ async function catatKegagalanPlatform(env, { rows, videoId, targetId, slot }) {
   });
 }
 
+// ── Ulangi platform yang gagal ───────────────────────────────────────────────
+// persistScheduleResult memindahkan video ke Sampah begitu ADA SATU platform
+// sukses; platform yang gagal tidak punya jalur pemulihan apa pun dan videonya
+// ikut hilang saat purge 30 hari. Terukur 2026-08-29: 22 video punya platform
+// gagal — 15 di Sampah, 7 sudah dipurge, NOL yang masih aktif.
+//
+// ⚠️ INTI KEAMANANNYA: hanya ulangi kegagalan yang TIDAK AMBIGU. Post yang sudah
+// tayang tidak bisa ditarik, jadi salah-ulang jauh lebih mahal daripada tidak
+// mengulang. Data nyata di D1 memisahkan dua kelompok dengan bersih:
+//
+//   "Buffer: Invalid post: …" / "Zernio HTTP 4xx: …"
+//        -> provider MENOLAK secara eksplisit, tidak ada post yang dibuat -> aman
+//   "Gagal menghubungi …: The operation was aborted"
+//        -> timeout/jaringan, TIDAK DIKETAHUI apakah post terlanjur dibuat -> JANGAN
+//   "…already scheduled" (Zernio 409)
+//        -> post-nya justru sudah ada -> JANGAN
+//   "… belum diatur"
+//        -> salah konfigurasi, mengulang tidak menolong -> JANGAN
+//
+// Dibaca dari TEKS error_message, bukan kolom baru — jadi berlaku juga untuk
+// baris lama yang mau dipulihkan, dan tidak perlu migrasi sama sekali.
+const POLA_TIDAK_DIULANG = [
+  /gagal menghubungi/i,
+  /already scheduled/i,
+  /belum diatur/i,
+];
+
+export function bolehDiulang(errorMessage) {
+  const s = String(errorMessage ?? '').trim();
+  if (!s) return false; // tanpa keterangan = tidak tahu apa yang terjadi = jangan
+  return !POLA_TIDAK_DIULANG.some(re => re.test(s));
+}
+
+// Total percobaan per (video, platform), termasuk yang pertama. 2 = boleh sekali
+// diulang, lalu berhenti — cukup memisahkan gangguan sesaat dari kerusakan
+// permanen tanpa membakar kuota API tiap hari.
+const MAKS_PERCOBAAN = 2;
+const UMUR_MAKS_HARI = 14;
+
+export async function ulangiPlatformGagal(env, { akun, targetId, akunUtamaId, kuota, jendela, preset, dipakai, maksVideo = 2, dryRun = false }) {
+  let baris;
+  try {
+    const res = await env.DB.prepare(
+      `SELECT sp.video_id, sp.platform, sp.error_message,
+              v.cloudinary_url, v.caption, v.hashtags,
+              (SELECT COUNT(*) FROM viralframe_scheduled_posts x
+                WHERE x.video_id = sp.video_id AND x.platform = sp.platform) AS percobaan
+         FROM viralframe_scheduled_posts sp
+         JOIN viralframe_agent_videos v ON v.id = sp.video_id
+        WHERE sp.akun_id = ? AND sp.status = 'failed' AND sp.video_type = 'agent'
+          AND julianday('now') - julianday(sp.created_at) < ?
+          AND v.cloudinary_url IS NOT NULL
+          -- ⚠️ WAJIB: kalau (video, platform) itu sudah punya baris 'scheduled',
+          -- berarti sudah pernah berhasil dijadwalkan. Tanpa penyaring ini,
+          -- percobaan yang SUDAH pulih akan dikirim lagi -> post dobel.
+          AND NOT EXISTS (SELECT 1 FROM viralframe_scheduled_posts s2
+                           WHERE s2.video_id = sp.video_id AND s2.platform = sp.platform
+                             AND s2.status = 'scheduled')
+        ORDER BY sp.created_at ASC`
+    ).bind(targetId, UMUR_MAKS_HARI).all();
+    baris = res.results ?? [];
+  } catch (err) {
+    console.error('[ulangiPlatformGagal] query', err.message);
+    return { diulang: 0, dilewati: 0, detail: [] };
+  }
+
+  // Kelompokkan per video, sekaligus dedupe (video, platform) — satu pasangan
+  // bisa punya lebih dari satu baris gagal.
+  const perVideo = new Map();
+  let dilewati = 0;
+  for (const r of baris) {
+    if (!bolehDiulang(r.error_message) || r.percobaan >= MAKS_PERCOBAAN) { dilewati++; continue; }
+    if (!perVideo.has(r.video_id)) {
+      perVideo.set(r.video_id, { video: { id: r.video_id, cloudinary_url: r.cloudinary_url, caption: r.caption, hashtags: r.hashtags }, platforms: new Set() });
+    }
+    perVideo.get(r.video_id).platforms.add(r.platform);
+  }
+
+  const detail = [];
+  let diulang = 0;
+  for (const [videoId, { video, platforms }] of perVideo) {
+    if (diulang >= maksVideo) break;
+
+    // Hanya platform yang channelnya memang masih terkonfigurasi di akun ini.
+    const daftar = [...platforms].filter(p => akun.channels?.[p]?.id);
+    if (daftar.length === 0) { dilewati++; detail.push({ video_id: videoId, alasan: 'channel platform sudah tidak ada di akun' }); continue; }
+
+    const slot = slotTersedia({ akunId: targetId, akunUtamaId, kuota, platforms: daftar, jendela, preset, dipakai })[0];
+    if (!slot) { detail.push({ video_id: videoId, alasan: 'tidak ada jendela kosong tersisa' }); break; }
+    dipakai.add(`${slot.tanggal}|${slot.jendela.index + 1}`);
+
+    if (dryRun) {
+      detail.push({ video_id: videoId, platform: daftar, jendela: slot.jendela.nama, tanggal: slot.tanggal, waktu: slot.waktu });
+      diulang++;
+      continue;
+    }
+
+    const channelsSubset = Object.fromEntries(daftar.map(p => [p, akun.channels[p]]));
+    const { rows } = await scheduleFanOut(env, {
+      assetUrl: video.cloudinary_url,
+      caption: gabungCaptionHashtag(video.caption, video.hashtags),
+      akun: { ...akun, channels: channelsSubset },
+      waktu: slot.waktu, slotIndex: slot.jendela.index + 1,
+    });
+
+    // trashTable null: videonya SUDAH di Sampah, dan menulis ulang trashed_at
+    // justru mengatur ulang jam purge 30 harinya. adaJadwalTertunda() sudah
+    // melindunginya dari purge selama baris 'scheduled' ini masih di depan.
+    await persistScheduleResult(env, {
+      videoId, videoType: 'agent', trashTable: null,
+      slotIndex: slot.jendela.index + 1, rows, akunId: targetId,
+    });
+    await catatKegagalanPlatform(env, { rows, videoId, targetId, slot });
+
+    const sukses = rows.filter(r => r.result.ok).map(r => r.platform);
+    detail.push({ video_id: videoId, platform: daftar, jendela: slot.jendela.nama, tanggal: slot.tanggal, sukses });
+    diulang++;
+  }
+
+  return { diulang, dilewati, detail };
+}
+
 export async function jadwalkanVideo(env, { video, akun, targetId, akunUtamaId, kuota, jendela, preset, dipakai, dryRun = false }) {
   const platforms = Object.keys(akun.channels ?? {});
   if (platforms.length === 0) return { ok: false, alasan: 'akun belum punya channel sosmed' };
