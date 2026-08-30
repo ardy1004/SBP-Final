@@ -35,11 +35,24 @@ const SELECT_COLS = `
   -- punya baris 'scheduled' bukan lagi kegagalan, dan mengulangnya akan membuat
   -- post dobel. Kegagalan TIMEOUT ikut di sini — justru itu yang tidak pernah
   -- diulang otomatis dan karenanya butuh tombol manual.
+  --
+  -- ⚠️ HTTP 409 "already scheduled" BUKAN kegagalan yang bisa dipulihkan — itu
+  -- provider memberi tahu bahwa kontennya SUDAH ADA di sana. Terjadi 2026-08-31
+  -- pada video 185: percobaan pertama timeout, kita catat gagal, padahal Zernio
+  -- sudah menerima dan menjadwalkannya (diverifikasi lewat GET /v1/posts —
+  -- kedua post ada, status 'scheduled'). Tanpa pengecualian ini tombol "Ulangi"
+  -- akan menawarkan diri SELAMANYA pada video yang sebenarnya sehat, dan tiap
+  -- klik menambah dua baris gagal baru. Sejalan dengan POLA_TIDAK_DIULANG di
+  -- jadwalOtomatis.js, yang juga menolak mengulang 'already scheduled'.
   (SELECT GROUP_CONCAT(DISTINCT sp.platform) FROM viralframe_scheduled_posts sp
     WHERE sp.video_id = v.id AND sp.status = 'failed'
+      AND COALESCE(sp.error_message,'') NOT LIKE '%already scheduled%'
       AND NOT EXISTS (SELECT 1 FROM viralframe_scheduled_posts s2
                        WHERE s2.video_id = sp.video_id AND s2.platform = sp.platform
-                         AND s2.status = 'scheduled')) AS platform_gagal
+                         AND s2.status = 'scheduled')
+      AND NOT EXISTS (SELECT 1 FROM viralframe_scheduled_posts s3
+                       WHERE s3.video_id = sp.video_id AND s3.platform = sp.platform
+                         AND COALESCE(s3.error_message,'') LIKE '%already scheduled%')) AS platform_gagal
 `;
 
 // Video lama (sebelum kolom width/height ada) tidak punya dimensi tersimpan.

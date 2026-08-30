@@ -891,9 +891,16 @@ function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo
             {results.map(r => (
               <div key={r.platform} className="flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg bg-gray-50">
                 <span className="font-medium text-[#0F172A]">{platformLabel[r.platform] ?? r.platform}</span>
+                {/* 409 "already scheduled" = provider menolak DUPLIKAT, bukan
+                    gagal. Artinya post-nya sudah ada di sana — biasanya karena
+                    percobaan sebelumnya timeout SESUDAH provider menerimanya.
+                    Menampilkannya sebagai "Gagal" bikin admin mengira ada yang
+                    rusak lalu mengulang terus-menerus (kejadian video 185). */}
                 {r.status === 'scheduled'
                   ? <span className="text-emerald-600 font-semibold">✅ Terjadwal</span>
-                  : <span className="text-red-500 font-semibold" title={r.error ?? ''}>❌ Gagal</span>}
+                  : /already scheduled/i.test(r.error ?? '')
+                    ? <span className="text-emerald-600 font-semibold" title={r.error ?? ''}>✅ Sudah ada di provider</span>
+                    : <span className="text-red-500 font-semibold" title={r.error ?? ''}>❌ Gagal</span>}
               </div>
             ))}
             {results.some(r => r.status === 'failed') && (
