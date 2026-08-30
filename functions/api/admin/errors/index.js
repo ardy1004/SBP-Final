@@ -33,11 +33,30 @@ export async function onRequestGet(context) {
   //
   // Barisnya TIDAK dihapus, hanya bisa disembunyikan — kalau polanya berubah
   // atau menyebar ke browser lain, kita masih harus bisa melihatnya.
+  //
+  // ⚠️ Dicocokkan lewat DUA jalan, dan itu disengaja:
+  //   · `context.in_app` — ditandai klien (browserInApp di entry.client.tsx)
+  //   · `user_agent`     — dibaca server, jadi berlaku juga untuk baris LAMA
+  // Flag saja tidak cukup: baris yang sudah telanjur masuk sebelum penandaan
+  // dipasang tidak akan pernah punya flag, sehingga fitur ini tidak menolong
+  // hari ini juga — diukur 2026-08-31: 15 dari 20 baris belum-ditinjau cocok
+  // lewat UA, NOL lewat flag. UA juga jadi jaring kalau penandaan klien gagal.
+  // ⚠️ COALESCE WAJIB. Tanpa itu, baris ber-`user_agent` NULL (semua error
+  // SERVER, termasuk [scheduler]) membuat ekspresinya bernilai NULL — dan
+  // `NOT NULL` juga NULL, sehingga barisnya terbuang dari KEDUA filter
+  // sekaligus. Diukur saat menulis ini: 20 baris belum-ditinjau berubah jadi
+  // 0 + 2, dan justru dua baris [scheduler] yang mau ditonjolkan malah lenyap.
+  // Jebakan tiga-nilai yang sama dengan aturan TRIM(COALESCE(x,''))='' di
+  // CLAUDE.md — kalau membandingkan kolom nullable, bungkus dulu.
+  const IN_APP = "(COALESCE(context,'') LIKE '%\"in_app\":true%' "
+    + "OR COALESCE(user_agent,'') LIKE '%FBAN%' OR COALESCE(user_agent,'') LIKE '%FBAV%' "
+    + "OR COALESCE(user_agent,'') LIKE '%FB_IAB%' OR COALESCE(user_agent,'') LIKE '%Instagram%')";
+
   const jenis = q.get('jenis');
   if (jenis === 'app') {
-    conditions.push("(context IS NULL OR context NOT LIKE '%\"in_app\":true%')");
+    conditions.push(`NOT ${IN_APP}`);
   } else if (jenis === 'in_app') {
-    conditions.push("context LIKE '%\"in_app\":true%'");
+    conditions.push(IN_APP);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
