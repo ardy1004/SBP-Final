@@ -16,25 +16,39 @@
 // Auth: header X-Purge-Secret == env.VIRALFRAME_PURGE_SECRET
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
-import { getSetting, setSetting } from '../../../_lib/schedulerProviders.js';
+import { getSetting, setSetting, TIMEOUT_POST_MS } from '../../../_lib/schedulerProviders.js';
 import { resolveScheduler, resolveAkunTarget, getModeAkun } from '../../../_lib/agentAccounts.js';
 import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai, getPresetUtama, ulangiPlatformGagal } from '../../../_lib/jadwalOtomatis.js';
 import { tanggalWib } from '../../../_lib/waktu.js';
 import { logServerError } from '../../../_lib/logError.js';
 
-// ⚠️ Anggaran wall-clock. Cloudflare membunuh Worker di 30 detik, dan putaran
-// ini MEMANGGIL PROVIDER BERURUTAN: agent utama menjadwalkan 5 video, tiap video
-// fan-out ke 5 platform dengan timeout provider 20 detik masing-masing. Latensi
-// normal memang aman (Buffer 318–1336 ms, Zernio 538–669 ms), tapi timeout
-// Zernio SUDAH benar-benar terjadi di produksi (5 baris "The operation was
-// aborted", 2026-08-24 & 2026-08-28) — jadi ini bukan skenario hipotetis.
+// ⚠️ Anggaran wall-clock. Cloudflare membunuh Worker di 30 detik. Tiap video
+// fan-out ke semua platform SECARA PARALEL, jadi biaya satu video ≈ platform
+// paling lambat, yaitu TIMEOUT_POST_MS bila ada provider yang menggantung.
+// Timeout Zernio bukan skenario hipotetis: sudah terjadi 2026-08-24, 08-28, dan
+// 08-31.
 //
 // Dibunuh di tengah = setStatusAgent tidak pernah ditulis dan sebagian video
 // terjadwal tanpa catatan. Berhenti lebih awal jauh lebih aman: kuota dihitung
 // dari slotTerpakaiHariIni, jadi putaran berikutnya melanjutkan tanpa pernah
-// melebihi kuota. Pola sama seperti anggaran 26s di ai-generate.js; di sini
-// lebih ketat karena masih ada setStatusAgent + setSetting di ekor.
-const ANGGARAN_MS = 20000;
+// melebihi kuota.
+const ANGGARAN_MS = 24000;
+
+// Sisihkan waktu untuk ekor putaran (setStatusAgent + setSetting + tulis daftar
+// tertunda) sesudah video terakhir selesai.
+const CADANGAN_EKOR_MS = 2000;
+
+// ⚠️ Biaya TERBURUK satu video. Anggaran harus MENCADANGKAN sebanyak ini
+// sebelum memulai video baru — bukan sekadar bertanya "sudah lewat anggaran?".
+//
+// Kenapa: pemeriksaan lama hanya membandingkan waktu berjalan dengan anggaran,
+// sehingga sebuah video boleh DIMULAI di detik ke-19,9 lalu berjalan 20 detik
+// lagi = 39,9 detik → Worker dibunuh di 30 detik, tepat pada bahaya yang
+// diperingatkan di atas. Bahaya itu justru membesar kalau ANGGARAN_MS dinaikkan
+// tanpa pencadangan ini. Dengan cadangan: video baru hanya dimulai bila benar-
+// benar muat sampai selesai (24000 − 10000 − 2000 → mulai paling lambat di
+// detik ke-12, selesai paling lambat detik ke-22, ekor sampai ~24).
+const BIAYA_VIDEO_MS = TIMEOUT_POST_MS + CADANGAN_EKOR_MS;
 
 // Jam WIB sekarang, dibulatkan ke bawah ke kelipatan 30 menit — dipakai
 // mencocokkan jam_auto agent. Runtime Worker selalu UTC, WIB = UTC+7.
@@ -51,7 +65,8 @@ export async function onRequestPost({ request, env }) {
   if (!secret || header !== secret) return jsonError('Forbidden', 403);
 
   const mulai = Date.now();
-  const anggaranHabis = () => Date.now() - mulai > ANGGARAN_MS;
+  // Tidak cukup ruang untuk MENYELESAIKAN satu video lagi — lihat BIAYA_VIDEO_MS.
+  const anggaranHabis = () => Date.now() - mulai > ANGGARAN_MS - BIAYA_VIDEO_MS;
 
   const dry = new URL(request.url).searchParams.get('dry') === '1';
   const paksaAgent = parseInt(new URL(request.url).searchParams.get('character_id') ?? '', 10);
@@ -61,11 +76,24 @@ export async function onRequestPost({ request, env }) {
   if (aktif !== '1' && !dry) return jsonOk({ dilewati: 'saklar auto mati' });
 
   const jamSlot = slotJamWib();
+  const manual = Number.isInteger(paksaAgent) && paksaAgent > 0;
+
+  // Agent yang putarannya TERPOTONG di tick sebelumnya, supaya sisanya diambil
+  // tick berikutnya (cron jalan 8× semalam, tiap 30 menit) alih-alih menunggu
+  // besok. Tanpa ini, putaran Monica yang terpotong 2026-08-31 membuat 4 dari 5
+  // videonya tidak pernah terkirim sama sekali.
+  //
+  // Dibatasi tanggal WIB: daftar dari malam sebelumnya TIDAK boleh bocor ke hari
+  // berikutnya — hari baru punya kuotanya sendiri dan slotnya sendiri.
+  const tertundaLama = manual ? [] : await bacaTertunda(env);
+
   const kandidat = await env.DB.prepare(
     `SELECT c.id, c.nama, a.auto_aktif, a.jam_auto
      FROM viralframe_characters c JOIN viralframe_agent_accounts a ON a.character_id = c.id
-     WHERE ${Number.isInteger(paksaAgent) && paksaAgent > 0 ? 'c.id = ?' : 'a.jam_auto = ?'}`
-  ).bind(Number.isInteger(paksaAgent) && paksaAgent > 0 ? paksaAgent : jamSlot).all().catch(() => null);
+     WHERE ${manual
+       ? 'c.id = ?'
+       : `(a.jam_auto = ?${tertundaLama.length > 0 ? ` OR c.id IN (${tertundaLama.map(() => '?').join(',')})` : ''})`}`
+  ).bind(...(manual ? [paksaAgent] : [jamSlot, ...tertundaLama])).all().catch(() => null);
 
   const agents = kandidat?.results ?? [];
   if (agents.length === 0) {
@@ -85,6 +113,8 @@ export async function onRequestPost({ request, env }) {
   const klaimPerAkun = new Map();
 
   let terpotong = false;
+  // Agent yang belum tuntas di putaran ini; dilanjutkan tick berikutnya.
+  const tertundaBaru = new Set();
 
   for (const ag of agents) {
     const hasilAgent = { agent: ag.nama, character_id: ag.id, terjadwal: 0, gagal: 0, detail: [] };
@@ -92,6 +122,7 @@ export async function onRequestPost({ request, env }) {
     // Dry-run tidak menyentuh provider sama sekali, jadi tidak perlu dibatasi.
     if (!dry && anggaranHabis()) {
       terpotong = true;
+      tertundaBaru.add(ag.id);
       hasilAgent.alasan = 'anggaran waktu habis — agent ini belum diproses';
       laporan.push(hasilAgent);
       continue;
@@ -139,6 +170,7 @@ export async function onRequestPost({ request, env }) {
     for (let i = 0; i < videos.length; i++) {
       if (!dry && anggaranHabis()) {
         terpotong = true;
+        tertundaBaru.add(ag.id);
         hasilAgent.detail.push({ video_id: videos[i].id, alasan: 'anggaran waktu habis' });
         break;
       }
@@ -200,7 +232,14 @@ export async function onRequestPost({ request, env }) {
     laporan.push(hasilAgent);
   }
 
-  if (!dry) await setSetting(env, 'viralframe_auto_terakhir', new Date().toISOString());
+  if (!dry) {
+    await setSetting(env, 'viralframe_auto_terakhir', new Date().toISOString());
+    // Agent yang sudah tuntas dibuang dari daftar; yang terpotong masuk/bertahan.
+    // Aman dijalankan berkali-kali: kuota harian (slotTerpakaiHariIni) membuat
+    // putaran idempoten, jadi agent yang terlanjur penuh cuma akan melaporkan
+    // "kuota hari ini sudah penuh" lalu keluar.
+    if (!manual) await tulisTertunda(env, [...tertundaBaru]);
+  }
 
   // Terpotong = putaran ini TIDAK menyelesaikan rencananya. Bukan error fatal
   // (sisanya aman diambil putaran berikutnya), tapi kalau sering muncul artinya
@@ -215,6 +254,34 @@ export async function onRequestPost({ request, env }) {
   }
 
   return jsonOk({ jam_slot: jamSlot, dry, tanggal: tanggalWib(), durasi_ms: Date.now() - mulai, terpotong, laporan });
+}
+
+// Daftar agent yang putarannya terpotong, disimpan di `settings` supaya tidak
+// perlu migrasi. Bentuk: {"tanggal":"2026-08-31","ids":[20,15]}.
+const KUNCI_TERTUNDA = 'viralframe_auto_tertunda';
+
+/** Kembalikan id agent tertunda, HANYA bila masih tanggal WIB yang sama. */
+async function bacaTertunda(env) {
+  try {
+    const mentah = await getSetting(env, KUNCI_TERTUNDA);
+    if (!mentah) return [];
+    const isi = JSON.parse(mentah);
+    // ⚠️ Nilai lintas hari dibuang: hari baru punya kuota & slotnya sendiri,
+    // dan menyeret daftar kemarin berarti menjadwalkan agent di jam yang bukan
+    // miliknya.
+    if (isi?.tanggal !== tanggalWib()) return [];
+    return Array.isArray(isi.ids) ? isi.ids.filter(n => Number.isInteger(n)).slice(0, 50) : [];
+  } catch {
+    return [];   // setting rusak = anggap tidak ada; jangan jatuhkan putaran
+  }
+}
+
+async function tulisTertunda(env, ids) {
+  try {
+    await setSetting(env, KUNCI_TERTUNDA, JSON.stringify({ tanggal: tanggalWib(), ids }));
+  } catch (err) {
+    console.error('[auto-schedule] simpan tertunda', err.message);
+  }
 }
 
 async function setStatusAgent(env, characterId, hasil) {

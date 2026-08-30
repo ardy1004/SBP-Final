@@ -97,6 +97,9 @@ interface AgentVideo {
   badge_featured: number | null;
   badge_hot: number | null;
   properti_pilihan: number | null;
+  // Platform yang gagal dijadwalkan dan belum punya pengganti aktif, dipisah
+  // koma (GROUP_CONCAT di agent-videos/index.js). null = tidak ada yang gagal.
+  platform_gagal: string | null;
 }
 
 function mediaUrl(key: string) {
@@ -719,10 +722,21 @@ export default function AdminViralFrameAgentVideosPage() {
                         </div>
                       )}
 
-                      {view === 'active' && (
+                      {/* ⚠️ Tombol ulangi WAJIB muncul juga di tab Sampah. Video
+                          yang minimal 1 platformnya sukses otomatis dipindah ke
+                          Sampah oleh persistScheduleResult — jadi justru di
+                          sanalah semua kegagalan platform berada. Syarat
+                          `view === 'active'` saja membuat pemulihan mustahil
+                          dijangkau (kasus video 185, 2026-08-31). */}
+                      {(view === 'active' || v.platform_gagal) && (
                         <button onClick={() => setScheduleTarget(v)}
-                          className="mt-auto flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700">
-                          <Send size={12} /> Jadwalkan ke Sosmed
+                          className={`mt-auto flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white ${
+                            v.platform_gagal ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                          }`}>
+                          <Send size={12} />
+                          {v.platform_gagal
+                            ? `Ulangi ${v.platform_gagal.split(',').length} platform gagal`
+                            : 'Jadwalkan ke Sosmed'}
                         </button>
                       )}
                     </div>
@@ -785,13 +799,23 @@ function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo
   const [errorMsg, setErrorMsg] = useState('');
   const [results, setResults] = useState<{ platform: string; status: 'scheduled' | 'failed'; error: string | null }[]>([]);
 
+  // Mode ULANGI: video ini punya platform yang gagal dan belum tergantikan.
+  // Kegagalan TIMEOUT sengaja tidak pernah diulang otomatis — mesin tidak tahu
+  // apakah post terlanjur dibuat — jadi keputusannya diserahkan ke manusia yang
+  // bisa memeriksa dulu ke Buffer/Zernio.
+  const platformGagal = (video.platform_gagal ?? '').split(',').map(s => s.trim()).filter(Boolean);
+  const modeUlangi = platformGagal.length > 0;
+
   const submit = async () => {
     setErrorMsg('');
     setPhase('submitting');
     try {
       const res = await fetch('/api/admin/viralframe/schedule/commit-agent', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_id: video.id, caption }),
+        body: JSON.stringify({
+          video_id: video.id, caption,
+          ...(modeUlangi ? { platforms: platformGagal } : {}),
+        }),
       });
       const json = await bacaJson<{ results: typeof results; trashed: boolean }>(res);
       if (!json.success || !json.data) throw new Error(json.error ?? 'Gagal menjadwalkan post');
@@ -809,7 +833,7 @@ function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo
     <div className="fixed inset-0 z-[9998] bg-black/40 flex items-center justify-center p-4" onClick={phase === 'form' || phase === 'error' ? onClose : undefined}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-bold text-[#0F172A]">Jadwalkan ke Sosmed</h3>
+          <h3 className="text-sm font-bold text-[#0F172A]">{modeUlangi ? 'Ulangi Platform Gagal' : 'Jadwalkan ke Sosmed'}</h3>
           {phase !== 'submitting' && (
             <button onClick={phase === 'done' ? onScheduled : onClose} className="p-1 rounded-lg hover:bg-gray-100"><X size={16} /></button>
           )}
@@ -817,7 +841,26 @@ function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo
 
         {(phase === 'form' || phase === 'error') && (
           <>
-            <p className="text-xs text-[#64748B] mb-3">Video akan dijadwalkan otomatis ke 5 akun (YT Shorts, TikTok, Threads, FB Pages, Instagram) pada slot jam primetime berikutnya yang masih kosong hari ini.</p>
+            {modeUlangi ? (
+              <>
+                <p className="text-xs text-[#64748B] mb-2">
+                  Mengirim ulang video ini hanya ke platform yang gagal:{' '}
+                  <span className="font-semibold text-[#0F172A]">
+                    {platformGagal.map(p => platformLabel[p] ?? p).join(', ')}
+                  </span>. Platform yang sudah terjadwal tidak disentuh, dan kuota harian tidak terpakai.
+                </p>
+                {/* Peringatan ini WAJIB ada. Kegagalan timeout berarti kita
+                    membatalkan request sebelum provider menjawab — postnya bisa
+                    saja SUDAH dibuat. Itulah alasan tombol ini manual. */}
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 mb-3">
+                  ⚠️ Kalau kegagalannya karena <em>timeout</em>, post bisa jadi sudah terlanjur dibuat.
+                  Periksa dulu di Buffer/Zernio sebelum mengulang — kalau ternyata sudah ada, mengulang
+                  akan membuatnya tayang dua kali.
+                </p>
+              </>
+            ) : (
+              <p className="text-xs text-[#64748B] mb-3">Video akan dijadwalkan otomatis ke 5 akun (YT Shorts, TikTok, Threads, FB Pages, Instagram) pada slot jam primetime berikutnya yang masih kosong hari ini.</p>
+            )}
             <textarea value={caption} onChange={e => setCaption(e.target.value)} rows={3} placeholder="Caption / deskripsi post…"
               className="w-full text-sm px-3 py-2 border border-gray-200 rounded-xl outline-none focus:border-[#1565C0] mb-2" />
             {/* Hashtag tersimpan terpisah dari caption (kolom sendiri di DB) dan
@@ -831,7 +874,7 @@ function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo
             )}
             {errorMsg && <p className="text-xs text-red-600 mb-3">{errorMsg}</p>}
             <button onClick={submit} className="w-full py-2.5 rounded-xl text-sm font-semibold text-white bg-[#1565C0] hover:bg-[#1565C0]/90">
-              Jadwalkan Sekarang
+              {modeUlangi ? `Ulangi ${platformGagal.length} Platform` : 'Jadwalkan Sekarang'}
             </button>
           </>
         )}
@@ -839,7 +882,7 @@ function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo
         {phase === 'submitting' && (
           <div className="py-6 text-center text-sm text-[#64748B]">
             <Loader2 size={20} className="animate-spin mx-auto mb-2" />
-            Menjadwalkan ke 5 akun…
+            {modeUlangi ? `Mengirim ulang ke ${platformGagal.length} platform…` : 'Menjadwalkan ke 5 akun…'}
           </div>
         )}
 
@@ -854,7 +897,11 @@ function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo
               </div>
             ))}
             {results.some(r => r.status === 'failed') && (
-              <p className="text-[11px] text-[#94A3B8] pt-1">Platform yang gagal bisa dicoba ulang manual nanti. Video sudah pindah ke Sampah karena minimal 1 platform sukses.</p>
+              <p className="text-[11px] text-[#94A3B8] pt-1">
+                Platform yang gagal bisa dicoba ulang lewat tombol yang sama — video yang punya
+                platform gagal otomatis membuka mode “Ulangi Platform Gagal”.
+                {!modeUlangi && ' Video sudah pindah ke Sampah karena minimal 1 platform sukses.'}
+              </p>
             )}
             <button onClick={onScheduled} className="w-full mt-2 py-2 rounded-xl text-sm font-semibold text-white bg-[#1565C0] hover:bg-[#1565C0]/90">Selesai</button>
           </div>

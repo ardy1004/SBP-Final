@@ -543,6 +543,63 @@ export async function ulangiPlatformGagal(env, { akun, targetId, akunUtamaId, ku
   return { diulang, dilewati, detail };
 }
 
+/**
+ * Ulangi SATU video ke platform tertentu — jalur MANUAL (tombol admin).
+ *
+ * Kenapa terpisah dari ulangiPlatformGagal(): yang itu otomatis dan sengaja
+ * MENOLAK kegagalan timeout, karena mesin tidak bisa tahu apakah post terlanjur
+ * dibuat. Justru itulah yang membuat facebook+instagram video 185 hilang
+ * permanen (2026-08-31). Yang ini dipicu manusia yang sudah bisa memeriksa
+ * dulu ke Buffer/Zernio, jadi timeout BOLEH diulang di sini.
+ *
+ * Berbeda dari jadwalkanVideo() dalam tiga hal yang disengaja:
+ *   · `trashTable: null` — video retry SUDAH di Sampah, dan menulis ulang
+ *     trashed_at akan MENGATUR ULANG jam purge 30 harinya.
+ *   · tidak memakai kuota harian — ini memulihkan kiriman yang slotnya sudah
+ *     terpakai, bukan menambah konten baru.
+ *   · hanya platform yang diminta, bukan seluruh channel akun.
+ *
+ * Penjaga anti-dobel tetap ada dan justru lebih tepat sasaran: platform yang
+ * SUDAH punya baris 'scheduled' untuk video ini ditolak.
+ */
+export async function ulangiPlatformVideo(env, { video, akun, targetId, akunUtamaId, kuota, jendela, preset, platforms }) {
+  const diminta = [...new Set(platforms)].filter(p => akun.channels?.[p]?.id);
+  if (diminta.length === 0) return { ok: false, alasan: 'platform yang diminta tidak punya channel di akun ini' };
+
+  const sudah = await env.DB.prepare(
+    `SELECT DISTINCT platform FROM viralframe_scheduled_posts
+      WHERE video_id = ? AND status = 'scheduled'`
+  ).bind(video.id).all().catch(() => null);
+  const terlarang = new Set((sudah?.results ?? []).map(r => r.platform));
+  const daftar = diminta.filter(p => !terlarang.has(p));
+  if (daftar.length === 0) {
+    return { ok: false, alasan: 'semua platform yang diminta sudah punya jadwal aktif — mengulang akan membuatnya posting dua kali' };
+  }
+
+  const dipakai = await slotDipakai(env, targetId);
+  const slot = slotTersedia({ akunId: targetId, akunUtamaId, kuota, platforms: daftar, jendela, preset, dipakai })[0];
+  if (!slot) return { ok: false, alasan: 'tidak ada jendela kosong yang tersisa' };
+
+  const channelsSubset = Object.fromEntries(daftar.map(p => [p, akun.channels[p]]));
+  const { rows } = await scheduleFanOut(env, {
+    assetUrl: video.cloudinary_url,
+    caption: gabungCaptionHashtag(video.caption, video.hashtags),
+    akun: { ...akun, channels: channelsSubset },
+    waktu: slot.waktu, slotIndex: slot.jendela.index + 1,
+  });
+
+  await persistScheduleResult(env, {
+    videoId: video.id, videoType: 'agent', trashTable: null,
+    slotIndex: slot.jendela.index + 1, rows, akunId: targetId,
+  });
+  await catatKegagalanPlatform(env, { rows, videoId: video.id, targetId, slot });
+
+  return {
+    ok: true, tanggal: slot.tanggal, jendela: slot.jendela.nama, waktu: slot.waktu, rows,
+    dilewati: diminta.filter(p => terlarang.has(p)),
+  };
+}
+
 export async function jadwalkanVideo(env, { video, akun, targetId, akunUtamaId, kuota, jendela, preset, dipakai, dryRun = false }) {
   const platforms = Object.keys(akun.channels ?? {});
   if (platforms.length === 0) return { ok: false, alasan: 'akun belum punya channel sosmed' };

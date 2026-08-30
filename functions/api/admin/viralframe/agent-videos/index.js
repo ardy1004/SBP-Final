@@ -28,7 +28,18 @@ const SELECT_COLS = `
   v.views, v.likes, v.gaya, v.metrics_updated_at,
   c.nama AS character_nama, c.foto_url AS character_foto_url,
   p.kode_listing, p.title AS property_title,
-  p.status_sold, p.badge_premium, p.badge_featured, p.badge_hot, p.properti_pilihan
+  p.status_sold, p.badge_premium, p.badge_featured, p.badge_hot, p.properti_pilihan,
+  -- Platform yang gagal dan BELUM punya jadwal aktif pengganti. Dipakai tombol
+  -- "Ulangi platform gagal" di Konten Agent. Syarat NOT EXISTS-nya sama persis
+  -- dengan penjaga anti-dobel di ulangiPlatformVideo(): platform yang sudah
+  -- punya baris 'scheduled' bukan lagi kegagalan, dan mengulangnya akan membuat
+  -- post dobel. Kegagalan TIMEOUT ikut di sini — justru itu yang tidak pernah
+  -- diulang otomatis dan karenanya butuh tombol manual.
+  (SELECT GROUP_CONCAT(DISTINCT sp.platform) FROM viralframe_scheduled_posts sp
+    WHERE sp.video_id = v.id AND sp.status = 'failed'
+      AND NOT EXISTS (SELECT 1 FROM viralframe_scheduled_posts s2
+                       WHERE s2.video_id = sp.video_id AND s2.platform = sp.platform
+                         AND s2.status = 'scheduled')) AS platform_gagal
 `;
 
 // Video lama (sebelum kolom width/height ada) tidak punya dimensi tersimpan.

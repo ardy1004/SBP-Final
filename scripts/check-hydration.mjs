@@ -96,6 +96,23 @@ const HALAMAN = [
 
 const RE_HYDRATION = /invariant=41[89]|invariant=42[0-9]|Hydration failed|did not match/i;
 
+// ⚠️ Pola penyisip DOM di HTML KITA SENDIRI. Snippet pihak ketiga (Meta Pixel,
+// analytics, dsb) lazim memakai `getElementsByTagName('script')[0]` +
+// `insertBefore` karena mengasumsikan halaman non-SSR. Di sini itu menaruh node
+// asing di tengah pohon yang dihydrate React → #418 → seluruh root dirender
+// ulang. Persis itulah yang terjadi 17-30 Agustus 2026.
+//
+// ⚠️ BATAS PENJAGA INI — baca sebelum menyimpulkan "aman": ia hanya bisa
+// melihat HTML yang KITA kirim. Injeksi oleh browser pihak ketiga TIDAK
+// terjangkau. Terukur 2026-08-31: in-app browser Facebook/Instagram
+// menyuntikkan JS-nya sendiri dengan pola yang sama, dan produksi yang lolos
+// penjaga ini tetap menghasilkan 10 × #418 begitu disuntik. Lulus di sini
+// berarti "kita tidak menembak kaki sendiri", BUKAN "kebal".
+const POLA_PENYISIP = [
+  { re: /insertBefore/, nama: 'insertBefore' },
+  { re: /getElementsByTagName\(\s*['"]script['"]\s*\)/, nama: "getElementsByTagName('script')" },
+];
+
 console.log('Penjaga hydration halaman publik');
 console.log('='.repeat(58));
 console.log(`Target: ${BASE}\n`);
@@ -166,6 +183,29 @@ for (const h of HALAMAN) {
 }
 
 await browser.close();
+
+// Pemeriksaan STATIS pada HTML terkirim — murah, dan tidak butuh browser.
+// Dijalankan sesudah loop supaya laporannya berkumpul di satu tempat.
+console.log('\nPola penyisip DOM di HTML kita sendiri:');
+for (const h of HALAMAN.slice(0, 3)) {
+  const sep = h.path.includes('?') ? '&' : '?';
+  let html = '';
+  try {
+    html = await (await fetch(`${BASE}${h.path}${sep}_hydcheck=${Date.now()}`)).text();
+  } catch (err) {
+    gagal.push(`${h.path}: gagal mengambil HTML untuk pemeriksaan statis — ${err.message.slice(0, 60)}`);
+    continue;
+  }
+  const ketemu = POLA_PENYISIP.filter(p => p.re.test(html)).map(p => p.nama);
+  console.log(`  ${ketemu.length === 0 ? '✓' : '✗'} ${String(h.label).padEnd(22)} ${ketemu.length === 0 ? 'bersih' : ketemu.join(', ')}`);
+  if (ketemu.length > 0) {
+    gagal.push(
+      `${h.path}: HTML memuat pola penyisip DOM (${ketemu.join(', ')}) — snippet seperti ini ` +
+      `menyisipkan node SEBELUM React hydrate dan merusak pohonnya. Render script eksternal ` +
+      `sebagai elemen React (<script async src=…>), lihat pixelScript di src/app/root.tsx.`,
+    );
+  }
+}
 
 if (gagal.length > 0) {
   console.error(`\nGAGAL — ${gagal.length} halaman bermasalah:\n`);

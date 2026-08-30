@@ -59,6 +59,31 @@ const RE_HIDRASI =
 // Satu mismatch memicu banyak peringatan; cukup laporkan sekali per muat halaman.
 let sudahDilaporkan = false;
 
+/**
+ * In-app browser Facebook/Instagram. Bukan sekadar label kosmetik:
+ *
+ * Browser dalam aplikasi Meta MENYUNTIKKAN JavaScript ke halaman yang dibukanya.
+ * Suntikan itu memakai pola baku `getElementsByTagName('script')[0]` +
+ * `insertBefore`, yang menaruh node asing tepat di depan node yang dikelola
+ * React → pohon bergeser → #418. Terbukti diukur ke produksi 2026-08-31:
+ * tanpa injeksi 0 error, dengan injeksi 10 error. Dari 35 baris #418 saat itu,
+ * 29 berasal dari sini dan 33 datang dari klik iklan (`?fbclid=`).
+ *
+ * ⚠️ Ini DI LUAR KENDALI KITA dan tidak bisa "diperbaiki" — tidak ada cara
+ * bersih membuat <head> yang dihydrate React kebal terhadap injeksi pihak
+ * ketiga. Tandanya dipakai Admin → Errors untuk menyembunyikannya secara
+ * bawaan, supaya error yang BISA kita perbaiki tidak tenggelam. Laporannya
+ * tetap dikirim utuh — disembunyikan, bukan dibuang, supaya kalau suatu saat
+ * polanya berubah atau menyebar ke browser lain kita masih bisa melihatnya.
+ */
+function browserInApp(): boolean {
+  try {
+    return /FBAN|FBAV|FB_IAB|Instagram/i.test(navigator.userAgent);
+  } catch {
+    return false;
+  }
+}
+
 /** Best-effort, sama seperti reportClientError di root.tsx. Kegagalan mengirim
  *  laporan TIDAK BOLEH melahirkan error baru. */
 function laporkanHidrasi(teks: string, stack: string | undefined, jalur: string) {
@@ -76,7 +101,8 @@ function laporkanHidrasi(teks: string, stack: string | undefined, jalur: string)
         url: window.location.href,
         // `jalur` = kanal mana yang menang. Tanpa ini kita tidak akan pernah
         // tahu kanal mana yang sebenarnya bekerja di browser pengunjung.
-        context: { type: 'hydration', jalur },
+        // `in_app` = dipicu injeksi in-app browser Meta, di luar kendali kita.
+        context: { type: 'hydration', jalur, in_app: browserInApp() },
       }),
       keepalive: true,
     }).catch(() => {});

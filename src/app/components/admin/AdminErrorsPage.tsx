@@ -16,6 +16,11 @@ interface ErrorLog {
 
 type FilterSource = 'all' | 'client' | 'server';
 type FilterResolved = 'unresolved' | 'all';
+// 'app' = kebisingan in-app browser DISEMBUNYIKAN. Sengaja jadi nilai BAWAAN:
+// error yang bisa kita perbaiki harus langsung terlihat tanpa perlu ada yang
+// ingat memfilter — itulah yang membuat 2 baris [scheduler] tenggelam di antara
+// 34 baris #418 pada 2026-08-31. Barisnya tidak dihapus, hanya disembunyikan.
+type FilterJenis = 'app' | 'in_app' | 'all';
 
 function relativeTime(dtStr: string): string {
   const diff = Date.now() - new Date(dtStr + 'Z').getTime();
@@ -47,6 +52,7 @@ export default function AdminErrorsPage() {
   const [error, setError] = useState<string | null>(null);
   const [filterSource, setFilterSource] = useState<FilterSource>('all');
   const [filterResolved, setFilterResolved] = useState<FilterResolved>('unresolved');
+  const [filterJenis, setFilterJenis] = useState<FilterJenis>('app');
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
 
@@ -56,11 +62,12 @@ export default function AdminErrorsPage() {
     const params = new URLSearchParams({ limit: '100' });
     if (filterSource !== 'all') params.set('source', filterSource);
     if (filterResolved === 'unresolved') params.set('resolved', '0');
+    if (filterJenis !== 'all') params.set('jenis', filterJenis);
     apiFetch(`/api/admin/errors?${params.toString()}`)
       .then(d => { setItems(d.items ?? []); setTotal(d.total ?? 0); })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }, [filterSource, filterResolved]);
+  }, [filterSource, filterResolved, filterJenis]);
 
   useEffect(() => { fetchErrors(); }, [fetchErrors]);
 
@@ -122,8 +129,22 @@ export default function AdminErrorsPage() {
             <option value="unresolved">Belum ditinjau</option>
             <option value="all">Semua (termasuk resolved)</option>
           </select>
+          <select value={filterJenis} onChange={e => setFilterJenis(e.target.value as FilterJenis)}
+            title="Browser dalam aplikasi Facebook/Instagram menyuntikkan JavaScript yang merusak hydration React. Di luar kendali kita, jadi disembunyikan secara bawaan."
+            className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#1565C0]">
+            <option value="app">Sembunyikan in-app browser</option>
+            <option value="in_app">Hanya in-app browser</option>
+            <option value="all">Semua jenis</option>
+          </select>
         </div>
       </div>
+
+      {filterJenis === 'app' && (
+        <p className="text-xs text-[#94A3B8] -mt-2 mb-4">
+          Error hydration dari in-app browser Facebook/Instagram disembunyikan — penyebabnya injeksi
+          JavaScript milik Meta, di luar kendali kita. Pilih “Hanya in-app browser” untuk melihatnya.
+        </p>
+      )}
 
       {error && (
         <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-600">{error}</div>

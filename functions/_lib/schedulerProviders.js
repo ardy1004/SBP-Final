@@ -17,6 +17,30 @@
 
 import { logServerError } from './logError.js';
 
+/**
+ * Timeout untuk panggilan MEMBUAT POST (Buffer & Zernio).
+ *
+ * ⚠️ Dulu 20000, dan itu PERSIS sebesar anggaran wall-clock putaran cron —
+ * sehingga satu provider yang menggantung menelan seluruh anggaran dan
+ * memotong putaran setelah satu video saja. Terjadi 2026-08-31: video 185
+ * (Monica) kena timeout Zernio di facebook + instagram, `durasi_ms` 20322,
+ * dan Monica akhirnya terjadwal 1 video dari kuota 5 — empat video hilang.
+ *
+ * 10 detik ≈ 8× latensi normal terburuk yang pernah diukur (Buffer 318-1336 ms,
+ * Zernio 538-669 ms), jadi masih sangat longgar untuk jalur yang sehat.
+ *
+ * ⚠️ Konsekuensi yang DISENGAJA: memotong lebih cepat menaikkan peluang kita
+ * membatalkan request yang sebenarnya sudah diproses provider (post tayang tapi
+ * tercatat gagal). Itu sebabnya kegagalan timeout TIDAK PERNAH diulang otomatis
+ * (`bolehDiulang()` di jadwalOtomatis.js) dan pemulihannya lewat tombol manual
+ * di Konten Agent, supaya manusia bisa memeriksa dulu ke Buffer/Zernio.
+ *
+ * Dipakai auto-schedule.js untuk MENCADANGKAN waktu sebelum memulai video baru.
+ * Angka pencarian channel/akun di bawah (15000) SENGAJA tidak ikut diturunkan:
+ * itu jalur interaktif admin, di luar putaran cron, dan memotongnya lebih awal
+ * justru merusak penemuan channel di koneksi lambat.
+ */
+export const TIMEOUT_POST_MS = 10000;
 
 // Helper setting dipakai lintas modul ViralFrame.
 export async function getSetting(env, key) {
@@ -216,7 +240,7 @@ export async function callBufferCreatePost({ apiKey, channelId, assetUrl, dueAt,
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ query, variables }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(TIMEOUT_POST_MS),
     });
   } catch (err) {
     return { ok: false, error: `Gagal menghubungi Buffer: ${err.message}` };
@@ -345,7 +369,7 @@ export async function callZernioCreatePost({ env, apiKey, content, scheduledFor,
         platforms,
         mediaItems: [{ url: mediaUrl, type: 'video' }],
       }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(TIMEOUT_POST_MS),
     });
   } catch (err) {
     return { ok: false, error: `Gagal menghubungi Zernio: ${err.message}` };

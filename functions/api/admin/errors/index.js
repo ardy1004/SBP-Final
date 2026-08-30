@@ -26,6 +26,20 @@ export async function onRequestGet(context) {
     bindings.push(Number(resolved));
   }
 
+  // Kebisingan yang TIDAK bisa kita perbaiki: hydration #418 yang dipicu injeksi
+  // JavaScript oleh in-app browser Facebook/Instagram (lihat browserInApp() di
+  // src/app/entry.client.tsx). Pernah 34 baris masuk dalam 8 jam dan menenggelamkan
+  // 2 baris [scheduler] yang justru menandakan kehilangan 4 video.
+  //
+  // Barisnya TIDAK dihapus, hanya bisa disembunyikan — kalau polanya berubah
+  // atau menyebar ke browser lain, kita masih harus bisa melihatnya.
+  const jenis = q.get('jenis');
+  if (jenis === 'app') {
+    conditions.push("(context IS NULL OR context NOT LIKE '%\"in_app\":true%')");
+  } else if (jenis === 'in_app') {
+    conditions.push("context LIKE '%\"in_app\":true%'");
+  }
+
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   let page = Math.max(1, parseInt(q.get('page') ?? '1', 10) || 1);
