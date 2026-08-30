@@ -75,10 +75,40 @@ export async function onRequestPost(context) {
       await env.DB.prepare(`DELETE FROM viralframe_agent_videos WHERE id IN (${placeholders})`).bind(...deletable).run();
     }
 
+    // Baris jadwal yatim: videonya sudah dihapus purge, tapi barisnya tinggal
+    // selamanya. Diukur 2026-08-31: 720 dari 901 baris (80%) sudah yatim, dan
+    // tabelnya tumbuh tanpa batas karena tidak ada yang pernah membersihkannya.
+    //
+    // Aman dihapus: keempat pembaca tabel ini (slotDipakai, slotTerpakaiHariIni,
+    // adaJadwalTertunda, platform_gagal) hanya peduli baris TERKINI, dan
+    // analytics.js tidak membacanya sama sekali.
+    //
+    // ⚠️ Dua penjaga yang WAJIB dipertahankan:
+    //  · umur > 30 hari — videonya sendiri baru dihapus sesudah 30 hari di
+    //    Sampah, jadi ini menyisakan jejak ~60 hari sebelum benar-benar hilang.
+    //    Jangan perketat tanpa alasan: sekali terhapus, riwayat posting hilang.
+    //  · BUKAN baris yang masih menunggu tayang — kalau sampai terhapus,
+    //    adaJadwalTertunda() buta dan video yang sama bisa dikirim dua kali.
+    let jadwalYatim = 0;
+    try {
+      const r = await env.DB.prepare(
+        `DELETE FROM viralframe_scheduled_posts
+          WHERE video_type = 'agent'
+            AND julianday('now') - julianday(created_at) > 30
+            AND NOT (status = 'scheduled' AND scheduled_at > datetime('now'))
+            AND NOT EXISTS (SELECT 1 FROM viralframe_agent_videos v WHERE v.id = video_id)`
+      ).run();
+      jadwalYatim = r?.meta?.changes ?? 0;
+    } catch (err) {
+      // Non-fatal: kebersihan tabel tidak boleh menjatuhkan purge aset.
+      console.error('[purge-trash] bersihkan jadwal yatim', err.message);
+    }
+
     return jsonOk({
       purged: deletable.length,
       failed: rows.length - deletable.length,
       skipped_pending: skippedPending,
+      jadwal_yatim_dihapus: jadwalYatim,
     });
   } catch (err) {
     console.error('[purge-trash]', err.message);

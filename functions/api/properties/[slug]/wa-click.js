@@ -9,6 +9,31 @@ import { sendCapiEvent, extractMetaIdentity } from '../../../_lib/metaCapi.js';
 import { SQL_TANGGAL_WIB } from '../../../_lib/waktu.js';
 import { extractGeo } from '../../../_lib/geoRequest.js';
 
+// Endpoint PUBLIK tanpa CAPTCHA yang menulis ke `leads` — persis kelas yang
+// sama dengan /api/wa-click, yang sudah lama punya rem ini. Kembarannya terjaga
+// sementara yang ini tidak (audit 2026-08-31): asimetri yang mudah lolos karena
+// keduanya dibaca terpisah.
+//
+// ⚠️ BEDA PENTING dari kembarannya: respons endpoint ini membawa `waUrl` yang
+// dipakai klien untuk membuka WhatsApp. Jadi rem ini HANYA melewati penulisan
+// `leads` — pengunjung tetap sampai ke WhatsApp, dan penghitung tampilan tetap
+// naik. Menolak seluruh request saat throttle berarti menghukum pengunjung asli
+// untuk melindungi tabel.
+const MAX_LEAD_PER_MINUTE = 30;
+
+async function leadQuickWaSemenit(db) {
+  try {
+    const row = await db
+      .prepare(`SELECT COUNT(*) AS cnt FROM leads
+                WHERE tipe_pengirim = 'quick_wa'
+                  AND created_at > datetime('now', '-60 seconds')`)
+      .first();
+    return row?.cnt ?? 0;
+  } catch {
+    return 0; // fail-open: lebih baik kehilangan rem daripada membuang lead asli
+  }
+}
+
 export async function onRequestPost(context) {
   const { env, params, request } = context;
   const slug = params.slug;
@@ -45,6 +70,10 @@ export async function onRequestPost(context) {
 
   const geo = extractGeo(request);
 
+  // Rem hanya untuk baris `leads`. Penghitung tampilan & geo tetap jalan:
+  // keduanya UPSERT/agregat bervolume terikat, bukan jalur pembengkakan tabel.
+  const remLead = (await leadQuickWaSemenit(env.DB)) >= MAX_LEAD_PER_MINUTE;
+
   // Jalankan ketiganya paralel
   const [clickResult, leadResult, geoResult] = await Promise.allSettled([
     env.DB.prepare(`
@@ -53,14 +82,16 @@ export async function onRequestPost(context) {
       ON CONFLICT(property_id, tanggal) DO UPDATE SET wa_clicks = wa_clicks + 1
     `).bind(propertyId).run(),
 
-    env.DB.prepare(`
-      INSERT INTO leads
-        (property_id, nama, no_wa, tipe_pengirim, source_page,
-         wa_clicked_at, status_pipeline, notes, created_at, updated_at)
-      VALUES
-        (?, NULL, NULL, 'quick_wa', ?,
-         CURRENT_TIMESTAMP, 'baru', '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `).bind(propertyId, propUrl).run(),
+    remLead
+      ? Promise.resolve(null)
+      : env.DB.prepare(`
+        INSERT INTO leads
+          (property_id, nama, no_wa, tipe_pengirim, source_page,
+           wa_clicked_at, status_pipeline, notes, created_at, updated_at)
+        VALUES
+          (?, NULL, NULL, 'quick_wa', ?,
+           CURRENT_TIMESTAMP, 'baru', '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `).bind(propertyId, propUrl).run(),
 
     env.DB.prepare(`
       INSERT INTO property_click_geo (property_id, click_type, city, region, country)
@@ -81,8 +112,11 @@ export async function onRequestPost(context) {
   const leadId = leadResult.status === 'fulfilled' ? leadResult.value?.meta?.last_row_id : null;
   const contactEventId = `contact_${leadId ?? 0}_${timestamp}`;
 
-  // CAPI Contact — fire best-effort via waitUntil (tidak blocking response)
-  context.waitUntil((async () => {
+  // CAPI Contact — fire best-effort via waitUntil (tidak blocking response).
+  // Ikut dilewati saat rem menyala: mengirim event Contact untuk lead yang
+  // sengaja tidak dicatat berarti membanjiri Meta dengan konversi palsu dan
+  // MENURUNKAN kualitas pencocokan — persis aset yang sedang kita jaga.
+  if (!remLead) context.waitUntil((async () => {
     try {
       const pixelRes = await env.DB
         .prepare("SELECT pixel_id, capi_access_token, events_enabled FROM pixel_configs WHERE is_active = 1 AND capi_access_token IS NOT NULL AND capi_access_token != ''")
