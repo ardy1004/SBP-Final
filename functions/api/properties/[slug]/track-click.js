@@ -7,6 +7,32 @@
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { extractGeo } from '../../../_lib/geoRequest.js';
 
+// Endpoint PUBLIK tanpa CAPTCHA yang meng-INSERT baris baru tiap panggilan —
+// bukan UPSERT bervolume terikat seperti property_view_daily. Tanpa rem, POST
+// berulang bisa membengkakkan property_click_geo tanpa batas.
+//
+// ⚠️ Ini penulis D1 publik TERAKHIR yang belum punya rem (audit 2026-09-02).
+// Asimetri yang sama sudah ditemukan 31 Agustus pada wa-click properti — sapuan
+// waktu itu melewatkan endpoint ini. Kalau menambah endpoint publik baru yang
+// menulis ke D1, pasang rem-nya sekaligus.
+//
+// 60/menit ≈ 12.000× trafik terukur (137 baris dalam 27 hari) — longgar untuk
+// lonjakan iklan wajar, tapi menutup flood.
+const MAX_CARD_CLICK_PER_MINUTE = 60;
+
+async function cardClickSemenit(db) {
+  try {
+    const row = await db
+      .prepare(`SELECT COUNT(*) AS cnt FROM property_click_geo
+                WHERE click_type = 'card_click'
+                  AND created_at > datetime('now', '-60 seconds')`)
+      .first();
+    return row?.cnt ?? 0;
+  } catch {
+    return 0; // fail-open: lebih baik kehilangan rem daripada membuang data asli
+  }
+}
+
 export async function onRequestPost(context) {
   const { env, params, request } = context;
   const slug = params.slug;
@@ -24,6 +50,13 @@ export async function onRequestPost(context) {
     // pernah dilihat siapa pun, tapi tetap balas 200 supaya tidak ada percobaan
     // retry otomatis browser untuk properti yang memang sudah tidak publish.
     if (!row) return jsonOk({ tercatat: false });
+
+    // Rem hanya melewati INSERT-nya, dan responsnya tetap 200. Pemanggilnya
+    // navigator.sendBeacon (fire-and-forget) — tidak ada yang membaca body ini,
+    // jadi 429 hanya akan memicu perilaku retry browser tanpa manfaat apa pun.
+    if ((await cardClickSemenit(env.DB)) >= MAX_CARD_CLICK_PER_MINUTE) {
+      return jsonOk({ tercatat: false, throttled: true });
+    }
 
     const geo = extractGeo(request);
     await env.DB.prepare(`

@@ -10,6 +10,7 @@ import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { hapusAsetVideo } from '../../../_lib/videoStorage.js';
 import { logServerError } from '../../../_lib/logError.js';
 import { adaJadwalTertunda } from '../../../_lib/schedulerProviders.js';
+import { sqlTanggalWibMinus } from '../../../_lib/waktu.js';
 
 // Batas D1 = 100 bound parameter per query, dan DELETE di bawah memakai
 // `IN (?, ?, ...)` sebanyak jumlah baris. Nilai 200 yang lama membuat cron GAGAL
@@ -87,7 +88,48 @@ async function bersihkanTabel(env) {
     console.error('[purge-trash] retensi error_logs', err.message);
   }
 
-  return { jadwal_yatim_dihapus: jadwalYatim, error_logs_dihapus: errorLogs };
+  // Retensi property_view_daily. Tabel metrik yang tumbuh paling cepat: satu
+  // baris per properti per hari (~104/hari pada 558 properti), tanpa pembersih
+  // sama sekali sampai 2026-09-02 — 8.744 baris menumpuk dalam ~84 hari.
+  //
+  // 180 hari aman dengan margin 6×: SELURUH pembacanya memakai jendela paling
+  // panjang 30 hari (sqlTanggalWibMinus(29) dan `tanggal = SQL_TANGGAL_WIB` di
+  // admin/overview.js), dan tidak ada satu pun agregat seumur hidup. Diverifikasi
+  // dengan menyapu semua rujukan tabel ini di functions/.
+  //
+  // ⚠️ Kolomnya `tanggal` (TEKS 'YYYY-MM-DD' waktu WIB), BUKAN `created_at`.
+  // Bandingkan lewat sqlTanggalWibMinus() — jangan tulis ekspresi tanggal
+  // sendiri: DATE('now','localtime') di D1 menghasilkan UTC, bukan WIB, dan
+  // pergeseran 7 jam itu dulu membuat seluruh metrik "hari ini" meleset.
+  let viewDaily = 0;
+  try {
+    const r = await env.DB.prepare(
+      `DELETE FROM property_view_daily WHERE tanggal < ${sqlTanggalWibMinus(180)}`
+    ).run();
+    viewDaily = r?.meta?.changes ?? 0;
+  } catch (err) {
+    console.error('[purge-trash] retensi property_view_daily', err.message);
+  }
+
+  // Retensi viralframe_caption_history. Dibaca HANYA sebagai 12 baris terakhir
+  // (`ORDER BY created_at DESC LIMIT 12` di viralframe/captions.js) untuk
+  // anti-pengulangan caption, jadi 90 hari sudah sangat berlebih.
+  let caption = 0;
+  try {
+    const r = await env.DB.prepare(
+      `DELETE FROM viralframe_caption_history WHERE created_at < datetime('now', '-90 days')`
+    ).run();
+    caption = r?.meta?.changes ?? 0;
+  } catch (err) {
+    console.error('[purge-trash] retensi caption_history', err.message);
+  }
+
+  return {
+    jadwal_yatim_dihapus: jadwalYatim,
+    error_logs_dihapus: errorLogs,
+    view_daily_dihapus: viewDaily,
+    caption_dihapus: caption,
+  };
 }
 
 export async function onRequestPost(context) {

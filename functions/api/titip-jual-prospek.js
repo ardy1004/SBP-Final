@@ -26,6 +26,7 @@
 
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { normalizeWA, isValidWA } from '../_lib/waUtils.js';
+import { sendCapiEvent, extractMetaIdentity } from '../_lib/metaCapi.js';
 
 // Prospek titip jual volumenya rendah (produksi: < 5/bulan). Cap ini jauh di
 // atas trafik wajar tapi menutup skenario flood ke tabel leads.
@@ -106,7 +107,55 @@ export async function onRequestPost(context) {
         (NULL, ?, ?, ?, 'penjual', ?, ?,
          'baru', '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `).bind(nama, no_wa, asal_daerah, PESAN_BELUM_SELESAI, SOURCE_PAGE).run();
-    return jsonOk({ lead_id: result.meta?.last_row_id ?? null });
+    const leadId = result.meta?.last_row_id ?? null;
+
+    // ─── Meta CAPI: Lead (prospek PENJUAL) ────────────────────────────────
+    // Sampai 2026-09-02 jalur ini tidak melapor apa pun ke Meta, padahal
+    // volumenya ~4× lebih padat daripada submit selesai (8 prospek dalam 2
+    // minggu vs 10 submit dalam 7 minggu). Orang-orang ini SUDAH menyerahkan
+    // nama + no WA, jadi mereka lead yang bisa ditelepon — bukan sekadar
+    // pengunjung yang kabur.
+    //
+    // ⚠️ `Lead`, bukan `CompleteRegistration`. Ini mengikuti semantik Meta dan
+    // memisahkan dua tahap corong yang berbeda:
+    //   · Lead                 = kontak sudah diserahkan (prospek, form belum tuntas)
+    //   · CompleteRegistration = registrasi tuntas (titip-jual.js)
+    // Dibedakan dari lead PEMBELI lewat content_category. Tanpa `value`,
+    // konsisten dengan CompleteRegistration: lead penjual tidak membawa
+    // pendapatan, dan mengisinya dengan harga aset membuat ROAS menyesatkan.
+    //
+    // ⚠️ HANYA di jalur INSERT ini. Dua jalur keluar lain TIDAK boleh
+    // menembakkan event: UPDATE (user bolak-balik Step 1↔2 — orang yang sama)
+    // dan throttled (rem menyala). `event_id` pun hanya dikembalikan di sini,
+    // sehingga browser ikut diam pada kedua jalur itu tanpa perlu mengandalkan
+    // kode status.
+    const prospekEventId = leadId ? `prospek_${leadId}_${Date.now()}` : null;
+    if (prospekEventId) context.waitUntil((async () => {
+      try {
+        const pixelRes = await env.DB
+          .prepare("SELECT pixel_id, capi_access_token, events_enabled FROM pixel_configs WHERE is_active = 1 AND capi_access_token IS NOT NULL AND capi_access_token != ''")
+          .all();
+        const capiPixels = (pixelRes.results ?? []).filter(px => {
+          try { return JSON.parse(px.events_enabled ?? '[]').includes('Lead'); } catch { return false; }
+        });
+        if (capiPixels.length > 0) {
+          await Promise.allSettled(capiPixels.map(px => sendCapiEvent(env, {
+            pixelId:        px.pixel_id,
+            accessToken:    px.capi_access_token,
+            eventName:      'Lead',
+            eventId:        prospekEventId,
+            eventSourceUrl: `${env.APP_URL ?? 'https://salambumi.xyz'}${SOURCE_PAGE}`,
+            userData:       { ph: no_wa },
+            identity:       extractMetaIdentity(request),
+            customData:     { content_category: 'titip_jual_prospek' },
+          })));
+        }
+      } catch (err) {
+        console.error('[titip-jual-prospek] CAPI dispatch error:', err?.message);
+      }
+    })());
+
+    return jsonOk({ lead_id: leadId, event_id: prospekEventId });
   } catch (err) {
     console.error('[titip-jual-prospek] INSERT gagal:', err.message);
     return jsonError('Gagal mencatat prospek', 500);

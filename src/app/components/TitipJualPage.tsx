@@ -239,11 +239,22 @@ async function kirimProspek(form: Step1State): Promise<void> {
         lead_id:   bacaDraft()?.leadId,
       }),
     });
-    const json = await bacaJson<{ lead_id: number | null }>(res);
+    const json = await bacaJson<{ lead_id: number | null; event_id?: string }>(res);
     const id = json.data?.lead_id;
     // Simpan id-nya supaya klik "Lanjut" berikutnya memperbarui baris yang sama,
     // bukan menumpuk prospek duplikat di papan CRM.
     if (typeof id === 'number') simpanDraft({ leadId: id });
+
+    // Meta Pixel — pasangan browser dari CAPI Lead yang dikirim
+    // titip-jual-prospek.js. eventID WAJIB sama supaya Meta mendeduplikasi.
+    //
+    // Digantungkan pada ADANYA event_id: server hanya menyertakannya di jalur
+    // INSERT (prospek baru). Klik "Lanjut" berulang masuk jalur UPDATE dan
+    // respons throttled tidak memuatnya, jadi orang yang sama tidak pernah
+    // terhitung dua kali.
+    if (json.data?.event_id) {
+      trackEvent('Lead', { content_category: 'titip_jual_prospek' }, { eventID: json.data.event_id });
+    }
   } catch {
     /* diam: prospek adalah jaring pengaman, bukan jalur utama */
   }
