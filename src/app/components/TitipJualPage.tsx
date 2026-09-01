@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router';
 import { Check, ChevronRight, Upload, X, AlertCircle } from 'lucide-react';
 import { getLocations, bacaJson, type ApiLocation } from '../../lib/api';
+import { trackEvent } from '../../lib/tracking';
 import { PROPERTY_TYPES } from '../../lib/propertyTypes';
 // Aturan tampil per jenis + opsi dropdown: SATU SUMBER bersama form admin
 // (src/app/components/admin/AdminPropertyDetailPage.tsx). Sebelumnya form ini
@@ -52,6 +53,10 @@ interface ApiResult {
   kode_perjanjian: string;
   photos_uploaded?: number;
   photos_total_sent?: number;
+  // Hanya ada pada respons 201 (submit BARU). Jalur idempoten mengembalikan
+  // objek dari cariSubmitLama() yang tidak memuatnya — itulah yang membuat
+  // submit ulang tidak menembakkan konversi kedua.
+  event_id?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -918,6 +923,20 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
           setApiError(json.error ?? 'Terjadi kesalahan. Silakan coba lagi.');
         }
         return;
+      }
+
+      // Meta Pixel — pasangan browser dari CAPI CompleteRegistration yang
+      // dikirim titip-jual.js. eventID WAJIB sama supaya Meta mendeduplikasi
+      // keduanya; tanpa itu satu konversi terhitung dua kali.
+      //
+      // Digantungkan pada ADANYA event_id, bukan pada kode status: respons
+      // jalur idempoten (submit ulang) tidak memuatnya, jadi percobaan ulang
+      // otomatis tidak menembakkan konversi kedua.
+      if (json.data?.event_id) {
+        trackEvent('CompleteRegistration', {
+          content_ids: [json.data.kode_listing],
+          content_category: 'titip_jual',
+        }, { eventID: json.data.event_id });
       }
 
       // Sudah tersimpan di server — draft lokal tidak lagi diperlukan dan

@@ -304,10 +304,21 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
     else if (hargaMin > 0) humanParts.push(`>${formatRupiah(hargaMin)}`);
     if (tujuan !== 'semua') humanParts.push(tujuan);
 
+    // eventID untuk deduplikasi Pixel↔CAPI.
+    //
+    // ⚠️ INI BELUM MENUTUP PERINGATAN "Search tidak dideduplikasi" di Events
+    // Manager, dan jangan dianggap begitu. Diselidiki 2026-09-01: server KITA
+    // tidak pernah mengirim `Search` sama sekali — hanya ada 4 pemanggil
+    // sendCapiEvent (semuanya Lead/Contact), `git log -S` di functions/ kosong,
+    // tidak ada Zaraz, dan gtm_container_id di D1 kosong. Jadi pengirim
+    // sisi-server yang dilihat Meta datang dari LUAR repo ini (integrasi/partner
+    // di Events Manager, CAPI Gateway, atau situs lain yang memakai pixel yang
+    // sama). Dedup baru bekerja bila pengirim itu ditemukan lalu memakai ID yang
+    // sama. Yang dilakukan di sini: membuat separuh kita benar dan siap.
     trackEvent('Search', {
       search_string: humanParts.join(' ') || key,
       content_category: 'real_estate',
-    });
+    }, { eventID: `search_${Date.now()}_${Math.random().toString(36).slice(2, 10)}` });
   }, [tujuan, selectedJenis, hargaMin, hargaMax, kabupaten, kecamatan, kt, km, lantai, ltMin, lbMin, qKeyword]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Filter handlers ───────────────────────────────────────────────────────

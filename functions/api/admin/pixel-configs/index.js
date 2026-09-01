@@ -3,8 +3,7 @@
 // Auth: dilindungi _middleware.js
 
 import { jsonOk, jsonCreated, jsonError, handleOptions } from '../../_shared/response.js';
-
-const DEFAULT_EVENTS = ['PageView', 'ViewContent', 'Search', 'Contact', 'Lead'];
+import { META_EVENTS as DEFAULT_EVENTS } from '../../../_lib/metaEvents.js';
 
 export async function onRequestGet({ env }) {
   try {

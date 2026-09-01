@@ -8,6 +8,7 @@ import { parseGmapsCoords } from '../_lib/parseGmapsCoords.js';
 import { nextKodeSeq, fmtSeq, isUniqueErr } from '../_lib/kodeSeq.js';
 import { normalisasiHarga } from '../_lib/hargaTanah.js';
 import { logServerError } from '../_lib/logError.js';
+import { sendCapiEvent, extractMetaIdentity } from '../_lib/metaCapi.js';
 
 function sanitize(val, maxLen = 500) {
   if (typeof val !== 'string') return '';
@@ -539,12 +540,62 @@ export async function onRequestPost(context) {
     console.error(`[titip-jual] ${photos_failed}/${photos_raw.length} foto gagal upload untuk property_id=${property_id}`);
   }
 
+  // ─── Meta CAPI: CompleteRegistration (lead PENJUAL) ───────────────────────
+  // Sampai 2026-09-01 jalur ini TIDAK melapor apa pun ke Meta — nol CAPI, nol
+  // Pixel — padahal ia sumber 8 dari 9 lead. Akibatnya Meta tidak pernah
+  // melihat konversi yang benar-benar terjadi, sehingga tidak bisa
+  // mengoptimalkan iklan ke arahnya.
+  //
+  // ⚠️ Event SENGAJA `CompleteRegistration`, BUKAN `Lead`. `Lead` dipakai lead
+  // PEMBELI (form detail properti, kontak, chat); menggabungkan keduanya
+  // membuat algoritma Meta belajar dari audiens campuran dan kedua sisi jadi
+  // lebih buruk. Dikirim TANPA `value`: lead penjual tidak membawa pendapatan,
+  // dan mengisi value dengan harga aset membuat ROAS menyesatkan.
+  //
+  // ⚠️ HANYA di jalur 201 ini. Dua jalur idempoten di atas (`if (lama) return
+  // jsonOk(lama, 200)`) TIDAK boleh menembakkan event — percobaan ulang submit
+  // yang sama bukan konversi kedua.
+  //
+  // `event_id` ikut dikembalikan supaya browser memakai ID yang SAMA
+  // (dedup Pixel↔CAPI, pola yang sama dengan leads.js). Objek dari
+  // cariSubmitLama() tidak memuatnya, jadi submit ulang otomatis tidak
+  // menembak lagi di sisi browser — tanpa perlu mengandalkan kode status.
+  const regEventId = `reg_${agreement_id}_${Date.now()}`;
+  context.waitUntil((async () => {
+    try {
+      const pixelRes = await env.DB
+        .prepare("SELECT pixel_id, capi_access_token, events_enabled FROM pixel_configs WHERE is_active = 1 AND capi_access_token IS NOT NULL AND capi_access_token != ''")
+        .all();
+      const capiPixels = (pixelRes.results ?? []).filter(px => {
+        try { return JSON.parse(px.events_enabled ?? '[]').includes('CompleteRegistration'); } catch { return false; }
+      });
+      if (capiPixels.length > 0) {
+        await Promise.allSettled(capiPixels.map(px => sendCapiEvent(env, {
+          pixelId:        px.pixel_id,
+          accessToken:    px.capi_access_token,
+          eventName:      'CompleteRegistration',
+          eventId:        regEventId,
+          eventSourceUrl: `${env.APP_URL ?? 'https://salambumi.xyz'}/titip-jual`,
+          userData:       no_wa_1 ? { ph: no_wa_1 } : {},
+          // Cukup `request`: extractMetaIdentity membaca Referer LEBIH DULU,
+          // dan form ini same-origin sehingga fbclid terbawa utuh — tidak
+          // lewat sanitize() yang memotong 300 karakter.
+          identity:       extractMetaIdentity(request),
+          customData:     { content_ids: [kode_listing], content_category: 'titip_jual' },
+        })));
+      }
+    } catch (err) {
+      console.error('[titip-jual] CAPI dispatch error:', err?.message);
+    }
+  })());
+
   return jsonOk({
     kode_perjanjian,
     kode_listing,
     property_id,
     owner_id,
     agreement_id,
+    event_id: regEventId,
     photos_uploaded,
     photos_failed,
     // Beri tahu klien agar bisa menampilkan peringatan bila sebagian/seluruh foto gagal

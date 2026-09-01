@@ -4,6 +4,7 @@ import GridLayout, { WidthProvider, type Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { Lock, User, CheckCircle, XCircle, Eye, EyeOff, BarChart2, Plus, Trash2, Edit2, ToggleLeft, ToggleRight, KeyRound, RotateCcw } from 'lucide-react';
+import { META_EVENTS } from '../../../../functions/_lib/metaEvents.js';
 import {
   getAiKeys, saveAiKeys, getAiStatus, type AiProviderId, type AiKeyInfo, type AiStatusInfo, bacaJson,
 } from '../../../lib/api';
@@ -40,7 +41,9 @@ interface TrackingSettings { ga4_measurement_id: string; ga4_property_id: string
 interface PixelFormState { mode: 'add' | 'edit'; id?: number; label: string; pixel_id: string; events: string[]; capi_access_token: string; }
 interface Msg { type: 'success' | 'error'; text: string; }
 
-const ALL_EVENTS = ['PageView', 'ViewContent', 'Search', 'Contact', 'Lead'];
+// Sumber tunggal — jangan tulis ulang daftarnya di sini. Menambah nama event
+// WAJIB disertai migrasi `events_enabled`; alasannya di metaEvents.js.
+const ALL_EVENTS = META_EVENTS;
 
 function MsgBox({ msg }: { msg: Msg | null }) {
   if (!msg) return null;
