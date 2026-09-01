@@ -3,6 +3,7 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+import { sqlInApp } from '../../../_lib/inAppBrowser.js';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -27,30 +28,23 @@ export async function onRequestGet(context) {
   }
 
   // Kebisingan yang TIDAK bisa kita perbaiki: hydration #418 yang dipicu injeksi
-  // JavaScript oleh in-app browser Facebook/Instagram (lihat browserInApp() di
-  // src/app/entry.client.tsx). Pernah 34 baris masuk dalam 8 jam dan menenggelamkan
-  // 2 baris [scheduler] yang justru menandakan kehilangan 4 video.
+  // JavaScript oleh in-app browser Meta (Facebook/Instagram/Threads). Pernah 34
+  // baris masuk dalam 8 jam dan menenggelamkan 2 baris [scheduler] yang justru
+  // menandakan kehilangan 4 video.
   //
   // Barisnya TIDAK dihapus, hanya bisa disembunyikan — kalau polanya berubah
   // atau menyebar ke browser lain, kita masih harus bisa melihatnya.
   //
-  // ⚠️ Dicocokkan lewat DUA jalan, dan itu disengaja:
-  //   · `context.in_app` — ditandai klien (browserInApp di entry.client.tsx)
-  //   · `user_agent`     — dibaca server, jadi berlaku juga untuk baris LAMA
-  // Flag saja tidak cukup: baris yang sudah telanjur masuk sebelum penandaan
-  // dipasang tidak akan pernah punya flag, sehingga fitur ini tidak menolong
-  // hari ini juga — diukur 2026-08-31: 15 dari 20 baris belum-ditinjau cocok
-  // lewat UA, NOL lewat flag. UA juga jadi jaring kalau penandaan klien gagal.
-  // ⚠️ COALESCE WAJIB. Tanpa itu, baris ber-`user_agent` NULL (semua error
-  // SERVER, termasuk [scheduler]) membuat ekspresinya bernilai NULL — dan
-  // `NOT NULL` juga NULL, sehingga barisnya terbuang dari KEDUA filter
-  // sekaligus. Diukur saat menulis ini: 20 baris belum-ditinjau berubah jadi
-  // 0 + 2, dan justru dua baris [scheduler] yang mau ditonjolkan malah lenyap.
-  // Jebakan tiga-nilai yang sama dengan aturan TRIM(COALESCE(x,''))='' di
-  // CLAUDE.md — kalau membandingkan kolom nullable, bungkus dulu.
-  const IN_APP = "(COALESCE(context,'') LIKE '%\"in_app\":true%' "
-    + "OR COALESCE(user_agent,'') LIKE '%FBAN%' OR COALESCE(user_agent,'') LIKE '%FBAV%' "
-    + "OR COALESCE(user_agent,'') LIKE '%FB_IAB%' OR COALESCE(user_agent,'') LIKE '%Instagram%')";
+  // Daftar penanda + alasan COALESCE ada di functions/_lib/inAppBrowser.js,
+  // yang juga dipakai klien. Dulu daftarnya ditulis dua kali dan menyimpang:
+  // Threads lolos filter selama berhari-hari (2026-09-01).
+  const IN_APP = sqlInApp();
+
+  // Penghitung "disembunyikan" dihitung atas kondisi source+resolved SAJA,
+  // tanpa `jenis` — itulah yang membuat lonjakan kebisingan tetap terlihat
+  // walau filternya sedang menyembunyikannya. Snapshot diambil SEBELUM `jenis`
+  // ikut didorong ke `conditions`.
+  const kondisiDasar = [...conditions];
 
   const jenis = q.get('jenis');
   if (jenis === 'app') {
@@ -60,6 +54,7 @@ export async function onRequestGet(context) {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const whereDasar = kondisiDasar.length > 0 ? `WHERE ${kondisiDasar.join(' AND ')}` : '';
 
   let page = Math.max(1, parseInt(q.get('page') ?? '1', 10) || 1);
   let limit = parseInt(q.get('limit') ?? String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT;
@@ -67,19 +62,34 @@ export async function onRequestGet(context) {
   const offset = (page - 1) * limit;
 
   try {
-    const [rows, countRow] = await Promise.all([
+    const [rows, hitung] = await Promise.all([
       env.DB.prepare(`
         SELECT id, source, message, stack, url, user_agent, context, resolved, created_at
         FROM error_logs ${where}
         ORDER BY created_at DESC, id DESC
         LIMIT ? OFFSET ?
       `).bind(...bindings, limit, offset).all(),
-      env.DB.prepare(`SELECT COUNT(*) AS cnt FROM error_logs ${where}`).bind(...bindings).first(),
+      // Agregasi kondisional: satu query menggantikan satu query, jadi
+      // penghitung "disembunyikan" TIDAK menambah round-trip D1.
+      env.DB.prepare(`
+        SELECT SUM(CASE WHEN ${IN_APP} THEN 0 ELSE 1 END) AS n_app,
+               SUM(CASE WHEN ${IN_APP} THEN 1 ELSE 0 END) AS n_in_app
+        FROM error_logs ${whereDasar}
+      `).bind(...bindings).first(),
     ]);
+
+    // SUM() atas NOL baris mengembalikan NULL, bukan 0.
+    const nApp = hitung?.n_app ?? 0;
+    const nInApp = hitung?.n_in_app ?? 0;
 
     return jsonOk({
       items: rows.results ?? [],
-      total: countRow?.cnt ?? 0,
+      total: jenis === 'app' ? nApp : jenis === 'in_app' ? nInApp : nApp + nInApp,
+      // Berapa yang sedang disembunyikan filter. Dikirim selalu, ditampilkan UI
+      // hanya saat jenis=app: tanpa angka ini, lonjakan kebisingan tidak
+      // terlihat sebagai lonjakan — persis yang membuat 44 baris Threads luput
+      // berhari-hari sementara layar tetap menunjukkan angka kecil.
+      tersembunyi: nInApp,
       page, limit,
     });
   } catch (err) {

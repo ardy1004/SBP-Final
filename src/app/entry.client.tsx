@@ -1,6 +1,7 @@
 import { startTransition, StrictMode } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { HydratedRouter } from "react-router/dom";
+import { cocokInApp } from "../../functions/_lib/inAppBrowser.js";
 
 /**
  * Pantau error hidrasi React (#418/#421/#423/#425) secara otomatis.
@@ -60,7 +61,7 @@ const RE_HIDRASI =
 let sudahDilaporkan = false;
 
 /**
- * In-app browser Facebook/Instagram. Bukan sekadar label kosmetik:
+ * In-app browser Meta (Facebook/Instagram/Threads). Bukan sekadar label kosmetik:
  *
  * Browser dalam aplikasi Meta MENYUNTIKKAN JavaScript ke halaman yang dibukanya.
  * Suntikan itu memakai pola baku `getElementsByTagName('script')[0]` +
@@ -75,10 +76,15 @@ let sudahDilaporkan = false;
  * bawaan, supaya error yang BISA kita perbaiki tidak tenggelam. Laporannya
  * tetap dikirim utuh — disembunyikan, bukan dibuang, supaya kalau suatu saat
  * polanya berubah atau menyebar ke browser lain kita masih bisa melihatnya.
+ *
+ * Daftar penandanya sengaja TIDAK ditulis di sini: ia dipakai juga oleh filter
+ * SQL di functions/api/admin/errors/index.js, dan versi duplikatnya sudah
+ * pernah menyimpang (Threads lolos selama berhari-hari, 2026-09-01). Satu
+ * sumber di functions/_lib/inAppBrowser.js.
  */
 function browserInApp(): boolean {
   try {
-    return /FBAN|FBAV|FB_IAB|Instagram/i.test(navigator.userAgent);
+    return cocokInApp(navigator.userAgent);
   } catch {
     return false;
   }

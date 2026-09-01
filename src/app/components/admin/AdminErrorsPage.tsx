@@ -48,6 +48,7 @@ async function apiFetch(path: string, opts?: RequestInit) {
 export default function AdminErrorsPage() {
   const [items, setItems] = useState<ErrorLog[]>([]);
   const [total, setTotal] = useState(0);
+  const [tersembunyi, setTersembunyi] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filterSource, setFilterSource] = useState<FilterSource>('all');
@@ -64,7 +65,7 @@ export default function AdminErrorsPage() {
     if (filterResolved === 'unresolved') params.set('resolved', '0');
     if (filterJenis !== 'all') params.set('jenis', filterJenis);
     apiFetch(`/api/admin/errors?${params.toString()}`)
-      .then(d => { setItems(d.items ?? []); setTotal(d.total ?? 0); })
+      .then(d => { setItems(d.items ?? []); setTotal(d.total ?? 0); setTersembunyi(d.tersembunyi ?? 0); })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [filterSource, filterResolved, filterJenis]);
@@ -114,7 +115,15 @@ export default function AdminErrorsPage() {
             <AlertTriangle size={20} className="text-[#EF4444]" />
             Error Logs
           </h1>
-          <p className="text-sm text-[#64748B] mt-0.5">{total} error {filterResolved === 'unresolved' ? 'belum ditinjau' : 'tercatat'}</p>
+          <p className="text-sm text-[#64748B] mt-0.5">
+            {total} error {filterResolved === 'unresolved' ? 'belum ditinjau' : 'tercatat'}
+            {/* Tanpa angka ini, kebisingan yang disembunyikan tidak terlihat
+                sebagai lonjakan — persis yang membuat 44 baris Threads luput
+                berhari-hari sementara layar tetap menunjukkan angka kecil. */}
+            {filterJenis === 'app' && tersembunyi > 0 && (
+              <span className="text-[#94A3B8]"> · {tersembunyi} disembunyikan sebagai in-app</span>
+            )}
+          </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
