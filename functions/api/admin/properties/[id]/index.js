@@ -376,6 +376,21 @@ export async function onRequestDelete(context) {
     const r2Keys = await collectPropertyR2Keys(env.DB, [id]);
     await deleteR2Keys(env.MEDIA, r2Keys);
 
+    // ⚠️ `owners` memakai ON DELETE SET NULL (bukan CASCADE seperti
+    // property_images & agreements), jadi tanpa baris ini penghapusan properti
+    // meninggalkan baris pemilik berisi NIK TERENKRIPSI + nama + alamat KTP +
+    // no WA, selamanya. Diukur 2026-09-02: 14 baris yatim sudah menumpuk sejak
+    // 10 Agustus, semuanya ber-NIK, tidak terjangkau halaman mana pun — tapi
+    // ikut terhitung di `SELECT COUNT(*) FROM owners` pada dashboard Overview.
+    //
+    // Diperbaiki di sisi APLIKASI, bukan dengan mengubah FK: SQLite tidak punya
+    // ALTER untuk itu, dan pola RENAME→CREATE→DROP yang diperlukan adalah pola
+    // yang nyaris menghapus data di migrasi 0022.
+    //
+    // WAJIB dijalankan SEBELUM DELETE properties — sesudahnya property_id sudah
+    // di-NULL-kan dan baris pemiliknya tidak bisa ditemukan lagi.
+    await env.DB.prepare('DELETE FROM owners WHERE property_id = ?').bind(id).run();
+
     await env.DB.prepare('DELETE FROM properties WHERE id = ?').bind(id).run();
     return jsonOk({ success: true });
   } catch (err) {

@@ -79,7 +79,23 @@ const BUDGET_SSR_MAIN_CHUNK = 560_000;    // 503.003 +11% — headroom nyata, bu
 // ikut ter-bundle ke Functions lewat SSR, bukan dari kode backend baru.
 // Metrik yang benar-benar berbahaya tidak bergerak: gzip 1,20 MB = 12% dari
 // batas skrip Cloudflare yang sesungguhnya (10 MB).
-const BUDGET_FUNCTIONS_RAW  = 6_150_000;  // 6.050.325 + headroom untuk Tahap 3-4 perbaikan Titip Jual
+// Naik 6.150.000 → 6.200.000 pada 2026-09-02, disetujui user. Pemicunya: CAPI
+// Titip Jual (CompleteRegistration) menyisakan hanya 839 B, sementara perbaikan
+// berikutnya — mencatat kegagalan CAPI ke error_logs — justru menutup titik buta
+// yang KELASNYA sudah pernah memakan korban (Instagram gagal 14/14 berhari-hari
+// tanpa ketahuan karena scheduler tidak memakai logServerError).
+//
+// Kenapa aman menaikkannya, bukan sekadar "menyerah pada ratchet":
+//  · Yang dijaga angka MENTAH ini sebenarnya CPU startup, bukan ruang. Sejak
+//    akun di Workers Paid (2026-08-01) batas CPU naik 10 ms → 30 detik, jadi
+//    kekhawatiran aslinya jauh berkurang.
+//  · Batas platform yang SESUNGGUHNYA diukur pada ukuran ter-gzip: 1,29 MB dari
+//    10 MB = 13%. Masih sangat lapang.
+//  · Penjaga yang benar-benar mengukur permukaan eager (Assertion A) TIDAK
+//    disentuh dan tetap 8 paket. Itulah yang menjaga startup, bukan angka ini.
+// Ratchet tetap berlaku untuk pertumbuhan berikutnya: pangkas dulu, menaikkan
+// angka ini tetap keputusan user.
+const BUDGET_FUNCTIONS_RAW  = 6_200_000;  // 6.149.161 (2026-09-02) + ruang ~51 KB
 const BUDGET_FUNCTIONS_GZIP = 8_000_000;  // jauh di bawah batas 10 MB; alarm jaring pengaman saja
 
 /**

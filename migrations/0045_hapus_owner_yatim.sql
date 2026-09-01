@@ -1,0 +1,23 @@
+-- 0045: hapus baris `owners` yatim (property_id NULL).
+--
+-- ASALNYA: FK owners.property_id memakai ON DELETE SET NULL, bukan CASCADE
+-- seperti property_images & agreements. Jadi setiap penghapusan properti
+-- meninggalkan baris pemilik berisi NIK TERENKRIPSI + nama + alamat KTP + no WA
+-- yang tidak terjangkau halaman mana pun — data pribadi yang disimpan tanpa
+-- tujuan. Diukur 2026-09-02: 14 baris, semuanya ber-NIK, tertua 10 Agustus.
+-- Baris-baris itu juga ikut terhitung `SELECT COUNT(*) FROM owners` di
+-- admin/overview.js, sehingga angka "pemilik" di dashboard kelebihan 14.
+--
+-- AMAN: kedua endpoint penghapusan properti (properties/[id]/index.js dan
+-- properties/bulk.js) MENOLAK properti yang punya perjanjian berstatus 'signed'.
+-- Jadi baris yatim mustahil berasal dari perjanjian yang mengikat — tidak ada
+-- bukti tanda tangan (UU ITE) yang hilang di sini.
+--
+-- SUMBERNYA sudah ditutup di sisi aplikasi pada commit yang sama: kedua endpoint
+-- kini menghapus baris owner SEBELUM DELETE properties. FK-nya sengaja TIDAK
+-- diubah jadi CASCADE — SQLite tidak punya ALTER untuk itu, dan pola
+-- RENAME→CREATE→DROP yang diperlukan adalah pola yang nyaris menghapus data di
+-- migrasi 0022.
+--
+-- Idempoten: dijalankan ulang tidak melakukan apa-apa.
+DELETE FROM owners WHERE property_id IS NULL;

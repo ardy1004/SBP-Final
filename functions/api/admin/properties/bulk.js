@@ -120,6 +120,14 @@ export async function onRequestPost(context) {
     const r2Keys = await collectPropertyR2Keys(env.DB, numericIds);
     await deleteR2Keys(env.MEDIA, r2Keys);
 
+    // ⚠️ `owners` = ON DELETE SET NULL, bukan CASCADE. Tanpa baris ini setiap
+    // penghapusan meninggalkan pemilik ber-NIK terenkripsi selamanya; alasan
+    // lengkapnya di properties/[id]/index.js. WAJIB sebelum DELETE properties.
+    // Aman terhadap batas 100 bound parameter D1: MAX_IDS di atas sudah 100.
+    await env.DB.prepare(
+      `DELETE FROM owners WHERE property_id IN (${placeholders})`
+    ).bind(...numericIds).run();
+
     const result = await env.DB.prepare(
       `DELETE FROM properties WHERE id IN (${placeholders})`
     ).bind(...numericIds).run();

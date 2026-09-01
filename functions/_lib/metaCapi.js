@@ -1,6 +1,18 @@
 // Meta Conversions API (CAPI) helper — server-side event sending
-// Digunakan oleh wa-click.js (Contact) dan leads.js (Lead).
+// Digunakan oleh wa-click.js (Contact), leads.js/createLead.js (Lead) dan
+// titip-jual.js (CompleteRegistration).
 // PII harus di-hash SHA-256 sebelum dikirim ke Meta.
+//
+// ⚠️ JANGAN PERNAH mengirim payload yang sengaja dirusak ke pixel PRODUKSI untuk
+// "menguji tanpa efek samping". Meta menolak payload cacat DAN TETAP MENCATATNYA
+// di diagnostik Events Manager — sebuah probe tanpa `event_name` pada 1 Sep 2026
+// memunculkan kartu "Prioritas tinggi" `s2s_missing_event_name` yang bertahan 7
+// hari. Ini BERBEDA dari Buffer/Zernio, yang menolak di tahap validasi tanpa
+// meninggalkan jejak (teknik itu memang sah di sana — lihat CLAUDE.md). Untuk
+// Meta, jalur yang benar adalah `test_event_code`: event masuk panel Uji
+// Peristiwa dan tidak menyentuh pelaporan.
+
+import { logServerError } from './logError.js';
 
 /** Normalisasi nomor WA ke format E.164 Indonesia (62xxx) */
 function normalizePhone(raw) {
@@ -118,7 +130,7 @@ async function hashUserData(rawData) {
  * Kirim 1 event ke Meta Conversions API.
  * Tidak melempar exception — gagal = log saja (best-effort).
  *
- * @param {object} _env - Cloudflare env (reserved for future use)
+ * @param {object} env - Cloudflare env (butuh env.DB untuk mencatat kegagalan)
  * @param {object} opts
  * @param {string} opts.pixelId
  * @param {string} opts.accessToken
@@ -131,7 +143,7 @@ async function hashUserData(rawData) {
  * @param {Record<string, unknown>} [opts.customData]
  * @returns {Promise<{ success: boolean, error?: string }>}
  */
-export async function sendCapiEvent(_env, { pixelId, accessToken, eventName, eventId, eventSourceUrl, userData = {}, identity = {}, customData = {} }) {
+export async function sendCapiEvent(env, { pixelId, accessToken, eventName, eventId, eventSourceUrl, userData = {}, identity = {}, customData = {} }) {
   try {
     // PII di-hash, pengidentifikasi teknis TIDAK — lihat catatan di
     // extractMetaIdentity(). Nilai kosong dibuang: Meta menurunkan kualitas
@@ -165,6 +177,7 @@ export async function sendCapiEvent(_env, { pixelId, accessToken, eventName, eve
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       console.error(`[CAPI] ${eventName} pixel=${pixelId} HTTP ${res.status}:`, errText.slice(0, 300));
+      await catatGagal(env, eventName, pixelId, eventId, `HTTP ${res.status}: ${errText.slice(0, 300)}`);
       return { success: false, error: `HTTP ${res.status}` };
     }
 
@@ -172,6 +185,39 @@ export async function sendCapiEvent(_env, { pixelId, accessToken, eventName, eve
     return { success: true };
   } catch (err) {
     console.error(`[CAPI] ${eventName} pixel=${pixelId} exception:`, err?.message);
+    await catatGagal(env, eventName, pixelId, eventId, `exception: ${err?.message ?? 'unknown'}`);
     return { success: false, error: err?.message ?? 'unknown' };
   }
+}
+
+/**
+ * Catat kegagalan CAPI ke `error_logs` supaya terlihat di Admin → Errors.
+ *
+ * KENAPA ADA: sampai 2026-09-02 kegagalan di sini hanya menyentuh console, yang
+ * berarti konversi bisa berhenti mengalir ke Meta berhari-hari tanpa satu pun
+ * jejak yang bisa dilihat. Kelas kegagalan yang PERSIS SAMA sudah memakan korban:
+ * jalur scheduler dulu juga tanpa logServerError, dan itulah sebabnya Instagram
+ * gagal 14 dari 14 selama berhari-hari tanpa ketahuan (CLAUDE.md).
+ *
+ * ⚠️ `source` WAJIB 'server', bukan nilai kustom seperti 'capi'. Filter di
+ * functions/api/admin/errors/index.js hanya menerima client|server, jadi nilai
+ * lain justru LENYAP begitu admin memfilter — jebakan yang sama sudah tercatat
+ * untuk penanda [scheduler]. Pembedanya di awal message: "[CAPI] …".
+ *
+ * ⚠️ JANGAN mencatat accessToken, user_data, atau payload mentah. error_logs
+ * terbaca di Admin, dan user_data memuat telepon ter-hash.
+ *
+ * ⚠️ BATASNYA: ini membuat KEGAGALAN terlihat, bukan membuktikan keberhasilan.
+ * "Tidak ada baris [CAPI]" tetap belum berarti event sampai ke Meta — bukti
+ * positifnya hanya Events Manager. Jangan membaca keheningan sebagai sehat.
+ */
+async function catatGagal(env, eventName, pixelId, eventId, detail) {
+  // logServerError sendiri best-effort dan tidak pernah throw; guard ini hanya
+  // menghindari kerja sia-sia saat env.DB memang tidak ada (mis. dev lokal).
+  if (!env?.DB) return;
+  await logServerError(env, {
+    message: `[CAPI] ${eventName} gagal dikirim ke pixel ${pixelId} — ${detail}`,
+    source: 'server',
+    context: { endpoint: '_lib/metaCapi', pixel_id: pixelId, event_name: eventName, event_id: eventId },
+  });
 }
