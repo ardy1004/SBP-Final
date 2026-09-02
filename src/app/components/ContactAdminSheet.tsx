@@ -143,7 +143,17 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
       />
 
       {/* Sheet panel */}
-      <div className={`absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-2xl transition-transform duration-300 ${isOpen ? 'translate-y-0' : 'translate-y-full'} max-h-[80vh] flex flex-col`}>
+      {/* ⚠️ paddingBottom safe-area WAJIB di sini, dan ini yang paling kritis dari
+          semua elemen fixed: tombol Kirim dan widget Turnstile berada di DASAR
+          area scroll panel ini. Tanpa padding, keduanya duduk tepat di zona yang
+          ditimpa bar navigasi in-app browser Meta — pengunjung sampai ke form
+          lalu tidak bisa mengirimnya. Panel `flex flex-col`, jadi padding di sini
+          mempersempit area scroll ke atas dan seluruh isinya jadi terjangkau.
+          Berfallback `, 0px` supaya browser tanpa inset tidak berubah. */}
+      <div
+        className={`absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-2xl transition-transform duration-300 ${isOpen ? 'translate-y-0' : 'translate-y-full'} max-h-[80vh] flex flex-col`}
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      >
 
         {/* Header */}
         <div className="flex-shrink-0 px-5 pt-4 pb-3 border-b border-gray-100">

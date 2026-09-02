@@ -536,7 +536,11 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
   ];
 
   return (
-    <div className="pt-16 min-h-screen" style={{ background: '#F0F4F8' }}>
+    // pb-28 di mobile: sticky bar ber-`fixed` tidak menempati ruang layout, jadi
+    // tanpa padding ini ia menutupi konten paling bawah SECARA PERMANEN — dan
+    // konten itu kini termasuk kartu properti serupa. `lg:pb-0` karena sticky
+    // bar-nya sendiri `lg:hidden`.
+    <div className="pt-16 pb-28 lg:pb-0 min-h-screen" style={{ background: '#F0F4F8' }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
         {/* Breadcrumb */}
@@ -649,6 +653,50 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                   <div className="text-xs font-semibold text-[#0F172A]">{property.legalitas}</div>
                 </div>
               </div>
+            </div>
+
+            {/* CTA Harga + Hubungi — MOBILE SAJA, sengaja di sini (sebelum Deskripsi).
+                KENAPA: sampai 2026-09-02 satu-satunya jalur konversi mobile adalah
+                sticky bar di dasar layar — dan `LeadForm` di bawah ber-`hidden lg:block`
+                sehingga TIDAK PERNAH dirender di mobile. Sticky bar itu sendiri
+                tertimpa bar navigasi sistem di in-app browser Meta (Threads/IG/FB)
+                yang merender edge-to-edge. Akibatnya terukur: 12.980 tayangan
+                menghasilkan 4 klik WA dalam 30 hari = 0,031%, sekitar 50-100x di
+                bawah wajar untuk halaman listing properti.
+                Blok inline ini tidak bergantung pada `position: fixed` sama sekali,
+                jadi ia mustahil tertutup bar navigasi.
+                ⚠️ Perilaku tombol SENGAJA identik dengan sticky bar (buka
+                ContactAdminSheet berisi form + pintasan "Langsung WA") — keputusan
+                user 2026-09-02. Ini titik masuk baru, BUKAN alur baru. */}
+            <div className="lg:hidden bg-white rounded-2xl p-5 mb-5 shadow-sm border border-gray-100">
+              <div className="flex items-end justify-between gap-3 mb-3">
+                <div className="min-w-0">
+                  {property.harga_lama && (
+                    <div className="text-sm text-gray-400 line-through">{formatRupiah(property.harga_lama)}</div>
+                  )}
+                  <div className="text-2xl font-bold font-display text-[#1565C0]" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {utamakanPerM2
+                      ? <>{formatRupiah(hargaPerM2!)}<span className="text-lg font-semibold">/m²</span></>
+                      : formatRupiah(property.harga)}
+                  </div>
+                  {utamakanPerM2
+                    ? <div className="text-xs text-gray-500">Total {formatRupiah(property.harga)}{property.luas_tanah ? ` untuk ${property.luas_tanah} m²` : ''}</div>
+                    : hargaPerM2 ? <div className="text-xs text-gray-400">~{formatRupiah(hargaPerM2)}/m²</div> : null}
+                </div>
+                <div className="flex gap-1.5 flex-shrink-0">
+                  {property.nego && <span className="px-2 py-0.5 rounded-full text-xs bg-orange-50 text-orange-600 border border-orange-200">Nego</span>}
+                  {property.nett && <span className="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-[#1565C0] border border-blue-200">Nett</span>}
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSheet(true)}
+                className="w-full flex flex-col items-center px-5 py-3 rounded-xl font-bold text-white bg-[#10B981] hover:bg-[#059669] transition-colors"
+              >
+                <span className="flex items-center gap-2 text-sm leading-tight">
+                  <MessageCircle size={16} /> Hubungi Admin Via WA
+                </span>
+                <span className="text-[10px] font-normal text-white/75 leading-tight mt-0.5">Isi form singkat dulu</span>
+              </button>
             </div>
 
             {/* Description */}
@@ -799,9 +847,18 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
         )}
       </div>
 
-      {/* Sticky Bottom Bar (Mobile) */}
+      {/* Sticky Bottom Bar (Mobile)
+          ⚠️ padding bawah WAJIB memperhitungkan env(safe-area-inset-bottom).
+          In-app browser Meta merender edge-to-edge, jadi tanpa ini bar navigasi
+          Android menimpa tombol — terlihat "tenggelam" dan sulit ditekan, persis
+          keluhan user 2026-09-02. Bentuk berfallback `, 0px` membuat browser
+          tanpa inset (Chrome desktop/biasa) tidak berubah sama sekali.
+          Prasyaratnya `viewport-fit=cover` di root.tsx — tanpa itu env() = 0. */}
       {showStickyBar && (
-        <div className="sticky-bottom-bar fixed bottom-0 left-0 right-0 z-40 lg:hidden bg-white border-t border-gray-200 shadow-lg px-4 py-3">
+        <div
+          className="sticky-bottom-bar fixed bottom-0 left-0 right-0 z-40 lg:hidden bg-white border-t border-gray-200 shadow-lg px-4 pt-3"
+          style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))' }}
+        >
           <div className="flex items-center justify-between max-w-lg mx-auto">
             <div>
               <div className="font-bold text-[#1565C0] font-display">{formatRupiah(property.harga)}</div>

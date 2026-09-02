@@ -38,7 +38,14 @@ export default function Navbar() {
 
   return (
     <>
-      <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${navBg}`}>
+      {/* paddingTop safe-area: `viewport-fit=cover` di root.tsx membuat halaman
+          membentang sampai ke balik poni/status bar. Tanpa ini logo dan tombol
+          menu bisa tertimpa di iPhone berponi. Berfallback `, 0px` sehingga
+          browser tanpa inset tidak berubah sama sekali. */}
+      <nav
+        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${navBg}`}
+        style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
