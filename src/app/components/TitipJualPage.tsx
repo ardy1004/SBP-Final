@@ -1494,7 +1494,7 @@ export default function TitipJualPage() {
 
   if (result) {
     return (
-      <div className="pt-16 min-h-screen" style={{ background: '#F0F4F8' }}>
+      <div className="pt-nav min-h-screen" style={{ background: '#F0F4F8' }}>
         <div className="max-w-2xl mx-auto px-4 py-12">
           <div className="bg-white rounded-2xl shadow-sm p-6 sm:p-8">
             <SuccessPage result={result} />
@@ -1505,7 +1505,7 @@ export default function TitipJualPage() {
   }
 
   return (
-    <div className="pt-16 min-h-screen" style={{ background: '#F0F4F8' }}>
+    <div className="pt-nav min-h-screen" style={{ background: '#F0F4F8' }}>
       <div className="max-w-2xl mx-auto px-4 py-12">
         <div className="text-center mb-6">
           <h1 className="font-display text-2xl font-bold text-[#0F172A]">Titip Jual Properti</h1>

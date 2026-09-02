@@ -113,7 +113,19 @@ export default function Navbar() {
           onClick={() => setMobileOpen(false)}
         />
         <div className={`absolute top-0 right-0 h-full w-72 bg-[#0B2447] transition-transform duration-300 ${mobileOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-          <div className="p-6 pt-20 flex flex-col gap-1">
+          {/* Offset ADITIF, bukan pengganti: navbar kini 4rem + inset atas, jadi
+              `pt-20` (5rem) statis tidak lagi menjamin tautan pertama bebas dari
+              navbar di perangkat berponi. Bawahnya juga diberi jarak karena panel
+              ini `h-full` sehingga menyentuh bar navigasi sistem.
+              ⚠️ Sengaja inline, BUKAN kelas .pt-nav/.pb-safe — keduanya MENIMPA
+              nilai dasar, sedangkan di sini 5rem dan 1.5rem harus dipertahankan. */}
+          <div
+            className="px-6 flex flex-col gap-1"
+            style={{
+              paddingTop: 'calc(5rem + env(safe-area-inset-top, 0px))',
+              paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))',
+            }}
+          >
             {NAV_LINKS.map((link) => {
               const isActive = location.pathname === link.href;
               return (

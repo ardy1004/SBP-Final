@@ -114,7 +114,7 @@ function LoadingView() {
 
 function NotFoundView() {
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 pt-16" style={{ background: '#F0F4F8' }}>
+    <div className="min-h-screen flex items-center justify-center px-4 pt-nav" style={{ background: '#F0F4F8' }}>
       <div className="text-center max-w-md">
         <AlertTriangle size={48} className="text-[#EF4444] mx-auto mb-4" />
         <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Link Tidak Valid</h1>
@@ -135,7 +135,7 @@ function NotFoundView() {
 
 function ExpiredView() {
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 pt-16" style={{ background: '#F0F4F8' }}>
+    <div className="min-h-screen flex items-center justify-center px-4 pt-nav" style={{ background: '#F0F4F8' }}>
       <div className="text-center max-w-md">
         <Clock size={48} className="text-[#F5A623] mx-auto mb-4" />
         <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Link Sudah Tidak Berlaku</h1>
@@ -157,7 +157,7 @@ function ExpiredView() {
 
 function AlreadySignedView({ data }: { data: Extract<PageState, { kind: 'sudah_ditandatangani' }> }) {
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 pt-16" style={{ background: '#F0F4F8' }}>
+    <div className="min-h-screen flex items-center justify-center px-4 pt-nav" style={{ background: '#F0F4F8' }}>
       <div className="text-center max-w-md">
         <div className="w-20 h-20 rounded-full bg-[#10B981] flex items-center justify-center mx-auto mb-6">
           <CheckCircle size={40} className="text-white" />
@@ -191,7 +191,7 @@ function AlreadySignedView({ data }: { data: Extract<PageState, { kind: 'sudah_d
 
 function SuccessView({ data }: { data: Extract<PageState, { kind: 'success' }> }) {
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 pt-16" style={{ background: '#F0F4F8' }}>
+    <div className="min-h-screen flex items-center justify-center px-4 pt-nav" style={{ background: '#F0F4F8' }}>
       <div className="text-center max-w-md">
         <div className="text-6xl mb-6">🚀</div>
         <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">
@@ -570,7 +570,7 @@ export default function SignPage() {
   const canSubmit = hasSigned && agreed && !submitting;
 
   return (
-    <div className="min-h-screen pt-16 pb-16" style={{ background: '#F0F4F8' }}>
+    <div className="min-h-screen pt-nav pb-16" style={{ background: '#F0F4F8' }}>
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
 
         {/* Page header */}

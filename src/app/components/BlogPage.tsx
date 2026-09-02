@@ -23,7 +23,7 @@ export default function BlogPage({ ssrPosts }: { ssrPosts: ApiBlogPost[] }) {
   );
 
   return (
-    <div className="pt-16">
+    <div className="pt-nav">
       <section className="py-16" style={{ background: 'linear-gradient(160deg, #0B2447 0%, #1565C0 100%)' }}>
         <div className="max-w-4xl mx-auto px-4 text-center">
           <h1 className="font-display text-4xl font-bold text-white mb-3">Blog & Tips Properti</h1>

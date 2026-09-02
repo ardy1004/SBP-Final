@@ -51,7 +51,7 @@ export default function FAQPage() {
   const filtered = activeKat === 'Semua' ? FAQ_DATA : FAQ_DATA.filter(k => k.kategori === activeKat);
 
   return (
-    <div className="pt-16">
+    <div className="pt-nav">
       {/* Hero */}
       <section className="py-16" style={{ background: 'linear-gradient(160deg, #0B2447 0%, #1565C0 100%)' }}>
         <div className="max-w-4xl mx-auto px-4 text-center">

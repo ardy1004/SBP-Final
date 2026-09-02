@@ -1,3 +1,22 @@
+/* ===== SAFE AREA (poni iOS & bar navigasi Android) =====
+   Sejak root.tsx memakai `viewport-fit=cover`, halaman membentang sampai ke balik
+   status bar dan bar navigasi sistem. Itu WAJIB supaya env(safe-area-inset-*)
+   mengembalikan nilai nyata — tanpanya semua padding safe-area jadi 0 dan sticky
+   bar tetap tertimpa bar navigasi di in-app browser Meta.
+   Konsekuensinya: navbar `fixed top-0` jadi setinggi 4rem + inset atas, sehingga
+   SETIAP offset yang dulu menganggap navbar = 4rem (`pt-16`, `sticky top-16`)
+   menjadi kependekan dan konten tergelincir ke balik navbar di perangkat berponi.
+   Kelas di bawah ini satu-satunya sumber angka itu — jangan tulis `pt-16` lagi
+   untuk mengosongkan ruang navbar. */
+.pt-nav  { padding-top: calc(4rem + env(safe-area-inset-top, 0px)); }
+.top-nav { top: calc(4rem + env(safe-area-inset-top, 0px)); }
+/* Untuk panel/overlay yang isinya menyentuh dasar layar. */
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+/* Halaman detail properti: sticky bar `fixed` tidak menempati ruang layout, jadi
+   konten terbawah tertutup permanen tanpa padding ini. 7rem = tinggi bar + jeda. */
+.pb-sticky-bar { padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px)); }
+@media (min-width: 1024px) { .pb-sticky-bar { padding-bottom: 0; } }
+
 /* ===== SBP DESIGN TOKENS ===== */
 :root {
   --navy-deep: #061B35;

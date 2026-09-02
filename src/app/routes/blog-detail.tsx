@@ -137,7 +137,7 @@ export default function BlogDetailRoute() {
   const { post } = useLoaderData<typeof loader>();
 
   return (
-    <div className="pt-16 min-h-screen" style={{ background: '#F0F4F8' }}>
+    <div className="pt-nav min-h-screen" style={{ background: '#F0F4F8' }}>
       {/* Hero cover */}
       {post.cover && (
         <div className="relative w-full h-64 sm:h-80 lg:h-96 overflow-hidden">

@@ -608,7 +608,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
   );
 
   return (
-    <div className="pt-16 min-h-screen" style={{ background: '#F0F4F8' }}>
+    <div className="pt-nav min-h-screen" style={{ background: '#F0F4F8' }}>
       {/* Header */}
       <div className="bg-white border-b border-gray-100 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -637,7 +637,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
           <div className="flex-1 min-w-0">
 
             {/* ─── Smart Search Bar ─── */}
-            <div ref={searchBoxRef} className="relative sticky top-16 z-20 bg-[#F0F4F8] pt-2 mb-4">
+            <div ref={searchBoxRef} className="relative sticky top-nav z-20 bg-[#F0F4F8] pt-2 mb-4">
               <div className="relative">
                 <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                 <input
@@ -928,7 +928,11 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
       {sidebarOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
-          <div className="absolute top-0 left-0 h-full w-80 bg-white overflow-y-auto">
+          {/* pb-safe: tombol "Terapkan Filter" ada di UJUNG area scroll ini, bukan
+              menempel di dasar panel. Dengan viewport-fit=cover, ~48px terbawah
+              berada di balik bar navigasi sistem — tombolnya jadi setengah
+              tertutup tepat saat user selesai memilih filter. */}
+          <div className="absolute top-0 left-0 h-full w-80 bg-white overflow-y-auto pb-safe">
             <div className="flex items-center justify-between p-4 border-b">
               <span className="font-bold">Filter Properti</span>
               <button onClick={() => setSidebarOpen(false)}><X size={20} /></button>

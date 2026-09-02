@@ -335,7 +335,7 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function DetailSkeleton() {
   return (
-    <div className="pt-16 min-h-screen" style={{ background: '#F0F4F8' }}>
+    <div className="pt-nav min-h-screen" style={{ background: '#F0F4F8' }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <Skeleton className="h-4 w-80 mb-5" />
         <div className="flex gap-6 flex-col lg:flex-row">
@@ -383,7 +383,7 @@ function DetailSkeleton() {
 // ─────────────────────────────────────────────────────────────────────────────
 function PropertyNotFound() {
   return (
-    <div className="pt-16 min-h-screen flex items-center justify-center px-4" style={{ background: '#F0F4F8' }}>
+    <div className="pt-nav min-h-screen flex items-center justify-center px-4" style={{ background: '#F0F4F8' }}>
       <div className="text-center max-w-md">
         <div className="text-8xl font-bold font-display text-[#E2E8F0] mb-2">404</div>
         <div className="text-5xl mb-4">🏚️</div>
@@ -540,7 +540,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
     // tanpa padding ini ia menutupi konten paling bawah SECARA PERMANEN — dan
     // konten itu kini termasuk kartu properti serupa. `lg:pb-0` karena sticky
     // bar-nya sendiri `lg:hidden`.
-    <div className="pt-16 pb-28 lg:pb-0 min-h-screen" style={{ background: '#F0F4F8' }}>
+    <div className="pt-nav pb-sticky-bar min-h-screen" style={{ background: '#F0F4F8' }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
         {/* Breadcrumb */}
