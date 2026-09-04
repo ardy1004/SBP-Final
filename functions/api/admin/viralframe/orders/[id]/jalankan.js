@@ -43,10 +43,23 @@ export async function onRequestPost({ env, params }) {
     // dilanjut kapan saja tanpa mengulang.
     if (order.status === 'baru' || order.status === 'material') {
       const labelSekarang = await hitungLabel(env, order.property_id);
-      if (labelSekarang.unik === 0) {
+      // ⚠️ Gerbangnya "belum DINILAI", bukan "belum BERLABEL".
+      //
+      // Versi pertama memakai `labelSekarang.unik === 0`, sehingga listing yang
+      // fotonya sudah dilabeli MANUAL melewati stasiun Material sepenuhnya —
+      // dan ikut kehilangan dua keluaran lain dari lintasan visi yang sama:
+      // `vf_skor` (peringkat foto jadi rata, urutan jatuh ke is_cover) dan
+      // `vf_catatan` (DNA Produk kehilangan seluruh bagian "keunikan").
+      // Terjadi pada properti 1025: 3 foto berlabel manual, ketiganya vf_skor NULL.
+      //
+      // Aman dijalankan pada foto berlabel: `stasiunMaterial` memakai
+      // `COALESCE(NULLIF(TRIM(label_ruangan),''), ?)` sehingga label manusia
+      // tidak pernah ditimpa — hanya skor & catatan yang ditulis.
+      if (labelSekarang.belumDinilai > 0) {
         const m = await jalankanMaterial(env, order.property_id);
         if (!m.ok) {
           await setStatus(env, id, 'material', m.error);
+          await catatKegagalan(env, id, order, 'Material', m.error);
           return jsonError(m.error ?? 'Stasiun Material gagal', 502);
         }
         const setelah = await hitungLabel(env, order.property_id);
@@ -66,6 +79,16 @@ export async function onRequestPost({ env, params }) {
       }
 
       // ── STASIUN 3 — VARIASI ───────────────────────────────────────────────
+      // Listing tanpa satu pun foto berlabel tidak bisa dilanjutkan. Dijaga di
+      // sini dengan pesannya sendiri: tanpa ini `maksVariasi(0)` mengembalikan 0
+      // dan user melihat "Rotasi listing ini sudah 0 dari 0 variasi" — benar
+      // secara aritmetika, tapi tidak menjelaskan bahwa masalahnya foto.
+      if (labelSekarang.unik === 0) {
+        const pesan = 'Listing ini tidak punya foto yang bisa dipakai. Tambahkan foto properti dulu di Detail Properti.';
+        await setStatus(env, id, 'material', pesan);
+        return jsonError(pesan, 422);
+      }
+
       const riwayat = await env.DB.prepare(
         `SELECT variation_key FROM viralframe_orders
           WHERE property_id = ? AND variation_key IS NOT NULL
@@ -159,6 +182,7 @@ export async function onRequestPost({ env, params }) {
       });
       if (!ir.ok) {
         await setStatus(env, id, 'storyboard', ir.error);
+        await catatKegagalan(env, id, order, 'Storyboard', ir.error);
         return jsonError(ir.error, 502);
       }
 
@@ -221,13 +245,52 @@ export async function onRequestPost({ env, params }) {
 }
 
 async function hitungLabel(env, propertyId) {
-  const r = await env.DB.prepare(
-    `SELECT DISTINCT TRIM(label_ruangan) AS label
-       FROM property_images
-      WHERE property_id = ? AND label_ruangan IS NOT NULL AND TRIM(label_ruangan) != ''`
-  ).bind(propertyId).all();
-  const daftar = (r.results ?? []).map(x => x.label).filter(Boolean);
-  return { unik: daftar.length, daftar };
+  const [label, nilai] = await env.DB.batch([
+    env.DB.prepare(
+      `SELECT DISTINCT TRIM(label_ruangan) AS label
+         FROM property_images
+        WHERE property_id = ? AND label_ruangan IS NOT NULL AND TRIM(label_ruangan) != ''`
+    ).bind(propertyId),
+    // Foto yang belum melewati lintasan visi. Dipakai sebagai GERBANG stasiun
+    // Material — lihat alasannya di pemanggil.
+    env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM property_images
+        WHERE property_id = ? AND vf_dinilai_at IS NULL`
+    ).bind(propertyId),
+  ]);
+  const daftar = (label.results ?? []).map(x => x.label).filter(Boolean);
+  return {
+    unik: daftar.length,
+    daftar,
+    belumDinilai: nilai.results?.[0]?.n ?? 0,
+  };
+}
+
+/**
+ * Catat kegagalan stasiun ke `error_logs` supaya terlihat di Admin → Errors.
+ *
+ * ⚠️ Sebelum ini kedua jalur 502 hanya menulis ke `viralframe_orders.catatan` —
+ * terbaca cuma kalau pesanan itu kebetulan dibuka. Itu kelas kegagalan yang
+ * PERSIS SAMA dengan `[scheduler]` yang dulu menyembunyikan Instagram gagal
+ * 14/14 selama berhari-hari: gagalnya nyata, jejaknya tidak ke mana-mana.
+ *
+ * `source` WAJIB 'server' — filter di `errors/index.js` hanya menerima
+ * client|server, nilai lain LENYAP justru saat admin memfilter. Penanda ada di
+ * awal message.
+ */
+async function catatKegagalan(env, id, order, stasiun, pesan) {
+  await logServerError(env, {
+    source: 'server',
+    message: `[viralframe] stasiun ${stasiun} gagal (pesanan ${id}) — ${String(pesan ?? 'tanpa detail').slice(0, 300)}`,
+    url: `/api/admin/viralframe/orders/${id}/jalankan`,
+    context: {
+      order_id: id,
+      property_id: order.property_id,
+      character_id: order.character_id,
+      status: order.status,
+      variation_key: order.variation_key,
+    },
+  });
 }
 
 async function setStatus(env, id, status, catatan) {

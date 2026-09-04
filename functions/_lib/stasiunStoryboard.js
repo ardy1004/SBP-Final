@@ -83,6 +83,10 @@ function buatUser({ prop, dna, dnaAgent, variasi, params, foto }) {
   const voDetik = params.voDetikPerPart;
   const maksKata = anggaranKata(voDetik);
   const cutTarget = entriSumbu('ritme', variasi.ritme)?.cutPerPart ?? 2;
+  // Contoh durasi per cut yang MASUK AKAL untuk ritme ini. Wajib angka nyata:
+  // contoh skema yang memakai 0 sebagai placeholder membuat model menyalinnya
+  // apa adanya, dan verifikasi menolak seluruh storyboard karena satu angka.
+  const detikContoh = Math.max(1, Math.round(detikPart / cutTarget));
 
   const daftarFoto = foto.map((f, i) =>
     `  ${i + 1}. [id ${f.id}] ${f.label_ruangan}${f.vf_skor != null ? ` (skor ${f.vf_skor})` : ''}${f.vf_catatan ? ` — ${f.vf_catatan}` : ''}`
@@ -147,8 +151,8 @@ KELUARAN JSON
       "peran": "Hook",
       "cuts": [
         {
-          "foto_id": 0,
-          "detik": 0,
+          "foto_id": ${foto[0]?.id ?? 1},
+          "detik": ${detikContoh},
           "kamera": "shot size + gerak kamera, BAHASA INGGRIS (contoh: 'Medium shot, slow push-in')",
           "aksi": "apa yang dilakukan subjek & apa yang terlihat, BAHASA INGGRIS, ground pada foto"
         }
@@ -158,6 +162,9 @@ KELUARAN JSON
     }
   ]
 }
+⚠️ "foto_id" WAJIB id nyata dari daftar FOTO di atas. "detik" WAJIB bilangan bulat
+minimal 1 (dengan ${cutTarget} cut per Part, sekitar ${detikContoh} detik per cut).
+Angka pada contoh di atas HANYA contoh bentuk — jangan disalin apa adanya.
 Jumlah "parts" HARUS ${params.jumlahPart}. Σ "detik" tiap Part HARUS ${detikPart}.
 "kamera" dan "aksi" dalam BAHASA INGGRIS (dikirim ke Google Flow); "dialog" dan
 "teks_layar" dalam BAHASA INDONESIA.`;
@@ -216,10 +223,22 @@ export async function susunStoryboard(env, { prop, agent, variationKey, params, 
       if (!idSah.has(fid)) {
         return { ok: false, error: `Part ${i + 1} menyebut foto_id ${c?.foto_id} yang tidak ada di daftar.` };
       }
-      const detik = Number(c?.detik);
-      if (!Number.isFinite(detik) || detik <= 0) {
-        return { ok: false, error: `Part ${i + 1}: durasi cut tidak valid.` };
-      }
+      // ⚠️ Durasi cut yang tidak valid TIDAK menggagalkan storyboard.
+      //
+      // Sebelumnya di sini ada `return { ok:false }`, dan itu membuang seluruh
+      // panggilan AI yang sudah dibayar hanya karena SATU angka — persis alasan
+      // yang sudah dipakai untuk menoleransi Σ durasi yang meleset. Terjadi
+      // sungguhan pada pesanan 4 (2026-09-04): ritme "montase cepat" 5 cut, satu
+      // cut tanpa `detik` sah → 502, dan pesanan mandek di status `storyboard`.
+      //
+      // Nilai penggantinya deterministik (bagi rata sesuai jumlah cut), lalu
+      // `sesuaikanDurasi()` di bawah merapikan Σ-nya. Berbeda dari `foto_id`
+      // yang tetap ditolak keras: menebak durasi aman, menebak FOTO berarti
+      // menarasikan ruangan yang belum tentu ada di gambarnya.
+      const detikMentah = Number(c?.detik);
+      const detik = Number.isFinite(detikMentah) && detikMentah >= 1
+        ? Math.round(detikMentah)
+        : Math.max(1, Math.round(params.detikPerPart / cutsRaw.length));
       const f = foto.find(x => x.id === fid);
       cuts.push({
         foto_id: fid,

@@ -31,7 +31,10 @@ export interface Bahan {
   dna: DnaProduk;
   dna_agent: DnaAgent;
   foto: FotoBahan[];
-  material: { total_foto: number; berlabel: number; label_unik: number; perlu_dinilai: boolean };
+  material: {
+    total_foto: number; berlabel: number; belum_dinilai: number;
+    label_unik: number; perlu_dinilai: boolean;
+  };
   rotasi: { sudah: number; maks: number };
   flow: { utama: number; maks: number };
 }
@@ -205,10 +208,20 @@ export default function PanelBahan({ propertyId, characterId, onSiap }: {
               <span className="font-normal normal-case">{material.berlabel}/{material.total_foto} berlabel</span>
             </div>
 
-            {material.perlu_dinilai ? (
-              <div className="bg-amber-50 border border-amber-100 text-amber-800 rounded-xl p-3 text-xs leading-relaxed">
-                Foto listing ini belum dinilai AI. Penilaian berjalan otomatis saat
-                “Buat Storyboard” ditekan — {material.total_foto} foto, ±6 foto per lintasan.
+            {/* Banner dan grid berdampingan, bukan salah satu. Listing bisa
+                punya foto BERLABEL manual yang belum pernah dinilai visi —
+                menyembunyikan gridnya membuat user mengira listingnya kosong,
+                menyembunyikan bannernya membuat skor kosong tampak seperti bug. */}
+            {material.perlu_dinilai && (
+              <div className="bg-amber-50 border border-amber-100 text-amber-800 rounded-xl p-3 text-xs leading-relaxed mb-2">
+                {material.belum_dinilai} dari {material.total_foto} foto belum dinilai AI —
+                skor dan catatan keunikan belum ada. Penilaian berjalan otomatis saat
+                “Buat Storyboard” ditekan, ±6 foto per lintasan.
+              </div>
+            )}
+            {material.total_foto === 0 ? (
+              <div className="bg-red-50 border border-red-100 text-red-700 rounded-xl p-3 text-xs">
+                Listing ini belum punya foto sama sekali. Tambahkan dulu di Detail Properti.
               </div>
             ) : (
               <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5">
@@ -234,9 +247,10 @@ export default function PanelBahan({ propertyId, characterId, onSiap }: {
                 ))}
               </div>
             )}
-            {!material.perlu_dinilai && (
+            {material.label_unik > 0 && (
               <p className="text-[10px] text-[#94A3B8] mt-1.5">
                 {material.label_unik} label unik → maksimal {rotasi.maks} variasi masuk akal untuk listing ini.
+                {material.total_foto < 5 && ' Foto sesedikit ini membuat storyboard mengulang ruang yang sama — tambah foto untuk hasil yang lebih baik.'}
               </p>
             )}
           </div>

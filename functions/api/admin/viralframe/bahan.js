@@ -62,6 +62,12 @@ export async function onRequestGet({ request, env }) {
     const semuaFoto = fotoRes.results ?? [];
     const berlabel = semuaFoto.filter(f => (f.label_ruangan ?? '').trim() !== '');
     const labelUnik = new Set(berlabel.map(f => f.label_ruangan.trim())).size;
+    // ⚠️ Gerbangnya WAJIB sama dengan `jalankan.js`: belum DINILAI, bukan belum
+    // BERLABEL. Foto berlabel manual tetap butuh lintasan visi untuk `vf_skor`
+    // (peringkat) dan `vf_catatan` (keunikan di DNA). Kalau panel ini memakai
+    // syarat berbeda, ia akan bilang "sudah dinilai" untuk listing yang justru
+    // akan dinilai beberapa detik kemudian.
+    const belumDinilai = semuaFoto.filter(f => f.vf_dinilai_at == null).length;
 
     // Foto yang BENAR-BENAR akan dipakai = yang berlabel. Kalau belum ada satu
     // pun, stasiun Material akan menilainya otomatis saat storyboard dibuat —
@@ -85,8 +91,9 @@ export async function onRequestGet({ request, env }) {
       material: {
         total_foto: semuaFoto.length,
         berlabel: berlabel.length,
+        belum_dinilai: belumDinilai,
         label_unik: labelUnik,
-        perlu_dinilai: berlabel.length === 0,
+        perlu_dinilai: belumDinilai > 0,
       },
       rotasi: {
         sudah: riwayat?.n ?? 0,
