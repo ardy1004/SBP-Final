@@ -119,7 +119,7 @@ export async function onRequestPatch({ request, env, params }) {
         hasilBaru = {
           ...hasilBaru,
           prompt_flow: renderPromptFlow({ ir, prop, params }),
-          retensi: periksaRetensi({ ir, params }),
+          retensi: periksaRetensi({ ir, params, dna: hasilBaru.dna ?? null }),
         };
       }
     }

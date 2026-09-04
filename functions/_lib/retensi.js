@@ -59,12 +59,25 @@ function hitungKata(teks) {
   return String(teks ?? '').trim().split(/\s+/).filter(Boolean).length;
 }
 
+// Klaim jarak / waktu tempuh: "500 meter dari Tugu", "5 menit ke kampus".
+// Angka semacam ini SPESIFIK, MUDAH DICEK ORANG, dan hampir tak pernah ada di
+// data listing — kombinasi terburuk untuk sebuah iklan.
+const KLAIM_JARAK = /(\d[\d.,]*)\s*(meter|metre|m\b|km|kilometer|menit)\s+(dari|ke|menuju)\b/gi;
+
+// Angka yang ditulis sebagai KATA — model rutin memakainya untuk voiceover
+// ("lima ratus meter dari Tugu"), dan pemeriksaan berbasis digit akan melewatkannya.
+const ANGKA_KATA = '(?:se|satu|dua|tiga|empat|lima|enam|tujuh|delapan|sembilan|sepuluh|sebelas|belas|puluh|ratus|ribu)';
+const KLAIM_JARAK_KATA = new RegExp(
+  `((?:${ANGKA_KATA}[\\s-]*)+)\\s*(meter|kilometer|menit)\\s+(dari|ke|menuju)\\b`, 'gi');
+
 /**
  * @param {object} ir      hasil susunStoryboard (punya .parts[], .variasi)
  * @param {object} params  parameter manusia (jumlahPart, detikPerPart, voDetikPerPart, cta)
+ * @param {object} [dna]   DNA Produk — dipakai memeriksa klaim jarak yang dikarang.
+ *                         Boleh kosong; pemeriksaan itu dilewati, bukan gagal.
  * @returns {{lolos: boolean, cacat: Array, ringkas: string}}
  */
-export function periksaRetensi({ ir, params }) {
+export function periksaRetensi({ ir, params, dna = null }) {
   const cacat = [];
   const catat = (part, jenis, pesan, berat = 'sedang') => cacat.push({ part, jenis, pesan, berat });
 
@@ -76,6 +89,16 @@ export function periksaRetensi({ ir, params }) {
   const maksKata = anggaranKata(params.voDetikPerPart);
   const cutTarget = entriSumbu('ritme', ir?.variasi?.ritme)?.cutPerPart ?? null;
   const totalDetik = parts.length * params.detikPerPart;
+
+  // Seluruh fakta listing sebagai satu teks huruf kecil — dasar pemeriksaan
+  // klaim jarak. Kalau DNA tidak dikirim, pemeriksaan itu dilewati diam-diam:
+  // lebih baik tidak memeriksa daripada menuduh setiap angka sebagai karangan.
+  const teksDna = dna
+    ? [
+        ...(dna.fakta ?? []).map(f => `${f.label} ${f.nilai}`),
+        ...(dna.keunikan ?? []),
+      ].join(' | ').toLowerCase()
+    : null;
 
   let totalCut = 0;
 
@@ -100,6 +123,31 @@ export function periksaRetensi({ ir, params }) {
       catat(nomor, 'kata_lebih',
         `Part ${nomor}: ${kata} kata, maksimal ${maksKata} untuk voiceover ${params.voDetikPerPart} detik. Kelebihan ${kata - maksKata} kata akan terpotong.`,
         'tinggi');
+    }
+
+    // ── Klaim jarak yang tidak ada di data ───────────────────────────────────
+    //
+    // Terjadi sungguhan 2026-09-04: dialog mengucapkan "Hanya lima ratus meter
+    // dari Tugu Jogja" padahal judul listing cuma menulis "Dekat Tugu Jogja" —
+    // tanpa satu pun angka. AI mengarang jarak yang spesifik dan mudah dicek.
+    //
+    // Bukan kebetulan: aturan keras kita MENDORONG hook memuat "hal konkret
+    // (angka, ukuran, nama tempat)" tanpa mengikat dari mana angkanya berasal.
+    // Kita memberi insentif spesifik tanpa mengikat sumbernya.
+    if (teksDna) {
+      for (const re of [KLAIM_JARAK, KLAIM_JARAK_KATA]) {
+        re.lastIndex = 0;
+        let k;
+        while ((k = re.exec(dialog)) !== null) {
+          const angka = k[1].trim().toLowerCase();
+          if (!teksDna.includes(angka)) {
+            catat(nomor, 'jarak_dikarang',
+              `Part ${nomor} menyebut "${k[0].trim()}" — angka itu TIDAK ADA di fakta listing. `
+              + 'Jarak yang dikarang mudah dicek pembeli dan merusak kepercayaan; sebut kedekatannya tanpa angka.',
+              'tinggi');
+          }
+        }
+      }
     }
 
     // ── Harga tidak boleh diucapkan ──────────────────────────────────────────
@@ -161,16 +209,34 @@ export function periksaRetensi({ ir, params }) {
   }
 
   // ── Kepadatan potongan seluruh video ───────────────────────────────────────
-  // 6–12 cut untuk 30 detik. Terlalu sedikit = pacing datar (penurunan pelan di
-  // tengah); terlalu banyak = potongan cepat yang menutupi konsep lemah.
-  const minCut = Math.max(3, Math.round(totalDetik / 5));
-  const maksCut = Math.round(totalDetik / 2.5);
-  if (totalCut < minCut) {
-    catat(null, 'pacing_datar',
-      `Total ${totalCut} cut untuk ${totalDetik} detik — terlalu sedikit (${minCut}–${maksCut}). Penurunan pelan di tengah video adalah masalah pacing.`);
-  } else if (totalCut > maksCut) {
-    catat(null, 'terlalu_ramai',
-      `Total ${totalCut} cut untuk ${totalDetik} detik — terlalu banyak (${minCut}–${maksCut}). Potongan berlebihan biasanya menutupi konsep yang lemah.`);
+  //
+  // 🔥 HANYA dipakai bila RITME TIDAK DIKETAHUI.
+  //
+  // Kepadatan cut ADALAH keputusan sumbu `ritme`, dan sumbu itu dipilih SISTEM
+  // sebelum AI menulis apa pun. Menerapkan aturan absolut di atasnya berarti
+  // memerintahkan sesuatu lalu menghukum kepatuhannya. Terukur 2026-09-04:
+  // aturan lama (min = totalDetik/5, maks = totalDetik/2,5) menghukum
+  // **7 dari 12 kombinasi (jumlah Part × ritme)** padahal AI patuh 100% —
+  // `tunggal` dan `montase_cepat` DIJAMIN gagal di semua konfigurasi.
+  // Contoh nyata: pesanan 3 memakai `montase_cepat` (5 cut), AI menghasilkan
+  // tepat 5, lalu checker menyebutnya "terlalu banyak (3-4)".
+  //
+  // Kepatuhan pada ritme sudah diperiksa per Part lewat `ritme_meleset` di atas,
+  // dan ITU pemeriksaan yang benar: bukan "berapa cut yang ideal", melainkan
+  // "apakah cut-nya sesuai gaya yang sudah ditetapkan".
+  //
+  // Kelas bug yang sama dengan `MEKANISME.hitung_angka` yang dulu menyuruh AI
+  // menyebut harga padahal aturan keras melarangnya.
+  if (cutTarget == null) {
+    const minCut = Math.max(3, Math.round(totalDetik / 5));
+    const maksCut = Math.round(totalDetik / 2.5);
+    if (totalCut < minCut) {
+      catat(null, 'pacing_datar',
+        `Total ${totalCut} cut untuk ${totalDetik} detik — terlalu sedikit (${minCut}–${maksCut}). Penurunan pelan di tengah video adalah masalah pacing.`);
+    } else if (totalCut > maksCut) {
+      catat(null, 'terlalu_ramai',
+        `Total ${totalCut} cut untuk ${totalDetik} detik — terlalu banyak (${minCut}–${maksCut}). Potongan berlebihan biasanya menutupi konsep yang lemah.`);
+    }
   }
 
   const berat = cacat.filter(c => c.berat === 'tinggi').length;

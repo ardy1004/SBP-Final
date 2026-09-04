@@ -21,6 +21,8 @@ export interface HasilPesanan {
   parts?: PartIR[];
   params?: { jumlahPart: number; detikPerPart: number; voDetikPerPart: number; cta: string };
   variasi?: Record<string, string>;
+  /** DNA Produk — dipakai memeriksa klaim jarak yang dikarang. */
+  dna?: { fakta?: { label: string; nilai: string }[]; keunikan?: string[] };
   provider?: string;
   caption?: { teks: string; hashtags: string };
 }
@@ -52,6 +54,9 @@ export default function PanelStoryboard({ orderId, hasil, onUbah }: {
       return periksaRetensi({
         ir: { parts, variasi: hasil.variasi ?? {} },
         params: hasil.params,
+        // DNA ikut dikirim supaya pemeriksaan klaim jarak juga hidup di browser
+        // — tanpa itu, cacat `jarak_dikarang` hilang tepat setelah hook diganti.
+        dna: hasil.dna ?? null,
       });
     } catch {
       return null;

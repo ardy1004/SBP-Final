@@ -16,6 +16,7 @@ import { logServerError } from '../../../../../_lib/logError.js';
 import { maksVariasi, entriSumbu, SUMBU_DOMINAN, FLOW, voDetikBaku } from '../../../../../_lib/viralframe.js';
 import { pilihVariasi } from '../../../../../_lib/variasi.js';
 import { jalankanMaterial } from '../../../../../_lib/stasiunMaterial.js';
+import { ambilFotoListing, hitungMaterial } from '../../../../../_lib/fotoListing.js';
 import { susunStoryboard, renderPromptFlow, CTA_PILIHAN } from '../../../../../_lib/stasiunStoryboard.js';
 import { periksaRetensi } from '../../../../../_lib/retensi.js';
 
@@ -42,10 +43,10 @@ export async function onRequestPost({ env, params }) {
     // butuh beberapa klik. Itu disengaja — tiap lintasan tersimpan, jadi bisa
     // dilanjut kapan saja tanpa mengulang.
     if (order.status === 'baru' || order.status === 'material') {
-      const labelSekarang = await hitungLabel(env, order.property_id);
+      const labelSekarang = await hitungMaterial(env, order.property_id);
       // ⚠️ Gerbangnya "belum DINILAI", bukan "belum BERLABEL".
       //
-      // Versi pertama memakai `labelSekarang.unik === 0`, sehingga listing yang
+      // Versi pertama memakai `labelSekarang.labelUnik === 0`, sehingga listing yang
       // fotonya sudah dilabeli MANUAL melewati stasiun Material sepenuhnya —
       // dan ikut kehilangan dua keluaran lain dari lintasan visi yang sama:
       // `vf_skor` (peringkat foto jadi rata, urutan jatuh ke is_cover) dan
@@ -62,7 +63,7 @@ export async function onRequestPost({ env, params }) {
           await catatKegagalan(env, id, order, 'Material', m.error);
           return jsonError(m.error ?? 'Stasiun Material gagal', 502);
         }
-        const setelah = await hitungLabel(env, order.property_id);
+        const setelah = await hitungMaterial(env, order.property_id);
         // Tetap di 'material' walau label sudah terisi: variasinya dipilih pada
         // panggilan BERIKUTNYA, bukan di sini. Menjejalkan dua stasiun ke satu
         // panggilan membuat kegagalan variasi ikut membatalkan hasil visi yang
@@ -74,7 +75,7 @@ export async function onRequestPost({ env, params }) {
           dinilai: m.dinilai,
           sisa: m.sisa,
           provider: m.provider,
-          pesan: `${m.dinilai} foto dinilai (${setelah.unik} label unik). ${m.sisa > 0 ? `Sisa ${m.sisa} foto — jalankan lagi.` : 'Jalankan lagi untuk memilih variasi.'}`,
+          pesan: `${m.dinilai} foto dinilai (${setelah.labelUnik} label unik). ${m.sisa > 0 ? `Sisa ${m.sisa} foto — jalankan lagi.` : 'Jalankan lagi untuk memilih variasi.'}`,
         });
       }
 
@@ -83,7 +84,7 @@ export async function onRequestPost({ env, params }) {
       // sini dengan pesannya sendiri: tanpa ini `maksVariasi(0)` mengembalikan 0
       // dan user melihat "Rotasi listing ini sudah 0 dari 0 variasi" — benar
       // secara aritmetika, tapi tidak menjelaskan bahwa masalahnya foto.
-      if (labelSekarang.unik === 0) {
+      if (labelSekarang.labelUnik === 0) {
         const pesan = 'Listing ini tidak punya foto yang bisa dipakai. Tambahkan foto properti dulu di Detail Properti.';
         await setStatus(env, id, 'material', pesan);
         return jsonError(pesan, 422);
@@ -96,10 +97,10 @@ export async function onRequestPost({ env, params }) {
       ).bind(order.property_id).all();
       const riwayatKunci = (riwayat.results ?? []).map(r => r.variation_key).filter(Boolean);
 
-      const plafon = maksVariasi(labelSekarang.unik);
+      const plafon = maksVariasi(labelSekarang.labelUnik);
       if (riwayatKunci.length >= plafon) {
         const pesan = `Rotasi listing ini sudah ${riwayatKunci.length} dari ${plafon} variasi yang masuk akal `
-          + `untuk ${labelSekarang.unik} label foto. Tambah foto berlabel untuk membuka lebih banyak.`;
+          + `untuk ${labelSekarang.labelUnik} label foto. Tambah foto berlabel untuk membuka lebih banyak.`;
         await setStatus(env, id, 'gagal', pesan);
         return jsonError(pesan, 422);
       }
@@ -131,7 +132,7 @@ export async function onRequestPost({ env, params }) {
         selesai: false,
         variation_key: pilihan.kunci,
         variasi: ringkasVariasi(pilihan.vektor),
-        rotasi: { ke: riwayatKunci.length + 1, dari: plafon, label_unik: labelSekarang.unik },
+        rotasi: { ke: riwayatKunci.length + 1, dari: plafon, label_unik: labelSekarang.labelUnik },
         jarak_dari_terbaru: pilihan.jarakTerdekat,
         longgar: pilihan.longgar,
         pesan: `Variasi terpilih: ${ringkasVariasi(pilihan.vektor).map(x => x.label).join(' · ')}`,
@@ -140,7 +141,7 @@ export async function onRequestPost({ env, params }) {
 
     // ── STASIUN 4 & 5 — KONSEP + STORYBOARD ─────────────────────────────────
     if (order.status === 'variasi' || order.status === 'storyboard') {
-      const [prop, agent, fotoRes] = await Promise.all([
+      const [prop, agent, foto] = await Promise.all([
         // Kolom yang dibaca dnaProduk.js ikut diambil di sini. `furnished` dulu
         // tidak pernah dibaca sama sekali (mesin lama menghardcode "tidak
         // disebutkan"), jadi data yang ADA dibuang dan model mengisinya dengan
@@ -156,20 +157,14 @@ export async function onRequestPost({ env, params }) {
         env.DB.prepare(
           'SELECT id, nama, gender, usia, etnik, style, ciri_fisik, foto_url FROM viralframe_characters WHERE id = ?'
         ).bind(order.character_id).first(),
-        // Foto TERBAIK dulu: skor visi lebih dulu daripada is_cover. Cover dipilih
-        // karena menjual di katalog, belum tentu bagus untuk gerak kamera.
-        env.DB.prepare(
-          `SELECT id, label_ruangan, vf_skor, vf_catatan
-             FROM property_images
-            WHERE property_id = ? AND label_ruangan IS NOT NULL AND TRIM(label_ruangan) != ''
-            ORDER BY COALESCE(vf_skor, 50) DESC, is_cover DESC, urutan ASC
-            LIMIT 14`
-        ).bind(order.property_id).all(),
+        // Query fotonya ADA DI SATU TEMPAT (`fotoListing.js`) dan dipakai panel
+        // Bahan juga — kalau ditulis dua kali, panel menampilkan himpunan foto
+        // yang berbeda dari yang benar-benar dipakai di sini.
+        ambilFotoListing(env, order.property_id),
       ]);
       if (!prop) return jsonError('Properti tidak ditemukan', 404);
       if (!agent) return jsonError('Agent tidak ditemukan', 404);
 
-      const foto = fotoRes.results ?? [];
       if (foto.length === 0) {
         await setStatus(env, id, 'material', 'Foto berlabel hilang — jalankan stasiun Material lagi.');
         return jsonError('Listing ini tidak punya foto berlabel lagi.', 422);
@@ -190,7 +185,7 @@ export async function onRequestPost({ env, params }) {
       // Retention check dijalankan DI SINI juga, bukan hanya di browser: hasilnya
       // ikut tersimpan sehingga pesanan lama tetap membawa catatannya saat dibuka
       // ulang, dan cacatnya bisa dilihat tanpa menghitung ulang.
-      const retensi = periksaRetensi({ ir, params: p });
+      const retensi = periksaRetensi({ ir, params: p, dna: ir.dna });
       const hasil = {
         konsep: ir.konsep,
         parts: ir.parts,
@@ -242,28 +237,6 @@ export async function onRequestPost({ env, params }) {
     });
     return jsonError('Gagal menjalankan stasiun', 500);
   }
-}
-
-async function hitungLabel(env, propertyId) {
-  const [label, nilai] = await env.DB.batch([
-    env.DB.prepare(
-      `SELECT DISTINCT TRIM(label_ruangan) AS label
-         FROM property_images
-        WHERE property_id = ? AND label_ruangan IS NOT NULL AND TRIM(label_ruangan) != ''`
-    ).bind(propertyId),
-    // Foto yang belum melewati lintasan visi. Dipakai sebagai GERBANG stasiun
-    // Material — lihat alasannya di pemanggil.
-    env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM property_images
-        WHERE property_id = ? AND vf_dinilai_at IS NULL`
-    ).bind(propertyId),
-  ]);
-  const daftar = (label.results ?? []).map(x => x.label).filter(Boolean);
-  return {
-    unik: daftar.length,
-    daftar,
-    belumDinilai: nilai.results?.[0]?.n ?? 0,
-  };
 }
 
 /**

@@ -108,6 +108,14 @@ export function rakitDnaProduk({ prop, foto = [] }) {
   const larangan = FITUR_RAWAN.filter(l => !adaLabel.has(l));
   if (!isi(prop.furnished)) larangan.push('status furnished (tidak tercatat di data)');
   if (!isi(prop.lantai)) larangan.push('jumlah lantai (tidak tercatat di data)');
+  // ⚠️ Kelas larangan yang BUKAN ruangan, dan yang paling mudah terlewat.
+  // Terjadi 2026-09-04: dialog mengucapkan "lima ratus meter dari Tugu Jogja"
+  // padahal judul listing cuma menulis "Dekat Tugu Jogja" tanpa angka. Klaim
+  // jarak itu spesifik, mudah dicek pembeli, dan tidak pernah ada di data —
+  // sementara aturan hook kita justru menuntut angka konkret. Tanpa larangan
+  // eksplisit ini, model mengisi tuntutan itu dengan karangan.
+  larangan.push('jarak atau waktu tempuh dalam ANGKA ke tempat mana pun '
+    + '(mis. "500 meter dari X", "5 menit ke Y") kecuali angkanya tertulis di FAKTA di atas');
 
   return { fakta, keunikan, ruangTerbukti, larangan };
 }

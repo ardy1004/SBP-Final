@@ -789,6 +789,16 @@ export default function AdminViralFramePage() {
               voiceover {voDetik} detik/part ≈ {Math.round(voDetik * 2.5)} kata ·
               gaya, sudut cerita, dan pilihan foto diputuskan AI.
             </p>
+            {/* Kombinasi 1 Part memaksa hook + isi + ajakan masuk ke satu anggaran
+                kata. Kedua pesanan nyata pertama melanggarnya (satu kelebihan 8
+                kata), jadi batasnya disebutkan sebelum ditekan, bukan sesudah. */}
+            {jumlahPart === 1 && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5 mt-1.5">
+                Satu Part berarti kail, isi, dan ajakan harus muat dalam{' '}
+                <b>{Math.round(voDetik * 2.5)} kata</b> — sangat ketat. Naikkan ke 2–3 Part
+                kalau ingin ruang bercerita.
+              </p>
+            )}
 
             <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
               <button

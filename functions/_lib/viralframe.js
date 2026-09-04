@@ -171,7 +171,12 @@ export const MEKANISME = [
   // menjadikannya tulang cerita membuat AI melanggar aturan kita sendiri —
   // dan `retensi.js` akan menandainya sebagai cacat pada setiap video bermekanisme ini.
   { id: 'hitung_angka',    label: 'Bicara angka',        arahan: 'jadikan angka nyata (LT/LB, jumlah kamar, lantai, lebar jalan) sebagai tulang cerita — TANPA menyebut nominal harga' },
-  { id: 'perbandingan',    label: 'Perbandingan',        arahan: 'bandingkan dengan pilihan lain di kelas harga yang sama' },
+  // ⚠️ "kelas harga" SENGAJA dihindari. Arahan lama berbunyi "bandingkan dengan
+  // pilihan lain di kelas harga yang sama" — itu menyeret AI membicarakan harga
+  // padahal aturan keras melarang nominal DIUCAPKAN, lalu `retensi.js` menandai
+  // kepatuhannya sebagai cacat. Kontradiksi yang sama pernah ada di
+  // `hitung_angka`. Pembandingnya sekarang non-harga.
+  { id: 'perbandingan',    label: 'Perbandingan',        arahan: 'bandingkan dengan properti sejenis di area yang sama pada ukuran, kondisi, atau akses — JANGAN menyebut harga' },
   { id: 'satu_ruang',      label: 'Fokus satu ruang',    arahan: 'habiskan hampir seluruh durasi pada SATU ruang paling kuat' },
   { id: 'kejutan_akhir',   label: 'Kejutan di akhir',    arahan: 'simpan elemen terbaik properti untuk cut terakhir' },
   { id: 'cerita_lokasi',   label: 'Cerita lokasi',       arahan: 'jadikan lingkungan sekitar dan akses sebagai inti cerita' },

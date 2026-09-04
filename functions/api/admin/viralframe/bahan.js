@@ -18,6 +18,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { rakitDnaProduk, rakitDnaAgent } from '../../../_lib/dnaProduk.js';
 import { FLOW, maksVariasi } from '../../../_lib/viralframe.js';
+import { ambilFotoListing, hitungMaterial } from '../../../_lib/fotoListing.js';
 
 export async function onRequestGet({ request, env }) {
   const url = new URL(request.url);
@@ -27,7 +28,7 @@ export async function onRequestGet({ request, env }) {
   if (!Number.isInteger(characterId) || characterId <= 0) return jsonError('character_id wajib', 422);
 
   try {
-    const [prop, agent, fotoRes, riwayat] = await Promise.all([
+    const [prop, agent, foto, material, riwayat] = await Promise.all([
       env.DB.prepare(
         `SELECT id, kode_listing, title, jenis_properti, tujuan, harga,
                 kelurahan, kecamatan, kabupaten,
@@ -39,17 +40,13 @@ export async function onRequestGet({ request, env }) {
       env.DB.prepare(
         'SELECT id, nama, gender, usia, etnik, style, ciri_fisik, foto_url FROM viralframe_characters WHERE id = ?'
       ).bind(characterId).first(),
-      // Urutan IDENTIK dengan yang dipakai stasiun Storyboard (jalankan.js) —
-      // kalau berbeda, panel ini menjanjikan foto yang tidak dipakai. Skor visi
-      // lebih dulu daripada is_cover: cover dipilih karena menjual di katalog,
-      // belum tentu bagus untuk gerak kamera.
-      env.DB.prepare(
-        `SELECT id, url_webp, label_ruangan, vf_skor, vf_catatan, vf_dinilai_at, is_cover
-           FROM property_images
-          WHERE property_id = ?
-          ORDER BY COALESCE(vf_skor, 50) DESC, is_cover DESC, urutan ASC
-          LIMIT 14`
-      ).bind(propertyId).all(),
+      // ⚠️ Foto dan hitungan material diambil lewat `fotoListing.js` yang SAMA
+      // dengan stasiun Storyboard. Sebelumnya panel ini menulis query sendiri
+      // tanpa filter label tapi dengan `LIMIT 14` yang sama, sehingga untuk
+      // listing berfoto >14 (terukur: 14 listing, terbanyak 20) ia menampilkan
+      // himpunan BERBEDA dari yang benar-benar dipakai membuat video.
+      ambilFotoListing(env, propertyId),
+      hitungMaterial(env, propertyId),
       env.DB.prepare(
         `SELECT COUNT(*) AS n FROM viralframe_orders
           WHERE property_id = ? AND variation_key IS NOT NULL`
@@ -59,25 +56,10 @@ export async function onRequestGet({ request, env }) {
     if (!prop) return jsonError('Properti tidak ditemukan', 404);
     if (!agent) return jsonError('Agent tidak ditemukan', 404);
 
-    const semuaFoto = fotoRes.results ?? [];
-    const berlabel = semuaFoto.filter(f => (f.label_ruangan ?? '').trim() !== '');
-    const labelUnik = new Set(berlabel.map(f => f.label_ruangan.trim())).size;
-    // ⚠️ Gerbangnya WAJIB sama dengan `jalankan.js`: belum DINILAI, bukan belum
-    // BERLABEL. Foto berlabel manual tetap butuh lintasan visi untuk `vf_skor`
-    // (peringkat) dan `vf_catatan` (keunikan di DNA). Kalau panel ini memakai
-    // syarat berbeda, ia akan bilang "sudah dinilai" untuk listing yang justru
-    // akan dinilai beberapa detik kemudian.
-    const belumDinilai = semuaFoto.filter(f => f.vf_dinilai_at == null).length;
-
-    // Foto yang BENAR-BENAR akan dipakai = yang berlabel. Kalau belum ada satu
-    // pun, stasiun Material akan menilainya otomatis saat storyboard dibuat —
-    // panel menyampaikan itu alih-alih menampilkan daftar kosong tanpa penjelasan.
-    const dipakai = berlabel.length > 0 ? berlabel : semuaFoto;
-
     return jsonOk({
-      dna: rakitDnaProduk({ prop, foto: berlabel }),
+      dna: rakitDnaProduk({ prop, foto }),
       dna_agent: rakitDnaAgent(agent),
-      foto: dipakai.map((f, i) => ({
+      foto: foto.map((f, i) => ({
         id: f.id,
         url: f.url_webp,
         label: f.label_ruangan ?? null,
@@ -89,15 +71,18 @@ export async function onRequestGet({ request, env }) {
         utama: i < FLOW.refImageUtama,
       })),
       material: {
-        total_foto: semuaFoto.length,
-        berlabel: berlabel.length,
-        belum_dinilai: belumDinilai,
-        label_unik: labelUnik,
-        perlu_dinilai: belumDinilai > 0,
+        total_foto: material.totalFoto,
+        berlabel: material.berlabel,
+        belum_dinilai: material.belumDinilai,
+        label_unik: material.labelUnik,
+        // Gerbang IDENTIK dengan stasiun Material di `jalankan.js` — keduanya
+        // memakai hitungan yang sama dari modul yang sama, jadi panel tidak bisa
+        // lagi bilang "sudah dinilai" untuk listing yang justru akan dinilai.
+        perlu_dinilai: material.belumDinilai > 0,
       },
       rotasi: {
         sudah: riwayat?.n ?? 0,
-        maks: maksVariasi(labelUnik),
+        maks: maksVariasi(material.labelUnik),
       },
       flow: { utama: FLOW.refImageUtama, maks: FLOW.refImagePerPart },
     });

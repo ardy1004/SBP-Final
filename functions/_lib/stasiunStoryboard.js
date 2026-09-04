@@ -113,6 +113,10 @@ ${daftarFoto}
 
 BENTUK VIDEO (dikunci kuota Google Flow, tidak bisa diubah)
 - ${params.jumlahPart} Part × ${detikPart} detik. Peran berurutan: ${PERAN.slice(0, params.jumlahPart).join(' → ')}.
+${params.jumlahPart === 1 ? `- ⚠️ HANYA SATU Part, jadi Part ini memikul TIGA tugas sekaligus dalam ${maksKata} kata:
+  kail di 2 detik pertama → satu nilai jual terkuat → ajakan penutup.
+  Anggarannya ketat dan TIDAK BISA dilonggarkan (itu batas fisik durasi bicara),
+  jadi pilih SATU keunggulan saja dan buang basa-basi. Ajakan cukup 4-5 kata.` : ''}
 - Voiceover ${voDetik} detik per Part → MAKSIMAL ${maksKata} kata per Part.
   Ini rentang target, bukan plafon: tulis 90-100% dari ${maksKata} kata. Dialog yang
   terlalu pendek membuat model video mengisi sisa waktu dengan mengulang frasa.
@@ -131,6 +135,12 @@ ATURAN KERAS
   pertama adalah hook, bukan salam.
 - Hook Part 1 WAJIB memuat minimal satu hal konkret (angka, ukuran, jumlah kamar,
   atau nama tempat). Pembuka tanpa detail bisa dipasang di listing mana pun.
+- 🔥 SETIAP ANGKA yang diucapkan HARUS berasal dari FAKTA TERVERIFIKASI di atas.
+  Dilarang keras mengarang jarak atau waktu tempuh ("500 meter dari Tugu",
+  "5 menit ke kampus") kalau angkanya tidak tertulis di sana. Kedekatan boleh
+  disebut TANPA angka ("dekat Tugu Jogja"). Angka yang dikarang mudah dicek
+  pembeli dan merusak kepercayaan — dan aturan hook di atas BUKAN izin
+  mengarang, melainkan perintah memakai angka yang memang ada.
 - "teks_layar" Part 1 dan Part terakhir WAJIB terisi — banyak penonton menonton
   tanpa suara, dan teks layar satu-satunya kanal yang boleh menampilkan harga.
 - "kamera" berisi POSISI & GERAK KAMERA saja, BUKAN aksi subjek. Tulis
