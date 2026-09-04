@@ -5,6 +5,8 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../../_shared/response.js';
+import { renderPromptFlow } from '../../../../../_lib/stasiunStoryboard.js';
+import { periksaRetensi } from '../../../../../_lib/retensi.js';
 
 // Sama persis dengan daftar di orders/index.js. Sengaja diulang di sini alih-alih
 // diimpor dari sana: file index.js adalah HANDLER route, mengimpornya dari sini
@@ -79,21 +81,57 @@ export async function onRequestPatch({ request, env, params }) {
   // ⚠️ Dibatasi ukurannya. `hasil_json` memuat storyboard + 3 prompt Flow, dan
   // tanpa batas, satu payload rusak bisa menggemukkan baris yang ikut terbaca
   // setiap kali antrean dimuat.
+  let hasilBaru = null;
   if (body.hasil && typeof body.hasil === 'object' && !Array.isArray(body.hasil)) {
-    const teks = JSON.stringify(body.hasil);
-    if (teks.length > 120000) return jsonError('Hasil terlalu besar untuk disimpan', 413);
-    set.push('hasil_json = ?'); bind.push(teks);
+    hasilBaru = body.hasil;
+    if (JSON.stringify(hasilBaru).length > 120000) {
+      return jsonError('Hasil terlalu besar untuk disimpan', 413);
+    }
   }
-  if (set.length === 0) return jsonError('Tidak ada field yang bisa diubah', 422);
-
-  set.push("updated_at = datetime('now')");
+  if (!hasilBaru && set.length === 0) return jsonError('Tidak ada field yang bisa diubah', 422);
 
   try {
+    // ⚠️ `prompt_flow` dan `retensi` SELALU DITURUNKAN ULANG dari `parts`,
+    // tidak pernah diterima apa adanya dari klien.
+    //
+    // Tanpa ini, mengganti hook lewat Adu Hook memperbarui `parts` tapi
+    // MENINGGALKAN prompt Google Flow yang masih memuat dialog lama — dan satu-
+    // satunya cara membuatnya ulang (tombol "Buat Storyboard") justru membuat
+    // pesanan dengan variasi BARU, sehingga hook yang baru dipilih ikut terbuang.
+    // Fiturnya jadi mustahil dipakai sampai tuntas.
+    //
+    // Karena `renderPromptFlow()` deterministik dan nol logika kreatif, menurunkan
+    // ulang di sini aman dan membuat prompt tak mungkin melenceng dari storyboard.
+    if (hasilBaru && Array.isArray(hasilBaru.parts) && hasilBaru.parts.length > 0) {
+      const prop = await env.DB.prepare(
+        `SELECT p.id, p.jenis_properti, p.kecamatan, p.kabupaten
+           FROM viralframe_orders o JOIN properties p ON p.id = o.property_id
+          WHERE o.id = ?`
+      ).bind(id).first();
+      if (prop) {
+        const params = hasilBaru.params ?? {};
+        // `hasil_json` menyimpan `dna_agent` (snake), renderer membaca `dnaAgent`.
+        const ir = {
+          parts: hasilBaru.parts,
+          variasi: hasilBaru.variasi ?? {},
+          dnaAgent: hasilBaru.dna_agent ?? null,
+        };
+        hasilBaru = {
+          ...hasilBaru,
+          prompt_flow: renderPromptFlow({ ir, prop, params }),
+          retensi: periksaRetensi({ ir, params }),
+        };
+      }
+    }
+
+    if (hasilBaru) { set.push('hasil_json = ?'); bind.push(JSON.stringify(hasilBaru)); }
+    set.push("updated_at = datetime('now')");
+
     const res = await env.DB.prepare(
       `UPDATE viralframe_orders SET ${set.join(', ')} WHERE id = ?`
     ).bind(...bind, id).run();
     if ((res.meta?.changes ?? 0) === 0) return jsonError('Pesanan tidak ditemukan', 404);
-    return jsonOk({ id, diubah: true });
+    return jsonOk({ id, diubah: true, prompt_dibuat_ulang: Boolean(hasilBaru?.prompt_flow) });
   } catch (err) {
     console.error('[vf orders PATCH]', err.message);
     return jsonError('Gagal mengubah pesanan', 500);

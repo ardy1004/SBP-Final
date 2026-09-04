@@ -140,6 +140,11 @@ export default function AdminViralFramePage() {
   const [dnaSunting, setDnaSunting] = useState<DnaProduk | null>(null);
   const [order, setOrder] = useState<OrderPenuh | null>(null);
   const [progres, setProgres] = useState<string[]>([]);
+  // Dinaikkan setiap kali pipeline selesai berjalan, supaya Panel Bahan memuat
+  // ulang: stasiun Material mengisi vf_skor & vf_catatan SESUDAH panel itu
+  // dimuat, dan tanpa ini layar terus bilang "belum dinilai" padahal datanya
+  // sudah ada di database beberapa detik sebelumnya.
+  const [bahanRefresh, setBahanRefresh] = useState(0);
   const [sibuk, setSibuk] = useState(false);
   const [kerjaError, setKerjaError] = useState('');
 
@@ -324,8 +329,38 @@ export default function AdminViralFramePage() {
 
       await muatPesanan(orderId);
       fetchOrders();
+      setBahanRefresh(n => n + 1);
     } catch (err: unknown) {
       setKerjaError(err instanceof Error ? err.message : 'Gagal membuat storyboard.');
+    } finally {
+      setSibuk(false);
+    }
+  };
+
+  /**
+   * Batalkan pesanan yang sedang dibuka.
+   *
+   * ⚠️ Wajib ada. Kuota `MAKS_PESANAN_TERBUKA_PER_AGENT` menghitung pesanan
+   * berstatus baru/material/variasi/konsep/storyboard/menunggu_render — jadi
+   * lima pesanan yang mandek (mis. AI gagal berulang) mengunci agent itu
+   * SELAMANYA tanpa jalan keluar di layar. Endpoint DELETE-nya sudah ada sejak
+   * awal tapi kehilangan pemanggilnya saat antrean dibongkar jadi meja kerja.
+   * Pesanan yang sudah menghasilkan video ditolak server, jadi tombol ini tidak
+   * bisa dipakai membuang jejak video yang masih dipakai metrik.
+   */
+  const batalkanOrder = async () => {
+    if (!order || sibuk) return;
+    setSibuk(true); setKerjaError('');
+    try {
+      const res = await fetch(`/api/admin/viralframe/orders/${order.id}`, {
+        method: 'DELETE', credentials: 'include',
+      });
+      const json = await bacaJson(res);
+      if (!json.success) { setKerjaError(json.error ?? 'Gagal membatalkan pesanan.'); return; }
+      setOrder(null); setProgres([]);
+      fetchOrders();
+    } catch (err: unknown) {
+      setKerjaError(err instanceof Error ? err.message : 'Gagal membatalkan pesanan.');
     } finally {
       setSibuk(false);
     }
@@ -473,6 +508,15 @@ export default function AdminViralFramePage() {
             <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#EFF6FF] text-[#1E40AF] shrink-0">
               {LANGKAH[order.status] ?? order.status}
             </span>
+          )}
+          {order && order.video_id == null && (
+            <button
+              onClick={batalkanOrder}
+              disabled={sibuk}
+              title="Hapus pesanan ini — membebaskan kuota agent"
+              className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-[#64748B] hover:bg-red-50 hover:text-red-600 hover:border-red-200 shrink-0 disabled:opacity-50">
+              Batalkan
+            </button>
           )}
           <button
             onClick={() => { setListingAktif(null); setOrder(null); setBahan(null); setDnaSunting(null); setProgres([]); setKerjaError(''); }}
@@ -687,6 +731,7 @@ export default function AdminViralFramePage() {
           <PanelBahan
             propertyId={listingAktif.id}
             characterId={agentAktif.id}
+            refreshKey={bahanRefresh}
             onSiap={(b, d) => { setBahan(b); setDnaSunting(d); }}
           />
 

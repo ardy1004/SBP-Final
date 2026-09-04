@@ -92,7 +92,9 @@ export default function PanelStoryboard({ orderId, hasil, onUbah }: {
       const json = await bacaJson(res);
       if (!json.success) { setError(json.error ?? 'Gagal menyimpan hook.'); return; }
       setAdu(null);
-      setPesan('Hook diganti. Prompt Google Flow perlu dibuat ulang agar ikut berubah.');
+      // Prompt Flow & retention check diturunkan ulang oleh server dari `parts`
+      // yang baru — tidak ada langkah manual yang harus diingat user.
+      setPesan('Hook diganti. Prompt Google Flow dan retention check ikut diperbarui.');
       onUbah();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Gagal menyimpan hook.');

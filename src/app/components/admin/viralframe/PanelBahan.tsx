@@ -10,7 +10,7 @@
 // Dokumentasi Google menyebut batas 3 ingredient per generate; pemilik akun
 // melaporkan 7. Alih-alih menebak, storyboard memilih sampai 7 TAPI panel
 // menandai 3 teratas sebagai wajib. Kalau ternyata 3, tiga teratas sudah cukup.
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, ImageOff, Star, ShieldAlert, Sparkles, RotateCcw } from 'lucide-react';
 import { bacaJson } from '../../../../lib/api';
 
@@ -46,9 +46,18 @@ function fotoSrc(key: string | null): string {
   return `/api/admin/media?key=${encodeURIComponent(key)}`;
 }
 
-export default function PanelBahan({ propertyId, characterId, onSiap }: {
+export default function PanelBahan({ propertyId, characterId, refreshKey = 0, onSiap }: {
   propertyId: number;
   characterId: number;
+  /**
+   * Dinaikkan induk setiap kali pipeline selesai berjalan.
+   *
+   * ⚠️ Wajib ada: stasiun Material mengisi `vf_skor` dan `vf_catatan` SESUDAH
+   * panel ini dimuat, jadi tanpa pemuatan ulang layar akan terus menampilkan
+   * "belum dinilai" dan DNA tanpa keunikan — padahal datanya sudah ada di
+   * database beberapa detik sebelumnya.
+   */
+  refreshKey?: number;
   /** Dipanggil tiap kali bahan berubah — induk menyimpannya untuk dikirim saat generate. */
   onSiap: (b: Bahan | null, dnaSunting: DnaProduk | null) => void;
 }) {
@@ -58,9 +67,22 @@ export default function PanelBahan({ propertyId, characterId, onSiap }: {
   const [error, setError] = useState('');
   const [disunting, setDisunting] = useState(false);
 
+  // Suntingan user dilacak lewat ref, bukan state, karena efek pemuatan di bawah
+  // harus MEMBACANYA tanpa ikut dijalankan ulang setiap kali nilainya berubah.
+  const adaSuntingan = useRef(false);
+  const dnaRef = useRef<DnaProduk | null>(null);
+
+  useEffect(() => {
+    // Ganti listing/agent = mulai bersih. Refresh (refreshKey naik) TIDAK
+    // membuang suntingan — lihat penanganannya di efek berikutnya.
+    adaSuntingan.current = false;
+    dnaRef.current = null;
+    setDisunting(false);
+  }, [propertyId, characterId]);
+
   useEffect(() => {
     let batal = false;
-    setLoading(true); setError(''); setDisunting(false);
+    setLoading(true); setError('');
     (async () => {
       try {
         const res = await fetch(
@@ -71,8 +93,16 @@ export default function PanelBahan({ propertyId, characterId, onSiap }: {
         if (batal) return;
         if (!json.success || !json.data) { setError(json.error ?? 'Gagal memuat bahan.'); return; }
         setBahan(json.data);
-        setDna(json.data.dna);
-        onSiap(json.data, null);
+        // ⚠️ DNA hasil suntingan TIDAK ditimpa oleh pemuatan ulang. Refresh
+        // dipicu setelah stasiun Material selesai, dan menimpanya di situ berarti
+        // membuang koreksi yang baru saja diketik user tepat sebelum ia menekan
+        // tombol — tanpa peringatan apa pun.
+        if (!adaSuntingan.current) {
+          setDna(json.data.dna);
+          onSiap(json.data, null);
+        } else {
+          onSiap(json.data, dnaRef.current);
+        }
       } catch (err: unknown) {
         if (!batal) setError(err instanceof Error ? err.message : 'Gagal memuat bahan.');
       } finally {
@@ -82,11 +112,13 @@ export default function PanelBahan({ propertyId, characterId, onSiap }: {
     return () => { batal = true; };
     // onSiap sengaja tidak jadi dependensi — induk membuatnya ulang tiap render,
     // dan memasukkannya ke sini membuat panel memuat ulang tanpa henti.
-  }, [propertyId, characterId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [propertyId, characterId, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ubahDna = useCallback((baru: DnaProduk) => {
     setDna(baru);
     setDisunting(true);
+    adaSuntingan.current = true;
+    dnaRef.current = baru;
     onSiap(bahan, baru);
   }, [bahan, onSiap]);
 
@@ -117,7 +149,11 @@ export default function PanelBahan({ propertyId, characterId, onSiap }: {
           </span>
           {disunting && (
             <button
-              onClick={() => { setDna(bahan.dna); setDisunting(false); onSiap(bahan, null); }}
+              onClick={() => {
+                setDna(bahan.dna); setDisunting(false);
+                adaSuntingan.current = false; dnaRef.current = null;
+                onSiap(bahan, null);
+              }}
               className="inline-flex items-center gap-1 text-[#64748B] hover:text-[#0F172A]">
               <RotateCcw size={11} /> Kembalikan
             </button>
