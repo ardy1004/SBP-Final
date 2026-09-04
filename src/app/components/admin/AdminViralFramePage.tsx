@@ -19,7 +19,7 @@ import { bacaJson } from '../../../lib/api';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Search, Filter, ImageOff, Video, ArrowLeft, Loader2, Sparkles,
-  SlidersHorizontal, ChevronDown, ChevronUp, RotateCcw, Crown, Award, Flame, Star, Type,
+  SlidersHorizontal, ChevronDown, ChevronUp, RotateCcw, Crown, Award, Flame, Star,
 } from 'lucide-react';
 import AgentGrid, { agentCocok, type AgentRow, type AgentStat } from './viralframe/AgentGrid';
 import PanelBahan, { type Bahan, type DnaProduk } from './viralframe/PanelBahan';
@@ -326,23 +326,6 @@ export default function AdminViralFramePage() {
       fetchOrders();
     } catch (err: unknown) {
       setKerjaError(err instanceof Error ? err.message : 'Gagal membuat storyboard.');
-    } finally {
-      setSibuk(false);
-    }
-  };
-
-  const buatCaption = async () => {
-    if (!order || sibuk) return;
-    setSibuk(true); setKerjaError('');
-    try {
-      const res = await fetch(`/api/admin/viralframe/orders/${order.id}/caption`, {
-        method: 'POST', credentials: 'include',
-      });
-      const json = await bacaJson(res);
-      if (!json.success) { setKerjaError(json.error ?? 'Gagal membuat caption.'); return; }
-      await muatPesanan(order.id);
-    } catch (err: unknown) {
-      setKerjaError(err instanceof Error ? err.message : 'Gagal membuat caption.');
     } finally {
       setSibuk(false);
     }
@@ -801,26 +784,13 @@ export default function AdminViralFramePage() {
           {/* ─── LANGKAH 7: PROMPT GOOGLE FLOW ──────────────────────────── */}
           {promptFlow.length > 0 && <PanelPrompt parts={promptFlow} />}
 
-          {/* ─── LANGKAH 8: CAPTION + HASHTAG ───────────────────────────── */}
-          {siapDirender && order && (
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-              <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  onClick={buatCaption}
-                  disabled={sibuk}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white disabled:opacity-50"
-                  style={{ background: '#0891B2' }}>
-                  {sibuk ? <Loader2 size={13} className="animate-spin" /> : <Type size={13} />}
-                  {hasil?.caption?.teks ? 'Buat ulang caption + hashtag' : 'Auto caption + hashtag'}
-                </button>
-                <span className="text-[11px] text-[#94A3B8]">
-                  Dibuat dari storyboard — ikut rotasi, dan hashtag merek/geo tetap sama.
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* ─── LANGKAH 9: UNGGAH ──────────────────────────────────────── */}
+          {/* ─── LANGKAH 8-9: CAPTION + HASHTAG + UNGGAH ─────────────────
+              Caption dulu berupa kartu TERPISAH di atas panel unggah, dan itu
+              salah dua kali: tombolnya jauh dari kolom yang diisinya, dan
+              hasilnya dioper lewat prop ke `useState` yang hanya membaca sekali
+              saat mount — jadi caption yang dibuat setelah panel terpasang tidak
+              pernah sampai ke kolomnya. Sekarang tombolnya di dalam panel dan
+              mengisi state-nya langsung; tidak ada jalur data yang bisa putus. */}
           {siapDirender && order && (
             <PanelUnggah
               order={{ id: order.id, property_id: order.property_id, character_id: order.character_id, title: order.title }}

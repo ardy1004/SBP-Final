@@ -243,15 +243,10 @@ export default function PanelStoryboard({ orderId, hasil, onUbah }: {
           ))}
         </div>
 
-        {hasil.caption?.teks && (
-          <div className="rounded-xl border border-gray-200 p-3">
-            <div className="text-[11px] uppercase tracking-wide text-[#94A3B8] font-semibold mb-1.5 flex items-center gap-1">
-              <Check size={11} /> Caption tersimpan
-            </div>
-            <p className="text-xs text-[#334155] whitespace-pre-wrap leading-relaxed">{hasil.caption.teks}</p>
-            <p className="text-[11px] text-[#1565C0] mt-1.5 break-words">{hasil.caption.hashtags}</p>
-          </div>
-        )}
+        {/* Caption SENGAJA tidak ditampilkan di sini. Satu-satunya tempatnya
+            adalah kolom di panel Unggah, tempat ia benar-benar dipakai —
+            menampilkannya di dua tempat berarti salinan di sini basi begitu
+            user menyunting yang di bawah. */}
       </div>
     </div>
   );

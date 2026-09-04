@@ -15,7 +15,7 @@
 // Cloudinary). Melewatinya membuat filter rasio di Konten Agent kehilangan
 // dasarnya tanpa error apa pun.
 import { useState } from 'react';
-import { Upload, Loader2, Check } from 'lucide-react';
+import { Upload, Loader2, Check, Type } from 'lucide-react';
 import { bacaJson } from '../../../../lib/api';
 import { buatPosterDariVideo } from '../../../lib/posterVideo';
 
@@ -27,21 +27,47 @@ interface Presign {
 
 export default function PanelUnggah({ order, captionAwal = '', hashtagAwal = '', onSelesai }: {
   order: { id: number; property_id: number; character_id: number; title: string };
-  /** Caption & hashtag hasil stasiun Caption — nilai awal, tetap bisa disunting. */
+  /** Caption & hashtag yang SUDAH tersimpan di pesanan — nilai awal saat panel dibuka. */
   captionAwal?: string;
   hashtagAwal?: string;
   onSelesai: () => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
-  // Sengaja `useState(nilaiAwal)`, bukan `value={captionAwal}` terkontrol: begitu
-  // caption dibuat, isinya milik user dan boleh disunting bebas. Menyinkronkannya
-  // terus-menerus akan menimpa suntingan setiap kali induk render ulang.
+  // ⚠️ `useState(nilaiAwal)` hanya membaca prop SEKALI, saat mount. Itu benar
+  // untuk kasus buka-ulang (caption sudah tersimpan di pesanan), tapi SALAH untuk
+  // caption yang dibuat SETELAH panel ini terpasang — nilainya tidak akan pernah
+  // sampai ke kolom, dan user melihat kotak yang tetap kosong tanpa error apa pun.
+  //
+  // Itulah kenapa tombol pembuatnya sekarang ADA DI SINI dan mengisi state ini
+  // langsung, bukan di kartu terpisah yang mengoper lewat prop. Tombol yang
+  // mengisi sebuah kolom harus duduk di sebelah kolom itu — bukan cuma soal
+  // tata letak, tapi supaya tidak ada jalur data yang bisa putus di tengah.
   const [caption, setCaption] = useState(captionAwal);
   const [hashtags, setHashtags] = useState(hashtagAwal);
   const [tahap, setTahap] = useState('');
   const [sibuk, setSibuk] = useState(false);
+  const [buatSibuk, setBuatSibuk] = useState(false);
   const [error, setError] = useState('');
   const [beres, setBeres] = useState(false);
+
+  /** Buat caption + hashtag dari storyboard, lalu isi kedua kolom di bawah. */
+  const buatCaption = async () => {
+    if (sibuk || buatSibuk) return;
+    setBuatSibuk(true); setError('');
+    try {
+      const res = await fetch(`/api/admin/viralframe/orders/${order.id}/caption`, {
+        method: 'POST', credentials: 'include',
+      });
+      const json = await bacaJson<{ caption?: string; hashtags?: string }>(res);
+      if (!json.success || !json.data) { setError(json.error ?? 'Gagal membuat caption.'); return; }
+      setCaption(json.data.caption ?? '');
+      setHashtags(json.data.hashtags ?? '');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Gagal membuat caption.');
+    } finally {
+      setBuatSibuk(false);
+    }
+  };
 
   const unggah = async () => {
     if (!file || sibuk) return;
@@ -155,10 +181,27 @@ export default function PanelUnggah({ order, captionAwal = '', hashtagAwal = '',
                 )}
               </label>
 
+              {/* Tombol pengisi duduk tepat di atas kolom yang diisinya. */}
+              <div className="flex items-center gap-2 flex-wrap pt-1">
+                <button
+                  type="button"
+                  onClick={buatCaption}
+                  disabled={sibuk || buatSibuk}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white disabled:opacity-50"
+                  style={{ background: '#0891B2' }}>
+                  {buatSibuk ? <Loader2 size={13} className="animate-spin" /> : <Type size={13} />}
+                  {buatSibuk ? 'Membuat…' : (caption ? 'Buat ulang caption + hashtag' : 'Buat caption + hashtag')}
+                </button>
+                <span className="text-[11px] text-[#94A3B8]">
+                  Dari storyboard — ikut rotasi, hashtag merek &amp; lokasi tetap sama.
+                </span>
+              </div>
+
               <label className="block">
                 <span className="block text-sm font-medium text-[#0F172A] mb-1.5">Caption <span className="font-normal text-[#94A3B8]">(opsional)</span></span>
-                <textarea value={caption} onChange={e => setCaption(e.target.value)} rows={3} disabled={sibuk}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0]" />
+                <textarea value={caption} onChange={e => setCaption(e.target.value)} rows={5} disabled={sibuk}
+                  placeholder="Tulis sendiri, atau tekan “Buat caption + hashtag” di atas."
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] leading-relaxed" />
               </label>
 
               <label className="block">
