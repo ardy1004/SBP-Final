@@ -19,7 +19,7 @@ import { handleOptions } from '../../_shared/response.js';
 
 // DeepSeek didahulukan agar gaya tulisan tetap sama seperti sebelumnya; sisanya
 // hanya dipakai bila DeepSeek gagal/lambat/kehabisan kuota.
-const PROVIDER_ORDER = ['deepseek', 'gemini', 'groq', 'openrouter'];
+const PROVIDER_ORDER = ['deepseek', 'gemini', 'groq', 'mistral'];
 
 // Per provider. Longgar karena streaming sudah melindungi dari wall-clock,
 // tapi tetap berbatas supaya rantai fallback tidak menggantung tanpa akhir.

@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { toImageThumbnailUrl } from '../../lib/cloudinaryUrl';
 import { unduhVideo } from '../../lib/posterVideo';
-import { findArchetype } from './viralframe/archetypes';
+import { labelGaya } from '../../../../functions/_lib/viralframe.js';
 import SlotIndicatorStrip from './viralframe/SlotIndicatorStrip';
 import AkunAgentCard from './AkunAgentCard';
 import JamPrimetimeCard from './JamPrimetimeCard';
@@ -56,9 +56,7 @@ interface AnalyticsRow {
 // historis tidak ikut bergeser kalau suatu saat labelnya diubah. Diterjemahkan
 // ke label hanya saat ditampilkan; ID tak dikenal (arketipe lama yang sudah
 // dihapus) ditampilkan apa adanya, bukan disembunyikan.
-function labelGaya(id: string): string {
-  return findArchetype(id)?.label ?? id;
-}
+
 
 interface AgentVideo {
   id: number;

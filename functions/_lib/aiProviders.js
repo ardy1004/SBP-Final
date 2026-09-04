@@ -118,12 +118,21 @@ export const PROVIDERS = {
     quota: null,
     supportsVision: false,
   },
-  openrouter: {
-    label: 'OpenRouter',
-    settingKey: 'openrouter_api_key',
-    base: 'https://openrouter.ai/api/v1',
-    defaultModel: 'deepseek/deepseek-chat',
-    quota: 'https://openrouter.ai/api/v1/auth/key',
+  // Menggantikan OpenRouter (keputusan user 2026-09-04, saat ViralFrame dibangun
+  // ulang): empat provider yang dipertahankan adalah Gemini, DeepSeek, Mistral,
+  // Groq. OpenRouter dilepas karena ia agregator — model yang dilayaninya sudah
+  // dijangkau langsung lewat tiga provider lain, jadi ia hanya menambah satu
+  // lapis kegagalan tanpa menambah kemampuan.
+  //
+  // ⚠️ Endpoint Mistral OpenAI-compatible, jadi callChatCompletion() tidak perlu
+  // cabang khusus. `pixtral-*` mendukung visi, tapi defaultnya sengaja model teks:
+  // jalur bervisi dipilih eksplisit lewat supportsVision di pemanggil.
+  mistral: {
+    label: 'Mistral',
+    settingKey: 'mistral_api_key',
+    base: 'https://api.mistral.ai/v1',
+    defaultModel: 'mistral-small-latest',
+    quota: null,
     supportsVision: false,
   },
   deepseek: {
@@ -320,17 +329,6 @@ export async function getQuotaStatus(provider, apiKey) {
   if (!apiKey) return { color: 'red', detail: 'Key belum diatur' };
 
   try {
-    if (provider === 'openrouter') {
-      const res = await fetch(cfg.quota, { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(12000) });
-      if (res.status === 401) return { color: 'red', detail: 'Key tidak valid' };
-      if (!res.ok) return { color: 'yellow', detail: `HTTP ${res.status}` };
-      const d = (await res.json()).data ?? {};
-      if (d.limit == null) return { color: 'green', detail: 'Kredit (tanpa limit harian)' };
-      const remaining = Math.max(0, (d.limit ?? 0) - (d.usage ?? 0));
-      const ratio = d.limit ? remaining / d.limit : 1;
-      const color = remaining <= 0 ? 'red' : ratio < 0.15 ? 'yellow' : 'green';
-      return { color, detail: `Sisa ${remaining.toFixed(2)}/${d.limit}` };
-    }
     if (provider === 'deepseek') {
       const res = await fetch(cfg.quota, { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(12000) });
       if (res.status === 401) return { color: 'red', detail: 'Key tidak valid' };

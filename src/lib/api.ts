@@ -513,7 +513,7 @@ export async function getAdminMe() {
 }
 
 // ─── AI Providers (ViralFrame multi-provider) ────────────────────────────────
-export type AiProviderId = 'gemini' | 'groq' | 'openrouter' | 'deepseek';
+export type AiProviderId = 'gemini' | 'groq' | 'mistral' | 'deepseek';
 export interface AiKeyInfo { configured: boolean; masked: string | null; source: 'db' | 'secret' | null }
 export interface AiStatusInfo { color: 'green' | 'yellow' | 'red'; detail: string; configured: boolean }
 

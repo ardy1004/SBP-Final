@@ -3,14 +3,8 @@ import { useState, useEffect } from 'react';
 import { useOutletContext, Link } from 'react-router';
 import { TrendingUp, Home, Users, Eye, MessageCircle, FileText, ArrowUpRight, ArrowDownRight, BarChart3, Settings, Video } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
-import { findArchetype } from './viralframe/archetypes';
+import { labelGaya } from '../../../../functions/_lib/viralframe.js';
 import AutoJadwalBanner from './AutoJadwalBanner';
-
-// Sama seperti AdminViralFrameAgentVideosPage.tsx: `gaya` disimpan sebagai ID
-// arketipe, diterjemahkan ke label hanya saat ditampilkan.
-function labelGaya(id: string): string {
-  return findArchetype(id)?.label ?? id;
-}
 
 // Judul kelompok section — accent bar dari palet yang sudah dipakai di file
 // ini (bukan warna baru), supaya scroll panjang tab Ringkasan mudah dipindai

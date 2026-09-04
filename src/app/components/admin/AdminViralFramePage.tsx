@@ -1,10 +1,32 @@
+// VIRAL FRAME — MEJA KERJA.
+//
+// ─── Kenapa satu halaman menurun, bukan antrean ──────────────────────────────
+// Versi sebelumnya berbentuk ANTREAN PRODUKSI: pilih banyak listing, masukkan
+// antrean, tekan "Jalankan" berkali-kali, buka modal terpisah. Bentuk itu masuk
+// akal untuk memproduksi puluhan video semalam tanpa melihat satu per satu.
+// Tapi aturannya berbunyi "storyboard wajib bagus" — artinya setiap video
+// DINILAI MANUSIA sebelum dirender, dan bentuk yang benar untuk itu adalah meja
+// kerja: satu listing dikerjakan sampai tuntas sambil dilihat.
+//
+//   agent → listing → bahan → parameter → storyboard → prompt → caption → unggah
+//
+// ─── Yang TIDAK berubah: mesinnya ────────────────────────────────────────────
+// Pesanan (`viralframe_orders`) tetap sumber kebenaran dan tetap menegakkan
+// rotasi lewat UNIQUE(property_id, variation_key). Bedanya ia dibuat IMPLISIT
+// saat "Buat Storyboard" ditekan, bukan lewat tombol "Antrekan" tersendiri.
+// Ledger-nya tetap ada; yang hilang cuma antrean sebagai layar kerja.
 import { bacaJson } from '../../../lib/api';
-import { readNdjsonFinal } from '../../../lib/ndjson';
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Search, Filter, ImageOff, Video,
-  SlidersHorizontal, ChevronDown, ChevronUp, RotateCcw, Crown, Award, Flame, Star,
+  Search, Filter, ImageOff, Video, ArrowLeft, Loader2, Sparkles,
+  SlidersHorizontal, ChevronDown, ChevronUp, RotateCcw, Crown, Award, Flame, Star, Type,
 } from 'lucide-react';
+import AgentGrid, { agentCocok, type AgentRow, type AgentStat } from './viralframe/AgentGrid';
+import PanelBahan, { type Bahan, type DnaProduk } from './viralframe/PanelBahan';
+import PanelStoryboard, { type HasilPesanan } from './viralframe/PanelStoryboard';
+import PanelPrompt, { type PromptPart } from './viralframe/PanelPrompt';
+import PanelUnggah from './viralframe/PanelUnggah';
+import { FLOW, voDetikBaku } from '../../../../functions/_lib/viralframe.js';
 
 interface PropertyRow {
   id: number;
@@ -19,13 +41,39 @@ interface PropertyRow {
   badge_featured: number;
   badge_hot: number;
   properti_pilihan: number;
-  viralframe_dismissed_at: string | null;
   provinsi: string;
   kabupaten: string;
   kecamatan: string;
   kelurahan: string;
   cover_url: string | null;
 }
+
+interface OrderRow {
+  id: number;
+  property_id: number;
+  character_id: number;
+  status: string;
+  variation_key: string | null;
+  catatan: string | null;
+  video_id: number | null;
+  title: string;
+}
+
+/** Bentuk lengkap satu pesanan hasil GET /orders/:id. */
+interface OrderPenuh extends OrderRow {
+  hasil: (HasilPesanan & { prompt_flow?: PromptPart[] }) | null;
+}
+
+const CTA_OPSI: { id: string; label: string }[] = [
+  { id: 'survei',   label: 'Jadwalkan survei' },
+  { id: 'wa',       label: 'Chat WhatsApp' },
+  { id: 'dm_info',  label: 'DM untuk detail' },
+  { id: 'link_bio', label: 'Klik link di bio' },
+  { id: 'komentar', label: 'Komentar di bawah' },
+  { id: 'simpan',   label: 'Simpan videonya' },
+];
+
+const PLATFORM_OPSI = ['tiktok', 'instagram', 'youtube', 'facebook'];
 
 const BADGE_DEFS = [
   { key: 'pilihan',  label: 'Pilihan',  col: 'properti_pilihan', icon: Star,  color: '#F5A623' },
@@ -63,26 +111,49 @@ function coverSrc(url: string | null) {
   return url;
 }
 
+// Stasiun mana yang sedang dikerjakan pesanan — dipakai sebagai label progres,
+// bukan lagi badge antrean.
+const LANGKAH: Record<string, string> = {
+  baru: 'Menyiapkan', material: 'Menilai foto', variasi: 'Memilih variasi',
+  konsep: 'Menyusun konsep', storyboard: 'Menyusun storyboard',
+  menunggu_render: 'Siap dirender', selesai: 'Selesai', gagal: 'Gagal',
+};
+
+/** Batas iterasi loop stasiun. Listing 20 foto butuh ±4 lintasan Material + 2. */
+const MAKS_LANGKAH = 8;
+
 export default function AdminViralFramePage() {
+  const [agents, setAgents] = useState<AgentRow[]>([]);
+  const [agentsLoading, setAgentsLoading] = useState(true);
+  const [agentAktif, setAgentAktif] = useState<AgentRow | null>(null);
   const [properties, setProperties] = useState<PropertyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [displayLimit, setDisplayLimit] = useState(24);
-  // Status konten per properti (R6)
-  const [withScript, setWithScript] = useState<Set<number>>(new Set());
   const [withVideo, setWithVideo] = useState<Set<number>>(new Set());
-  const [latestContentAt, setLatestContentAt] = useState<Record<number, string>>({});
-  const [dismissedMap, setDismissedMap] = useState<Record<number, string | null>>({});
-  const [resettingId, setResettingId] = useState<number | null>(null);
   const [onlyEmpty, setOnlyEmpty] = useState(false);
 
-  // ── Filter (jenis, harga, lokasi 4-level, badge, sold) ──────────────────────
+  // ── Meja kerja ────────────────────────────────────────────────────────────
+  const [listingAktif, setListingAktif] = useState<PropertyRow | null>(null);
+  const [bahan, setBahan] = useState<Bahan | null>(null);
+  const [dnaSunting, setDnaSunting] = useState<DnaProduk | null>(null);
+  const [order, setOrder] = useState<OrderPenuh | null>(null);
+  const [progres, setProgres] = useState<string[]>([]);
+  const [sibuk, setSibuk] = useState(false);
+  const [kerjaError, setKerjaError] = useState('');
+
+  // Lima parameter manual. Defaultnya diambil dari LAPIS KONSTANTA (kuota Flow),
+  // bukan diketik ulang di sini — supaya tidak jadi sumber kebenaran kedua.
+  const [jumlahPart, setJumlahPart] = useState<number>(FLOW.partPerVideo);
+  const [detikPerPart, setDetikPerPart] = useState<number>(FLOW.detikPerPart);
+  const [voDetik, setVoDetik] = useState<number>(voDetikBaku(FLOW.detikPerPart));
+  const [cta, setCta] = useState('survei');
+  const [platform, setPlatform] = useState('tiktok');
+
+  // ── Filter ────────────────────────────────────────────────────────────────
   const [filterOpen, setFilterOpen] = useState(false);
   const [jenisSet, setJenisSet] = useState<Set<string>>(new Set());
-  // Lokasi cascading — pilih provinsi membatasi opsi kabupaten, dst. Opsi diambil
-  // dari data properti yang sudah dimuat (bukan /api/locations) supaya tiap opsi
-  // dijamin punya minimal 1 properti — konsisten dengan pendekatan filter client-side lain di halaman ini.
   const [provinsiFilter, setProvinsiFilter] = useState('');
   const [kabupatenFilter, setKabupatenFilter] = useState('');
   const [kecamatanFilter, setKecamatanFilter] = useState('');
@@ -102,102 +173,34 @@ export default function AdminViralFramePage() {
     setProvinsiFilter(''); setKabupatenFilter(''); setKecamatanFilter(''); setKelurahanFilter('');
     setHargaMin(''); setHargaMax(''); setBadgeSet(new Set()); setSoldFilter('all');
   };
-  // Reset level anak saat level induk berubah — cegah kombinasi filter yang sudah tidak valid
   const setProvinsi = (v: string) => { setProvinsiFilter(v); setKabupatenFilter(''); setKecamatanFilter(''); setKelurahanFilter(''); };
   const setKabupaten = (v: string) => { setKabupatenFilter(v); setKecamatanFilter(''); setKelurahanFilter(''); };
   const setKecamatan = (v: string) => { setKecamatanFilter(v); setKelurahanFilter(''); };
-  // R9 batch
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [batchRunning, setBatchRunning] = useState(false);
-  const [batchDone, setBatchDone] = useState(0);
-  const [batchResult, setBatchResult] = useState<{ ok: number; failed: { id: number; title: string; reason: string }[]; dihentikan?: boolean } | null>(null);
-  const batchAbortRef = useRef<AbortController | null>(null);
-  const toggleSelect = (id: number) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const refreshStatus = () => fetch('/api/admin/viralframe/status', { credentials: 'include' }).then(r => bacaJson(r))
-    .then(j => {
-      if (j.success) {
-        setWithScript(new Set(j.data?.with_script ?? []));
-        setWithVideo(new Set(j.data?.with_video ?? []));
-        setLatestContentAt(j.data?.latest_content_at ?? {});
-      }
-    }).catch(() => {});
 
-  const handleReset = async (id: number) => {
-    setResettingId(id);
+  const [orders, setOrders] = useState<OrderRow[]>([]);
+
+  const refreshStatus = () => fetch('/api/admin/viralframe/status', { credentials: 'include' })
+    .then(r => bacaJson<{ with_video?: number[] }>(r))
+    .then(j => { if (j.success) setWithVideo(new Set(j.data?.with_video ?? [])); })
+    .catch(() => {});
+
+  const fetchOrders = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/viralframe/dismiss', {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ property_id: id }),
-      });
-      if (res.ok) setDismissedMap(prev => ({ ...prev, [id]: new Date().toISOString() }));
-    } catch { /* abaikan — overlay tetap tampil, admin bisa coba lagi */ }
-    finally { setResettingId(null); }
-  };
-  const runBatch = async () => {
-    const ids = [...selected]; if (ids.length === 0 || batchRunning) return;
-    setBatchRunning(true); setBatchDone(0); setBatchResult(null);
-    const failed: { id: number; title: string; reason: string }[] = [];
-    let ok = 0;
-    let dihentikan = false;
-    const ac = new AbortController();
-    batchAbortRef.current = ac;
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i];
-      const title = properties.find(p => p.id === id)?.title ?? `Properti #${id}`;
-      try {
-        const detailRes = await fetch(`/api/admin/properties/${id}`, { credentials: 'include', signal: ac.signal });
-        if (!detailRes.ok) throw new Error(`Gagal ambil detail properti (HTTP ${detailRes.status})`);
-        const detailJson = await bacaJson(detailRes);
-        const images: { url_webp: string; label_ruangan?: string | null }[] = detailJson.data?.images ?? [];
-        if (images.length < 2) throw new Error('Foto kurang dari 2 — lewati');
-        // Hanya foto yang SUDAH dilabeli. Versi lama mengirim label palsu
-        // "Foto 1".."Foto 12" sehingga AI tidak tahu ruangan mana yang mana dan
-        // mengarang isinya — persis yang dilarang blok anti-halusinasi
-        // (audit 2026-07-26, temuan Y3).
-        const berlabel = images.filter(img => (img.label_ruangan ?? '').trim());
-        if (berlabel.length < 2) {
-          throw new Error(`Baru ${berlabel.length} dari ${images.length} foto yang dilabeli — beri label ruangan dulu di Detail Properti`);
-        }
-        const photos = berlabel.slice(0, 12).map(img => ({
-          label: (img.label_ruangan ?? '').trim(),
-          url_webp: img.url_webp,
-        }));
-        const res = await fetch('/api/admin/viralframe/youtube-long', {
-          method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ property_id: id, photos, visual_style: '', camera_style: '' }),
-          signal: ac.signal,
-        });
-        // WAJIB menunggu baris {done,...}. Endpoint ini mengalirkan NDJSON, jadi
-        // res.ok bernilai true SEKETIKA (begitu header tiba) — jauh sebelum AI
-        // menjawab. Versi lama menghitung ok++ di titik itu, sehingga generate
-        // yang gagal tetap dilaporkan berhasil, DAN loop melepas N permintaan
-        // serentak walau terlihat sekuensial (audit 2026-07-26).
-        await readNdjsonFinal(res, { signal: ac.signal });
-        ok++;
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') { dihentikan = true; break; }
-        failed.push({ id, title, reason: err instanceof Error ? err.message : 'Gagal' });
-      }
-      setBatchDone(i + 1);
+      const res = await fetch('/api/admin/viralframe/orders?status=terbuka', { credentials: 'include' });
+      const json = await bacaJson<{ items?: OrderRow[] }>(res);
+      setOrders(json.data?.items ?? []);
+    } catch {
+      setOrders([]);
     }
-    batchAbortRef.current = null;
-    setBatchRunning(false); setSelected(new Set());
-    setBatchResult({ ok, failed, dihentikan });
-    refreshStatus();
-  };
-
-  const stopBatch = () => batchAbortRef.current?.abort();
+  }, []);
 
   const fetchProperties = useCallback(async () => {
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
       const res = await fetch('/api/admin/properties', { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await bacaJson(res);
-      const rows: PropertyRow[] = json.data?.properties ?? [];
-      setProperties(rows);
-      setDismissedMap(Object.fromEntries(rows.map(p => [p.id, p.viralframe_dismissed_at])));
+      setProperties(json.data?.properties ?? []);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Gagal memuat data');
     } finally {
@@ -205,54 +208,183 @@ export default function AdminViralFramePage() {
     }
   }, []);
 
+  const fetchAgents = useCallback(async () => {
+    setAgentsLoading(true);
+    try {
+      const res = await fetch('/api/admin/viralframe/characters', { credentials: 'include' });
+      const json = await bacaJson(res);
+      setAgents((json.data?.items ?? []) as AgentRow[]);
+    } catch {
+      setAgents([]);
+    } finally {
+      setAgentsLoading(false);
+    }
+  }, []);
+
   useEffect(() => { fetchProperties(); }, [fetchProperties]);
+  useEffect(() => { fetchAgents(); }, [fetchAgents]);
+  useEffect(() => { fetchOrders(); }, [fetchOrders]);
   useEffect(() => { refreshStatus(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setDisplayLimit(24);
-  }, [search, onlyEmpty, jenisSet, provinsiFilter, kabupatenFilter, kecamatanFilter, kelurahanFilter, hargaMin, hargaMax, badgeSet, soldFilter]);
+  }, [agentAktif, search, onlyEmpty, jenisSet, provinsiFilter, kabupatenFilter, kecamatanFilter, kelurahanFilter, hargaMin, hargaMax, badgeSet, soldFilter]);
 
-  const contentStatus = (id: number): 'video' | 'script' | 'empty' =>
-    withVideo.has(id) ? 'video' : withScript.has(id) ? 'script' : 'empty';
+  /** Muat satu pesanan LENGKAP (dengan hasil_json terurai). */
+  const muatPesanan = useCallback(async (id: number) => {
+    try {
+      const res = await fetch(`/api/admin/viralframe/orders/${id}`, { credentials: 'include' });
+      const json = await bacaJson<OrderPenuh>(res);
+      if (json.success && json.data) setOrder(json.data);
+    } catch { /* biarkan state lama; user bisa menekan tombol lagi */ }
+  }, []);
 
-  // Overlay "sudah diproses" — tersembunyi kalau admin klik Reset SETELAH konten
-  // terbaru dibuat. Kalau diproses ulang setelah dismiss, latest_content_at maju
-  // melewati dismissed_at lagi sehingga overlay otomatis muncul kembali.
-  const isProcessedOverlay = (p: PropertyRow): boolean => {
-    if (contentStatus(p.id) === 'empty') return false;
-    const dismissedAt = dismissedMap[p.id];
-    if (!dismissedAt) return true;
-    const latest = latestContentAt[p.id];
-    if (!latest) return true;
-    return dismissedAt < latest;
+  // Pilih listing → reset seluruh state kerja, lalu sambung ke pesanan yang MASIH
+  // TERBUKA untuk pasangan (listing, agent) ini kalau ada. Tanpa penyambungan itu,
+  // menutup tab di tengah pekerjaan berarti storyboard yang sudah dibayar hilang
+  // dari layar walau barisnya masih hidup di database.
+  const pilihListing = useCallback((p: PropertyRow) => {
+    setListingAktif(p);
+    setOrder(null); setBahan(null); setDnaSunting(null);
+    setProgres([]); setKerjaError('');
+    const lama = orders.find(o => o.property_id === p.id && o.character_id === agentAktif?.id);
+    if (lama) muatPesanan(lama.id);
+  }, [orders, agentAktif, muatPesanan]);
+
+  const paramsKirim = useCallback(() => ({
+    jumlah_part: jumlahPart,
+    detik_per_part: detikPerPart,
+    vo_detik_per_part: voDetik,
+    cta,
+    platform,
+    dna: dnaSunting ?? undefined,
+  }), [jumlahPart, detikPerPart, voDetik, cta, platform, dnaSunting]);
+
+  /**
+   * Buat storyboard — cari/buat pesanan, lalu JALANKAN STASIUNNYA SENDIRI
+   * sampai siap dirender.
+   *
+   * Loop-nya wajib, bukan kenyamanan: satu panggilan = satu stasiun karena
+   * wall-clock Worker 30 detik, dan stasiun Material menilai 6 foto per lintasan
+   * sehingga listing berfoto banyak butuh beberapa putaran. Dulu user yang
+   * menekan "Jalankan" berulang kali; sekarang mesin yang mengulang dan user
+   * cukup melihat progresnya.
+   */
+  const buatStoryboard = async () => {
+    if (!listingAktif || !agentAktif || sibuk) return;
+    setSibuk(true); setKerjaError(''); setProgres([]);
+    try {
+      let orderId = order?.id ?? null;
+
+      // Pesanan yang sudah selesai TIDAK dipakai ulang — menekan tombol ini lagi
+      // berarti minta VARIASI BARU, dan variasi baru butuh baris baru supaya
+      // UNIQUE(property_id, variation_key) benar-benar menegakkan rotasi.
+      if (order && (order.status === 'menunggu_render' || order.status === 'selesai')) orderId = null;
+
+      if (orderId == null) {
+        const res = await fetch('/api/admin/viralframe/orders', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            character_id: agentAktif.id,
+            property_ids: [listingAktif.id],
+            params: paramsKirim(),
+          }),
+        });
+        const json = await bacaJson<{ ids?: (number | null)[] }>(res);
+        if (!json.success) { setKerjaError(json.error ?? 'Gagal membuat pesanan.'); return; }
+        orderId = json.data?.ids?.[0] ?? null;
+        if (orderId == null) { setKerjaError('Pesanan dibuat tapi id-nya tidak terbaca.'); return; }
+      } else {
+        // Parameter & DNA suntingan bisa berubah sejak pesanan dibuat.
+        await fetch(`/api/admin/viralframe/orders/${orderId}`, {
+          method: 'PATCH', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ params: paramsKirim() }),
+        });
+      }
+
+      for (let i = 0; i < MAKS_LANGKAH; i++) {
+        const res = await fetch(`/api/admin/viralframe/orders/${orderId}/jalankan`, {
+          method: 'POST', credentials: 'include',
+        });
+        const json = await bacaJson<{ pesan?: string; selesai?: boolean; status?: string }>(res);
+        if (!json.success) {
+          // Kegagalan MENGHENTIKAN loop. Mencoba ulang otomatis akan mengulang
+          // kegagalan kuota AI delapan kali tanpa guna, dan menyembunyikan
+          // sebabnya di balik tujuh percobaan berikutnya.
+          setKerjaError(json.error ?? 'Stasiun gagal.');
+          break;
+        }
+        setProgres(p => [...p, json.data?.pesan ?? 'Langkah selesai.']);
+        if (json.data?.selesai) break;
+        if (i === MAKS_LANGKAH - 1) {
+          setKerjaError(`Berhenti setelah ${MAKS_LANGKAH} langkah — tekan "Buat Storyboard" lagi untuk melanjutkan.`);
+        }
+      }
+
+      await muatPesanan(orderId);
+      fetchOrders();
+    } catch (err: unknown) {
+      setKerjaError(err instanceof Error ? err.message : 'Gagal membuat storyboard.');
+    } finally {
+      setSibuk(false);
+    }
   };
 
-  // Opsi cascading — tiap level dibatasi oleh pilihan level di atasnya, dan hanya
-  // menampilkan nilai yang benar-benar dipakai oleh properti yang sudah dimuat.
-  const provinsiOptions = useMemo(() => {
-    return [...new Set(properties.map(p => p.provinsi).filter(Boolean))].sort();
-  }, [properties]);
+  const buatCaption = async () => {
+    if (!order || sibuk) return;
+    setSibuk(true); setKerjaError('');
+    try {
+      const res = await fetch(`/api/admin/viralframe/orders/${order.id}/caption`, {
+        method: 'POST', credentials: 'include',
+      });
+      const json = await bacaJson(res);
+      if (!json.success) { setKerjaError(json.error ?? 'Gagal membuat caption.'); return; }
+      await muatPesanan(order.id);
+    } catch (err: unknown) {
+      setKerjaError(err instanceof Error ? err.message : 'Gagal membuat caption.');
+    } finally {
+      setSibuk(false);
+    }
+  };
 
+  const contentStatus = (id: number): 'video' | 'empty' => (withVideo.has(id) ? 'video' : 'empty');
+
+  const provinsiOptions = useMemo(
+    () => [...new Set(properties.map(p => p.provinsi).filter(Boolean))].sort(), [properties]);
   const kabupatenOptions = useMemo(() => {
     const scoped = provinsiFilter ? properties.filter(p => p.provinsi === provinsiFilter) : properties;
     return [...new Set(scoped.map(p => p.kabupaten).filter(Boolean))].sort();
   }, [properties, provinsiFilter]);
-
   const kecamatanOptions = useMemo(() => {
-    let scoped = properties;
-    if (provinsiFilter) scoped = scoped.filter(p => p.provinsi === provinsiFilter);
-    if (kabupatenFilter) scoped = scoped.filter(p => p.kabupaten === kabupatenFilter);
-    return [...new Set(scoped.map(p => p.kecamatan).filter(Boolean))].sort();
+    let s = properties;
+    if (provinsiFilter) s = s.filter(p => p.provinsi === provinsiFilter);
+    if (kabupatenFilter) s = s.filter(p => p.kabupaten === kabupatenFilter);
+    return [...new Set(s.map(p => p.kecamatan).filter(Boolean))].sort();
   }, [properties, provinsiFilter, kabupatenFilter]);
-
   const kelurahanOptions = useMemo(() => {
-    let scoped = properties;
-    if (provinsiFilter) scoped = scoped.filter(p => p.provinsi === provinsiFilter);
-    if (kabupatenFilter) scoped = scoped.filter(p => p.kabupaten === kabupatenFilter);
-    if (kecamatanFilter) scoped = scoped.filter(p => p.kecamatan === kecamatanFilter);
-    return [...new Set(scoped.map(p => p.kelurahan).filter(Boolean))].sort();
+    let s = properties;
+    if (provinsiFilter) s = s.filter(p => p.provinsi === provinsiFilter);
+    if (kabupatenFilter) s = s.filter(p => p.kabupaten === kabupatenFilter);
+    if (kecamatanFilter) s = s.filter(p => p.kecamatan === kecamatanFilter);
+    return [...new Set(s.map(p => p.kelurahan).filter(Boolean))].sort();
   }, [properties, provinsiFilter, kabupatenFilter, kecamatanFilter]);
 
+  const agentStats = useMemo(() => {
+    const out: Record<number, AgentStat> = {};
+    for (const a of agents) {
+      const cocok = properties.filter(p => agentCocok(a.spesialis, p.jenis_properti));
+      out[a.id] = {
+        total: cocok.length,
+        adaKonten: cocok.filter(p => withVideo.has(p.id)).length,
+        antre: orders.filter(o => o.character_id === a.id).length,
+      };
+    }
+    return out;
+  }, [agents, properties, withVideo, orders]);
+
   const filtered = properties.filter(p => {
+    if (agentAktif && !agentCocok(agentAktif.spesialis, p.jenis_properti)) return false;
     if (onlyEmpty && contentStatus(p.id) !== 'empty') return false;
     if (jenisSet.size > 0 && !jenisSet.has(p.jenis_properti)) return false;
     if (provinsiFilter && p.provinsi !== provinsiFilter) return false;
@@ -271,327 +403,434 @@ export default function AdminViralFramePage() {
     if (soldFilter === 'available' && p.status_sold === 1) return false;
     if (!search) return true;
     const q = search.toLowerCase();
-    return (
-      p.title.toLowerCase().includes(q) ||
-      (p.kode_listing ?? '').toLowerCase().includes(q)
-    );
+    return p.title.toLowerCase().includes(q) || (p.kode_listing ?? '').toLowerCase().includes(q);
   });
 
   const totalWithContent = properties.filter(p => contentStatus(p.id) !== 'empty').length;
+  const hasil = order?.hasil ?? null;
+  const promptFlow = hasil?.prompt_flow ?? [];
+  const siapDirender = order?.status === 'menunggu_render';
 
-  return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
+  // ─── LAYAR 1: pilih agent ─────────────────────────────────────────────────
+  // Early return, bukan cabang di dalam JSX besar: seluruh hook sudah dipanggil
+  // di atas baris ini, jadi urutannya tetap stabil di kedua layar.
+  if (!agentAktif) {
+    return (
+      <div className="space-y-5">
         <div>
           <h1 className="font-display text-xl font-bold text-[#0F172A] flex items-center gap-2">
             <Video size={20} className="text-[#1565C0]" /> Viral Frame
           </h1>
           <p className="text-[#64748B] text-sm mt-0.5">
-            {loading ? 'Memuat…' : `Pilih properti untuk membuat prompt video AI — ${filtered.length} properti`}
+            Pilih agent dulu — tiap agent hanya menangani jenis properti yang jadi spesialisasinya.
+          </p>
+        </div>
+
+        {!loading && properties.length > 0 && (
+          <div className="bg-gradient-to-r from-[#1565C0] to-[#29B6F6] rounded-2xl p-4 text-white flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="text-sm font-semibold">Produksi Konten Video</div>
+              <div className="text-2xl font-bold">{totalWithContent}<span className="text-base font-normal">/{properties.length} listing</span></div>
+            </div>
+            <div className="text-right">
+              <div className="text-3xl font-bold">{properties.length ? Math.round((totalWithContent / properties.length) * 100) : 0}%</div>
+              <div className="text-xs text-white/80">sudah ada konten</div>
+            </div>
+          </div>
+        )}
+
+        <AgentGrid agents={agents} stats={agentStats} onPilih={setAgentAktif} loading={agentsLoading || loading} />
+      </div>
+    );
+  }
+
+  // ─── LAYAR 2: meja kerja ──────────────────────────────────────────────────
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 min-w-0">
+        <button
+          type="button"
+          onClick={() => { setAgentAktif(null); setListingAktif(null); setOrder(null); }}
+          title="Kembali ke daftar agent"
+          className="w-9 h-9 rounded-xl border border-gray-200 bg-white flex items-center justify-center text-[#64748B] hover:bg-gray-50 hover:text-[#0F172A] transition-colors shrink-0"
+        >
+          <ArrowLeft size={17} />
+        </button>
+        <div className="min-w-0">
+          <h1 className="font-display text-xl font-bold text-[#0F172A] flex items-center gap-2 truncate">
+            <Video size={20} className="text-[#1565C0] shrink-0" />
+            {agentAktif.nama.replace(/\b\w/g, c => c.toUpperCase())}
+          </h1>
+          <p className="text-[#64748B] text-sm mt-0.5">
+            {loading
+              ? 'Memuat…'
+              : `${(agentAktif.spesialis?.length ?? 0) === 0 ? 'Semua jenis properti' : `Spesialis ${agentAktif.spesialis!.join(', ')}`} — ${filtered.length} listing`}
           </p>
         </div>
       </div>
 
-      {/* KPI produksi konten (R6) */}
-      {!loading && properties.length > 0 && (
-        <div className="bg-gradient-to-r from-[#1565C0] to-[#29B6F6] rounded-2xl p-4 text-white flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <div className="text-sm font-semibold">Produksi Konten Video</div>
-            <div className="text-2xl font-bold">{totalWithContent}<span className="text-base font-normal">/{properties.length} listing</span></div>
+      {/* ─── LANGKAH 2: LISTING ─────────────────────────────────────────────
+          Setelah satu listing dipilih, grid dilipat jadi satu baris. Tanpa itu
+          user harus menggulir melewati 24 kartu setiap kali ingin menyentuh
+          parameter di bawahnya. */}
+      {listingAktif ? (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex items-center gap-3">
+          <div className="w-12 h-12 rounded-lg bg-gray-100 overflow-hidden shrink-0">
+            {coverSrc(listingAktif.cover_url)
+              ? <img src={coverSrc(listingAktif.cover_url)!} alt="" className="w-full h-full object-cover" />
+              : <div className="w-full h-full flex items-center justify-center text-[#CBD5E1]"><ImageOff size={16} /></div>}
           </div>
-          <div className="text-right">
-            <div className="text-3xl font-bold">{properties.length ? Math.round((totalWithContent / properties.length) * 100) : 0}%</div>
-            <div className="text-xs text-white/80">sudah ada konten</div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold text-[#0F172A] truncate">{listingAktif.title}</div>
+            <div className="text-[11px] text-[#94A3B8]">
+              {listingAktif.kode_listing} · {listingAktif.kecamatan}, {listingAktif.kabupaten} · Rp {formatRupiahShort(listingAktif.harga)}
+            </div>
           </div>
-        </div>
-      )}
-
-      {/* Search bar + filter */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-3">
-        <div className="relative">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#94A3B8]" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Cari judul atau kode listing…"
-            className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] transition-colors"
-          />
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={() => setOnlyEmpty(v => !v)}
-            className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${onlyEmpty ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}>
-            ⬜ Belum ada konten {onlyEmpty ? '(aktif)' : ''}
-          </button>
-
-          <button onClick={() => setFilterOpen(v => !v)}
-            className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${filterOpen || activeFilterCount > 0 ? 'bg-[#0F172A] text-white border-[#0F172A]' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}>
-            <SlidersHorizontal size={13} /> Filter
-            {activeFilterCount > 0 && (
-              <span className="w-4 h-4 rounded-full bg-white/20 flex items-center justify-center text-[10px] font-bold">{activeFilterCount}</span>
-            )}
-            {filterOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-          </button>
-
-          {activeFilterCount > 0 && (
-            <button onClick={resetFilters} className="text-xs text-red-500 hover:underline flex items-center gap-1">
-              <RotateCcw size={12} /> Reset filter
-            </button>
+          {order && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#EFF6FF] text-[#1E40AF] shrink-0">
+              {LANGKAH[order.status] ?? order.status}
+            </span>
           )}
+          <button
+            onClick={() => { setListingAktif(null); setOrder(null); setBahan(null); setDnaSunting(null); setProgres([]); setKerjaError(''); }}
+            className="px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-[#64748B] hover:bg-gray-50 shrink-0">
+            Ganti listing
+          </button>
         </div>
-
-        {filterOpen && (
-          <div className="pt-3 border-t border-gray-100 space-y-4">
-            {/* Jenis properti */}
-            <div>
-              <div className="text-xs font-semibold text-[#64748B] mb-1.5">Jenis Properti</div>
-              <div className="flex flex-wrap gap-1.5">
-                {Object.keys(JENIS_COLORS).map(j => (
-                  <button key={j} onClick={() => toggleJenis(j)}
-                    className={`text-xs px-2.5 py-1 rounded-full border capitalize transition-colors ${jenisSet.has(j) ? 'text-white border-transparent' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}
-                    style={jenisSet.has(j) ? { background: JENIS_COLORS[j] } : undefined}>
-                    {j}
-                  </button>
-                ))}
-              </div>
+      ) : (
+        <>
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-3">
+            <div className="relative">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#94A3B8]" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Cari judul atau kode listing…"
+                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] transition-colors"
+              />
             </div>
 
-            {/* Harga */}
-            <div>
-              <div className="text-xs font-semibold text-[#64748B] mb-1.5">Rentang Harga (Rp)</div>
-              <div className="flex items-center gap-2">
-                <input type="number" min={0} value={hargaMin} onChange={e => setHargaMin(e.target.value)}
-                  placeholder="Minimum" className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0]" />
-                <span className="text-[#94A3B8] text-sm">–</span>
-                <input type="number" min={0} value={hargaMax} onChange={e => setHargaMax(e.target.value)}
-                  placeholder="Maksimum" className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0]" />
-              </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={() => setOnlyEmpty(v => !v)}
+                className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${onlyEmpty ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}>
+                ⬜ Belum ada konten {onlyEmpty ? '(aktif)' : ''}
+              </button>
+              <button onClick={() => setFilterOpen(v => !v)}
+                className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors flex items-center gap-1.5 ${filterOpen || activeFilterCount > 0 ? 'bg-[#0F172A] text-white border-[#0F172A]' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}>
+                <SlidersHorizontal size={13} /> Filter
+                {activeFilterCount > 0 && (
+                  <span className="w-4 h-4 rounded-full bg-white/20 flex items-center justify-center text-[10px] font-bold">{activeFilterCount}</span>
+                )}
+                {filterOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              </button>
+              {activeFilterCount > 0 && (
+                <button onClick={resetFilters} className="text-xs text-red-500 hover:underline flex items-center gap-1">
+                  <RotateCcw size={12} /> Reset filter
+                </button>
+              )}
             </div>
 
-            {/* Lokasi — cascading 4 level, tiap level membatasi opsi level berikutnya */}
-            <div>
-              <div className="text-xs font-semibold text-[#64748B] mb-1.5">Lokasi</div>
-              <div className="grid grid-cols-2 gap-2">
-                <select value={provinsiFilter} onChange={e => setProvinsi(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
-                  <option value="">Semua Provinsi</option>
-                  {provinsiOptions.map(v => <option key={v} value={v}>{v}</option>)}
-                </select>
-                <select value={kabupatenFilter} onChange={e => setKabupaten(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
-                  <option value="">Semua Kab./Kota</option>
-                  {kabupatenOptions.map(v => <option key={v} value={v}>{v}</option>)}
-                </select>
-                <select value={kecamatanFilter} onChange={e => setKecamatan(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
-                  <option value="">Semua Kecamatan</option>
-                  {kecamatanOptions.map(v => <option key={v} value={v}>{v}</option>)}
-                </select>
-                <select value={kelurahanFilter} onChange={e => setKelurahanFilter(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
-                  <option value="">Semua Kel./Desa</option>
-                  {kelurahanOptions.map(v => <option key={v} value={v}>{v}</option>)}
-                </select>
-              </div>
-            </div>
-
-            {/* Badge */}
-            <div>
-              <div className="text-xs font-semibold text-[#64748B] mb-1.5">Badge</div>
-              <div className="flex flex-wrap gap-1.5">
-                {BADGE_DEFS.map(({ key, label, icon: Icon, color }) => (
-                  <button key={key} onClick={() => toggleBadge(key)}
-                    className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1 transition-colors ${badgeSet.has(key) ? 'text-white border-transparent' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}
-                    style={badgeSet.has(key) ? { background: color } : undefined}>
-                    <Icon size={11} /> {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Sold */}
-            <div>
-              <div className="text-xs font-semibold text-[#64748B] mb-1.5">Status Terjual</div>
-              <div className="flex gap-1.5">
-                {([['all', 'Semua'], ['available', 'Tersedia'], ['sold', '🔴 SOLD']] as const).map(([val, label]) => (
-                  <button key={val} onClick={() => setSoldFilter(val)}
-                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${soldFilter === val ? 'bg-[#0F172A] text-white border-[#0F172A]' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {error && (
-        <div className="p-4 text-sm text-red-600 bg-red-50 rounded-2xl border border-red-100">
-          {error} —{' '}
-          <button onClick={fetchProperties} className="underline font-medium">Coba lagi</button>
-        </div>
-      )}
-
-      {loading && (
-        <div className="py-12 text-center text-[#94A3B8] text-sm">
-          <div className="w-6 h-6 border-2 border-[#1565C0]/20 border-t-[#1565C0] rounded-full animate-spin mx-auto mb-2" />
-          Memuat data…
-        </div>
-      )}
-
-      {/* R9: Batch result summary */}
-      {batchResult && (
-        <div className={`rounded-2xl p-4 text-sm ${batchResult.failed.length === 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-amber-50 text-amber-800 border border-amber-100'}`}>
-          <div className="font-semibold mb-1">
-            {batchResult.dihentikan ? 'Batch dihentikan' : 'Batch selesai'}: {batchResult.ok} berhasil{batchResult.failed.length > 0 ? `, ${batchResult.failed.length} gagal` : ''}.
-          </div>
-          {batchResult.failed.length > 0 && (
-            <ul className="list-disc pl-5 space-y-0.5">
-              {batchResult.failed.map(f => (
-                <li key={f.id}>{f.title}: {f.reason}</li>
-              ))}
-            </ul>
-          )}
-          <button onClick={() => setBatchResult(null)} className="mt-2 text-xs underline opacity-70 hover:opacity-100">Tutup</button>
-        </div>
-      )}
-
-      {/* R9: Batch action bar */}
-      {selected.size > 0 && (
-        <div className="sticky top-2 z-20 bg-[#0F172A] text-white rounded-2xl p-3 flex items-center justify-between gap-3 shadow-lg">
-          <span className="text-sm font-medium">{selected.size} properti dipilih</span>
-          <div className="flex items-center gap-2">
-            {batchRunning
-              ? (
-                <>
-                  <span className="text-xs">Memproses {batchDone}/{selected.size}…</span>
-                  <button onClick={stopBatch} className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-white/30 text-white/90 hover:bg-white/10">
-                    Hentikan
-                  </button>
-                </>
-              )
-              : <button onClick={() => setSelected(new Set())} className="text-xs text-white/70 hover:text-white">Batal</button>}
-            <button onClick={runBatch} disabled={batchRunning}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-500 hover:bg-red-600 disabled:opacity-50">
-              📺 Generate Storyboard Massal
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Grid properti */}
-      {!loading && !error && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.slice(0, displayLimit).map(p => {
-            const badge = STATUS_BADGE[p.status_publish] ?? { label: p.status_publish, cls: 'bg-gray-100 text-gray-500' };
-            const src = coverSrc(p.cover_url);
-            const processed = isProcessedOverlay(p);
-            return (
-              <div
-                key={p.id}
-                className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col"
-              >
-                <div className="relative w-full bg-gray-100" style={{ paddingBottom: '56.25%' }}>
-                  {src ? (
-                    <img src={src} alt={p.title}
-                      className="absolute inset-0 w-full h-full object-cover"
-                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                    />
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <ImageOff size={24} className="text-gray-300" />
-                    </div>
-                  )}
-
-                  {/* Overlay hitam 50% — properti sudah pernah diproses (naskah/video) */}
-                  {processed && (
-                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-10">
-                      <button
-                        onClick={() => handleReset(p.id)}
-                        disabled={resettingId === p.id}
-                        title="Sembunyikan overlay ini — naskah/video lama TETAP tersimpan di Riwayat"
-                        className="px-3 py-1.5 rounded-full text-xs font-semibold bg-white/90 text-[#0F172A] hover:bg-white transition-colors flex items-center gap-1.5 disabled:opacity-50"
-                      >
-                        <RotateCcw size={12} className={resettingId === p.id ? 'animate-spin' : ''} />
-                        {resettingId === p.id ? 'Mereset…' : 'Reset'}
+            {filterOpen && (
+              <div className="pt-3 border-t border-gray-100 space-y-4">
+                <div>
+                  <div className="text-xs font-semibold text-[#64748B] mb-1.5">Jenis Properti</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.keys(JENIS_COLORS).map(j => (
+                      <button key={j} onClick={() => toggleJenis(j)}
+                        className={`text-xs px-2.5 py-1 rounded-full border capitalize transition-colors ${jenisSet.has(j) ? 'text-white border-transparent' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}
+                        style={jenisSet.has(j) ? { background: JENIS_COLORS[j] } : undefined}>
+                        {j}
                       </button>
-                    </div>
-                  )}
+                    ))}
+                  </div>
+                </div>
 
-                  {/* Ribbon SOLD — sumber kebenaran: status_sold (checkbox terpisah dari status_publish) */}
-                  {p.status_sold === 1 && (
-                    <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
-                      <span className="px-4 py-1 rotate-[-8deg] bg-red-600 text-white text-sm font-extrabold tracking-wider rounded shadow-lg border-2 border-white">
-                        SOLD
+                <div>
+                  <div className="text-xs font-semibold text-[#64748B] mb-1.5">Rentang Harga (Rp)</div>
+                  <div className="flex items-center gap-2">
+                    <input type="number" min={0} value={hargaMin} onChange={e => setHargaMin(e.target.value)}
+                      placeholder="Minimum" className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0]" />
+                    <span className="text-[#94A3B8] text-sm">–</span>
+                    <input type="number" min={0} value={hargaMax} onChange={e => setHargaMax(e.target.value)}
+                      placeholder="Maksimum" className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0]" />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs font-semibold text-[#64748B] mb-1.5">Lokasi</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select value={provinsiFilter} onChange={e => setProvinsi(e.target.value)}
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
+                      <option value="">Semua Provinsi</option>
+                      {provinsiOptions.map(v => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                    <select value={kabupatenFilter} onChange={e => setKabupaten(e.target.value)}
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
+                      <option value="">Semua Kab./Kota</option>
+                      {kabupatenOptions.map(v => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                    <select value={kecamatanFilter} onChange={e => setKecamatan(e.target.value)}
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
+                      <option value="">Semua Kecamatan</option>
+                      {kecamatanOptions.map(v => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                    <select value={kelurahanFilter} onChange={e => setKelurahanFilter(e.target.value)}
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
+                      <option value="">Semua Kel./Desa</option>
+                      {kelurahanOptions.map(v => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs font-semibold text-[#64748B] mb-1.5">Badge</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {BADGE_DEFS.map(({ key, label, icon: Icon, color }) => (
+                      <button key={key} onClick={() => toggleBadge(key)}
+                        className={`text-xs px-2.5 py-1 rounded-full border flex items-center gap-1 transition-colors ${badgeSet.has(key) ? 'text-white border-transparent' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}
+                        style={badgeSet.has(key) ? { background: color } : undefined}>
+                        <Icon size={11} /> {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs font-semibold text-[#64748B] mb-1.5">Status Terjual</div>
+                  <div className="flex gap-1.5">
+                    {([['all', 'Semua'], ['available', 'Tersedia'], ['sold', '🔴 SOLD']] as const).map(([val, label]) => (
+                      <button key={val} onClick={() => setSoldFilter(val)}
+                        className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${soldFilter === val ? 'bg-[#0F172A] text-white border-[#0F172A]' : 'bg-white text-[#64748B] border-gray-200 hover:bg-gray-50'}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <div className="p-4 text-sm text-red-600 bg-red-50 rounded-2xl border border-red-100">
+              {error} — <button onClick={fetchProperties} className="underline font-medium">Coba lagi</button>
+            </div>
+          )}
+
+          {loading && (
+            <div className="py-12 text-center text-[#94A3B8] text-sm">
+              <div className="w-6 h-6 border-2 border-[#1565C0]/20 border-t-[#1565C0] rounded-full animate-spin mx-auto mb-2" />
+              Memuat data…
+            </div>
+          )}
+
+          {!loading && !error && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filtered.slice(0, displayLimit).map(p => {
+                const badge = STATUS_BADGE[p.status_publish] ?? { label: p.status_publish, cls: 'bg-gray-100 text-gray-500' };
+                const src = coverSrc(p.cover_url);
+                const punyaVideo = contentStatus(p.id) === 'video';
+                const antre = orders.filter(o => o.property_id === p.id).length;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => pilihListing(p)}
+                    className="text-left bg-white rounded-2xl shadow-sm border border-gray-100 hover:border-[#1565C0] hover:shadow-md transition-all overflow-hidden flex flex-col"
+                  >
+                    <div className="relative w-full bg-gray-100" style={{ paddingBottom: '56.25%' }}>
+                      {src ? (
+                        <img src={src} alt={p.title} className="absolute inset-0 w-full h-full object-cover"
+                          onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <ImageOff size={24} className="text-gray-300" />
+                        </div>
+                      )}
+                      {p.status_sold === 1 && (
+                        <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+                          <span className="px-4 py-1 rotate-[-8deg] bg-red-600 text-white text-sm font-extrabold tracking-wider rounded shadow-lg border-2 border-white">SOLD</span>
+                        </div>
+                      )}
+                      <span className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-xs font-medium z-20 ${badge.cls}`}>{badge.label}</span>
+                      <span className={`absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-semibold z-20 ${
+                        antre > 0 ? 'bg-amber-400 text-amber-950'
+                        : punyaVideo ? 'bg-emerald-500 text-white'
+                        : 'bg-white/90 text-gray-500 border border-gray-200'}`}>
+                        {antre > 0 ? `${antre} dikerjakan` : punyaVideo ? '🎬 Ada video' : '⬜ Belum'}
                       </span>
                     </div>
-                  )}
-
-                  <span className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-xs font-medium z-20 ${badge.cls}`}>
-                    {badge.label}
-                  </span>
-                  {/* Badge status konten ViralFrame (R6) */}
-                  {(() => {
-                    const st = contentStatus(p.id);
-                    const meta = st === 'video' ? { t: '🎬 Video', c: 'bg-emerald-500 text-white' }
-                      : st === 'script' ? { t: '📝 Naskah', c: 'bg-amber-400 text-white' }
-                      : { t: '⬜ Belum', c: 'bg-white/90 text-gray-500 border border-gray-200' };
-                    return <span className={`absolute top-2 left-10 px-2 py-0.5 rounded-full text-[10px] font-semibold z-20 ${meta.c}`}>{meta.t}</span>;
-                  })()}
-                  {/* R9: checkbox pilih untuk batch */}
-                  <button onClick={() => toggleSelect(p.id)} title="Pilih untuk batch"
-                    className={`absolute top-2 left-2 w-6 h-6 rounded-md border-2 flex items-center justify-center transition-colors z-20 ${selected.has(p.id) ? 'bg-[#1565C0] border-[#1565C0]' : 'bg-white/90 border-gray-300 hover:border-[#1565C0]'}`}>
-                    {selected.has(p.id) && <span className="text-white text-xs font-bold">✓</span>}
+                    <div className="p-3 flex-1 flex flex-col gap-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs px-1.5 py-0.5 rounded-full text-white font-semibold"
+                          style={{ background: JENIS_COLORS[p.jenis_properti] ?? '#64748B', fontSize: '10px' }}>
+                          {p.jenis_properti}
+                        </span>
+                        <span className="text-xs text-[#94A3B8] truncate">{p.kode_listing}</span>
+                      </div>
+                      <div className="font-medium text-[#0F172A] text-sm leading-snug line-clamp-2">{p.title}</div>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-xs text-[#64748B] truncate">{p.kecamatan}, {p.kabupaten}</div>
+                        <div className="text-xs font-semibold text-[#1565C0] whitespace-nowrap">Rp {formatRupiahShort(p.harga)}</div>
+                      </div>
+                    </div>
                   </button>
-                </div>
-                <div className="p-3 flex-1 flex flex-col gap-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs px-1.5 py-0.5 rounded-full text-white font-semibold"
-                      style={{ background: JENIS_COLORS[p.jenis_properti] ?? '#64748B', fontSize: '10px' }}>
-                      {p.jenis_properti}
-                    </span>
-                    <span className="text-xs text-[#94A3B8] truncate">{p.kode_listing}</span>
-                  </div>
-                  <div className="font-medium text-[#0F172A] text-sm leading-snug line-clamp-2">{p.title}</div>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-xs text-[#64748B] truncate">{p.kecamatan}, {p.kabupaten}</div>
-                    <div className="text-xs font-semibold text-[#1565C0] whitespace-nowrap">Rp {formatRupiahShort(p.harga)}</div>
-                  </div>
-                  <div className="mt-auto pt-2">
-                    <button
-                      onClick={() => window.open(`/admin/viralframe/${p.id}`, '_blank')}
-                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-                      style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
-                    >
-                      🎬 Buat Video
-                    </button>
-                  </div>
-                </div>
+                );
+              })}
+            </div>
+          )}
+
+          {!loading && !error && filtered.length === 0 && (
+            <div className="text-center py-12">
+              <Filter size={32} className="text-[#E2E8F0] mx-auto mb-3" />
+              <p className="text-[#64748B] text-sm">Tidak ada properti yang sesuai pencarian</p>
+            </div>
+          )}
+
+          {!loading && filtered.length > displayLimit && (
+            <div className="flex justify-center">
+              <button onClick={() => setDisplayLimit(prev => prev + 24)}
+                className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+                Muat Lebih Banyak ({filtered.length - displayLimit} tersisa)
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ─── LANGKAH 3-9: hanya setelah listing dipilih ───────────────────── */}
+      {listingAktif && agentAktif && (
+        <>
+          <PanelBahan
+            propertyId={listingAktif.id}
+            characterId={agentAktif.id}
+            onSiap={(b, d) => { setBahan(b); setDnaSunting(d); }}
+          />
+
+          {/* ─── LANGKAH 4: PARAMETER ───────────────────────────────────── */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <h2 className="font-display font-bold text-[#0F172A] text-sm mb-3">Parameter</h2>
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+              <label className="block">
+                <span className="block text-[11px] font-medium text-[#64748B] mb-1">Total part</span>
+                <select value={jumlahPart} onChange={e => setJumlahPart(parseInt(e.target.value, 10))}
+                  className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
+                  {[1, 2, 3].map(n => <option key={n} value={n}>{n} part</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className="block text-[11px] font-medium text-[#64748B] mb-1">Durasi / part</span>
+                <select value={detikPerPart}
+                  onChange={e => {
+                    const d = parseInt(e.target.value, 10);
+                    setDetikPerPart(d);
+                    // VO ikut turun kalau melebihi durasi klip yang baru — nilai VO
+                    // lebih besar dari klipnya mustahil dan hanya akan dipotong server.
+                    setVoDetik(v => (v > d ? voDetikBaku(d) : v));
+                  }}
+                  className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
+                  {[6, 8, 10].map(n => <option key={n} value={n}>{n} detik</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className="block text-[11px] font-medium text-[#64748B] mb-1">Voiceover / part</span>
+                <select value={voDetik} onChange={e => setVoDetik(parseInt(e.target.value, 10))}
+                  className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
+                  {Array.from({ length: detikPerPart - 1 }, (_, i) => i + 2).map(n => (
+                    <option key={n} value={n}>{n} detik</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="block text-[11px] font-medium text-[#64748B] mb-1">Call to action</span>
+                <select value={cta} onChange={e => setCta(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white">
+                  {CTA_OPSI.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className="block text-[11px] font-medium text-[#64748B] mb-1">Platform</span>
+                <select value={platform} onChange={e => setPlatform(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:border-[#1565C0] bg-white capitalize">
+                  {PLATFORM_OPSI.map(o => <option key={o} value={o} className="capitalize">{o}</option>)}
+                </select>
+              </label>
+            </div>
+            <p className="text-[11px] text-[#94A3B8] mt-2.5">
+              {jumlahPart} × {detikPerPart} detik = {jumlahPart * detikPerPart} detik total ·
+              voiceover {voDetik} detik/part ≈ {Math.round(voDetik * 2.5)} kata ·
+              gaya, sudut cerita, dan pilihan foto diputuskan AI.
+            </p>
+
+            <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">
+              <button
+                onClick={buatStoryboard}
+                disabled={sibuk || !bahan}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+                {sibuk ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+                {sibuk ? 'Memproses…' : siapDirender ? 'Buat storyboard baru (rotasi berikutnya)' : 'Buat storyboard'}
+              </button>
+              {bahan && (
+                <span className="text-[11px] text-[#94A3B8]">
+                  Rotasi ke-{bahan.rotasi.sudah + 1}
+                  {bahan.rotasi.maks ? ` dari ${bahan.rotasi.maks}` : ''} · variasi dipilih sistem, bukan AI
+                </span>
+              )}
+            </div>
+
+            {progres.length > 0 && (
+              <ul className="mt-3 space-y-1">
+                {progres.map((t, i) => (
+                  <li key={i} className="text-[11px] text-[#64748B] flex gap-1.5">
+                    <span className="text-emerald-600">✓</span> {t}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {kerjaError && (
+              <div className="mt-3 bg-red-50 border border-red-100 text-red-700 rounded-xl px-3 py-2 text-xs">{kerjaError}</div>
+            )}
+          </div>
+
+          {/* ─── LANGKAH 5-6: STORYBOARD + RETENTION CHECK + ADU HOOK ───── */}
+          {hasil && order && (
+            <PanelStoryboard orderId={order.id} hasil={hasil} onUbah={() => muatPesanan(order.id)} />
+          )}
+
+          {/* ─── LANGKAH 7: PROMPT GOOGLE FLOW ──────────────────────────── */}
+          {promptFlow.length > 0 && <PanelPrompt parts={promptFlow} />}
+
+          {/* ─── LANGKAH 8: CAPTION + HASHTAG ───────────────────────────── */}
+          {siapDirender && order && (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={buatCaption}
+                  disabled={sibuk}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white disabled:opacity-50"
+                  style={{ background: '#0891B2' }}>
+                  {sibuk ? <Loader2 size={13} className="animate-spin" /> : <Type size={13} />}
+                  {hasil?.caption?.teks ? 'Buat ulang caption + hashtag' : 'Auto caption + hashtag'}
+                </button>
+                <span className="text-[11px] text-[#94A3B8]">
+                  Dibuat dari storyboard — ikut rotasi, dan hashtag merek/geo tetap sama.
+                </span>
               </div>
-            );
-          })}
-        </div>
-      )}
+            </div>
+          )}
 
-      {!loading && !error && filtered.length === 0 && (
-        <div className="text-center py-12">
-          <Filter size={32} className="text-[#E2E8F0] mx-auto mb-3" />
-          <p className="text-[#64748B] text-sm">Tidak ada properti yang sesuai pencarian</p>
-        </div>
+          {/* ─── LANGKAH 9: UNGGAH ──────────────────────────────────────── */}
+          {siapDirender && order && (
+            <PanelUnggah
+              order={{ id: order.id, property_id: order.property_id, character_id: order.character_id, title: order.title }}
+              captionAwal={hasil?.caption?.teks ?? ''}
+              hashtagAwal={hasil?.caption?.hashtags ?? ''}
+              onSelesai={() => { fetchOrders(); refreshStatus(); muatPesanan(order.id); }}
+            />
+          )}
+        </>
       )}
-
-      {!loading && filtered.length > displayLimit && (
-        <div className="flex justify-center">
-          <button
-            onClick={() => setDisplayLimit(prev => prev + 24)}
-            className="px-6 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-            style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
-          >
-            Muat Lebih Banyak ({filtered.length - displayLimit} tersisa)
-          </button>
-        </div>
-      )}
-
     </div>
   );
 }

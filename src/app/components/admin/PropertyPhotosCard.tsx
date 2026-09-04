@@ -1,7 +1,7 @@
 import { bacaJson } from '../../../lib/api';
 import { useState, useRef } from 'react';
 import { Star, Trash2, ImageOff, ChevronDown, ChevronUp, Upload } from 'lucide-react';
-import { PHOTO_LABELS } from './viralframe/options';
+import { PHOTO_LABELS } from '../../../../functions/_lib/viralframe.js';
 
 interface PropertyImage {
   id: number;

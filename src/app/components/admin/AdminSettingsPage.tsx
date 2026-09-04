@@ -26,7 +26,7 @@ const DRAG_CANCEL_SELECTOR = 'input, textarea, select, button, a, label';
 const AI_PROVIDERS: { id: AiProviderId; label: string; hint: string }[] = [
   { id: 'gemini',     label: 'Google Gemini', hint: 'aistudio.google.com/apikey' },
   { id: 'groq',       label: 'Groq',          hint: 'console.groq.com/keys' },
-  { id: 'openrouter', label: 'OpenRouter',    hint: 'openrouter.ai/keys' },
+  { id: 'mistral',    label: 'Mistral',       hint: 'console.mistral.ai/api-keys' },
   { id: 'deepseek',   label: 'DeepSeek',      hint: 'platform.deepseek.com/api_keys' },
 ];
 
@@ -125,7 +125,7 @@ export default function AdminSettingsPage() {
 
   // ── AI Providers (API keys + status) ──
   const [aiKeys, setAiKeys] = useState<Record<AiProviderId, AiKeyInfo> | null>(null);
-  const [aiInput, setAiInput] = useState<Record<AiProviderId, string>>({ gemini: '', groq: '', openrouter: '', deepseek: '' });
+  const [aiInput, setAiInput] = useState<Record<AiProviderId, string>>({ gemini: '', groq: '', mistral: '', deepseek: '' });
   const [aiStatus, setAiStatus] = useState<Record<AiProviderId, AiStatusInfo> | null>(null);
   const [aiSaving, setAiSaving] = useState<AiProviderId | null>(null);
   const [aiMsg, setAiMsg] = useState<Msg | null>(null);

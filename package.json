@@ -7,7 +7,6 @@
     "build": "react-router build",
     "dev": "react-router dev",
     "check:bundle": "node scripts/check-bundle-budget.mjs",
-    "check:viralframe-rules": "node scripts/check-viralframe-rulebook.mjs",
     "check:turnstile": "node scripts/check-turnstile-callers.mjs",
     "check:hydration": "node scripts/check-hydration.mjs",
     "smoke": "node scripts/smoke-deploy.mjs",

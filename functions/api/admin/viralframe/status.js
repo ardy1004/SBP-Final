@@ -1,46 +1,52 @@
-// GET /api/admin/viralframe/status — properti mana yang sudah punya naskah/video.
-// Untuk badge & KPI di list page ViralFrame. Auth: _middleware.js
+// GET /api/admin/viralframe/status — listing mana yang sudah punya video, dan
+// berapa pesanan yang sedang berjalan untuknya.
+//
+// ─── Ditulis ulang 2026-09-04 (ViralFrame dibangun ulang) ────────────────────
+// Versi lama melaporkan dua hal: "punya naskah" (dari `viralframe_generations`)
+// dan "punya video" (dari `viralframe_agent_videos`). Bagian NASKAH dibuang:
+// mesin prompt lama sudah dihapus, jadi tabel itu tidak punya penulis lagi —
+// menampilkan 316 baris warisannya sebagai status hidup hanya menyesatkan.
+//
+// Penggantinya bukan tebakan melainkan sesuatu yang benar-benar berjalan:
+// PESANAN PRODUKSI (`viralframe_orders`, migrasi 0046).
+//
+// Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 
+// Sama dengan daftar di orders/index.js — status yang berarti "masih dikerjakan".
+const STATUS_TERBUKA = ['baru', 'material', 'variasi', 'konsep', 'storyboard', 'menunggu_render'];
+
 export async function onRequestGet({ env }) {
   try {
-    // ⚠️ SUMBER VIDEO = `viralframe_agent_videos`, BUKAN `viralframe_videos`.
-    // Sampai 2026-08-02 baris ini membaca `viralframe_videos` — tabel Content
-    // Library yang berisi 0 baris sejak fitur Video VO dihapus (commit 1e3c17a).
-    // Akibatnya `with_video` SELALU kosong, badge "🎬 Video" tidak pernah bisa
-    // muncul, dan 21 properti yang video-nya sudah jadi tampil sebagai "📝 Naskah".
-    // Tidak ada error apa pun — cuma cabang yang tak pernah tercapai.
-    //
-    // Video di Sampah SENGAJA ikut dihitung: `trashed_at` berarti "sudah selesai
-    // dijadwalkan" (lihat migrasi 0023), jadi propertinya memang sudah punya video.
-    // Memfilternya keluar akan mengulang bug yang sedang diperbaiki ini.
-    const [gen, vid] = await Promise.all([
-      env.DB.prepare('SELECT property_id, MAX(created_at) AS latest FROM viralframe_generations GROUP BY property_id').all(),
-      env.DB.prepare('SELECT property_id, MAX(created_at) AS latest FROM viralframe_agent_videos GROUP BY property_id').all().catch(() => ({ results: [] })),
+    // ⚠️ Video di Sampah SENGAJA ikut dihitung: `trashed_at` berarti "sudah
+    // selesai dijadwalkan" (migrasi 0023), jadi listing-nya memang sudah punya
+    // video. Memfilternya keluar mengulang bug lama yang membuat badge video
+    // tidak pernah muncul.
+    const [vid, ord] = await Promise.all([
+      env.DB.prepare(
+        'SELECT property_id, COUNT(*) AS n FROM viralframe_agent_videos GROUP BY property_id'
+      ).all(),
+      env.DB.prepare(
+        `SELECT property_id, COUNT(*) AS n FROM viralframe_orders
+          WHERE status IN (${STATUS_TERBUKA.map(() => '?').join(',')})
+          GROUP BY property_id`
+      ).bind(...STATUS_TERBUKA).all(),
     ]);
 
-    // latest_content_at: timestamp konten TERBARU (naskah ATAU video) per properti —
-    // dipakai frontend membandingkan dengan viralframe_dismissed_at. Kalau properti
-    // diproses ulang SETELAH admin klik Reset, overlay otomatis muncul lagi tanpa
-    // perlu tiap endpoint AI (naskah manual/AI-generate/YouTube Long/video-VO) saling
-    // tahu untuk me-reset dismissed_at secara eksplisit.
-    const latestContentAt = {};
-    for (const r of gen.results ?? []) {
-      if (r.latest && (!latestContentAt[r.property_id] || r.latest > latestContentAt[r.property_id])) {
-        latestContentAt[r.property_id] = r.latest;
-      }
-    }
+    const withVideo = {};
     for (const r of vid.results ?? []) {
-      if (r.latest && (!latestContentAt[r.property_id] || r.latest > latestContentAt[r.property_id])) {
-        latestContentAt[r.property_id] = r.latest;
-      }
+      if (r.property_id != null) withVideo[r.property_id] = r.n;
+    }
+    const antre = {};
+    for (const r of ord.results ?? []) {
+      if (r.property_id != null) antre[r.property_id] = r.n;
     }
 
     return jsonOk({
-      with_script: (gen.results ?? []).map(r => r.property_id),
-      with_video:  (vid.results ?? []).map(r => r.property_id),
-      latest_content_at: latestContentAt,
+      with_video: Object.keys(withVideo).map(Number),
+      jumlah_video: withVideo,
+      antre,
     });
   } catch (err) {
     console.error('[vf status]', err.message);
