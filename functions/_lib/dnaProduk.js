@@ -121,6 +121,60 @@ export function rakitDnaProduk({ prop, foto = [] }) {
 }
 
 /**
+ * Kamus ciri agent Indonesia → Inggris.
+ *
+ * 🔥 Prompt Google Flow berbahasa INGGRIS. Sebelum 2026-09-04 nilai kolom
+ * dimasukkan MENTAH, sehingga prompt produksi benar-benar berbunyi
+ * "26-year-old, asia_tenggara, man, wearing profesional, wajah tampan, badan
+ * berotot, gagah" — campuran token Indonesia + snake_case yang dibaca Veo
+ * sebagai kebisingan, bukan deskripsi orang. Itu salah satu sebab hasilnya
+ * "tidak konsisten dengan reference image".
+ *
+ * Isinya pendek dan berulang (diukur ke D1: `etnik` satu nilai, `style` satu
+ * nilai, `ciri_fisik` frasa 2-5 kata), jadi kamus kecil sudah menutup hampir
+ * semuanya. Yang TIDAK dikenali sengaja DIBUANG, bukan diloloskan: foto
+ * referensi Subject sudah membawa penampilan, dan menyisipkan kata Indonesia
+ * ke prompt Inggris lebih merusak daripada tidak menyebutnya sama sekali.
+ * Hasil terjemahannya ditampilkan di Panel Bahan supaya bisa dilihat & dikoreksi.
+ */
+const CIRI_EN = {
+  asia_tenggara: 'Southeast Asian', asia_timur: 'East Asian', kaukasia: 'Caucasian',
+  indonesia: 'Indonesian', jawa: 'Javanese Indonesian', sunda: 'Sundanese Indonesian',
+  profesional: 'professional business attire', kasual: 'smart casual outfit',
+  formal: 'formal attire', santai: 'relaxed casual outfit', modis: 'fashionable outfit',
+  'hijab muslimah': 'wearing a hijab', hijab: 'wearing a hijab', berhijab: 'wearing a hijab',
+  'rambut panjang': 'long hair', 'rambut pendek': 'short hair', 'rambut sebahu': 'shoulder-length hair',
+  'rambut lurus': 'straight hair', 'rambut ikal': 'wavy hair', 'rambut keriting': 'curly hair',
+  hitam: 'black', pirang: 'blonde', blonde: 'blonde', coklat: 'brown',
+  'wajah tampan': 'handsome face', 'wajah cantik': 'attractive face',
+  'badan berotot': 'athletic build', gagah: 'strong build', ramping: 'slim build', tinggi: 'tall',
+  berkacamata: 'wearing glasses', berjenggot: 'with a beard', berkumis: 'with a moustache',
+};
+
+/**
+ * Terjemahkan frasa ciri; bagian yang tak dikenal dibuang.
+ * @returns {string} kosong bila tidak ada satu pun bagian yang dikenali.
+ */
+function keInggris(teks) {
+  if (!isi(teks)) return '';
+  const bersih = String(teks).toLowerCase().replace(/\(([^)]*)\)/g, ' $1 ');
+  // Frasa terpanjang diuji lebih dulu supaya "rambut panjang" menang atas "panjang".
+  const kunci = Object.keys(CIRI_EN).sort((a, b) => b.length - a.length);
+  const out = [];
+  let sisa = ` ${bersih} `;
+  for (const k of kunci) {
+    const re = new RegExp(`(?<![a-z])${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z])`, 'g');
+    if (re.test(sisa)) {
+      out.push(CIRI_EN[k]);
+      sisa = sisa.replace(re, ' ');
+    }
+  }
+  // Dipisah koma: "athletic build handsome face strong build" terbaca sebagai
+  // satu frasa rusak, sedangkan daftar bersanding dibaca sebagai ciri terpisah.
+  return out.join(', ').trim();
+}
+
+/**
  * DNA Agent — ciri yang WAJIB identik di ketiga Part.
  *
  * Dipisah `wajahSuara` (tidak boleh berubah antar Part) dari `bahasaInggris`
@@ -137,10 +191,10 @@ export function rakitDnaAgent(agent) {
 
   const bahasaInggris = [
     isi(agent.usia) ? `${agent.usia}-year-old` : null,
-    isi(agent.etnik) ? agent.etnik : 'Indonesian',
+    keInggris(agent.etnik) || 'Indonesian',
     agent.gender === 'Wanita' ? 'woman' : agent.gender === 'Pria' ? 'man' : 'presenter',
-    isi(agent.style) ? `wearing ${agent.style}` : null,
-    isi(agent.ciri_fisik) ? agent.ciri_fisik : null,
+    keInggris(agent.style) ? `wearing ${keInggris(agent.style)}` : null,
+    keInggris(agent.ciri_fisik) || null,
   ].filter(Boolean).join(', ');
 
   return {

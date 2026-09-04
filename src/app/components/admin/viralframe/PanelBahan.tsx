@@ -11,8 +11,9 @@
 // melaporkan 7. Alih-alih menebak, storyboard memilih sampai 7 TAPI panel
 // menandai 3 teratas sebagai wajib. Kalau ternyata 3, tiga teratas sudah cukup.
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Loader2, ImageOff, Star, ShieldAlert, Sparkles, RotateCcw } from 'lucide-react';
+import { Loader2, ImageOff, Star, ShieldAlert, Sparkles, RotateCcw, Check } from 'lucide-react';
 import { bacaJson } from '../../../../lib/api';
+import { PHOTO_LABELS } from '../../../../../functions/_lib/viralframe.js';
 
 export interface DnaProduk {
   fakta: { label: string; nilai: string }[];
@@ -113,6 +114,34 @@ export default function PanelBahan({ propertyId, characterId, refreshKey = 0, on
     // onSiap sengaja tidak jadi dependensi — induk membuatnya ulang tiap render,
     // dan memasukkannya ke sini membuat panel memuat ulang tanpa henti.
   }, [propertyId, characterId, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Koreksi label foto ────────────────────────────────────────────────────
+  // Visi AI salah baca — kasus nyata: foto GARASI dilabeli "Ruang Keluarga".
+  // Label itu menentukan `pembukaan` variasi, kalimat "Context: the ..." di
+  // prompt Flow, dan pagar `larangan` di DNA, jadi satu label salah merusak
+  // seluruh video. Manusia harus bisa membetulkannya di layar yang sama tempat
+  // ia melihatnya — bukan pindah ke halaman Detail Properti.
+  const [simpanLabel, setSimpanLabel] = useState<number | null>(null);
+  const [labelBaru, setLabelBaru] = useState<Record<number, string>>({});
+
+  const ubahLabel = async (fotoId: number, nilai: string) => {
+    setSimpanLabel(fotoId);
+    try {
+      const res = await fetch(`/api/admin/properties/${propertyId}/photos/${fotoId}`, {
+        method: 'PATCH', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label_ruangan: nilai || null }),
+      });
+      const json = await bacaJson(res);
+      if (!json.success) { setError(json.error ?? 'Gagal menyimpan label.'); return; }
+      setLabelBaru(prev => ({ ...prev, [fotoId]: nilai }));
+      setBahan(b => (b ? { ...b, foto: b.foto.map(f => (f.id === fotoId ? { ...f, label: nilai || null } : f)) } : b));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Gagal menyimpan label.');
+    } finally {
+      setSimpanLabel(null);
+    }
+  };
 
   const ubahDna = useCallback((baru: DnaProduk) => {
     setDna(baru);
@@ -260,28 +289,55 @@ export default function PanelBahan({ propertyId, characterId, refreshKey = 0, on
                 Listing ini belum punya foto sama sekali. Tambahkan dulu di Detail Properti.
               </div>
             ) : (
-              <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {foto.map(f => (
-                  <div key={f.id} className="relative aspect-square rounded-lg overflow-hidden bg-gray-100 group">
-                    {f.url
-                      ? <img src={fotoSrc(f.url)} alt={f.label ?? ''} className="w-full h-full object-cover" loading="lazy" />
-                      : <div className="w-full h-full flex items-center justify-center text-[#CBD5E1]"><ImageOff size={13} /></div>}
-                    {f.utama && (
-                      <span className="absolute top-1 left-1 w-4 h-4 rounded-full bg-[#1565C0] text-white flex items-center justify-center">
-                        <Star size={9} fill="currentColor" />
-                      </span>
-                    )}
-                    {f.skor != null && (
-                      <span className="absolute bottom-0 right-0 px-1 rounded-tl text-[9px] font-bold bg-black/60 text-white tabular-nums">
-                        {f.skor}
-                      </span>
-                    )}
-                    <span className="absolute inset-x-0 bottom-0 px-1 py-0.5 text-[8px] leading-tight bg-black/55 text-white truncate opacity-0 group-hover:opacity-100 transition-opacity">
-                      {f.label}
-                    </span>
+                  <div key={f.id} className="rounded-lg border border-gray-200 overflow-hidden">
+                    <div className="relative aspect-[4/3] bg-gray-100">
+                      {f.url
+                        ? <img src={fotoSrc(f.url)} alt={f.label ?? ''} className="w-full h-full object-cover" loading="lazy" />
+                        : <div className="w-full h-full flex items-center justify-center text-[#CBD5E1]"><ImageOff size={14} /></div>}
+                      {f.utama && (
+                        <span className="absolute top-1 left-1 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-[#1565C0] text-white text-[9px] font-bold">
+                          <Star size={8} fill="currentColor" /> wajib
+                        </span>
+                      )}
+                      {f.skor != null && (
+                        <span className="absolute top-1 right-1 px-1.5 rounded-full text-[9px] font-bold bg-black/60 text-white tabular-nums">
+                          {f.skor}
+                        </span>
+                      )}
+                      {simpanLabel === f.id && (
+                        <span className="absolute inset-0 bg-white/70 flex items-center justify-center">
+                          <Loader2 size={16} className="animate-spin text-[#1565C0]" />
+                        </span>
+                      )}
+                      {labelBaru[f.id] !== undefined && simpanLabel !== f.id && (
+                        <span className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center">
+                          <Check size={10} />
+                        </span>
+                      )}
+                    </div>
+                    {/* Koreksi label langsung di sini — visi AI bisa salah baca
+                        (kasus nyata: garasi terbaca "Ruang Keluarga"), dan label
+                        itu ikut menentukan prompt Flow serta pagar anti-halusinasi. */}
+                    <select
+                      value={f.label ?? ''}
+                      onChange={e => ubahLabel(f.id, e.target.value)}
+                      disabled={simpanLabel != null}
+                      className="w-full px-1.5 py-1 text-[11px] border-0 border-t border-gray-200 outline-none focus:bg-[#EFF6FF] bg-white disabled:opacity-50"
+                    >
+                      <option value="">— belum berlabel —</option>
+                      {PHOTO_LABELS.map((l: string) => <option key={l} value={l}>{l}</option>)}
+                    </select>
                   </div>
                 ))}
               </div>
+            )}
+            {!material.perlu_dinilai && material.total_foto > 0 && (
+              <p className="text-[10px] text-[#94A3B8] mt-1.5">
+                Label salah? Ganti langsung di dropdown — itu mengubah prompt Google Flow
+                dan pagar anti-halusinasi, bukan cuma tampilan.
+              </p>
             )}
             {material.label_unik > 0 && (
               <p className="text-[10px] text-[#94A3B8] mt-1.5">

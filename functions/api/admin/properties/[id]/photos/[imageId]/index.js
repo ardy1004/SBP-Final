@@ -9,17 +9,19 @@ import { jsonOk, jsonError, handleOptions } from '../../../../../_shared/respons
 
 const R2_PREFIXES = ['property-photos/', 'signatures/', 'agreements/'];
 
-// Nilai label yang sah — SALINAN PHOTO_LABELS di
-// src/app/components/admin/viralframe/options.ts. Sengaja tidak diimpor dari sana:
-// aturan CLAUDE.md melarang functions/ mengimpor src/app/. Kalau daftar di sana
-// bertambah, tambahkan juga di sini (kalau tidak, label baru ditolak 422).
-const LABEL_SAH = new Set([
-  'Fasad', 'Foyer/Lobby', 'Ruang Tamu', 'Ruang Keluarga', 'Ruang Makan',
-  'Kamar Tidur', 'Walk-in Closet', 'Kamar Mandi', 'Dapur', 'Ruang Cuci/Jemur',
-  'Ruang Kerja/Study', 'Gym/Fitness', 'Koridor/Tangga', 'Void/Plafon Tinggi',
-  'Taman/Halaman', 'Carport/Garasi', 'Balkon/Teras', 'Rooftop', 'Kolam Renang',
-  'Musholla', 'Gudang', 'Ruang Usaha', 'Tampak Lokasi/Lingkungan', 'Lainnya',
-]);
+// Nilai label yang sah — DIIMPOR, bukan disalin.
+//
+// Dulu ini salinan manual dengan catatan "kalau daftar di options.ts bertambah,
+// tambahkan juga di sini". Berkas itu sudah dihapus saat ViralFrame dibangun
+// ulang, dan salinan yang menunjuk sumber yang tak ada adalah drift yang tinggal
+// menunggu waktu: label baru akan ditolak 422 di sini tanpa alasan yang jelas.
+// `functions/_lib/` memang boleh diimpor backend DAN frontend, jadi tidak ada
+// lagi alasan menyalin.
+// 6 level: [imageId] → photos → [id] → properties → admin → api → functions/
+// (bandingkan `_shared` di atas yang cuma 5, karena letaknya di functions/api/).
+import { PHOTO_LABELS } from '../../../../../../_lib/viralframe.js';
+
+const LABEL_SAH = new Set(PHOTO_LABELS);
 
 export async function onRequestPatch(context) {
   const { env, params, request } = context;

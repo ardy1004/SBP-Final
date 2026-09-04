@@ -143,10 +143,17 @@ ATURAN KERAS
   mengarang, melainkan perintah memakai angka yang memang ada.
 - "teks_layar" Part 1 dan Part terakhir WAJIB terisi — banyak penonton menonton
   tanpa suara, dan teks layar satu-satunya kanal yang boleh menampilkan harga.
-- "kamera" berisi POSISI & GERAK KAMERA saja, BUKAN aksi subjek. Tulis
-  "camera at arm's length, selfie perspective, hands empty" — JANGAN
-  "presenter holds the camera", karena itu membuat model merender orang yang
-  menenteng perangkat.
+- "kamera" berisi UKURAN SHOT + GERAK KAMERA saja (mis. "Medium shot, slow
+  push-in" / "Wide shot, static"), maksimal 6 kata. DILARANG menuliskan aksi
+  subjek di situ, dan DILARANG menyebut orang memegang atau membawa kamera —
+  itu membuat model merender presenter yang menenteng perangkat.
+  ⚠️ JANGAN menyalin contoh di atas apa adanya ke semua cut; setiap cut punya
+  ukuran shot sendiri. Wide shot yang juga ditulis "selfie perspective" adalah
+  perintah yang saling bertentangan dan hasilnya rusak.
+- SEMUA cut dalam SATU Part terjadi di RUANG YANG SAMA. Ganti ruangan hanya
+  ANTAR Part. Satu klip 10 detik yang melompat antar ruangan memaksa model
+  mengarang transisi, dan itu penyebab utama hasil yang tidak konsisten dengan
+  foto referensi. Maksimal ${FLOW.refImageUtama} foto properti per Part.
 
 KELUARAN JSON
 {
@@ -328,21 +335,43 @@ export function renderPromptFlow({ ir, prop, params }) {
   const lokasi = [prop.kecamatan, prop.kabupaten].filter(Boolean).join(', ');
 
   return ir.parts.map((p, i) => {
-    let t = 0;
-    // Blok timestamp: kamera DULU, baru aksi, baru ruang yang jadi konteksnya.
-    const baris = p.cuts.map(c => {
-      const mulai = tc(t); t += c.detik;
-      const kamera = c.kamera || 'Medium shot, steady';
-      return `[${mulai}-${tc(t)}] ${kamera}. ${c.aksi} Context: the ${labelInggris(c.label)}.`;
-    });
-
-    // Foto berperingkat — inti keputusan "adaptif" soal batas ingredient.
-    // Urut skor visi menurun, karena itu peringkat kualitas yang sudah diukur;
-    // urutan kemunculan di storyboard bukan peringkat kualitas.
+    // Foto berperingkat — inti keputusan soal batas ingredient. Urut skor visi
+    // menurun karena itu peringkat kualitas yang sudah diukur; urutan kemunculan
+    // di storyboard bukan peringkat kualitas.
+    //
+    // ⚠️ DIHITUNG SEBELUM blok timestamp, karena tiap cut harus menunjuk NOMOR
+    // reference image-nya. Cut yang fotonya tidak masuk daftar utama dipetakan
+    // ke foto utama pertama — lebih baik menunjuk ruangan yang benar-benar
+    // terlampir daripada menunjuk nomor yang tidak ada.
     const unik = [...new Map(p.cuts.map(c => [c.foto_id, c])).values()]
       .sort((a, b) => (b.skor ?? 0) - (a.skor ?? 0));
     const utama = unik.slice(0, FLOW.refImageUtama);
     const cadangan = unik.slice(FLOW.refImageUtama);
+    const nomorRef = new Map(utama.map((c, n) => [c.foto_id, n + 2])); // [1] = agent
+
+    let t = 0;
+    // Blok timestamp: kamera DULU, lalu aksi, lalu foto mana yang dipakai.
+    const baris = p.cuts.map(c => {
+      const mulai = tc(t); t += c.detik;
+      const kamera = (c.kamera || 'Medium shot, steady').replace(/[.\s]+$/, '');
+      const aksi = String(c.aksi ?? '').replace(/[.\s]+$/, '');
+      const nRef = nomorRef.get(c.foto_id) ?? 2;
+      return `[${mulai}-${tc(t)}] ${kamera}. ${aksi}. Filmed inside reference image [${nRef}].`;
+    });
+
+    // ── Pengikatan reference image ke PERANNYA ────────────────────────────
+    //
+    // 🔥 INI YANG PALING MENENTUKAN KONSISTENSI, dan sebelumnya TIDAK ADA sama
+    // sekali. Prompt lama cuma mendeskripsikan adegan dengan kata-kata dan tidak
+    // pernah menyebut bahwa ada foto terlampir — jadi Veo memperlakukan
+    // referensinya sebagai saran lepas dan mengarang ruangannya sendiri.
+    // Dokumentasi Google tegas: "add a text prompt that explicitly maps each
+    // image to its role", dengan peran Subject / Scene / Style.
+    const ref = [`[1] SUBJECT — the presenter. Keep the face, hairstyle, and outfit EXACTLY as in this image.`];
+    utama.forEach((c, n) => {
+      ref.push(`[${n + 2}] SCENE — the real ${labelInggris(c.label)}. `
+        + 'Match its actual layout, materials and lighting. Do not redecorate it or substitute a different place.');
+    });
 
     return {
       part: i + 1,
@@ -352,14 +381,19 @@ export function renderPromptFlow({ ir, prop, params }) {
       dialog: p.dialog,
       teks_layar: p.teks_layar,
       prompt: [
-        `Vertical ${FLOW.rasio} short-form video, ${params.detikPerPart} seconds, single scene.`,
+        `Vertical ${FLOW.rasio} short-form video, ${params.detikPerPart} seconds, one continuous scene.`,
         '',
-        `SUBJECT: ${dnaAgent.bahasaInggris}. Same face, same outfit, same voice in every part.`,
-        `CONTEXT: an Indonesian ${prop.jenis_properti} property in ${lokasi || 'Yogyakarta'}.`,
+        'REFERENCE IMAGES (attached — follow them exactly, they are the source of truth):',
+        ...ref,
+        'Everything visible must come from these images. Do not add rooms, furniture, people,',
+        'graphics, text overlays or map insets that are not in them.',
+        '',
+        `SUBJECT DESCRIPTION (must match image [1]): ${dnaAgent.bahasaInggris}.`,
+        `LOCATION: an Indonesian ${prop.jenis_properti} property in ${lokasi || 'Yogyakarta'}.`,
         '',
         baris.join('\n'),
         '',
-        `Dialogue (Indonesian, ${dnaAgent.suara}): "${p.dialog}"`,
+        `Dialogue (spoken in Indonesian, ${dnaAgent.suara}): "${p.dialog}"`,
         `Music: ${mood?.musik ?? 'subtle background bed'}.`,
         'Ambient: quiet natural room tone, no crowd noise.',
         '',
@@ -367,8 +401,11 @@ export function renderPromptFlow({ ir, prop, params }) {
         // Negative prompt spesifik, bukan kabur — Google menganjurkan menyebut
         // benda yang tidak diinginkan, bukan kategori abstrak. `selfie stick` dan
         // `camera in hand` menutup halusinasi perangkat rekam yang muncul saat
-        // foto referensi talent kebetulan memegang alat.
-        'Negative: subtitles, captions, burned-in text, watermark, logo, distorted hands, extra people, CGI render, plastic skin, over-smoothed skin, selfie stick, gimbal, camera in hand, mirror reflection of a camera.',
+        // foto referensi talent kebetulan memegang alat. `map overlay` & `infographic`
+        // ditambahkan 2026-09-04 setelah AI mengarang "digital map overlay".
+        'Negative: subtitles, captions, burned-in text, watermark, logo, map overlay, infographic, '
+          + 'distorted hands, extra people, different room, CGI render, plastic skin, over-smoothed skin, '
+          + 'selfie stick, gimbal, camera in hand, mirror reflection of a camera.',
       ].join('\n'),
     };
   });

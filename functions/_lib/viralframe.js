@@ -117,11 +117,22 @@ export function labelGaya(id) {
 // foto, TAPI renderer memberi PERINGKAT dan menandai `refImageUtama` teratas
 // sebagai wajib. Kalau Flow ternyata 3, tiga foto teratas sudah cukup dan sisanya
 // diabaikan; kalau 7, semuanya terpakai. Nol deploy ulang saat kenyataannya beda.
+// ⚠️ DIKONFIRMASI 2026-09-04 (dokumentasi Google + hasil nyata user): Ingredients
+// to Video menerima **3 reference image per generate**, dengan peran Subject /
+// Scene / Style. Angka 7 yang sempat dipakai membuat kita mengirim terlalu banyak
+// foto ruangan berbeda ke satu klip 10 detik — model memaksa transisi antar
+// ruangan yang tidak diminta, dan hasilnya "tidak konsisten dengan reference".
+//
+// Karena foto AGENT memakai satu slot Subject, foto properti yang tersisa = 2.
 export const FLOW = {
   detikPerPart: 10,
   partPerVideo: 3,
-  refImagePerPart: 7,
-  refImageUtama: 3,
+  /** Total ingredient per generate (batas keras Google Flow). */
+  ingredientMaks: 3,
+  /** Foto PROPERTI per Part = ingredientMaks − 1 slot untuk foto agent. */
+  refImageUtama: 2,
+  /** Batas atas foto yang boleh dipertimbangkan storyboard per Part. */
+  refImagePerPart: 4,
   rasio: '9:16',
 };
 
