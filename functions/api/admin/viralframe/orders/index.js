@@ -141,15 +141,25 @@ export async function onRequestPost({ request, env }) {
       diterima.map(pid => stmt.bind(pid, characterId, params ? JSON.stringify(params) : null)),
     );
 
-    // ⚠️ `ids` WAJIB dikembalikan, dan urutannya sejajar dengan `diterima`.
+    // ⚠️ id baris baru WAJIB dikembalikan, urutannya sejajar dengan `diterima`.
     // Meja kerja membuat pesanan lalu LANGSUNG menjalankan stasiunnya, jadi ia
     // butuh id-nya seketika. Tanpa ini klien harus menebak lewat GET ulang, dan
     // dua tab yang mengantre listing sama akan saling merebut baris yang salah.
-    const ids = (hasil ?? []).map(r => r?.meta?.last_row_id ?? null);
+    //
+    // 🔥 NAMANYA `idBaru`, BUKAN `ids` — dan itu bukan selera penamaan.
+    // Menamainya `ids` menaungi `const ids` (property_ids) di baris 81 untuk
+    // SELURUH blok try ini, sehingga `ids.filter(...)` di atas jatuh ke temporal
+    // dead zone dan POST ini gagal 500 SETIAP KALI. Terjadi sungguhan 2026-09-04
+    // dan lolos semua gate: `functions/` JS polos tanpa typecheck, esbuild
+    // membundel TDZ tanpa keluhan, dan smoke tidak pernah POST ke endpoint admin.
+    // Dijaga sekarang oleh `npm run check:functions`.
+    const idBaru = (hasil ?? []).map(r => r?.meta?.last_row_id ?? null);
 
     return jsonCreated({
-      ids,
+      ids: idBaru,
       dibuat: diterima.length,
+      // Dihitung dari `ids` (property_ids yang DIMINTA), bukan dari baris yang
+      // dibuat — dua hal berbeda yang sempat tertukar oleh shadowing di atas.
       dilewati_sudah_antre: ids.length - kandidat.length,
       ditolak_kuota: ditolakKuota,
       sisa_kuota: sisa - diterima.length,
