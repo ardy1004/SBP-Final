@@ -16,6 +16,12 @@ interface FotoRef { id: number; label: string }
 export interface PromptPart {
   part: number;
   peran: string;
+  /**
+   * Slot talent/karakter — HANYA ada di mode non-faceless (satu slot ingredient
+   * dipakai foto agent, sisanya untuk properti). Opsional: kalau backend belum
+   * mengirimnya, panel diam-diam tidak menampilkan baris ini.
+   */
+  foto_agent?: FotoRef | null;
   foto_utama: FotoRef[];
   foto_cadangan: FotoRef[];
   dialog: string;
@@ -23,7 +29,7 @@ export interface PromptPart {
   prompt: string;
 }
 
-export default function PanelPrompt({ parts }: { parts: PromptPart[] }) {
+export default function PanelPrompt({ parts, faceless = false }: { parts: PromptPart[]; faceless?: boolean }) {
   const [tersalin, setTersalin] = useState<number | null>(null);
 
   const salin = async (teks: string, idx: number) => {
@@ -42,7 +48,12 @@ export default function PanelPrompt({ parts }: { parts: PromptPart[] }) {
         <h2 className="font-display font-bold text-[#0F172A] text-sm flex items-center gap-1.5">
           <Wand2 size={15} className="text-[#B45309]" /> Prompt Google Flow
         </h2>
-        <span className="text-[11px] text-[#94A3B8]">{parts.length} generate · tempel satu per satu</span>
+        <span className="text-[11px] text-[#94A3B8] flex items-center gap-1.5">
+          <span className={`px-1.5 py-0.5 rounded-full font-semibold ${faceless ? 'bg-[#F5F3FF] text-[#7C3AED]' : 'bg-[#EFF6FF] text-[#1565C0]'}`}>
+            {faceless ? 'Faceless' : 'Dengan agent'}
+          </span>
+          {parts.length} generate · tempel satu per satu
+        </span>
       </div>
 
       <div className="p-4 space-y-3">
@@ -65,8 +76,16 @@ export default function PanelPrompt({ parts }: { parts: PromptPart[] }) {
             </pre>
 
             <div className="px-3 py-2 border-t border-gray-100 space-y-1">
+              {/* Slot talent/karakter HANYA ditampilkan di mode agent — mode
+                  faceless tidak punya slot ini sama sekali (nol foto orang). */}
+              {!faceless && p.foto_agent && (
+                <div className="text-[11px]">
+                  <span className="font-semibold text-[#0F172A]">Slot talent/karakter:</span>{' '}
+                  <span className="text-[#334155]">#{p.foto_agent.id} {p.foto_agent.label}</span>
+                </div>
+              )}
               <div className="text-[11px]">
-                <span className="font-semibold text-[#0F172A]">Lampirkan foto:</span>{' '}
+                <span className="font-semibold text-[#0F172A]">Lampirkan foto properti:</span>{' '}
                 <span className="text-[#334155]">
                   {p.foto_utama.map(f => `#${f.id} ${f.label}`).join(' · ') || '—'}
                 </span>

@@ -14,12 +14,56 @@ import {
 import { bacaJson } from '../../../../lib/api';
 import { periksaRetensi, PATOKAN } from '../../../../../functions/_lib/retensi.js';
 
-interface Cut { foto_id: number; label: string; detik: number; kamera: string; aksi: string; skor: number | null }
-export interface PartIR { peran: string; cuts: Cut[]; dialog: string; teks_layar: string }
+// Skema K2 (rencana v2) — `beats` menggantikan `cuts` lama: setiap beat WAJIB
+// membawa Narrative State (viewer_question → reveal → informasi_baru →
+// next_question), bukan sekadar foto + kamera + aksi.
+interface Beat {
+  mulai: number; selesai: number; foto_id: number;
+  viewer_question: string; start_state: string; kamera: string; aksi: string;
+  reveal: string; informasi_baru: string; end_state: string; next_question: string;
+}
+export interface PartIR {
+  peran: string;
+  /** null hanya untuk Part 1 — Part berikutnya wajib menyambung dari sini. */
+  continuity_in: string | null;
+  /** Boleh kosong HANYA di Part terakhir. */
+  continuity_out: string;
+  beats: Beat[];
+  dialog: string;
+  teks_layar: string;
+}
+
+// Skema K1 — keluaran Stasiun Konsep (`hasil_json.konsep`). AI mengusulkan 3
+// kandidat sudut cerita, kode menyaring salah satunya jadi Creative DNA yang
+// benar-benar dieksekusi storyboard.
+interface Audiens { utama: string; keinginan: string; keberatan: string; pemicu: string }
+interface KandidatSudut {
+  id: string; sudut: string; alasan: string;
+  fakta_pendukung?: string[]; foto_pendukung?: number[];
+}
+interface CreativeDna {
+  sudut: string; hook_mekanisme: string; pemicu_psikologis: string;
+  struktur_naratif: string; foto_pembuka: number;
+  urutan_informasi?: string[]; profil_pacing?: string; bahasa_kamera?: string;
+  payoff?: string; gaya_cta?: string;
+}
+interface CeritaGlobal {
+  janji?: string; part1_open_loop?: string; part2_payoff?: string;
+  part2_open_loop?: string; part3_payoff?: string;
+}
+interface PetaRetensi { '0_3'?: string; '3_10'?: string; '10_20'?: string; '20_30'?: string }
+interface Konsep {
+  audiens?: Audiens;
+  kandidat?: KandidatSudut[];
+  dna?: CreativeDna;
+  cerita_global?: CeritaGlobal;
+  peta_retensi?: PetaRetensi;
+}
+
 export interface HasilPesanan {
-  konsep?: { sudut?: string; emosi?: string; payoff?: string; alasan?: string };
+  konsep?: Konsep;
   parts?: PartIR[];
-  params?: { jumlahPart: number; detikPerPart: number; voDetikPerPart: number; cta: string };
+  params?: { jumlahPart: number; detikPerPart: number; voDetikPerPart: number; cta: string; faceless?: boolean };
   variasi?: Record<string, string>;
   /** DNA Produk — dipakai memeriksa klaim jarak yang dikarang. */
   dna?: { fakta?: { label: string; nilai: string }[]; keunikan?: string[] };
@@ -31,6 +75,13 @@ interface HasilAdu {
   kandidat: Kandidat[]; pemenang: number | null; alasan: string;
   dua_arah: boolean; penulis: string; juri: string; pesan: string;
 }
+
+const PETA_RETENSI_URUTAN: { key: keyof PetaRetensi; label: string }[] = [
+  { key: '0_3', label: '0–3 dtk' },
+  { key: '3_10', label: '3–10 dtk' },
+  { key: '10_20', label: '10–20 dtk' },
+  { key: '20_30', label: '20–30 dtk' },
+];
 
 export default function PanelStoryboard({ orderId, hasil, onUbah }: {
   orderId: number;
@@ -44,6 +95,9 @@ export default function PanelStoryboard({ orderId, hasil, onUbah }: {
   const [pesan, setPesan] = useState('');
 
   const parts = hasil.parts ?? [];
+  const dnaTerpilih = hasil.konsep?.dna;
+  const kandidatSudut = hasil.konsep?.kandidat ?? [];
+  const petaRetensi = hasil.konsep?.peta_retensi;
 
   // Dihitung ulang tiap render dari IR yang sedang tampil — bukan dibaca dari
   // hasil tersimpan. Itu yang membuat daftar cacat langsung menyesuaikan setelah
@@ -120,17 +174,62 @@ export default function PanelStoryboard({ orderId, hasil, onUbah }: {
       </div>
 
       <div className="p-4 space-y-4">
-        {hasil.konsep?.sudut && (
-          <div className="bg-[#F8FAFC] border border-gray-100 rounded-xl p-3.5">
-            <div className="text-[11px] uppercase tracking-wide text-[#94A3B8] font-semibold mb-1">Konsep</div>
-            <p className="text-sm text-[#0F172A] font-medium">{hasil.konsep.sudut}</p>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-[#64748B]">
-              {hasil.konsep.emosi && <span>Emosi: <b className="text-[#334155]">{hasil.konsep.emosi}</b></span>}
-              {hasil.konsep.payoff && <span>Payoff: {hasil.konsep.payoff}</span>}
-            </div>
-            {/* Alasan AI ditampilkan supaya keputusannya bisa dikoreksi manusia —
-                bukan kotak hitam yang harus dipercaya begitu saja. */}
-            {hasil.konsep.alasan && <p className="text-xs text-[#94A3B8] mt-1.5 italic">{hasil.konsep.alasan}</p>}
+        {(dnaTerpilih || kandidatSudut.length > 0) && (
+          <div className="bg-[#F8FAFC] border border-gray-100 rounded-xl p-3.5 space-y-3">
+            {dnaTerpilih && (
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-[#94A3B8] font-semibold mb-1">Konsep terpilih</div>
+                <p className="text-sm text-[#0F172A] font-medium">{dnaTerpilih.sudut}</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-[#64748B]">
+                  {dnaTerpilih.hook_mekanisme && <span>Hook: <b className="text-[#334155]">{dnaTerpilih.hook_mekanisme}</b></span>}
+                  {dnaTerpilih.struktur_naratif && <span>Naratif: <b className="text-[#334155]">{dnaTerpilih.struktur_naratif}</b></span>}
+                  {dnaTerpilih.payoff && <span>Payoff: {dnaTerpilih.payoff}</span>}
+                  {dnaTerpilih.gaya_cta && <span>CTA: {dnaTerpilih.gaya_cta}</span>}
+                </div>
+              </div>
+            )}
+
+            {/* 3 kandidat sudut yang diusulkan AI, disaring sistem — ditampilkan
+                supaya pemilihannya bisa dikoreksi manusia, bukan kotak hitam. */}
+            {kandidatSudut.length > 0 && (
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-[#94A3B8] font-semibold mb-1.5">3 kandidat sudut</div>
+                <div className="space-y-1.5">
+                  {kandidatSudut.map(k => {
+                    const menang = dnaTerpilih != null && k.sudut === dnaTerpilih.sudut;
+                    return (
+                      <div key={k.id} className={`rounded-lg border p-2.5 ${menang ? 'border-[#1565C0] bg-[#EFF6FF]' : 'border-gray-200 bg-white'}`}>
+                        <div className="flex items-center gap-1.5">
+                          {menang && <Check size={12} className="text-[#1565C0] shrink-0" />}
+                          <span className="text-xs font-semibold text-[#0F172A]">{k.sudut}</span>
+                          {menang && <span className="text-[10px] font-semibold text-[#1565C0]">Terpilih</span>}
+                        </div>
+                        {k.alasan && <p className="text-[11px] text-[#64748B] mt-0.5 leading-relaxed">{k.alasan}</p>}
+                        {k.fakta_pendukung && k.fakta_pendukung.length > 0 && (
+                          <p className="text-[10px] text-[#94A3B8] mt-1">Fakta: {k.fakta_pendukung.join(' · ')}</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Peta retensi (K1: `konsep.peta_retensi`) — rencana apa yang
+                menahan penonton di tiap jendela waktu, bukan hasil ukur video jadi. */}
+            {petaRetensi && (
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-[#94A3B8] font-semibold mb-1.5">Peta retensi</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                  {PETA_RETENSI_URUTAN.filter(({ key }) => petaRetensi[key]).map(({ key, label }) => (
+                    <div key={key} className="rounded-lg bg-white border border-gray-200 p-2">
+                      <div className="text-[10px] font-semibold text-[#1565C0]">{label}</div>
+                      <div className="text-[11px] text-[#334155] mt-0.5 leading-snug">{petaRetensi[key]}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -224,24 +323,38 @@ export default function PanelStoryboard({ orderId, hasil, onUbah }: {
                   Part {i + 1} <span className="font-normal text-[#94A3B8]">· {p.peran}</span>
                 </span>
                 <span className="text-[11px] text-[#94A3B8] tabular-nums flex items-center gap-1">
-                  <Clock size={11} /> {p.cuts.reduce((s, c) => s + c.detik, 0)}s · {p.cuts.length} cut
+                  <Clock size={11} /> {p.beats.reduce((s, b) => s + (b.selesai - b.mulai), 0).toFixed(1)}s · {p.beats.length} beat
                 </span>
               </div>
               <div className="p-3 space-y-2">
+                {(p.continuity_in || p.continuity_out) && (
+                  <div className="text-[10px] text-[#94A3B8] flex flex-wrap gap-x-3">
+                    {p.continuity_in && <span>Masuk: {p.continuity_in}</span>}
+                    {p.continuity_out && <span>Keluar: {p.continuity_out}</span>}
+                  </div>
+                )}
                 <p className="text-sm text-[#0F172A] leading-snug">“{p.dialog}”</p>
                 {p.teks_layar && (
                   <p className="text-[11px] text-[#64748B]">
                     Teks layar: <b className="text-[#334155]">{p.teks_layar}</b>
                   </p>
                 )}
-                <ul className="space-y-1 pt-1 border-t border-gray-100">
-                  {p.cuts.map((c, j) => (
-                    <li key={j} className="text-[11px] text-[#64748B] leading-snug flex gap-2">
-                      <span className="tabular-nums text-[#94A3B8] shrink-0">{c.detik}s</span>
-                      <span>
-                        <b className="text-[#334155]">{c.label}</b>
-                        {c.kamera ? ` — ${c.kamera}.` : ''} {c.aksi}
-                      </span>
+                <ul className="space-y-1.5 pt-1 border-t border-gray-100">
+                  {p.beats.map((b, j) => (
+                    <li key={j} className="text-[11px] text-[#64748B] leading-snug">
+                      <div className="flex gap-2">
+                        <span className="tabular-nums text-[#94A3B8] shrink-0">{b.mulai}–{b.selesai}s</span>
+                        <span>
+                          <b className="text-[#334155]">#{b.foto_id}</b>
+                          {b.kamera ? ` — ${b.kamera}.` : ''} {b.aksi}
+                        </span>
+                      </div>
+                      {(b.reveal || b.informasi_baru) && (
+                        <div className="pl-9 text-[#94A3B8]">
+                          {b.reveal && <>Reveal: {b.reveal}. </>}
+                          {b.informasi_baru && <>Info baru: {b.informasi_baru}</>}
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>

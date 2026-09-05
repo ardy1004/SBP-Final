@@ -155,6 +155,9 @@ export default function AdminViralFramePage() {
   const [voDetik, setVoDetik] = useState<number>(voDetikBaku(FLOW.detikPerPart));
   const [cta, setCta] = useState('survei');
   const [platform, setPlatform] = useState('tiktok');
+  // Faceless = pilihan per pesanan (keputusan user, BUKAN default) — video
+  // properti tanpa talent/agent, ketiga slot ingredient dipakai foto properti.
+  const [faceless, setFaceless] = useState(false);
 
   // ── Filter ────────────────────────────────────────────────────────────────
   const [filterOpen, setFilterOpen] = useState(false);
@@ -261,8 +264,9 @@ export default function AdminViralFramePage() {
     vo_detik_per_part: voDetik,
     cta,
     platform,
+    faceless,
     dna: dnaSunting ?? undefined,
-  }), [jumlahPart, detikPerPart, voDetik, cta, platform, dnaSunting]);
+  }), [jumlahPart, detikPerPart, voDetik, cta, platform, faceless, dnaSunting]);
 
   /**
    * Buat storyboard — cari/buat pesanan, lalu JALANKAN STASIUNNYA SENDIRI
@@ -738,7 +742,26 @@ export default function AdminViralFramePage() {
           {/* ─── LANGKAH 4: PARAMETER ───────────────────────────────────── */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
             <h2 className="font-display font-bold text-[#0F172A] text-sm mb-3">Parameter</h2>
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+              <label className="block">
+                <span className="block text-[11px] font-medium text-[#64748B] mb-1">Talent</span>
+                <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setFaceless(false)}
+                    title="Video memakai foto agent sebagai talent"
+                    className={`flex-1 px-2 py-1.5 text-xs font-medium transition-colors ${!faceless ? 'bg-[#1565C0] text-white' : 'bg-white text-[#64748B] hover:bg-gray-50'}`}>
+                    Dengan agent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFaceless(true)}
+                    title="Video properti tanpa talent — nol foto orang"
+                    className={`flex-1 px-2 py-1.5 text-xs font-medium transition-colors ${faceless ? 'bg-[#1565C0] text-white' : 'bg-white text-[#64748B] hover:bg-gray-50'}`}>
+                    Faceless
+                  </button>
+                </div>
+              </label>
               <label className="block">
                 <span className="block text-[11px] font-medium text-[#64748B] mb-1">Total part</span>
                 <select value={jumlahPart} onChange={e => setJumlahPart(parseInt(e.target.value, 10))}
@@ -787,6 +810,7 @@ export default function AdminViralFramePage() {
             <p className="text-[11px] text-[#94A3B8] mt-2.5">
               {jumlahPart} × {detikPerPart} detik = {jumlahPart * detikPerPart} detik total ·
               voiceover {voDetik} detik/part ≈ {Math.round(voDetik * 2.5)} kata ·
+              {faceless ? ' faceless — properti tanpa talent ·' : ` agent ${agentAktif.nama} ·`}
               gaya, sudut cerita, dan pilihan foto diputuskan AI.
             </p>
             {/* Kombinasi 1 Part memaksa hook + isi + ajakan masuk ke satu anggaran
@@ -837,7 +861,9 @@ export default function AdminViralFramePage() {
           )}
 
           {/* ─── LANGKAH 7: PROMPT GOOGLE FLOW ──────────────────────────── */}
-          {promptFlow.length > 0 && <PanelPrompt parts={promptFlow} />}
+          {promptFlow.length > 0 && (
+            <PanelPrompt parts={promptFlow} faceless={hasil?.params?.faceless ?? faceless} />
+          )}
 
           {/* ─── LANGKAH 8-9: CAPTION + HASHTAG + UNGGAH ─────────────────
               Caption dulu berupa kartu TERPISAH di atas panel unggah, dan itu

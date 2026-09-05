@@ -5,7 +5,9 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../../_shared/response.js';
-import { renderPromptFlow } from '../../../../../_lib/stasiunStoryboard.js';
+// ⚠️ KONTRAK K3 (BEKU): `renderPromptFlow` sekarang tinggal di `flowCompiler.js`
+// (rencana v2) — `stasiunStoryboard.js` sudah tidak lagi mengekspornya.
+import { renderPromptFlow } from '../../../../../_lib/flowCompiler.js';
 import { periksaRetensi } from '../../../../../_lib/retensi.js';
 
 // Sama persis dengan daftar di orders/index.js. Sengaja diulang di sini alih-alih
@@ -111,14 +113,26 @@ export async function onRequestPatch({ request, env, params }) {
       if (prop) {
         const params = hasilBaru.params ?? {};
         // `hasil_json` menyimpan `dna_agent` (snake), renderer membaca `dnaAgent`.
+        // Kontrak K3: `ir = { parts, konsep, dnaAgent|null, variasi }` — `konsep`
+        // ikut disertakan (bukan cuma `dna`) karena flowCompiler tidak membacanya,
+        // tapi kontraknya BEKU dan pemanggil lain (jalankan.js) selalu mengisinya.
         const ir = {
           parts: hasilBaru.parts,
-          variasi: hasilBaru.variasi ?? {},
+          konsep: hasilBaru.konsep ?? null,
+          // `mood` dipulihkan dari Creative DNA bila `variasi` tersimpan belum
+          // membawanya — pesanan yang dibuat SEBELUM mood masuk DNA (2026-09-05)
+          // akan kehilangan warna & musiknya setiap kali prompt dirender ulang,
+          // dan diamnya kegagalan itu persis yang membuatnya luput pertama kali.
+          variasi: {
+            ...(hasilBaru.variasi ?? {}),
+            mood: hasilBaru.variasi?.mood ?? hasilBaru.konsep?.dna?.mood ?? 'hangat',
+          },
           dnaAgent: hasilBaru.dna_agent ?? null,
         };
+        const faceless = Boolean(params.faceless);
         hasilBaru = {
           ...hasilBaru,
-          prompt_flow: renderPromptFlow({ ir, prop, params }),
+          prompt_flow: renderPromptFlow({ ir, prop, params, faceless }),
           retensi: periksaRetensi({ ir, params, dna: hasilBaru.dna ?? null }),
         };
       }

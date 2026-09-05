@@ -7,17 +7,29 @@
 //   3. Pesanan berhenti berjam-jam di `menunggu_render` (gerbang manusia di Google
 //      Flow) — bentuk alaminya memang state machine, bukan satu proses panjang.
 //
-//   baru → material → variasi → storyboard → menunggu_render
+//   baru → material → konsep → storyboard → menunggu_render
+//
+// ⚠️ SEJAK rencana v2 (kontrak K1-K4, 2026-09-05): stasiun `variasi` lama
+// (dadu sistem) DILEBUR ke stasiun `konsep` — AI mengusulkan 3 kandidat Creative
+// DNA (stasiunKonsep.js), sistem menyaring (`saringKandidat`, variasi.js).
+// Plafon `maksVariasi()` sekarang dicek DI stasiun konsep, bukan di stasiun
+// terpisah seperti dulu.
 //
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../../_shared/response.js';
 import { logServerError } from '../../../../../_lib/logError.js';
-import { maksVariasi, entriSumbu, SUMBU_DOMINAN, FLOW, voDetikBaku } from '../../../../../_lib/viralframe.js';
-import { pilihVariasi } from '../../../../../_lib/variasi.js';
+import { maksVariasi, FLOW, voDetikBaku } from '../../../../../_lib/viralframe.js';
+import { saringKandidat, uraiKunci } from '../../../../../_lib/variasi.js';
 import { jalankanMaterial } from '../../../../../_lib/stasiunMaterial.js';
 import { ambilFotoListing, hitungMaterial } from '../../../../../_lib/fotoListing.js';
-import { susunStoryboard, renderPromptFlow, CTA_PILIHAN } from '../../../../../_lib/stasiunStoryboard.js';
+import { susunKonsep } from '../../../../../_lib/stasiunKonsep.js';
+import { susunStoryboard, CTA_PILIHAN } from '../../../../../_lib/stasiunStoryboard.js';
+// ⚠️ KONTRAK K3 (BEKU): `renderPromptFlow({ ir, prop, params, faceless })`.
+// `flowCompiler.js` ditulis PARALEL oleh agent lain (A4) — kode di sini ditulis
+// terhadap kontrak itu. Kalau berkas ini belum ada saat gate dijalankan, itu
+// integrasi yang diverifikasi koordinator setelah semua agent selesai.
+import { renderPromptFlow } from '../../../../../_lib/flowCompiler.js';
 import { periksaRetensi } from '../../../../../_lib/retensi.js';
 
 export async function onRequestPost({ env, params }) {
@@ -27,7 +39,7 @@ export async function onRequestPost({ env, params }) {
   let order;
   try {
     order = await env.DB.prepare(
-      `SELECT id, property_id, character_id, status, variation_key, params_json
+      `SELECT id, property_id, character_id, status, variation_key, params_json, hasil_json
          FROM viralframe_orders WHERE id = ?`
     ).bind(id).first();
   } catch (err) {
@@ -64,9 +76,9 @@ export async function onRequestPost({ env, params }) {
           return jsonError(m.error ?? 'Stasiun Material gagal', 502);
         }
         const setelah = await hitungMaterial(env, order.property_id);
-        // Tetap di 'material' walau label sudah terisi: variasinya dipilih pada
+        // Tetap di 'material' walau label sudah terisi: konsep dipilih pada
         // panggilan BERIKUTNYA, bukan di sini. Menjejalkan dua stasiun ke satu
-        // panggilan membuat kegagalan variasi ikut membatalkan hasil visi yang
+        // panggilan membuat kegagalan konsep ikut membatalkan hasil visi yang
         // sudah dibayar — padahal hasil visi itu milik listing, bukan pesanan.
         await setStatus(env, id, 'material', null);
         return jsonOk({
@@ -75,11 +87,11 @@ export async function onRequestPost({ env, params }) {
           dinilai: m.dinilai,
           sisa: m.sisa,
           provider: m.provider,
-          pesan: `${m.dinilai} foto dinilai (${setelah.labelUnik} label unik). ${m.sisa > 0 ? `Sisa ${m.sisa} foto — jalankan lagi.` : 'Jalankan lagi untuk memilih variasi.'}`,
+          pesan: `${m.dinilai} foto dinilai (${setelah.labelUnik} label unik). ${m.sisa > 0 ? `Sisa ${m.sisa} foto — jalankan lagi.` : 'Jalankan lagi untuk menyusun konsep.'}`,
         });
       }
 
-      // ── STASIUN 3 — VARIASI ───────────────────────────────────────────────
+      // ── STASIUN 3 — KONSEP ─────────────────────────────────────────────────
       // Listing tanpa satu pun foto berlabel tidak bisa dilanjutkan. Dijaga di
       // sini dengan pesannya sendiri: tanpa ini `maksVariasi(0)` mengembalikan 0
       // dan user melihat "Rotasi listing ini sudah 0 dari 0 variasi" — benar
@@ -105,43 +117,7 @@ export async function onRequestPost({ env, params }) {
         return jsonError(pesan, 422);
       }
 
-      const pilihan = pilihVariasi({ riwayatKunci, labelFoto: labelSekarang.daftar });
-      if (!pilihan) {
-        await setStatus(env, id, 'gagal', 'Ruang variasi habis untuk listing ini.');
-        return jsonError('Ruang variasi habis untuk listing ini.', 422);
-      }
-
-      // ⚠️ UNIQUE(property_id, variation_key) yang jadi penegak sebenarnya.
-      // Selector sudah menghindari duplikat, tapi dua permintaan bersamaan bisa
-      // memilih kunci sama — DB yang menolaknya, bukan pengecekan aplikasi.
-      try {
-        await env.DB.prepare(
-          `UPDATE viralframe_orders
-              SET variation_key = ?, status = 'variasi', catatan = NULL, updated_at = datetime('now')
-            WHERE id = ?`
-        ).bind(pilihan.kunci, id).run();
-      } catch (err) {
-        if (/UNIQUE/i.test(err.message)) {
-          return jsonError('Variasi itu baru saja terpakai pesanan lain. Jalankan lagi.', 409);
-        }
-        throw err;
-      }
-
-      return jsonOk({
-        status: 'variasi',
-        selesai: false,
-        variation_key: pilihan.kunci,
-        variasi: ringkasVariasi(pilihan.vektor),
-        rotasi: { ke: riwayatKunci.length + 1, dari: plafon, label_unik: labelSekarang.labelUnik },
-        jarak_dari_terbaru: pilihan.jarakTerdekat,
-        longgar: pilihan.longgar,
-        pesan: `Variasi terpilih: ${ringkasVariasi(pilihan.vektor).map(x => x.label).join(' · ')}`,
-      });
-    }
-
-    // ── STASIUN 4 & 5 — KONSEP + STORYBOARD ─────────────────────────────────
-    if (order.status === 'variasi' || order.status === 'storyboard') {
-      const [prop, agent, foto] = await Promise.all([
+      const [prop, foto] = await Promise.all([
         // Kolom yang dibaca dnaProduk.js ikut diambil di sini. `furnished` dulu
         // tidak pernah dibaca sama sekali (mesin lama menghardcode "tidak
         // disebutkan"), jadi data yang ADA dibuang dan model mengisinya dengan
@@ -154,43 +130,145 @@ export async function onRequestPost({ env, params }) {
                   income_per_bulan, harga_sewa_kamar_bulan, deskripsi
              FROM properties WHERE id = ?`
         ).bind(order.property_id).first(),
+        // Query fotonya ADA DI SATU TEMPAT (`fotoListing.js`) dan dipakai panel
+        // Bahan & stasiun Storyboard juga — kalau ditulis dua kali, dua tempat
+        // itu bisa melenceng ke himpunan foto yang berbeda.
+        ambilFotoListing(env, order.property_id),
+      ]);
+      if (!prop) return jsonError('Properti tidak ditemukan', 404);
+      if (foto.length === 0) {
+        await setStatus(env, id, 'material', 'Foto berlabel hilang — jalankan stasiun Material lagi.');
+        return jsonError('Listing ini tidak punya foto berlabel lagi.', 422);
+      }
+
+      const konsepAi = await susunKonsep(env, { prop, foto, riwayatKunci });
+      if (!konsepAi.ok) {
+        await setStatus(env, id, 'material', konsepAi.error);
+        await catatKegagalan(env, id, order, 'Konsep', konsepAi.error);
+        return jsonError(konsepAi.error ?? 'Stasiun Konsep gagal', 502);
+      }
+
+      const pilihan = saringKandidat({ kandidat: konsepAi.kandidat, riwayatKunci });
+      if (!pilihan) {
+        const pesan = 'Tidak ada kandidat sudut yang bisa dipilih dari usulan AI.';
+        await setStatus(env, id, 'material', pesan);
+        await catatKegagalan(env, id, order, 'Konsep', pesan);
+        return jsonError(pesan, 502);
+      }
+
+      // Kontrak K1: `dna` = kandidat terpilih SESUDAH disaring; `kandidat` (3
+      // usulan asli) dipertahankan utuh untuk panel Konsep menampilkan
+      // "3 kandidat sudut + alasan pemenang" (BAGIAN 5 rencana v2).
+      const konsepFinal = {
+        audiens: konsepAi.audiens,
+        kandidat: konsepAi.kandidat,
+        dna: pilihan.dna,
+        cerita_global: pilihan.kandidat?.cerita_global ?? null,
+        peta_retensi: pilihan.kandidat?.peta_retensi ?? null,
+      };
+
+      // ⚠️ UNIQUE(property_id, variation_key) yang jadi penegak sebenarnya.
+      // Penyaring sudah menghindari duplikat, tapi dua permintaan bersamaan bisa
+      // memilih kunci sama — DB yang menolaknya, bukan pengecekan aplikasi.
+      try {
+        await env.DB.prepare(
+          `UPDATE viralframe_orders
+              SET variation_key = ?, status = 'konsep', hasil_json = ?, catatan = NULL, updated_at = datetime('now')
+            WHERE id = ?`
+        ).bind(pilihan.kunci, JSON.stringify({ konsep: konsepFinal }), id).run();
+      } catch (err) {
+        if (/UNIQUE/i.test(err.message)) {
+          return jsonError('Variasi itu baru saja terpakai pesanan lain. Jalankan lagi.', 409);
+        }
+        throw err;
+      }
+
+      return jsonOk({
+        status: 'konsep',
+        selesai: false,
+        variation_key: pilihan.kunci,
+        konsep: konsepFinal,
+        rotasi: { ke: riwayatKunci.length + 1, dari: plafon, label_unik: labelSekarang.labelUnik },
+        jarak_dari_terbaru: pilihan.jarakTerdekat,
+        alasan_pemilihan: pilihan.alasan,
+        provider: konsepAi.provider,
+        pesan: `Konsep terpilih: ${pilihan.dna.sudut}`,
+      });
+    }
+
+    // ── STASIUN 4 — STORYBOARD + PROMPT FLOW ────────────────────────────────
+    if (order.status === 'konsep' || order.status === 'storyboard') {
+      let hasilLama = null;
+      try { hasilLama = order.hasil_json ? JSON.parse(order.hasil_json) : null; } catch { hasilLama = null; }
+      const konsep = hasilLama?.konsep;
+      if (!konsep?.dna) {
+        const pesan = 'Pesanan ini belum punya konsep tersimpan — jalankan stasiun Konsep lagi.';
+        await setStatus(env, id, 'material', pesan);
+        return jsonError(pesan, 422);
+      }
+
+      const [prop, agent, foto] = await Promise.all([
+        env.DB.prepare(
+          `SELECT id, kode_listing, title, jenis_properti, tujuan, harga,
+                  kelurahan, kecamatan, kabupaten,
+                  luas_tanah, luas_bangunan, jumlah_kamar_tidur, jumlah_kamar_mandi,
+                  lantai, lebar_depan, lebar_jalan_m, furnished, legalitas,
+                  income_per_bulan, harga_sewa_kamar_bulan, deskripsi
+             FROM properties WHERE id = ?`
+        ).bind(order.property_id).first(),
         env.DB.prepare(
           'SELECT id, nama, gender, usia, etnik, style, ciri_fisik, foto_url FROM viralframe_characters WHERE id = ?'
         ).bind(order.character_id).first(),
-        // Query fotonya ADA DI SATU TEMPAT (`fotoListing.js`) dan dipakai panel
-        // Bahan juga — kalau ditulis dua kali, panel menampilkan himpunan foto
-        // yang berbeda dari yang benar-benar dipakai di sini.
         ambilFotoListing(env, order.property_id),
       ]);
       if (!prop) return jsonError('Properti tidak ditemukan', 404);
       if (!agent) return jsonError('Agent tidak ditemukan', 404);
-
       if (foto.length === 0) {
         await setStatus(env, id, 'material', 'Foto berlabel hilang — jalankan stasiun Material lagi.');
         return jsonError('Listing ini tidak punya foto berlabel lagi.', 422);
       }
 
       const p = amanParams(order.params_json);
-      const ir = await susunStoryboard(env, {
-        prop, agent, variationKey: order.variation_key, params: p, foto,
-        dnaOverride: p.dna,
+      // AI TIDAK LAGI memilih sudut di sini — ia mengeksekusi `konsep.dna` yang
+      // sudah terpilih & disaring di stasiun Konsep (kontrak K1 sebagai masukan).
+      const sb = await susunStoryboard(env, {
+        prop, agent, konsep, params: p, foto, faceless: p.faceless,
       });
-      if (!ir.ok) {
-        await setStatus(env, id, 'storyboard', ir.error);
-        await catatKegagalan(env, id, order, 'Storyboard', ir.error);
-        return jsonError(ir.error, 502);
+      if (!sb.ok) {
+        await setStatus(env, id, 'konsep', sb.error);
+        await catatKegagalan(env, id, order, 'Storyboard', sb.error);
+        return jsonError(sb.error, 502);
       }
 
-      const promptFlow = renderPromptFlow({ ir, prop, params: p });
+      // `ir` dirakit terhadap kontrak K3 (`{ parts, konsep, dnaAgent, variasi }`).
+      // `sb.variasi` diasumsikan berbentuk vektor K4 (`uraiKunci` hasil parse
+      // `variation_key`) — kalau susunStoryboard tidak mengembalikannya, diurai
+      // ulang di sini dari kolom `variation_key` supaya tidak pernah kosong.
+      //
+      // ⚠️ `mood` DISUNTIKKAN TERPISAH dan itu memang perlu: ia sengaja BUKAN
+      // bagian `variation_key` (sumbu kosmetik — dua video yang cuma beda warna
+      // terlihat kembar di feed), jadi `uraiKunci()` tidak akan pernah
+      // mengembalikannya. Tanpa baris ini `flowCompiler` selalu jatuh ke fallback
+      // dan SETIAP video keluar dengan warna + musik yang identik.
+      const ir = {
+        parts: sb.parts,
+        konsep: sb.konsep ?? konsep,
+        dnaAgent: sb.dnaAgent ?? null,
+        variasi: {
+          ...(sb.variasi ?? uraiKunci(order.variation_key)),
+          mood: konsep?.dna?.mood ?? sb.variasi?.mood ?? 'hangat',
+        },
+      };
+      const promptFlow = renderPromptFlow({ ir, prop, params: p, faceless: p.faceless });
       // Retention check dijalankan DI SINI juga, bukan hanya di browser: hasilnya
       // ikut tersimpan sehingga pesanan lama tetap membawa catatannya saat dibuka
       // ulang, dan cacatnya bisa dilihat tanpa menghitung ulang.
-      const retensi = periksaRetensi({ ir, params: p, dna: ir.dna });
+      const retensi = periksaRetensi({ ir, params: p, dna: konsep.dna });
       const hasil = {
-        konsep: ir.konsep,
+        konsep,
         parts: ir.parts,
         prompt_flow: promptFlow,
-        dna: ir.dna,
+        dna: konsep.dna,
         dna_agent: ir.dnaAgent,
         // Vektor variasi ikut disimpan, bukan hanya `variation_key` di kolomnya:
         // stasiun Caption & Adu Hook membacanya untuk tetap sejalan dengan gaya
@@ -198,7 +276,7 @@ export async function onRequestPost({ env, params }) {
         // berarti tiga tempat yang harus sepakat soal formatnya.
         variasi: ir.variasi,
         retensi,
-        provider: ir.provider,
+        provider: sb.provider,
         params: p,
       };
 
@@ -211,10 +289,10 @@ export async function onRequestPost({ env, params }) {
       return jsonOk({
         status: 'menunggu_render',
         selesai: true,
-        konsep: ir.konsep,
+        konsep,
         retensi,
         jumlah_part: promptFlow.length,
-        provider: ir.provider,
+        provider: sb.provider,
         pesan: `Storyboard siap — ${promptFlow.length} prompt Google Flow. ${retensi.ringkas}`,
       });
     }
@@ -273,7 +351,7 @@ async function setStatus(env, id, status, catatan) {
 }
 
 /**
- * Lima parameter manusia, dengan default dari LAPIS KONSTANTA.
+ * Parameter manusia, dengan default dari LAPIS KONSTANTA.
  * Nilai di luar batas dikembalikan ke default, bukan ditolak: parameter ini
  * penyimpangan yang diizinkan, dan menggagalkan seluruh pesanan karena satu
  * angka aneh lebih merugikan daripada memakai yang benar.
@@ -293,15 +371,18 @@ function amanParams(json) {
     voDetikPerPart: int(raw.vo_detik_per_part, 2, detikPerPart, voDetikBaku(detikPerPart)),
     cta: CTA_PILIHAN.includes(raw.cta) ? raw.cta : 'survei',
     platform: typeof raw.platform === 'string' ? raw.platform.slice(0, 30) : 'tiktok',
+    // Pilihan PER PESANAN (rencana v2, keputusan user #1) — bukan default.
+    // false kalau tidak dikirim: mode agent (dengan talent) tetap perilaku lama.
+    faceless: Boolean(raw.faceless),
     // DNA Produk hasil KOREKSI manusia di Panel Bahan. Dibiarkan lewat apa adanya
     // (setelah pemeriksaan bentuk) karena isinya memang teks bebas hasil suntingan;
     // yang penting bentuknya benar supaya dnaKeTeks() tidak meledak di tengah
-    // penyusunan prompt. Tanpa ini, panel koreksi cuma hiasan.
+        // penyusunan prompt. Tanpa ini, panel koreksi cuma hiasan.
     dna: bentukDna(raw.dna),
   };
 }
 
-/** Terima DNA hasil suntingan hanya bila bentuknya benar; selain itu abaikan. */
+/** Terima DNA Produk hasil suntingan hanya bila bentuknya benar; selain itu abaikan. */
 function bentukDna(v) {
   if (!v || typeof v !== 'object') return null;
   const arr = (x, maks) => (Array.isArray(x) ? x.slice(0, maks) : []);
@@ -315,16 +396,6 @@ function bentukDna(v) {
     ruangTerbukti: arr(v.ruangTerbukti, 24).map(x => String(x).slice(0, 60)),
     larangan: arr(v.larangan, 24).map(x => String(x).slice(0, 80)),
   };
-}
-
-/** Vektor → daftar {sumbu, id, label} siap tampil. */
-function ringkasVariasi(vektor) {
-  return SUMBU_DOMINAN.map(sumbu => {
-    const nilai = vektor[sumbu];
-    // `pembukaan` isinya label foto bebas, bukan enum — tidak ada katalognya.
-    const entri = sumbu === 'pembukaan' ? null : entriSumbu(sumbu, nilai);
-    return { sumbu, id: nilai, label: entri?.label ?? String(nilai ?? '-') };
-  });
 }
 
 export async function onRequestOptions() { return handleOptions(); }

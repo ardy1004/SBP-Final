@@ -63,10 +63,15 @@ const FIXTURE = {
   'from viralframe_agent_videos': [],
 };
 
-function buatDB() {
+// `override` menimpa/menambah kunci FIXTURE HANYA untuk satu skenario — dipakai
+// skenario `jalankan.js` (rencana v2) yang butuh baris `viralframe_orders`
+// dengan `status` berbeda dari fixture bersama di atas, tanpa mengubah fixture
+// bersama yang dipakai skenario lain.
+function buatDB(override = {}) {
+  const fixture = { ...FIXTURE, ...override };
   const cocok = (sql) => {
     const s = sql.replace(/\s+/g, ' ').trim().toLowerCase();
-    for (const [pola, nilai] of Object.entries(FIXTURE)) if (s.includes(pola)) return nilai;
+    for (const [pola, nilai] of Object.entries(fixture)) if (s.includes(pola)) return nilai;
     return [];
   };
   const stmt = (sql) => ({
@@ -80,7 +85,7 @@ function buatDB() {
     batch: async (s) => s.map((_, i) => ({ meta: { changes: 1, last_row_id: 500 + i }, results: [] })),
   };
 }
-const env = () => ({ DB: buatDB(), MEDIA: { get: async () => null } });
+const env = (override) => ({ DB: buatDB(override), MEDIA: { get: async () => null } });
 const req = (url, body, method = 'POST') => new Request(url, {
   method, headers: { 'content-type': 'application/json' },
   body: body === undefined ? undefined : JSON.stringify(body),
@@ -115,6 +120,47 @@ const SKENARIO = [
     ctx: () => ({ request: req('https://x/bahan?property_id=1025&character_id=20', undefined, 'GET'), env: env() }) },
   { file: 'status.js', fn: 'onRequestGet', nama: 'GET /status',
     ctx: () => ({ request: req('https://x/status', undefined, 'GET'), env: env() }) },
+  // ─── jalankan.js (rencana v2 — stasiun Konsep dilebur, kontrak K1-K4) ───────
+  // `env()` di harness ini TIDAK menaruh API key provider AI apa pun (tabel
+  // `settings` fixture kosong, dan objek `env()` tidak punya `GROQ_API_KEY` dkk),
+  // jadi endpoint yang memanggil AI (stasiun Konsep/Storyboard) SELALU gagal
+  // dengan 502 "semua provider gagal" — itu BUKAN bug, itu jalur gagal-terkontrol
+  // yang benar. `harap: 502` menandai skenario yang memang mengharapkan itu,
+  // supaya gate tetap membuktikan nol TDZ/exception di sepanjang jalur sampai
+  // titik itu, tanpa mensyaratkan kunci API sungguhan.
+  { file: 'orders/[id]/jalankan.js', fn: 'onRequestPost', nama: 'POST /orders/:id/jalankan (status material)',
+    // Mock `.batch()` di atas selalu membalas `results: []` apa pun SQL-nya
+    // (lihat komentar `buatDB`), jadi `hitungMaterial()` selalu melihat
+    // `labelUnik: 0` di harness ini — order lewat gerbang "listing ini tidak
+    // punya foto yang bisa dipakai" (422), BUKAN benar-benar menjalankan visi.
+    // Itu tetap smoke test yang jujur: membuktikan jalur status='material'
+    // sampai gerbang itu tidak meledak, cuma tidak menembus stasiun Material.
+    ctx: () => ({ env: env({
+      'character_id, status, variation_key, params_json, hasil_json': [
+        { id: 4, property_id: 1025, character_id: 20, status: 'material', variation_key: null, params_json: null, hasil_json: null },
+      ],
+    }), params: { id: '4' } }) },
+  { file: 'orders/[id]/jalankan.js', fn: 'onRequestPost', nama: 'POST /orders/:id/jalankan (status konsep → storyboard)',
+    ctx: () => ({ env: env({
+      'character_id, status, variation_key, params_json, hasil_json': [{
+        id: 4, property_id: 1025, character_id: 20, status: 'konsep',
+        variation_key: 'sudut:skala_tak_terduga|hookmek:fakta_kaget|naratif:tur_terpandu|buka:11',
+        params_json: JSON.stringify({ jumlah_part: 3, detik_per_part: 10, vo_detik_per_part: 8, cta: 'survei', platform: 'tiktok', faceless: false }),
+        hasil_json: JSON.stringify({ konsep: {
+          audiens: { utama: 'keluarga muda', keinginan: '...', keberatan: '...', pemicu: '...' },
+          kandidat: [],
+          dna: {
+            sudut: 'skala tak terduga di kawasan kampus padat', hook_mekanisme: 'fakta mengejutkan',
+            pemicu_psikologis: 'rasa penasaran', struktur_naratif: 'tur terpandu', foto_pembuka: 11,
+            urutan_informasi: ['lokasi', 'skala', 'interior', 'cta'], profil_pacing: 'progressive_discovery',
+            bahasa_kamera: 'controlled_observational', payoff: 'skala sesungguhnya', gaya_cta: 'survei langsung',
+          },
+          cerita_global: { janji: '...', part1_open_loop: '...', part2_payoff: '...', part2_open_loop: '...', part3_payoff: '...' },
+          peta_retensi: { '0_3': '...', '3_10': '...', '10_20': '...', '20_30': '...' },
+        } }),
+      }],
+    }), params: { id: '4' } }),
+    harap: 502 },
 ];
 
 async function bagian1() {
@@ -132,6 +178,14 @@ async function bagian1() {
       status = res?.status ?? '?';
       if (typeof status !== 'number') { catat(`${s.nama} — handler tidak mengembalikan Response`); continue; }
       if (status >= 500) {
+        // `harap` menandai skenario yang MEMANG mengharapkan 5xx tertentu (mis.
+        // stasiun AI gagal terkontrol karena harness ini tanpa API key sungguhan)
+        // — lihat komentar di skenario `jalankan.js`. Status lain di rentang 5xx
+        // tetap GAGAL: itu tandanya crash/TDZ, bukan kegagalan yang diharapkan.
+        if (s.harap && status === s.harap) {
+          console.log(`  ✓ ${String(status).padEnd(4)} ${s.nama} (diharapkan — tanpa API key AI di harness ini)`);
+          continue;
+        }
         try { pesan = (await res.clone().json())?.error ?? ''; } catch { /* bukan JSON */ }
         catat(`${s.nama} — HTTP ${status} ${pesan}`);
         continue;

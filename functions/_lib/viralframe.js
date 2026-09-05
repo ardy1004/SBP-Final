@@ -129,7 +129,13 @@ export const FLOW = {
   partPerVideo: 3,
   /** Total ingredient per generate (batas keras Google Flow). */
   ingredientMaks: 3,
-  /** Foto PROPERTI per Part = ingredientMaks − 1 slot untuk foto agent. */
+  /**
+   * Foto PROPERTI per Part dalam mode NON-FACELESS = ingredientMaks − 1 slot
+   * untuk foto agent. Mode faceless pakai `slotFotoProperti(true)` (LAPIS 2,
+   * = 3) — konstanta ini sendiri TIDAK berubah karena `bahan.js` (peringkat
+   * foto saat pengumpulan bahan, sebelum faceless dipilih per pesanan) masih
+   * membacanya langsung.
+   */
   refImageUtama: 2,
   /** Batas atas foto yang boleh dipertimbangkan storyboard per Part. */
   refImagePerPart: 4,
@@ -154,6 +160,121 @@ export function anggaranKata(voDetik) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// LAPIS 2 — CREATIVE DNA. Diusulkan AI (Stasiun Konsep), disaring SISTEM.
+// ════════════════════════════════════════════════════════════════════════════
+// Sebaliknya dari LAPIS 3 di bawah: di sini AI yang memilih dulu (3 kandidat),
+// sistem yang menyaring (menolak kandidat kembar/terlalu mirip riwayat — lihat
+// `saringKandidat` di `variasi.js`). Katalog di bawah DIBACA AI lewat
+// `kapan_cocok` sebagai menu beserta panduan kapan tiap opsi relevan — bukan
+// aturan yang dipaksakan kode. `variation_key` (kontrak K4) sekarang sidik jari
+// dari pilihan AI ini, BUKAN lagi dadu sistem dari LAPIS 3.
+
+/** Sudut cerita — "kenapa listing ini menarik", bukan struktur videonya. */
+export const SUDUT = [
+  { id: 'skala_tak_terduga', label: 'Skala tak terduga',
+    kapan_cocok: 'Ukuran properti (luas tanah/bangunan, lebar depan, jumlah lantai) jauh dari ekspektasi kawasan sekitarnya — mis. tanah luas di kawasan padat, atau bangunan besar di gang sempit.' },
+  { id: 'lokasi_strategis', label: 'Lokasi strategis',
+    kapan_cocok: 'Jarak/akses ke titik penting (kampus, jalan utama, pusat kota) adalah kekuatan utama listing, dan datanya faktual — bukan jarak yang dikarang.' },
+  { id: 'pengalaman_ruang', label: 'Pengalaman ruang',
+    kapan_cocok: 'Kekuatan properti ada pada rasa berada di dalamnya — plafon tinggi, void, cahaya alami, alur ruang lapang — bukan pada angka.' },
+  { id: 'potensi_investasi', label: 'Potensi investasi',
+    kapan_cocok: 'Listing cocok dibingkai sebagai peluang nilai naik: lokasi berkembang, harga per meter kompetitif, atau kelangkaan tipe properti di area itu.' },
+  { id: 'fitur_tersembunyi', label: 'Fitur tersembunyi',
+    kapan_cocok: 'Ada elemen yang tidak terlihat dari ringkasan listing biasa (kolam renang, rooftop, musholla, ruang usaha) yang baru terasa dari foto lengkap.' },
+  { id: 'alur_fungsional', label: 'Alur fungsional',
+    kapan_cocok: 'Kekuatan listing ada pada tata letak yang masuk akal untuk aktivitas sehari-hari — dapur dekat ruang makan, kamar utama di lantai privat, carport dekat akses masuk.' },
+  { id: 'kontras_harapan', label: 'Kontras harapan',
+    kapan_cocok: 'Ada jarak antara ekspektasi awal calon pembeli (dari harga/lokasi) dan kenyataan properti, ke arah positif (lebih bagus dari dugaan) atau yang perlu diluruskan.' },
+  { id: 'kesiapan_huni', label: 'Kesiapan huni',
+    kapan_cocok: 'Properti sudah siap pakai/furnished/renovasi baru — cocok untuk pembeli yang ingin langsung tinggal tanpa kerja tambahan.' },
+  { id: 'legalitas_aman', label: 'Legalitas aman',
+    kapan_cocok: 'Status legal (SHM/SHGB, IMB/PBG) lengkap dan terverifikasi jadi nilai jual utama — cocok untuk pembeli yang pernah kena kasus legalitas bermasalah.' },
+  { id: 'keunikan_bentuk', label: 'Keunikan bentuk',
+    kapan_cocok: 'Arsitektur atau bentuk lahan/bangunan tidak umum (hook, split-level, lahan menyudut, void besar) sehingga jadi pembeda visual instan di feed.' },
+];
+
+/** Mekanisme pembuka — bagaimana 2 detik pertama menahan penonton. */
+export const HOOK_MEKANISME = [
+  { id: 'celah_penasaran', label: 'Celah penasaran',
+    kapan_cocok: 'Ada informasi yang bisa sengaja ditahan di awal dan baru dijawab belakangan — cocok kalau listing punya satu fakta kuat yang baru masuk akal setelah konteks terbentuk.' },
+  { id: 'fakta_mengejutkan', label: 'Fakta mengejutkan',
+    kapan_cocok: 'Ada satu angka atau fakta (luas, harga per meter, jarak) yang objektif di luar dugaan untuk kawasannya, dan bisa langsung disebut di awal tanpa konteks tambahan.' },
+  { id: 'kontras_visual', label: 'Kontras visual',
+    kapan_cocok: 'Ada dua kondisi yang bisa dibandingkan berdampingan secara visual — luar vs dalam, tampilan sederhana vs interior lengkap.' },
+  { id: 'bantah_anggapan', label: 'Bantah anggapan',
+    kapan_cocok: 'Listing punya sesuatu yang berlawanan dengan asumsi umum orang tentang properti sejenis di area itu.' },
+  { id: 'pertanyaan_terbuka', label: 'Pertanyaan terbuka',
+    kapan_cocok: 'Properti punya satu ciri unik yang wajar memancing rasa ingin tahu tanpa klaim berlebihan — jawabannya adalah foto/data itu sendiri.' },
+  { id: 'pemecah_pola', label: 'Pemecah pola',
+    kapan_cocok: 'Materi foto/visual listing berbeda dari konten properti kebanyakan di feed — cocok dibuka dengan visual yang tidak terduga untuk jenis konten ini.' },
+];
+
+/** Struktur naratif — bentuk arc cerita di seluruh video, bukan per-beat. */
+export const STRUKTUR_NARATIF = [
+  { id: 'penemuan_bertahap', label: 'Penemuan bertahap',
+    kapan_cocok: 'Cerita dibuka luas lalu menyempit — kawasan → properti → detail ruang. Cocok kalau lokasi & skala sama kuatnya dengan interior.' },
+  { id: 'masalah_solusi', label: 'Masalah lalu solusi',
+    kapan_cocok: 'Buka dengan kebutuhan/keberatan calon pembeli, lalu tunjukkan properti sebagai jawabannya. Cocok kalau audiens sasaran sudah jelas.' },
+  { id: 'tur_terpandu', label: 'Tur terpandu',
+    kapan_cocok: 'Susuri properti mengikuti satu alur jalan kaki nyata (gerbang → ruang tamu → … → area terakhir). Cocok kalau alur ruangnya sendiri sudah menarik.' },
+  { id: 'sebelum_sesudah', label: 'Sebelum–sesudah',
+    kapan_cocok: 'Bangun dari kondisi/persepsi awal ke pengungkapan yang mengubah persepsi itu di Part terakhir. Cocok untuk sudut kontras_harapan atau fitur_tersembunyi.' },
+  { id: 'checklist_kebutuhan', label: 'Checklist kebutuhan',
+    kapan_cocok: 'Susun sebagai daftar kriteria yang biasa dicari pembeli tipe ini, dicentang satu per satu. Cocok kalau listing kuat di banyak aspek sekaligus, bukan satu keunggulan tunggal.' },
+];
+
+/**
+ * Slug aman untuk bagian `variation_key` (dan index/UNIQUE SQLite).
+ *
+ * Huruf kecil, diakritik dilepas, non-alfanumerik → `_`, dipotong 40 char.
+ * Tidak pernah mengembalikan string kosong — input kosong/simbol-saja jatuh
+ * ke `'na'`.
+ */
+export function slug(input) {
+  const mentah = input == null ? '' : String(input);
+  const bersih = mentah
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return (bersih || 'na').slice(0, 40);
+}
+
+/**
+ * Kunci variasi (kontrak K4) — sidik jari Creative DNA yang diusulkan AI,
+ * disaring SISTEM.
+ *
+ * Sengaja teks yang BISA DIBACA MANUSIA, bukan hash: kolomnya terlihat di layar
+ * antrean dan di log, dan "kenapa video ini begini" harus bisa dijawab tanpa
+ * membuka tabel lain.
+ *
+ * Bentuk BARU — breaking change dari `mekanisme:x|hook:y|ritme:z|mood:w|pembukaan:v`
+ * (dadu sistem lama, LAPIS 3 di bawah). `dna` adalah bentuk K1
+ * (`hasil_json.konsep.dna`); kolom & UNIQUE SQLite TIDAK berubah, tidak ada migrasi.
+ */
+export function kunciVariasi(dna) {
+  const d = dna ?? {};
+  return [
+    `sudut:${slug(d.sudut)}`,
+    `hookmek:${slug(d.hook_mekanisme)}`,
+    `naratif:${slug(d.struktur_naratif)}`,
+    `buka:${d.foto_pembuka ?? 'na'}`,
+  ].join('|');
+}
+
+/**
+ * Berapa slot ingredient PROPERTI per Part, tergantung mode faceless.
+ *
+ * Non-faceless: 1 slot dipakai foto agent, sisanya (`ingredientMaks - 1` = 2)
+ * untuk properti — sama dengan `FLOW.refImageUtama`. Faceless: nol foto agent,
+ * ketiga slot untuk properti.
+ */
+export function slotFotoProperti(faceless) {
+  return faceless ? FLOW.ingredientMaks : FLOW.refImageUtama;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // LAPIS 3 — SUMBU VARIASI. Dipilih SISTEM, bukan AI dan bukan manusia.
 // ════════════════════════════════════════════════════════════════════════════
 // Kenapa sistem: LLM adalah pencari modus. Diminta "pilih gaya terbaik" 100 kali
@@ -168,8 +289,19 @@ export function anggaranKata(voDetik) {
 // dua video yang cuma beda `tone` terlihat kembar di feed, dan menghitungnya
 // sebagai "variasi baru" akan membuat plafon 100 tercapai tanpa satu pun video
 // yang benar-benar berbeda.
+//
+// ⚠️ SEJAK kontrak K4 (2026-09-05): `variation_key` TIDAK LAGI dibangun dari
+// sumbu di bawah ini — lihat `kunciVariasi()` di LAPIS 2 (Creative DNA pilihan
+// AI, disaring sistem). `MEKANISME`/`HOOK`/`RITME`/`MOOD` DIPERTAHANKAN sebagai
+// referensi opsional untuk AI (mis. inspirasi mekanisme cerita di prompt),
+// bukan lagi perintah wajib yang dipaksakan lewat rotasi sistem.
 
-/** Mesin cerita seluruh video — BUKAN sekadar pembukaannya. */
+/**
+ * Mesin cerita seluruh video — BUKAN sekadar pembukaannya.
+ *
+ * ⚠️ SEJAK K4: referensi opsional untuk AI, bukan lagi dadu sistem yang
+ * membentuk `variation_key` (lihat LAPIS 2 di atas).
+ */
 export const MEKANISME = [
   { id: 'curiosity_gap',   label: 'Rasa penasaran',      arahan: 'buka celah informasi di awal dan baru tutup di detik terakhir' },
   { id: 'before_after',    label: 'Sebelum–sesudah',     arahan: 'kontraskan keadaan awal dengan keadaan akhir secara visual' },
@@ -207,11 +339,10 @@ export const HOOK = [
 /**
  * Ritme potongan DI DALAM satu Part 10 detik.
  *
- * ⚠️ Ini sumbu dominan TERPENTING sekarang. Karena kuota Flow mengunci kerangka
- * ke 3 Part × 10 detik, struktur videonya tidak bisa lagi divariasikan — yang
- * tersisa justru ritme di dalamnya. Sepuluh detik itu panjang untuk video
- * vertikal: bisa satu talking-head penuh, bisa montase lima potongan. Dua video
- * dengan susunan Part identik tapi ritme berbeda terasa seperti dua video lain.
+ * ⚠️ SEJAK K4: bukan lagi sumbu dominan / target keras. `cutPerPart` sekarang
+ * cuma inspirasi tempo untuk AI (Stasiun Storyboard) — ritme nyata sebuah beat
+ * ditentukan cerita (`Information Change > Cut Count`, BAGIAN 1 rencana v2),
+ * bukan angka di tabel ini. Data & isi TETAP dipertahankan sebagai referensi.
  */
 export const RITME = [
   { id: 'tunggal',      label: 'Satu shot penuh', cutPerPart: 1, arahan: 'satu shot utuh 10 detik, kamera stabil, tanpa potongan' },
@@ -228,6 +359,10 @@ export const RITME = [
  * deterministik, dan membelah `arahan` dengan operasi string untuk memisahkan
  * bagian warna dari bagian musik adalah bentuk logika yang rapuh persis di
  * tempat yang paling tidak boleh rapuh.
+ *
+ * ⚠️ SEJAK K4: `mood` bukan lagi sumbu dominan penentu `variation_key` — tapi
+ * `warna`/`musik` TETAP dipakai langsung oleh renderer prompt (mis. blok
+ * VISUAL QUALITY/MUSIC di flowCompiler.js), jadi jangan dianggap mati.
  */
 export const MOOD = [
   { id: 'hangat',    label: 'Hangat',    arahan: 'warna hangat keemasan, musik akustik lembut',
@@ -242,7 +377,12 @@ export const MOOD = [
     warna: 'high-saturation punchy grade, crisp highlights',       musik: 'fast modern beat, driving rhythm' },
 ];
 
-/** Sumbu yang membentuk `variation_key`. Urutannya BAGIAN DARI kunci — jangan diacak. */
+/**
+ * Sumbu dominan LEGACY (dadu sistem lama) — dipertahankan untuk `entriSumbu()`
+ * dan `jarakSumbu()`/`hitungPemakaian()` di `variasi.js` sampai dimigrasikan.
+ * TIDAK LAGI membentuk `variation_key` sejak kontrak K4 — itu sekarang
+ * `kunciVariasi()` di LAPIS 2, dari Creative DNA pilihan AI.
+ */
 export const SUMBU_DOMINAN = ['mekanisme', 'hook', 'ritme', 'mood', 'pembukaan'];
 
 const KATALOG = { mekanisme: MEKANISME, hook: HOOK, ritme: RITME, mood: MOOD };
@@ -250,17 +390,6 @@ const KATALOG = { mekanisme: MEKANISME, hook: HOOK, ritme: RITME, mood: MOOD };
 /** Cari entri kosakata; mengembalikan null bila id tidak dikenal (data lama). */
 export function entriSumbu(sumbu, id) {
   return (KATALOG[sumbu] ?? []).find(x => x.id === id) ?? null;
-}
-
-/**
- * Kunci variasi — sidik jari kombinasi sumbu dominan.
- *
- * Sengaja teks yang BISA DIBACA MANUSIA, bukan hash: kolomnya terlihat di layar
- * antrean dan di log, dan "kenapa video ini begini" harus bisa dijawab tanpa
- * membuka tabel lain. Panjangnya masih jauh di bawah batas index SQLite.
- */
-export function kunciVariasi(v) {
-  return SUMBU_DOMINAN.map(s => `${s}:${v[s] ?? '-'}`).join('|');
 }
 
 /**

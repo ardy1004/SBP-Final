@@ -102,11 +102,17 @@ export function periksaRetensi({ ir, params, dna = null }) {
 
   let totalCut = 0;
 
+  // `informasi_baru` sudah terlihat di beat mana (part, indeks) — dasar cek
+  // `informasi_kembar` di bawah. Peta GLOBAL (lintas Part) sengaja, bukan per-
+  // Part: dua beat yang membawa informasi sama di Part berbeda tetap sama-sama
+  // percuma bagi penonton, sama percumanya dengan di Part yang sama.
+  const infoTerlihat = new Map();
+
   parts.forEach((p, i) => {
     const nomor = i + 1;
     const dialog = String(p.dialog ?? '').trim();
-    const cuts = Array.isArray(p.cuts) ? p.cuts : [];
-    totalCut += cuts.length;
+    const beats = Array.isArray(p.beats) ? p.beats : [];
+    totalCut += beats.length;
 
     // ── Anggaran kata ────────────────────────────────────────────────────────
     // Rentang, BUKAN plafon. Dialog yang terlalu pendek membuat model video
@@ -157,20 +163,52 @@ export function periksaRetensi({ ir, params, dna = null }) {
         'tinggi');
     }
 
-    // ── Cut & ritme ──────────────────────────────────────────────────────────
-    if (cuts.length === 0) {
-      catat(nomor, 'tanpa_cut', `Part ${nomor} tidak punya cut.`, 'tinggi');
+    // ── Beat & foto ──────────────────────────────────────────────────────────
+    if (beats.length === 0) {
+      catat(nomor, 'tanpa_cut', `Part ${nomor} tidak punya beat.`, 'tinggi');
     } else {
-      const fotoUnik = new Set(cuts.map(c => c.foto_id)).size;
+      const fotoUnik = new Set(beats.map(b => b.foto_id)).size;
       if (fotoUnik > FLOW.refImagePerPart) {
         catat(nomor, 'foto_lebih',
           `Part ${nomor} memakai ${fotoUnik} foto, batas ${FLOW.refImagePerPart} per generate.`,
           'tinggi');
       }
-      if (cutTarget != null && Math.abs(cuts.length - cutTarget) > 1) {
-        catat(nomor, 'ritme_meleset',
-          `Part ${nomor}: ${cuts.length} cut, ritme "${entriSumbu('ritme', ir.variasi.ritme)?.label}" menargetkan ${cutTarget}. Variasi yang tidak sampai ke layar membuat rotasi cuma beda di teks.`);
+    }
+
+    // ── Informasi baru wajib UNIK di seluruh video ───────────────────────────
+    //
+    // Penegak langsung prinsip BAGIAN 1 rencana v2: "Information Change > Cut
+    // Count". Dua beat yang membawa `informasi_baru` yang sama (dinormalisasi
+    // huruf kecil + trim) berarti salah satu di antaranya cuma potongan kosong
+    // — menambah cut tanpa alasan penonton untuk terus menonton.
+    beats.forEach((b, j) => {
+      const info = String(b.informasi_baru ?? '').trim().toLowerCase();
+      if (info) {
+        const dup = infoTerlihat.get(info);
+        if (dup) {
+          catat(nomor, 'informasi_kembar',
+            `Part ${nomor} beat ${j + 1} membawa informasi yang SAMA dengan Part ${dup.part} beat ${dup.beat}: "${b.informasi_baru}". Tiap beat wajib membawa informasi baru — beat yang mengulang informasi cuma menambah cut tanpa alasan.`,
+            'tinggi');
+        } else {
+          infoTerlihat.set(info, { part: nomor, beat: j + 1 });
+        }
       }
+
+      // ── Beat wajib mendorong rasa penasaran ke beat berikutnya ────────────
+      if (!String(b.viewer_question ?? '').trim() || !String(b.next_question ?? '').trim()) {
+        catat(nomor, 'beat_tanpa_pertanyaan',
+          `Part ${nomor} beat ${j + 1} tidak punya viewer_question/next_question. Tanpa itu beat tidak jelas menjawab pertanyaan penonton yang mana, atau memancing pertanyaan apa berikutnya.`);
+      }
+    });
+
+    // ── Continuity ke Part berikutnya ────────────────────────────────────────
+    //
+    // `continuity_out` Part terakhir BOLEH kosong — tidak ada Part sesudahnya
+    // untuk disambung. Part 1..N-1 wajib mengisinya, kalau tidak posisi & arah
+    // kamera terasa terpotong saat pindah ke generate berikutnya.
+    if (i < parts.length - 1 && !String(p.continuity_out ?? '').trim()) {
+      catat(nomor, 'continuity_putus',
+        `Part ${nomor} tidak punya continuity_out padahal Part ${nomor + 1} masih menyambung. Tanpa itu posisi & arah kamera terasa terpotong antar generate.`);
     }
   });
 
@@ -212,21 +250,16 @@ export function periksaRetensi({ ir, params, dna = null }) {
   //
   // 🔥 HANYA dipakai bila RITME TIDAK DIKETAHUI.
   //
-  // Kepadatan cut ADALAH keputusan sumbu `ritme`, dan sumbu itu dipilih SISTEM
-  // sebelum AI menulis apa pun. Menerapkan aturan absolut di atasnya berarti
-  // memerintahkan sesuatu lalu menghukum kepatuhannya. Terukur 2026-09-04:
-  // aturan lama (min = totalDetik/5, maks = totalDetik/2,5) menghukum
-  // **7 dari 12 kombinasi (jumlah Part × ritme)** padahal AI patuh 100% —
-  // `tunggal` dan `montase_cepat` DIJAMIN gagal di semua konfigurasi.
-  // Contoh nyata: pesanan 3 memakai `montase_cepat` (5 cut), AI menghasilkan
-  // tepat 5, lalu checker menyebutnya "terlalu banyak (3-4)".
-  //
-  // Kepatuhan pada ritme sudah diperiksa per Part lewat `ritme_meleset` di atas,
-  // dan ITU pemeriksaan yang benar: bukan "berapa cut yang ideal", melainkan
-  // "apakah cut-nya sesuai gaya yang sudah ditetapkan".
-  //
-  // Kelas bug yang sama dengan `MEKANISME.hitung_angka` yang dulu menyuruh AI
-  // menyebut harga padahal aturan keras melarangnya.
+  // Sejak kontrak v2 (BAGIAN 1 rencana: "Information Change > Cut Count"),
+  // `ritme` bukan lagi sumbu yang dipilih SISTEM sebelum AI menulis — jadi
+  // `ir.variasi.ritme` nyaris selalu kosong sekarang dan `cutTarget` di atas
+  // nyaris selalu null. Penegak barunya bukan lagi "berapa cut yang ideal"
+  // (cek `ritme_meleset` sudah DIHAPUS), melainkan `informasi_kembar` di atas:
+  // "apakah tiap beat membawa informasi baru". Cek di bawah ini jadi pagar
+  // lunak terakhir untuk kepadatan potongan — dipertahankan sebagai fallback
+  // untuk data lama yang kebetulan masih mengisi `ir.variasi.ritme`, dan
+  // sebagai batas wajar kalau seluruh video ternyata nyaris tanpa potongan
+  // atau dipotong berlebihan.
   if (cutTarget == null) {
     const minCut = Math.max(3, Math.round(totalDetik / 5));
     const maksCut = Math.round(totalDetik / 2.5);

@@ -1,24 +1,25 @@
-// STASIUN 4 & 5 — KONSEP lalu STORYBOARD, dalam satu lintasan AI.
+// STASIUN STORYBOARD — v2: eksekusi Creative DNA (K1), keluaran beat (K2).
 //
-// Digabung karena konsep TANPA storyboard tidak berguna, dan memisahkannya
-// berarti dua panggilan AI (dua kali latensi, dua kali titik gagal) untuk satu
-// keputusan kreatif yang memang menyatu. Yang TIDAK digabung: rendering prompt
-// akhir — itu dikerjakan kode, bukan AI (lihat renderPromptFlow di bawah).
+// ─── Apa yang berubah dari v1 ────────────────────────────────────────────────
+// v1 menggabung KONSEP + STORYBOARD dalam satu panggilan AI: model memilih
+// sudut cerita SENDIRI di tengah 15 aturan keras, jadi perhatiannya habis untuk
+// "jangan salah" alih-alih "buat cerita terbaik". v2 memisahkan itu ke Stasiun
+// Konsep (`stasiunKonsep.js`, K1) yang SUDAH menetapkan sudut/hook/struktur
+// naratif SEBELUM sampai di sini. Stasiun ini TIDAK LAGI memilih gaya — ia
+// mengeksekusinya jadi beat-demi-beat.
 //
 // ─── Pembagian tugas yang mengikat ───────────────────────────────────────────
-//   SISTEM  memilih vektor variasi (stasiun 3) → AI menerimanya sebagai BATASAN
-//   AI      mengerjakan kerajinannya: sudut cerita, pilihan foto, dialog
-//   SISTEM  merender prompt Google Flow dari hasil AI, deterministik
+//   STASIUN KONSEP  memutuskan sudut, mekanisme hook, struktur naratif (K1)
+//   AI (di sini)    mengeksekusi K1 jadi beat: foto, kamera, dialog, reveal
+//   KODE (di sini)  memaksa foto_id sah, Σ durasi, continuity antar Part
+//   FLOW COMPILER   merender prompt Google Flow dari K2, deterministik (A4)
 //
-// Renderer nol logika kreatif adalah SYARAT, bukan gaya: begitu renderer tidak
-// boleh memutuskan apa pun, drift antar-jalur jadi mustahil secara desain. Mesin
-// lama punya tiga jalur prompt paralel yang harus dijaga sinkron oleh script
-// penjaga — itu gejala arsitektur, bukan solusinya.
+// Renderer prompt (dulu `renderPromptFlow` di file ini) SUDAH DIPINDAH ke
+// `flowCompiler.js` — file ini nol logika rendering, hanya AI-call + validator.
 
 import { PROVIDERS, getProviderKey, callChatCompletion } from './aiProviders.js';
-import { FLOW, anggaranKata, entriSumbu, labelInggris } from './viralframe.js';
+import { anggaranKata, slotFotoProperti } from './viralframe.js';
 import { uraiJsonModel } from './visiFoto.js';
-import { uraiKunci } from './variasi.js';
 import { rakitDnaProduk, rakitDnaAgent, dnaKeTeks } from './dnaProduk.js';
 
 const URUTAN = ['gemini', 'deepseek', 'mistral', 'groq'];
@@ -39,167 +40,173 @@ const CTA_UCAP = {
 export const CTA_PILIHAN = Object.keys(CTA_UCAP);
 
 /**
- * Paksa Σ durasi cut = `target`, dengan LANTAI 1 detik per cut. Mengubah di tempat.
+ * Paksa Σ durasi item = `target`, dengan LANTAI per item. Mengubah di tempat.
  *
- * ⚠️ Selisihnya TIDAK boleh dijatuhkan mentah ke cut terakhir — itu bug yang
- * pernah ada di sini. Kalau model mengalokasikan berlebih (mis. 12 detik untuk
- * klip 10 detik — masih dalam toleransi ±2) dan cut terakhirnya cuma 2 detik,
- * ia jadi NOL, dan renderer memancarkan blok `[00:10-00:10]` yang tidak berarti
- * apa-apa bagi Veo. Tidak ada gate yang menangkapnya: JSON-nya tetap sah, Σ-nya
- * tetap benar, dan videonya cuma kehilangan satu shot tanpa pesan apa pun.
+ * Generik lewat opsi `{ langkah, lantai, field }` supaya satu fungsi melayani
+ * cut lama (detik bulat, langkah 1, dipertahankan sebagai bawaan) maupun beat
+ * baru (durasi desimal 0.1) TANPA duplikasi algoritma. Kerja dalam satuan
+ * "tick" (kelipatan `langkah`) supaya aritmetikanya tetap BILANGAN BULAT —
+ * desimal 0.1 langsung rawan floating point drift (0.1 + 0.2 !== 0.3 di JS).
  *
- * Selisih dibagikan dari/ke cut TERPANJANG karena di situ satu detik paling
+ * ⚠️ Selisihnya TIDAK boleh dijatuhkan mentah ke item terakhir — itu bug yang
+ * pernah ada di sini. Kalau model mengalokasikan berlebih dan item terakhirnya
+ * kecil, ia bisa jadi NOL/negatif dan renderer memancarkan rentang waktu yang
+ * tidak berarti apa-apa bagi Veo. Tidak ada gate yang menangkapnya.
+ *
+ * Selisih dibagikan dari/ke item TERPANJANG karena di situ satu langkah paling
  * tidak terasa.
  */
-export function sesuaikanDurasi(cuts, target) {
-  if (!Array.isArray(cuts) || cuts.length === 0) return cuts;
-  let selisih = target - cuts.reduce((s, c) => s + c.detik, 0);
+export function sesuaikanDurasi(items, target, { langkah = 1, lantai = 1, field = 'detik' } = {}) {
+  if (!Array.isArray(items) || items.length === 0) return items;
+  const keTick = (n) => Math.round(n / langkah);
+  const dariTick = (t) => Math.round(t * langkah * 10) / 10;
+  const lantaiTick = keTick(lantai);
+  const tick = items.map(it => keTick(it[field]));
+  let selisih = keTick(target) - tick.reduce((s, t) => s + t, 0);
   while (selisih !== 0) {
     const naik = selisih > 0;
-    const kandidat = naik ? cuts : cuts.filter(c => c.detik > 1);
-    if (kandidat.length === 0) break; // semuanya sudah di lantai — berhenti, jangan negatif
-    const pilih = kandidat.reduce((a, b) => (b.detik > a.detik ? b : a));
-    pilih.detik += naik ? 1 : -1;
+    let idx = -1;
+    for (let i = 0; i < tick.length; i++) {
+      if (!naik && tick[i] <= lantaiTick) continue; // sudah di lantai — jangan turun lagi
+      if (idx === -1 || tick[i] > tick[idx]) idx = i;
+    }
+    if (idx === -1) break; // semuanya sudah di lantai — berhenti, jangan negatif
+    tick[idx] += naik ? 1 : -1;
     selisih += naik ? -1 : 1;
   }
-  return cuts;
+  items.forEach((it, i) => { it[field] = dariTick(tick[i]); });
+  return items;
 }
 
-/** Timecode "00:03" dari detik. */
-function tc(detik) {
-  const m = Math.floor(detik / 60);
-  const s = Math.floor(detik % 60);
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+/** Potong teks ke maksimal N kata (bukan N karakter) — dipakai untuk "kamera". */
+function batasKata(teks, maks) {
+  const kata = String(teks ?? '').trim().split(/\s+/).filter(Boolean);
+  return kata.slice(0, maks).join(' ');
 }
 
 function buatSystem() {
-  return `Kamu sutradara video pendek properti Indonesia. Kamu menerima BATASAN GAYA yang sudah ditetapkan sistem dan TIDAK BOLEH mengubahnya — tugasmu mengeksekusinya sebaik mungkin, bukan memilih gaya lain.
+  return `Kamu sutradara video pendek properti Indonesia. Creative DNA (sudut cerita, mekanisme hook, struktur naratif) SUDAH DITETAPKAN sistem — tugasmu MENGEKSEKUSINYA jadi storyboard beat-demi-beat yang hidup, bukan memilih sudut lain atau menggantinya.
 
 Jawab HANYA JSON valid. Tanpa markdown, tanpa kalimat pembuka.`;
 }
 
-function buatUser({ prop, dna, dnaAgent, variasi, params, foto }) {
+function buatUser({ prop, dna, dnaAgent, konsep, params, foto, faceless }) {
   const detikPart = params.detikPerPart;
   const voDetik = params.voDetikPerPart;
   const maksKata = anggaranKata(voDetik);
-  const cutTarget = entriSumbu('ritme', variasi.ritme)?.cutPerPart ?? 2;
-  // Contoh durasi per cut yang MASUK AKAL untuk ritme ini. Wajib angka nyata:
-  // contoh skema yang memakai 0 sebagai placeholder membuat model menyalinnya
-  // apa adanya, dan verifikasi menolak seluruh storyboard karena satu angka.
-  const detikContoh = Math.max(1, Math.round(detikPart / cutTarget));
+  const slot = slotFotoProperti(faceless);
+  const d = konsep?.dna ?? {};
+  const urutanInformasi = Array.isArray(d.urutan_informasi) ? d.urutan_informasi : [];
+  const cerita = konsep?.cerita_global ?? {};
 
   const daftarFoto = foto.map((f, i) =>
     `  ${i + 1}. [id ${f.id}] ${f.label_ruangan}${f.vf_skor != null ? ` (skor ${f.vf_skor})` : ''}${f.vf_catatan ? ` — ${f.vf_catatan}` : ''}`
   ).join('\n');
 
-  const arahan = (sumbu) => entriSumbu(sumbu, variasi[sumbu])?.arahan ?? '';
+  // Contoh durasi beat yang MASUK AKAL (bukan placeholder 0) — contoh 0 pernah
+  // membuat model menyalinnya apa adanya dan menggagalkan seluruh storyboard.
+  const beatContoh = Math.max(0.5, Math.round((detikPart / 3) * 10) / 10);
+
+  const blokTalent = faceless
+    ? 'MODE FACELESS — TIDAK ADA PRESENTER MANUSIA. Jangan sebut orang, tangan, wajah, atau aksi manusia di "aksi"/"reveal"/"start_state"/"end_state". Video murni showcase properti; "dialog" tetap voiceover naratif, bukan ucapan seseorang yang tampil di layar.'
+    : `TALENT — ${dnaAgent.nama}\n- ${dnaAgent.ciri.join(', ') || 'ciri belum diisi'}`;
+
+  const blokCerita = cerita.janji
+    ? `\nCERITA GLOBAL LINTAS PART (jaga benang merahnya)\n- Janji video: ${cerita.janji}\n- Part 1 open loop: ${cerita.part1_open_loop || '-'}\n- Part 2 payoff: ${cerita.part2_payoff || '-'}\n- Part 2 open loop: ${cerita.part2_open_loop || '-'}\n- Part 3 payoff: ${cerita.part3_payoff || '-'}\n`
+    : '';
 
   return `PROPERTI — ${prop.title}
 ${dnaKeTeks(dna)}
 ${prop.deskripsi ? `\nCATATAN PEMILIK (boleh dipakai, jangan ditambah-tambahi)\n${String(prop.deskripsi).replace(/\s+/g, ' ').slice(0, 400)}` : ''}
 
-TALENT — ${dnaAgent.nama}
-- ${dnaAgent.ciri.join(', ') || 'ciri belum diisi'}
+${blokTalent}
 
-BATASAN GAYA (ditetapkan sistem — WAJIB dipatuhi, JANGAN diganti)
-- Mesin cerita : ${entriSumbu('mekanisme', variasi.mekanisme)?.label ?? variasi.mekanisme} — ${arahan('mekanisme')}
-- Pembuka      : ${entriSumbu('hook', variasi.hook)?.label ?? variasi.hook} — ${arahan('hook')}
-- Ritme        : ${entriSumbu('ritme', variasi.ritme)?.label ?? variasi.ritme} — ${arahan('ritme')} (target ${cutTarget} cut per Part)
-- Mood         : ${entriSumbu('mood', variasi.mood)?.label ?? variasi.mood} — ${arahan('mood')}
-- Foto pembuka : Part 1 WAJIB dibuka dengan foto berlabel "${variasi.pembukaan}"
-
+CREATIVE DNA — SUDAH DITETAPKAN, WAJIB DIEKSEKUSI (jangan ganti dengan sudut lain)
+- Sudut cerita      : ${d.sudut || '-'}
+- Hook mekanisme    : ${d.hook_mekanisme || '-'}
+- Pemicu psikologis : ${d.pemicu_psikologis || '-'}
+- Struktur naratif  : ${d.struktur_naratif || '-'}
+- Profil pacing     : ${d.profil_pacing || '-'}
+- Bahasa kamera     : ${d.bahasa_kamera || '-'} (acuan gaya "kamera" tiap beat)
+- Payoff            : ${d.payoff || '-'}
+- Gaya CTA          : ${d.gaya_cta || '-'}
+- Urutan informasi (garis besar seluruh video): ${urutanInformasi.join(' → ') || '-'}
+- Foto pembuka Part 1: beat pertama Part 1 SEBAIKNYA pakai foto id ${d.foto_pembuka ?? '(pilih dari daftar foto)'}
+${blokCerita}
 FOTO YANG TERSEDIA (pakai HANYA id dari daftar ini)
 ${daftarFoto}
 
 BENTUK VIDEO (dikunci kuota Google Flow, tidak bisa diubah)
 - ${params.jumlahPart} Part × ${detikPart} detik. Peran berurutan: ${PERAN.slice(0, params.jumlahPart).join(' → ')}.
-${params.jumlahPart === 1 ? `- ⚠️ HANYA SATU Part, jadi Part ini memikul TIGA tugas sekaligus dalam ${maksKata} kata:
-  kail di 2 detik pertama → satu nilai jual terkuat → ajakan penutup.
-  Anggarannya ketat dan TIDAK BISA dilonggarkan (itu batas fisik durasi bicara),
-  jadi pilih SATU keunggulan saja dan buang basa-basi. Ajakan cukup 4-5 kata.` : ''}
-- Voiceover ${voDetik} detik per Part → MAKSIMAL ${maksKata} kata per Part.
-  Ini rentang target, bukan plafon: tulis 90-100% dari ${maksKata} kata. Dialog yang
-  terlalu pendek membuat model video mengisi sisa waktu dengan mengulang frasa.
-- Maksimal ${FLOW.refImagePerPart} foto referensi per Part, dan ${FLOW.refImageUtama} foto
-  pertama tiap Part adalah yang PALING PENTING — taruh yang terkuat di depan.
+${params.jumlahPart === 1 ? `- ⚠️ HANYA SATU Part: beat pertama menahan (hook), beat tengah membawa nilai jual terkuat, beat terakhir menutup dengan ajakan.` : ''}
+- Tiap Part berisi 2-4 BEAT — satu beat = satu potongan CERITA (bukan sekadar potongan gambar). Tiap beat WAJIB membawa satu informasi baru; kalau tidak ada info baru, gabung ke beat sebelumnya alih-alih menambah beat kosong.
+- Voiceover: tulis 2-4 kalimat PENDEK, SATU per beat, mengikuti urutan beat (sebar sepanjang durasi Part, jangan menumpuk semua di awal lalu diam di sisanya). Buang apa pun yang bisa masuk teks layar (harga, legalitas, angka luas persis) — dialog fokus ke yang paling penting DIDENGAR. Information hierarchy > information quantity. Total kata per Part maksimal ${maksKata} kata — ini batas ATAS, bukan target yang wajib dipenuhi.
+- Maksimal ${slot} foto properti berbeda per Part; foto yang disebut lebih dulu adalah yang PALING PENTING.
+
+PERPINDAHAN RUANG
+Boleh berpindah ruang DI DALAM satu Part asal gerakan kameranya berkelanjutan & searah (mis. berjalan dari teras masuk ke ruang tamu). DILARANG potongan keras antar ruang yang tidak berhubungan — itu memaksa model mengarang transisi dan jadi sumber utama hasil tidak konsisten dengan foto referensi.
 
 ATURAN KERAS
-- Deskripsi tiap cut WAJIB sesuai foto yang benar-benar ada. Patuhi daftar
-  "DILARANG DISEBUT" di atas — itu diturunkan dari foto & data listing ini, bukan tebakan.
-- Dialog terucap DILARANG menyebut nominal harga, dan dilarang menumpuk urgensi
-  ("buruan", "terbatas", "jangan sampai kehabisan"). Harga tampil lewat teks layar.
-- Part terakhir WAJIB menutup dengan ajakan yang objeknya sama seperti contoh ini:
-  "${CTA_UCAP[params.cta] ?? CTA_UCAP.survei}"
-  Diksi boleh berbeda, OBJEK ajakannya tidak boleh diganti jadi ajakan umum.
-- JANGAN membuka dengan sapaan atau perkenalan diri ("Halo guys, aku ..."). Detik
-  pertama adalah hook, bukan salam.
-- Hook Part 1 WAJIB memuat minimal satu hal konkret (angka, ukuran, jumlah kamar,
-  atau nama tempat). Pembuka tanpa detail bisa dipasang di listing mana pun.
-- 🔥 SETIAP ANGKA yang diucapkan HARUS berasal dari FAKTA TERVERIFIKASI di atas.
-  Dilarang keras mengarang jarak atau waktu tempuh ("500 meter dari Tugu",
-  "5 menit ke kampus") kalau angkanya tidak tertulis di sana. Kedekatan boleh
-  disebut TANPA angka ("dekat Tugu Jogja"). Angka yang dikarang mudah dicek
-  pembeli dan merusak kepercayaan — dan aturan hook di atas BUKAN izin
-  mengarang, melainkan perintah memakai angka yang memang ada.
-- "teks_layar" Part 1 dan Part terakhir WAJIB terisi — banyak penonton menonton
-  tanpa suara, dan teks layar satu-satunya kanal yang boleh menampilkan harga.
-- "kamera" berisi UKURAN SHOT + GERAK KAMERA saja (mis. "Medium shot, slow
-  push-in" / "Wide shot, static"), maksimal 6 kata. DILARANG menuliskan aksi
-  subjek di situ, dan DILARANG menyebut orang memegang atau membawa kamera —
-  itu membuat model merender presenter yang menenteng perangkat.
-  ⚠️ JANGAN menyalin contoh di atas apa adanya ke semua cut; setiap cut punya
-  ukuran shot sendiri. Wide shot yang juga ditulis "selfie perspective" adalah
-  perintah yang saling bertentangan dan hasilnya rusak.
-- SEMUA cut dalam SATU Part terjadi di RUANG YANG SAMA. Ganti ruangan hanya
-  ANTAR Part. Satu klip 10 detik yang melompat antar ruangan memaksa model
-  mengarang transisi, dan itu penyebab utama hasil yang tidak konsisten dengan
-  foto referensi. Maksimal ${FLOW.refImageUtama} foto properti per Part.
+- Setiap beat WAJIB sesuai foto yang benar-benar ada. Patuhi "DILARANG DISEBUT" di atas — diturunkan dari data listing ini, bukan tebakan.
+- Dialog terucap DILARANG menyebut nominal harga, dan dilarang menumpuk urgensi ("buruan", "terbatas", "jangan sampai kehabisan"). Harga hanya lewat teks layar.
+- Beat terakhir Part terakhir WAJIB menutup dengan ajakan yang objeknya sama seperti contoh ini: "${CTA_UCAP[params.cta] ?? CTA_UCAP.survei}" — diksi boleh beda, objek ajakannya tidak boleh diganti jadi ajakan umum.
+- JANGAN membuka dengan sapaan/perkenalan diri ("Halo guys, aku ..."). Beat pertama Part 1 adalah hook, bukan salam.
+- Beat pertama Part 1 WAJIB memuat hal konkret (angka, ukuran, jumlah kamar, atau nama tempat) di "viewer_question" atau "reveal"-nya.
+- 🔥 SETIAP ANGKA yang diucapkan HARUS berasal dari FAKTA TERVERIFIKASI di atas. Dilarang keras mengarang jarak/waktu tempuh ("500 meter dari Tugu"). Kedekatan boleh disebut TANPA angka.
+- "teks_layar" Part 1 dan Part terakhir WAJIB terisi — banyak penonton menonton tanpa suara.
+- "kamera" berisi POSISI & GERAK KAMERA saja (maksimal 8 kata, Inggris, mis. "Handheld, slow push-in through doorway"). DILARANG menuliskan aksi subjek di situ, dan DILARANG menyebut orang memegang/membawa kamera — itu membuat model merender presenter yang menenteng perangkat.
 
 KELUARAN JSON
 {
-  "konsep": {
-    "sudut": "sudut cerita video ini dalam 1 kalimat",
-    "emosi": "satu emosi dominan",
-    "payoff": "apa yang penonton dapat di akhir",
-    "alasan": "kenapa susunan ini cocok untuk properti ini, 1-2 kalimat jujur"
-  },
   "parts": [
     {
-      "peran": "Hook",
-      "cuts": [
+      "beats": [
         {
           "foto_id": ${foto[0]?.id ?? 1},
-          "detik": ${detikContoh},
-          "kamera": "shot size + gerak kamera, BAHASA INGGRIS (contoh: 'Medium shot, slow push-in')",
-          "aksi": "apa yang dilakukan subjek & apa yang terlihat, BAHASA INGGRIS, ground pada foto"
+          "durasi": ${beatContoh},
+          "viewer_question": "pertanyaan di benak penonton saat beat ini mulai",
+          "start_state": "kondisi/posisi penonton sebelum beat ini",
+          "kamera": "posisi & gerak kamera, BAHASA INGGRIS, maks 8 kata",
+          "aksi": "apa yang terlihat/terjadi, BAHASA INGGRIS, ground pada foto",
+          "reveal": "apa yang baru terlihat/terungkap di beat ini",
+          "informasi_baru": "satu info baru yang dibawa beat ini, Bahasa Indonesia",
+          "end_state": "kondisi/posisi penonton di akhir beat ini",
+          "next_question": "pertanyaan baru yang muncul untuk beat berikutnya"
         }
       ],
-      "dialog": "narasi Part ini dalam Bahasa Indonesia, ${maksKata} kata",
-      "teks_layar": "teks overlay singkat untuk editor"
+      "continuity_out": "posisi & arah kamera di frame TERAKHIR Part ini — jadi dasar Part berikutnya",
+      "dialog": "voiceover Part ini, Bahasa Indonesia",
+      "teks_layar": "teks overlay singkat untuk editor, Bahasa Indonesia"
     }
   ]
 }
-⚠️ "foto_id" WAJIB id nyata dari daftar FOTO di atas. "detik" WAJIB bilangan bulat
-minimal 1 (dengan ${cutTarget} cut per Part, sekitar ${detikContoh} detik per cut).
-Angka pada contoh di atas HANYA contoh bentuk — jangan disalin apa adanya.
-Jumlah "parts" HARUS ${params.jumlahPart}. Σ "detik" tiap Part HARUS ${detikPart}.
-"kamera" dan "aksi" dalam BAHASA INGGRIS (dikirim ke Google Flow); "dialog" dan
-"teks_layar" dalam BAHASA INDONESIA.`;
+⚠️ "foto_id" WAJIB id nyata dari daftar FOTO di atas. "durasi" desimal (boleh 1
+angka di belakang koma) — ${beatContoh} pada contoh HANYA gambaran, jangan disalin
+apa adanya. Jumlah "parts" HARUS ${params.jumlahPart}; tiap Part berisi 2-4 "beats";
+Σ "durasi" tiap Part ≈ ${detikPart} detik. "kamera" dan "aksi" BAHASA INGGRIS (dikirim
+ke Google Flow); field lainnya BAHASA INDONESIA.`;
 }
 
 /**
- * Panggil AI, kembalikan IR terverifikasi.
+ * Panggil AI, kembalikan IR terverifikasi (K2: `parts[].beats[]`).
+ *
+ * `konsep` = keluaran Stasiun Konsep (K1, `hasil_json.konsep`) — AI di sini
+ * TIDAK memilih sudut lagi, hanya mengeksekusi `konsep.dna`.
+ *
+ * `agent` boleh null/undefined → MODE FACELESS: tidak ada DNA Agent, prompt
+ * tidak menyebut presenter sama sekali. `dnaAgent` pada hasil ikut null,
+ * sesuai kontrak K3 (`ir.dnaAgent|null`) yang dibaca Flow Compiler.
  *
  * `dnaOverride` = DNA Produk yang sudah DIKOREKSI manusia di Panel Bahan. Kalau
  * user membetulkan fakta yang salah di layar lalu koreksinya tidak sampai ke
  * sini, panel itu cuma hiasan — jadi koreksi selalu menang atas hasil rakitan.
  */
-export async function susunStoryboard(env, { prop, agent, variationKey, params, foto, dnaOverride = null }) {
-  const variasi = uraiKunci(variationKey);
+export async function susunStoryboard(env, { prop, agent, konsep, params, foto, dnaOverride = null }) {
   const dna = dnaOverride ?? rakitDnaProduk({ prop, foto });
-  const dnaAgent = rakitDnaAgent(agent);
+  const faceless = !agent;
+  const dnaAgent = faceless ? null : rakitDnaAgent(agent);
   const systemPrompt = buatSystem();
-  const userPrompt = buatUser({ prop, dna, dnaAgent, variasi, params, foto });
+  const userPrompt = buatUser({ prop, dna, dnaAgent, konsep, params, foto, faceless });
 
   let raw = null, dipakai = null, errTerakhir = null;
   for (const prov of URUTAN) {
@@ -220,70 +227,95 @@ export async function susunStoryboard(env, { prop, agent, variationKey, params, 
   }
 
   const parsed = uraiJsonModel(raw);
-  const parts = Array.isArray(parsed?.parts) ? parsed.parts : null;
-  if (!parts || parts.length !== params.jumlahPart) {
-    return { ok: false, error: `AI mengembalikan ${parts?.length ?? 0} Part, seharusnya ${params.jumlahPart}.` };
+  const partsRaw = Array.isArray(parsed?.parts) ? parsed.parts : null;
+  if (!partsRaw || partsRaw.length !== params.jumlahPart) {
+    return { ok: false, error: `AI mengembalikan ${partsRaw?.length ?? 0} Part, seharusnya ${params.jumlahPart}.` };
   }
 
   // ── Verifikasi keras. readNdjson/JSON.parse hanya meng-CAST; tanpa pemeriksaan
   // ini ketidakcocokan muncul sebagai layar putih saat render, bukan pesan error.
   const idSah = new Set(foto.map(f => f.id));
   const bersih = [];
-  for (let i = 0; i < parts.length; i++) {
-    const p = parts[i] ?? {};
-    const cutsRaw = Array.isArray(p.cuts) ? p.cuts : [];
-    if (cutsRaw.length === 0) return { ok: false, error: `Part ${i + 1} tidak punya cut sama sekali.` };
+  for (let i = 0; i < partsRaw.length; i++) {
+    const p = partsRaw[i] ?? {};
+    const beatsRaw = Array.isArray(p.beats) ? p.beats : [];
+    if (beatsRaw.length < 2 || beatsRaw.length > 4) {
+      return { ok: false, error: `Part ${i + 1}: ${beatsRaw.length} beat, seharusnya 2-4.` };
+    }
 
-    const cuts = [];
-    for (const c of cutsRaw) {
-      const fid = parseInt(c?.foto_id, 10);
+    const beats = [];
+    for (const b of beatsRaw) {
+      const fid = parseInt(b?.foto_id, 10);
       if (!idSah.has(fid)) {
-        return { ok: false, error: `Part ${i + 1} menyebut foto_id ${c?.foto_id} yang tidak ada di daftar.` };
+        return { ok: false, error: `Part ${i + 1} menyebut foto_id ${b?.foto_id} yang tidak ada di daftar.` };
       }
-      // ⚠️ Durasi cut yang tidak valid TIDAK menggagalkan storyboard.
-      //
-      // Sebelumnya di sini ada `return { ok:false }`, dan itu membuang seluruh
-      // panggilan AI yang sudah dibayar hanya karena SATU angka — persis alasan
-      // yang sudah dipakai untuk menoleransi Σ durasi yang meleset. Terjadi
-      // sungguhan pada pesanan 4 (2026-09-04): ritme "montase cepat" 5 cut, satu
-      // cut tanpa `detik` sah → 502, dan pesanan mandek di status `storyboard`.
-      //
-      // Nilai penggantinya deterministik (bagi rata sesuai jumlah cut), lalu
-      // `sesuaikanDurasi()` di bawah merapikan Σ-nya. Berbeda dari `foto_id`
-      // yang tetap ditolak keras: menebak durasi aman, menebak FOTO berarti
-      // menarasikan ruangan yang belum tentu ada di gambarnya.
-      const detikMentah = Number(c?.detik);
-      const detik = Number.isFinite(detikMentah) && detikMentah >= 1
-        ? Math.round(detikMentah)
-        : Math.max(1, Math.round(params.detikPerPart / cutsRaw.length));
+      const informasiBaru = String(b?.informasi_baru ?? '').trim();
+      if (!informasiBaru) {
+        return { ok: false, error: `Part ${i + 1}: ada beat tanpa "informasi_baru".` };
+      }
+      // ⚠️ Durasi tak sah TIDAK menggagalkan storyboard, sama seperti "detik"
+      // di mesin lama — menebak durasi aman (dirapikan `sesuaikanDurasi` di
+      // bawah), menebak FOTO berarti menarasikan ruangan yang belum tentu ada.
+      const durasiMentah = Number(b?.durasi);
+      const durasi = Number.isFinite(durasiMentah) && durasiMentah > 0
+        ? durasiMentah
+        : Math.max(0.5, params.detikPerPart / beatsRaw.length);
       const f = foto.find(x => x.id === fid);
-      cuts.push({
+      beats.push({
         foto_id: fid,
+        // `label`/`skor` bukan bagian K2, tapi Flow Compiler (K3) tidak menerima
+        // daftar foto terpisah — ini satu-satunya jalan baginya tahu label &
+        // peringkat foto tiap beat tanpa query ulang.
         label: f?.label_ruangan ?? '',
         skor: f?.vf_skor ?? null,
-        detik: Math.round(detik),
-        // Dipisah dari `aksi` supaya renderer bisa menaruh sinematografi DULUAN
-        // sesuai formula resmi Veo 3.1. Model lama diminta menggabung keduanya,
-        // jadi urutan formulanya mustahil ditegakkan tanpa membelah string.
-        kamera: String(c?.kamera ?? '').trim().slice(0, 200),
-        aksi: String(c?.aksi ?? '').trim().slice(0, 300),
+        durasi,
+        viewer_question: String(b?.viewer_question ?? '').trim().slice(0, 150),
+        start_state: String(b?.start_state ?? '').trim().slice(0, 200),
+        kamera: batasKata(String(b?.kamera ?? '').trim(), 8).slice(0, 160),
+        aksi: String(b?.aksi ?? '').trim().slice(0, 300),
+        reveal: String(b?.reveal ?? '').trim().slice(0, 200),
+        informasi_baru: informasiBaru.slice(0, 200),
+        end_state: String(b?.end_state ?? '').trim().slice(0, 200),
+        next_question: String(b?.next_question ?? '').trim().slice(0, 150),
       });
     }
-    const total = cuts.reduce((s, c) => s + c.detik, 0);
-    // Toleransi 2 detik lalu dikoreksi deterministik: memaksa model berhitung
+
+    const total = beats.reduce((s, b) => s + b.durasi, 0);
+    // Toleransi 2 detik lalu dikoreksi deterministik — memaksa model berhitung
     // persis hanya menghasilkan kegagalan berulang untuk sesuatu yang bisa
     // dibetulkan di sini.
     if (Math.abs(total - params.detikPerPart) > 2) {
-      return { ok: false, error: `Part ${i + 1}: Σ durasi cut ${total}s, seharusnya ${params.detikPerPart}s.` };
+      return { ok: false, error: `Part ${i + 1}: Σ durasi beat ${total.toFixed(1)}s, seharusnya ${params.detikPerPart}s.` };
     }
-    sesuaikanDurasi(cuts, params.detikPerPart);
+    sesuaikanDurasi(beats, params.detikPerPart, { langkah: 0.1, lantai: 0.5, field: 'durasi' });
+
+    // `mulai`/`selesai` dihitung KODE dari Σ berjalan, bukan diminta ke model —
+    // model tidak andal menjaga jumlah kumulatif tetap konsisten antar beat.
+    let t = 0;
+    const beatsFinal = beats.map(b => {
+      const mulai = Math.round(t * 10) / 10;
+      t += b.durasi;
+      const selesai = Math.round(t * 10) / 10;
+      const { durasi, ...sisa } = b;
+      return { ...sisa, mulai, selesai };
+    });
 
     bersih.push({
       peran: PERAN[i] ?? `Part ${i + 1}`,
-      cuts,
+      continuity_in: null, // Part 1 tetap null; Part 2+ diisi di bawah, sesudah loop.
+      continuity_out: String(p.continuity_out ?? '').trim().slice(0, 300),
+      beats: beatsFinal,
       dialog: String(p.dialog ?? '').trim(),
       teks_layar: String(p.teks_layar ?? '').trim().slice(0, 200),
     });
+  }
+
+  // Continuity antar Part DIPAKSA KODE: `continuity_out` Part N menjadi
+  // `continuity_in` Part N+1 secara harfiah. Lebih andal daripada berharap
+  // model menyalinnya sendiri konsisten di dua Part yang tidak saling tahu
+  // (tiga Part = tiga generate terpisah, nol memori bersama).
+  for (let i = 1; i < bersih.length; i++) {
+    bersih[i].continuity_in = bersih[i - 1].continuity_out || null;
   }
 
   return {
@@ -291,122 +323,7 @@ export async function susunStoryboard(env, { prop, agent, variationKey, params, 
     provider: dipakai,
     dna,
     dnaAgent,
-    konsep: {
-      sudut: String(parsed?.konsep?.sudut ?? '').slice(0, 300),
-      emosi: String(parsed?.konsep?.emosi ?? '').slice(0, 80),
-      payoff: String(parsed?.konsep?.payoff ?? '').slice(0, 300),
-      alasan: String(parsed?.konsep?.alasan ?? '').slice(0, 500),
-    },
+    konsep,
     parts: bersih,
-    variasi,
   };
-}
-
-/**
- * Render prompt Google Flow — SATU prompt per Part, siap tempel.
- *
- * DETERMINISTIK. Tidak ada keputusan kreatif di sini; seluruh isinya berasal dari
- * IR hasil susunStoryboard() dan dari tabel kosakata. Renderer yang tidak boleh
- * memutuskan apa pun membuat drift antar-jalur mustahil SECARA DESAIN — mesin
- * lama punya tiga jalur prompt paralel yang harus dijaga sinkron oleh script
- * penjaga, dan itu gejala arsitektur, bukan solusinya.
- *
- * ─── Tiga hal yang mengikat bentuk keluarannya ───────────────────────────────
- * 1. TIMESTAMP PROMPTING. Google menganjurkan beberapa shot dalam SATU generate
- *    lewat blok `[00:00-00:03]`. Ini yang membuat Part 10 detik bisa berisi 3
- *    potongan alih-alih satu bidikan statis — dan pacing adalah separuh retensi.
- * 2. FORMULA VEO 3.1: [Cinematography] + [Subject] + [Action] + [Context] +
- *    [Style & Audio]. Kamera disebut DULUAN; itu sebabnya `kamera` dipisah dari
- *    `aksi` di IR.
- * 3. DNA DIULANG UTUH DI SETIAP PART. Tiga Part = tiga generate yang tidak saling
- *    tahu, jadi satu-satunya cara membuat orangnya tetap sama adalah mengulang
- *    seluruh cirinya. Ini bukan pemborosan token, ini mekanismenya.
- */
-export function renderPromptFlow({ ir, prop, params }) {
-  const mood = entriSumbu('mood', ir.variasi.mood);
-  const dnaAgent = ir.dnaAgent ?? { bahasaInggris: 'Indonesian presenter', suara: 'natural conversational voice' };
-  const gaya = [
-    mood?.warna ?? 'natural color grade',
-    'shot on mirrorless camera look, shallow depth of field',
-    'subtle film grain, natural handheld micro-jitter',
-    `${FLOW.rasio} vertical`,
-  ].join(', ');
-
-  const lokasi = [prop.kecamatan, prop.kabupaten].filter(Boolean).join(', ');
-
-  return ir.parts.map((p, i) => {
-    // Foto berperingkat — inti keputusan soal batas ingredient. Urut skor visi
-    // menurun karena itu peringkat kualitas yang sudah diukur; urutan kemunculan
-    // di storyboard bukan peringkat kualitas.
-    //
-    // ⚠️ DIHITUNG SEBELUM blok timestamp, karena tiap cut harus menunjuk NOMOR
-    // reference image-nya. Cut yang fotonya tidak masuk daftar utama dipetakan
-    // ke foto utama pertama — lebih baik menunjuk ruangan yang benar-benar
-    // terlampir daripada menunjuk nomor yang tidak ada.
-    const unik = [...new Map(p.cuts.map(c => [c.foto_id, c])).values()]
-      .sort((a, b) => (b.skor ?? 0) - (a.skor ?? 0));
-    const utama = unik.slice(0, FLOW.refImageUtama);
-    const cadangan = unik.slice(FLOW.refImageUtama);
-    const nomorRef = new Map(utama.map((c, n) => [c.foto_id, n + 2])); // [1] = agent
-
-    let t = 0;
-    // Blok timestamp: kamera DULU, lalu aksi, lalu foto mana yang dipakai.
-    const baris = p.cuts.map(c => {
-      const mulai = tc(t); t += c.detik;
-      const kamera = (c.kamera || 'Medium shot, steady').replace(/[.\s]+$/, '');
-      const aksi = String(c.aksi ?? '').replace(/[.\s]+$/, '');
-      const nRef = nomorRef.get(c.foto_id) ?? 2;
-      return `[${mulai}-${tc(t)}] ${kamera}. ${aksi}. Filmed inside reference image [${nRef}].`;
-    });
-
-    // ── Pengikatan reference image ke PERANNYA ────────────────────────────
-    //
-    // 🔥 INI YANG PALING MENENTUKAN KONSISTENSI, dan sebelumnya TIDAK ADA sama
-    // sekali. Prompt lama cuma mendeskripsikan adegan dengan kata-kata dan tidak
-    // pernah menyebut bahwa ada foto terlampir — jadi Veo memperlakukan
-    // referensinya sebagai saran lepas dan mengarang ruangannya sendiri.
-    // Dokumentasi Google tegas: "add a text prompt that explicitly maps each
-    // image to its role", dengan peran Subject / Scene / Style.
-    const ref = [`[1] SUBJECT — the presenter. Keep the face, hairstyle, and outfit EXACTLY as in this image.`];
-    utama.forEach((c, n) => {
-      ref.push(`[${n + 2}] SCENE — the real ${labelInggris(c.label)}. `
-        + 'Match its actual layout, materials and lighting. Do not redecorate it or substitute a different place.');
-    });
-
-    return {
-      part: i + 1,
-      peran: p.peran,
-      foto_utama: utama.map(c => ({ id: c.foto_id, label: c.label })),
-      foto_cadangan: cadangan.map(c => ({ id: c.foto_id, label: c.label })),
-      dialog: p.dialog,
-      teks_layar: p.teks_layar,
-      prompt: [
-        `Vertical ${FLOW.rasio} short-form video, ${params.detikPerPart} seconds, one continuous scene.`,
-        '',
-        'REFERENCE IMAGES (attached — follow them exactly, they are the source of truth):',
-        ...ref,
-        'Everything visible must come from these images. Do not add rooms, furniture, people,',
-        'graphics, text overlays or map insets that are not in them.',
-        '',
-        `SUBJECT DESCRIPTION (must match image [1]): ${dnaAgent.bahasaInggris}.`,
-        `LOCATION: an Indonesian ${prop.jenis_properti} property in ${lokasi || 'Yogyakarta'}.`,
-        '',
-        baris.join('\n'),
-        '',
-        `Dialogue (spoken in Indonesian, ${dnaAgent.suara}): "${p.dialog}"`,
-        `Music: ${mood?.musik ?? 'subtle background bed'}.`,
-        'Ambient: quiet natural room tone, no crowd noise.',
-        '',
-        `Style: ${gaya}.`,
-        // Negative prompt spesifik, bukan kabur — Google menganjurkan menyebut
-        // benda yang tidak diinginkan, bukan kategori abstrak. `selfie stick` dan
-        // `camera in hand` menutup halusinasi perangkat rekam yang muncul saat
-        // foto referensi talent kebetulan memegang alat. `map overlay` & `infographic`
-        // ditambahkan 2026-09-04 setelah AI mengarang "digital map overlay".
-        'Negative: subtitles, captions, burned-in text, watermark, logo, map overlay, infographic, '
-          + 'distorted hands, extra people, different room, CGI render, plastic skin, over-smoothed skin, '
-          + 'selfie stick, gimbal, camera in hand, mirror reflection of a camera.',
-      ].join('\n'),
-    };
-  });
 }

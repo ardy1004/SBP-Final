@@ -1,31 +1,48 @@
-// Selector variasi — STASIUN 3 pipeline ViralFrame.
+// Selector variasi — STASIUN KONSEP, tahap PENYARINGAN (kontrak K1 → K4).
 //
-// Inilah yang menjawab "AI yang memutuskan gaya/pola/metode" TANPA menyerahkan
-// keputusannya ke AI. Sistem melempar dadu; AI mengerjakan kerajinannya.
+// SEJAK kontrak K4 (2026-09-05): AI (stasiunKonsep.js) mengusulkan 3 kandidat
+// Creative DNA; fungsi di sini MENYARING, bukan memilih dari nol. "AI mengusulkan
+// sudut, kode menyaring" — bukan lagi "sistem melempar dadu, AI mengeksekusi"
+// seperti LAPIS 3 (viralframe.js) di bawah ini.
 //
-// ─── Kenapa sistem, bukan LLM ────────────────────────────────────────────────
-// LLM adalah pencari modus. Diminta "pilih gaya terbaik" 100 kali dengan prompt
-// yang sama, ia memilih 3–4 gaya yang itu-itu saja; menaikkan temperature
-// menghasilkan kebisingan, bukan keragaman. Kalau lapis ini diserahkan ke AI,
-// aturan rotasi gagal — dan gagalnya SENYAP: tiap storyboard "beda" di teks,
-// seragam di layar. Tidak ada gate yang bisa menangkap kemiripan.
+// ─── Kenapa masih perlu lapis sistem sama sekali ────────────────────────────
+// Kalau AI dibiarkan memilih sendirian, rotasi bergantung pada kepatuhan model —
+// dan LLM adalah pencari modus: diminta "usulkan sudut berbeda dari sebelumnya"
+// berkali-kali dengan prompt yang sama, ia cenderung kembali ke 2-3 pola favorit.
+// Prompt sudah menyertakan daftar-hindari (lihat stasiunKonsep.js), tapi itu
+// PERMINTAAN, bukan JAMINAN. `saringKandidat()` di sini yang menjaminnya:
+// menolak kandidat berkunci identik dengan riwayat, dan memilih yang jaraknya
+// paling jauh dari variasi TERBARU kalau ada pilihan.
 //
 // ⚠️ Fungsi ini SENGAJA MURNI (tanpa DB, tanpa fetch, RNG disuntik dari luar)
-// supaya bisa disimulasikan 100 rotasi berturut tanpa menyentuh apa pun. Dua
-// mekanisme anti-pengulangan sebelumnya di project ini mati diam-diam justru
-// karena tidak pernah bisa diuji terpisah.
+// supaya bisa disimulasikan berkali-kali tanpa menyentuh apa pun — pelajaran
+// project ini: dua mekanisme anti-pengulangan sebelumnya di sini mati diam-diam
+// justru karena tidak pernah bisa diuji terpisah dari DB/AI.
+//
+// ⚠️ SUMBU_K4 di bawah MENGGANTIKAN `SUMBU_DOMINAN` (viralframe.js, LAPIS 3)
+// UNTUK FILE INI. `SUMBU_DOMINAN` lama (mekanisme/hook/ritme/mood/pembukaan)
+// tetap ada di viralframe.js sebagai referensi legacy untuk `entriSumbu()` yang
+// masih dipakai stasiunStoryboard.js/hook-battle.js/retensi.js versi lama —
+// tapi TIDAK LAGI relevan untuk `variation_key`, jadi tidak dipakai di sini.
 
-import { MEKANISME, HOOK, RITME, MOOD, SUMBU_DOMINAN, kunciVariasi } from './viralframe.js';
+import { kunciVariasi } from './viralframe.js';
+
+/** Sumbu kontrak K4 (`kunciVariasi()` di viralframe.js) — urutan tidak penting. */
+export const SUMBU_K4 = ['sudut', 'hookmek', 'naratif', 'buka'];
 
 /** Berapa variasi terakhir yang dijadikan acuan "harus terasa beda". */
 const JENDELA_BEDA = 5;
-/** Minimal berapa sumbu dominan yang WAJIB berbeda dari variasi dalam jendela. */
+/** Minimal berapa sumbu K4 yang WAJIB berbeda dari variasi dalam jendela. */
 const MIN_SUMBU_BEDA = 2;
-/** Kandidat yang diundi tiap pemilihan. Cukup besar untuk menutup ruang, cukup
- *  kecil untuk selesai dalam mikrodetik di Workers. */
-const JUMLAH_KANDIDAT = 240;
 
-/** Ubah `variation_key` kembali jadi objek vektor. Toleran nilai tak dikenal. */
+/**
+ * Ubah `variation_key` kembali jadi objek vektor. Toleran nilai tak dikenal.
+ *
+ * Generik — bekerja untuk bentuk K4 (`sudut:…|hookmek:…|naratif:…|buka:…`)
+ * MAUPUN bentuk lama (`mekanisme:…|hook:…|ritme:…|mood:…|pembukaan:…`), karena
+ * hanya membelah `sumbu:nilai` tanpa mengasumsikan nama sumbunya. Baris data
+ * lama tetap terbaca tanpa migrasi.
+ */
 export function uraiKunci(kunci) {
   const v = {};
   for (const bagian of String(kunci ?? '').split('|')) {
@@ -35,103 +52,87 @@ export function uraiKunci(kunci) {
   return v;
 }
 
-/** Berapa sumbu dominan yang berbeda antara dua vektor. */
+/** Berapa sumbu K4 yang berbeda antara dua vektor variation_key. */
 export function jarakSumbu(a, b) {
   let n = 0;
-  for (const s of SUMBU_DOMINAN) if ((a?.[s] ?? null) !== (b?.[s] ?? null)) n += 1;
+  for (const s of SUMBU_K4) if ((a?.[s] ?? null) !== (b?.[s] ?? null)) n += 1;
   return n;
 }
 
 /**
- * Hitung pemakaian tiap nilai per sumbu di seluruh riwayat listing ini.
- * Dipakai untuk cakupan BERTINGKAT: nilai yang jarang dipakai lebih diprioritaskan,
- * sehingga ruang variasi tertutup merata alih-alih acak menumpuk di beberapa titik.
- */
-function hitungPemakaian(riwayat) {
-  const pakai = {};
-  for (const s of SUMBU_DOMINAN) pakai[s] = new Map();
-  for (const v of riwayat) {
-    for (const s of SUMBU_DOMINAN) {
-      const nilai = v?.[s];
-      if (nilai == null) continue;
-      pakai[s].set(nilai, (pakai[s].get(nilai) ?? 0) + 1);
-    }
-  }
-  return pakai;
-}
-
-/** Ambil satu nilai, condong ke yang paling jarang dipakai. */
-function undiCondong(pilihan, pakai, acak) {
-  if (pilihan.length === 0) return null;
-  // Bobot = 1 / (1 + jumlah pakai) → yang belum pernah dipakai berbobot penuh.
-  const bobot = pilihan.map(p => 1 / (1 + (pakai.get(p) ?? 0)));
-  const total = bobot.reduce((s, b) => s + b, 0);
-  let u = acak() * total;
-  for (let i = 0; i < pilihan.length; i++) {
-    u -= bobot[i];
-    if (u <= 0) return pilihan[i];
-  }
-  return pilihan[pilihan.length - 1];
-}
-
-/**
- * Pilih satu vektor variasi untuk listing ini.
+ * Saring kandidat Creative DNA (dari `susunKonsep()`, stasiunKonsep.js) →
+ * satu pemenang, dengan alasan.
+ *
+ * Tiap entri `kandidat[]` sudah membawa `.dna` berskema K1 PERSIS (lihat
+ * `stasiunKonsep.js` — keputusan desain: kandidat mentah AI dibersihkan JADI
+ * bentuk K1 `dna` di stasiun sebelumnya, supaya fungsi murni ini tidak perlu
+ * tahu apa pun soal bentuk balasan AI mentah).
  *
  * @param {object} opsi
- * @param {string[]} opsi.riwayatKunci  - `variation_key` seluruh pesanan listing ini.
- * @param {string[]} opsi.labelFoto     - label foto yang tersedia (sumbu `pembukaan`).
- * @param {() => number} [opsi.acak]    - RNG; disuntik agar bisa diuji deterministik.
- * @returns {{ vektor: object, kunci: string, jarakTerdekat: number, longgar: boolean } | null}
- *          null bila listing tidak punya foto sama sekali (tidak ada yang bisa dibuka).
+ * @param {Array}  opsi.kandidat        - `{ id, alasan, fakta_pendukung, foto_pendukung,
+ *                                          dna, cerita_global, peta_retensi }[]`, urut AI
+ *                                          terkuat dulu (dipakai sebagai pemecah seri).
+ * @param {string[]} [opsi.riwayatKunci] - `variation_key` listing ini, TERBARU DULU.
+ * @param {() => number} [opsi.acak]     - RNG disuntik; dipertahankan untuk stabilitas
+ *                                          antarmuka & simulasi deterministik. Pemilihan
+ *                                          saat ini sepenuhnya deterministik (jarak lalu
+ *                                          peringkat AI selalu memberi total order karena
+ *                                          `indeks` tidak pernah kembar), jadi RNG belum
+ *                                          dipakai — tempatnya di sini kalau kelak butuh
+ *                                          pemecah seri acak, tanpa mengubah signature.
+ * @returns {{ indeks:number, kandidat:object, dna:object, kunci:string,
+ *             jarakTerdekat:number, kembarDitolak:number, longgar:boolean,
+ *             alasan:string } | null}  null bila `kandidat` kosong.
  */
-export function pilihVariasi({ riwayatKunci = [], labelFoto = [], acak = Math.random } = {}) {
-  if (!Array.isArray(labelFoto) || labelFoto.length === 0) return null;
+export function saringKandidat({ kandidat = [], riwayatKunci = [], acak = Math.random } = {}) {
+  if (!Array.isArray(kandidat) || kandidat.length === 0) return null;
+  void acak;
 
   const riwayat = riwayatKunci.filter(Boolean).map(uraiKunci);
   const sudahAda = new Set(riwayatKunci.filter(Boolean));
   const terbaru = riwayat.slice(0, JENDELA_BEDA); // riwayat dikirim terbaru dulu
-  const pakai = hitungPemakaian(riwayat);
 
-  const idMekanisme = MEKANISME.map(x => x.id);
-  const idHook = HOOK.map(x => x.id);
-  const idRitme = RITME.map(x => x.id);
-  const idMood = MOOD.map(x => x.id);
+  const dinilai = kandidat.map((k, i) => {
+    const kunci = kunciVariasi(k?.dna);
+    const vektor = uraiKunci(kunci);
+    let terdekat = SUMBU_K4.length;
+    for (const lama of terbaru) terdekat = Math.min(terdekat, jarakSumbu(vektor, lama));
+    return { indeks: i, kandidat: k, kunci, terdekat, kembar: sudahAda.has(kunci) };
+  });
 
-  const kandidat = [];
-  for (let i = 0; i < JUMLAH_KANDIDAT; i++) {
-    const v = {
-      mekanisme: undiCondong(idMekanisme, pakai.mekanisme, acak),
-      hook:      undiCondong(idHook,      pakai.hook,      acak),
-      ritme:     undiCondong(idRitme,     pakai.ritme,     acak),
-      mood:      undiCondong(idMood,      pakai.mood,      acak),
-      pembukaan: undiCondong(labelFoto,   pakai.pembukaan, acak),
+  const kembarDitolak = dinilai.filter(d => d.kembar).length;
+  // Kandidat berkunci identik dengan riwayat SELALU dibuang duluan — itu bukan
+  // "kurang beda", itu PERSIS video yang sudah pernah dibuat untuk listing ini.
+  let pool = dinilai.filter(d => !d.kembar);
+  // Tiga kandidat AI per panggilan itu SEDIKIT (bukan 240 kandidat acak seperti
+  // dadu sistem LAPIS 3 lama) — kalau ketiganya kebetulan kembar dengan riwayat,
+  // memaksa gagal total lebih buruk daripada memakai yang ada. Daftar-hindari di
+  // prompt stasiunKonsep.js sudah menekan peluang ini; pool kosong seharusnya jarang.
+  if (pool.length === 0) pool = dinilai;
+
+  // Kelonggaran bertingkat, semangatnya sama dengan `pilihVariasi` lama: turun
+  // setingkat HANYA bila tidak ada yang lolos ambang di atasnya.
+  for (const batas of [MIN_SUMBU_BEDA, 1, 0]) {
+    const lolos = pool.filter(d => d.terdekat >= batas);
+    if (lolos.length === 0) continue;
+    // Jarak menang duluan (kebaruan), lalu peringkat AI (indeks kecil = lebih
+    // kuat menurut AI) memecah seri — AI sudah mengurutkan "terkuat dulu", tugas
+    // sistem cuma memastikan pemenangnya tidak kembar/terlalu mirip riwayat.
+    lolos.sort((a, b) => (b.terdekat - a.terdekat) || (a.indeks - b.indeks));
+    const menang = lolos[0];
+    const label = menang.kandidat?.id ?? `#${menang.indeks + 1}`;
+    return {
+      indeks: menang.indeks,
+      kandidat: menang.kandidat,
+      dna: menang.kandidat.dna,
+      kunci: menang.kunci,
+      jarakTerdekat: menang.terdekat,
+      kembarDitolak,
+      longgar: batas < MIN_SUMBU_BEDA,
+      alasan: kembarDitolak > 0
+        ? `Dipilih kandidat ${label} — jarak ${menang.terdekat} sumbu dari variasi terbaru (${kembarDitolak} kandidat lain ditolak karena kembar dengan riwayat).`
+        : `Dipilih kandidat ${label} — jarak ${menang.terdekat} sumbu dari variasi terbaru.`,
     };
-    const kunci = kunciVariasi(v);
-    if (sudahAda.has(kunci)) continue; // kombinasi persis ini sudah pernah dipakai
-    // Jarak ke variasi TERBARU — inilah yang menjaga "terasa beda", bukan sekadar
-    // "tidak identik". Dua video yang cuma beda mood terlihat kembar di feed.
-    let terdekat = SUMBU_DOMINAN.length;
-    for (const lama of terbaru) terdekat = Math.min(terdekat, jarakSumbu(v, lama));
-    // Kelangkaan: makin jarang nilainya dipakai, makin tinggi skornya.
-    const langka = SUMBU_DOMINAN.reduce((s, sb) => s + 1 / (1 + (pakai[sb].get(v[sb]) ?? 0)), 0);
-    kandidat.push({ v, kunci, terdekat, langka });
   }
-
-  if (kandidat.length === 0) return null; // ruang variasi benar-benar habis
-
-  // Tiga tingkat kelonggaran. Turun setingkat HANYA bila tidak ada yang lolos —
-  // properti bermaterial tipis (median 4 label) memang akan sampai ke sini, dan
-  // menolak menghasilkan apa pun lebih buruk daripada variasi yang agak mirip.
-  for (const batas of [MIN_SUMBU_BEDA, 1]) {
-    const lolos = kandidat.filter(k => k.terdekat >= batas);
-    if (lolos.length > 0) {
-      lolos.sort((a, b) => (b.terdekat - a.terdekat) || (b.langka - a.langka));
-      const p = lolos[0];
-      return { vektor: p.v, kunci: p.kunci, jarakTerdekat: p.terdekat, longgar: batas < MIN_SUMBU_BEDA };
-    }
-  }
-  // Tingkat terakhir: apa pun yang kuncinya belum pernah dipakai.
-  kandidat.sort((a, b) => (b.terdekat - a.terdekat) || (b.langka - a.langka));
-  const p = kandidat[0];
-  return { vektor: p.v, kunci: p.kunci, jarakTerdekat: p.terdekat, longgar: true };
+  return null; // tak tercapai secara praktis: batas 0 selalu meloloskan sisa pool
 }
