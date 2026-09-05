@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { bacaJson } from '../../../../lib/api';
 import { periksaRetensi, PATOKAN } from '../../../../../functions/_lib/retensi.js';
+import { bacaBeats } from '../../../../../functions/_lib/viralframe.js';
 
 // Skema K2 (rencana v2) — `beats` menggantikan `cuts` lama: setiap beat WAJIB
 // membawa Narrative State (viewer_question → reveal → informasi_baru →
@@ -316,14 +317,20 @@ export default function PanelStoryboard({ orderId, hasil, onUbah }: {
 
         {/* ── PART ─────────────────────────────────────────────────────── */}
         <div className="space-y-2.5">
-          {parts.map((p, i) => (
+          {parts.map((p, i) => {
+            // ⚠️ LEWAT `bacaBeats`, jangan `p.beats` langsung. Pesanan yang dibuat
+            // sebelum skema K2 menyimpan `cuts`, dan `p.beats.reduce(...)` pada
+            // undefined meruntuhkan SELURUH halaman jadi layar putih (terjadi
+            // 2026-09-05 saat membuka pesanan 3 & 4 di produksi).
+            const beats = bacaBeats(p);
+            return (
             <div key={i} className="border border-gray-200 rounded-xl overflow-hidden">
               <div className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 border-b border-gray-100">
                 <span className="text-xs font-bold text-[#0F172A]">
                   Part {i + 1} <span className="font-normal text-[#94A3B8]">· {p.peran}</span>
                 </span>
                 <span className="text-[11px] text-[#94A3B8] tabular-nums flex items-center gap-1">
-                  <Clock size={11} /> {p.beats.reduce((s, b) => s + (b.selesai - b.mulai), 0).toFixed(1)}s · {p.beats.length} beat
+                  <Clock size={11} /> {beats.reduce((s: number, b: Beat) => s + (b.selesai - b.mulai), 0).toFixed(1)}s · {beats.length} beat
                 </span>
               </div>
               <div className="p-3 space-y-2">
@@ -340,7 +347,7 @@ export default function PanelStoryboard({ orderId, hasil, onUbah }: {
                   </p>
                 )}
                 <ul className="space-y-1.5 pt-1 border-t border-gray-100">
-                  {p.beats.map((b, j) => (
+                  {beats.map((b: Beat, j: number) => (
                     <li key={j} className="text-[11px] text-[#64748B] leading-snug">
                       <div className="flex gap-2">
                         <span className="tabular-nums text-[#94A3B8] shrink-0">{b.mulai}–{b.selesai}s</span>
@@ -360,7 +367,8 @@ export default function PanelStoryboard({ orderId, hasil, onUbah }: {
                 </ul>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Caption SENGAJA tidak ditampilkan di sini. Satu-satunya tempatnya

@@ -23,7 +23,7 @@
 // dua pemanggil — tidak ada duplikasi yang bisa drift, jadi tidak butuh script
 // penjaga seperti yang dulu menjaga tiga jalur prompt paralel.
 
-import { anggaranKata, entriSumbu, FLOW } from './viralframe.js';
+import { anggaranKata, entriSumbu, FLOW, bacaBeats } from './viralframe.js';
 
 /**
  * Patokan retensi 2026 — ditampilkan sebagai konteks, bukan sebagai prediksi.
@@ -111,7 +111,7 @@ export function periksaRetensi({ ir, params, dna = null }) {
   parts.forEach((p, i) => {
     const nomor = i + 1;
     const dialog = String(p.dialog ?? '').trim();
-    const beats = Array.isArray(p.beats) ? p.beats : [];
+    const beats = bacaBeats(p);   // toleran skema lama `cuts` — lihat viralframe.js
     totalCut += beats.length;
 
     // ── Anggaran kata ────────────────────────────────────────────────────────

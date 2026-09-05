@@ -32,7 +32,7 @@
 // 3. DNA (agent + properti) diulang UTUH di setiap Part karena tiga Part = tiga
 //    generate yang tidak saling tahu.
 
-import { FLOW, labelInggris, slotFotoProperti, entriSumbu } from './viralframe.js';
+import { FLOW, labelInggris, slotFotoProperti, entriSumbu, bacaBeats } from './viralframe.js';
 
 /** Timecode desimal "00:02.2" dari detik (mulai/selesai K2 berpresisi 0.1). */
 function tc(detik) {
@@ -133,7 +133,7 @@ export function renderPromptFlow({ ir, prop, params, faceless }) {
     : (dnaAgent?.suara ?? 'natural conversational voice');
 
   return parts.map((p, i) => {
-    const beats = Array.isArray(p.beats) ? p.beats : [];
+    const beats = bacaBeats(p);   // toleran skema lama `cuts` — lihat viralframe.js
     const { utama, cadangan } = fotoUtamaPart(beats, maxSlot);
     const nomorRef = new Map(utama.map((b, n) => [b.foto_id, n + offset]));
     const nomorFallback = utama.length ? offset : offset;

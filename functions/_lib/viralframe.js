@@ -142,6 +142,50 @@ export const FLOW = {
   rasio: '9:16',
 };
 
+/**
+ * Baca `beats` sebuah Part, TOLERAN terhadap skema lama `cuts`.
+ *
+ * 🔥 WAJIB dipakai setiap pembaca `hasil_json.parts[]`. Skema K2 (2026-09-05)
+ * mengganti `cuts` → `beats` dan `detik` → `mulai`/`selesai`, tapi pesanan yang
+ * SUDAH TERSIMPAN tetap berbentuk lama. Tiga pembaca bereaksi berbeda dan semua
+ * salah:
+ *   · PanelStoryboard  → `p.beats.reduce(...)` pada undefined = LAYAR PUTIH
+ *   · retensi.js       → dianggap nol beat, verdik retensinya jadi ngawur
+ *   · flowCompiler.js  → VISUAL STORY kosong, prompt tanpa satu pun shot
+ * Dua terakhir GAGAL DIAM-DIAM — lebih berbahaya daripada yang crash.
+ *
+ * Aturan project ini sudah menyebutkannya: state persisten adalah INPUT TIDAK
+ * TEPERCAYA, dan pembaca riwayat wajib toleran dua bentuk. Mengubah skema tanpa
+ * pembaca yang toleran = fitur yang lolos semua gate lalu meledak saat dipakai.
+ *
+ * Field Narrative State memang TIDAK ADA di data lama — dibiarkan kosong, bukan
+ * dikarang. Yang penting cut-nya tetap tergambar dan durasinya tetap benar.
+ */
+export function bacaBeats(part) {
+  if (Array.isArray(part?.beats)) return part.beats;
+  const lama = Array.isArray(part?.cuts) ? part.cuts : [];
+  let t = 0;
+  return lama.map((c) => {
+    const mulai = t;
+    t += Number(c?.detik) || 0;
+    return {
+      foto_id: c?.foto_id,
+      label: c?.label ?? '',
+      skor: c?.skor ?? null,
+      mulai,
+      selesai: t,
+      kamera: c?.kamera ?? '',
+      aksi: c?.aksi ?? '',
+      viewer_question: '',
+      start_state: '',
+      reveal: '',
+      informasi_baru: '',
+      end_state: '',
+      next_question: '',
+    };
+  });
+}
+
 /** Durasi voiceover baku = 80% durasi klip — menyisakan napas awal & ekor penutup. */
 export function voDetikBaku(detikPart = FLOW.detikPerPart) {
   return Math.max(2, Math.round(detikPart * 0.8));
