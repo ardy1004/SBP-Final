@@ -28,8 +28,25 @@
    sendiri dan tidak ada angka ajaib yang bisa drift.
    ⚠️ `bottom` sengaja TIDAK diatur lewat kelas Tailwind di komponennya — dua sumber
    dengan spesifisitas sama membuat hasilnya bergantung urutan CSS. */
-:root { --sbp-bottom-inset: 0px; }
+/* Dua variabel, DUA ARAH BERBEDA — jangan tertukar:
+     --sbp-bottom-inset  : DITULIS PropertyDetailPage (tinggi sticky bar),
+                           DIBACA .cookie-banner di bawah.
+     --sbp-cookie-tinggi : DITULIS CookieBanner (tinggi dirinya sendiri),
+                           DIBACA FAB kontak di ChatWidget, yang dirender di
+                           root.tsx DI LUAR Layout sehingga tak punya cara lain
+                           tahu banner ini ada.
+   Tidak sirkular: CookieBanner membaca yang pertama dan menulis yang kedua.
+   Ketiganya tak pernah aktif bersamaan — ChatWidget memang disembunyikan di
+   halaman detail properti. */
+:root { --sbp-bottom-inset: 0px; --sbp-cookie-tinggi: 0px; }
 .cookie-banner { bottom: 0; }
+
+/* Label FAB WhatsApp melebar sesaat lalu menyusut. Hormati preferensi sistem:
+   bagi yang mematikan animasi, label tetap muncul dan tetap hilang — hanya
+   perpindahannya yang seketika. */
+@media (prefers-reduced-motion: reduce) {
+  .fab-wa, .fab-wa-label { transition: none !important; }
+}
 @media (max-width: 1023px) {           /* sticky bar sendiri ber-`lg:hidden` */
   .cookie-banner { bottom: var(--sbp-bottom-inset, 0px); }
 }

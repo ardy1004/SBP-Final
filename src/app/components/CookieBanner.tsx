@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Shield } from 'lucide-react';
 
 const KUNCI = 'sbp_cookie_consent';
@@ -20,6 +20,7 @@ function bacaConsent(): { tersedia: boolean; nilai: string | null } {
 
 export default function CookieBanner() {
   const [show, setShow] = useState(false);
+  const bannerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const { tersedia, nilai } = bacaConsent();
@@ -29,6 +30,31 @@ export default function CookieBanner() {
     // tidak ada banner — dan halaman yang runtuh lebih buruk daripada keduanya.
     if (tersedia && !nilai) setShow(true);
   }, []);
+
+  // Umumkan tinggi banner ke elemen `fixed` lain di dasar layar — saat ini FAB
+  // kontak di ChatWidget, yang dirender di root.tsx DI LUAR Layout sehingga tidak
+  // punya cara lain mengetahui banner ini ada. Tanpa ini keduanya berhimpit, dan
+  // label FAB yang melebar menutupi tombol "Setuju"/"Tolak" di sini.
+  //
+  // Tingginya DIUKUR, bukan dihardcode: isi banner membungkus berbeda di tiap
+  // lebar layar. ⚠️ Cleanup wajib — banner hilang setelah ditekan, dan var yang
+  // tertinggal akan membuat FAB melayang di atas ruang kosong selamanya.
+  useEffect(() => {
+    const akar = document.documentElement;
+    const el = bannerRef.current;
+    if (!show || !el) {
+      akar.style.removeProperty('--sbp-cookie-tinggi');
+      return;
+    }
+    const ukur = () => akar.style.setProperty('--sbp-cookie-tinggi', `${el.offsetHeight}px`);
+    ukur();
+    const ro = new ResizeObserver(ukur);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      akar.style.removeProperty('--sbp-cookie-tinggi');
+    };
+  }, [show]);
 
   const accept = () => {
     try {
@@ -53,6 +79,7 @@ export default function CookieBanner() {
     // membuat dua aturan berspesifisitas sama saling menimpa menurut urutan CSS,
     // dan banner akan kembali menutupi satu-satunya tombol konversi mobile.
     <div
+      ref={bannerRef}
       className="cookie-banner fixed left-0 right-0 z-50 px-4 pt-4"
       style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
     >

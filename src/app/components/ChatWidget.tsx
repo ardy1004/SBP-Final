@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useLocation } from 'react-router';
-import { MessageCircle, Sparkles, X, Send, CheckCircle } from 'lucide-react';
+import { Sparkles, X, Send, CheckCircle } from 'lucide-react';
 import ChatPropertyCard, { type ChatPropItem } from './ChatPropertyCard';
 import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnstile';
 import { formatRupiah, bacaJson } from '../../lib/api';
@@ -19,9 +19,9 @@ type ChatMsg = {
   waUrl?: string | null;
 };
 
-function WaIcon() {
+function WaIcon({ size = 18 }: { size?: number }) {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width="18" height="18" aria-hidden="true" style={{ flexShrink: 0 }}>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width={size} height={size} aria-hidden="true" style={{ flexShrink: 0 }}>
       <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
     </svg>
   );
@@ -29,8 +29,12 @@ function WaIcon() {
 
 export default function ChatWidget() {
   const { pathname } = useLocation();
-  const [showMenu, setShowMenu] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  // Label pengundang di FAB WhatsApp. ⚠️ Nilai awal WAJIB `false` supaya SSR dan
+  // render-klien-pertama identik; label baru dibuka di dalam useEffect. Menukar
+  // urutan ini (server "terbuka", klien "tertutup") = hydration mismatch #418,
+  // kelas error yang di repo ini belum tertutup dan sudah mahal.
+  const [labelTampil, setLabelTampil] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -63,6 +67,30 @@ export default function ChatWidget() {
   useEffect(() => {
     if (showChat) setTimeout(() => inputRef.current?.focus(), 50);
   }, [showChat]);
+
+  // Label "Chat Admin Sekarang": melebar sesaat lalu menyusut jadi ikon.
+  // SEKALI PER SESI — muncul lagi di setiap navigasi berubah dari menarik
+  // perhatian jadi mengganggu, dan halaman publik ini banyak dilalui.
+  //
+  // ⚠️ sessionStorage lewat try/catch: in-app browser Meta bisa memblokir akses
+  // site data, dan panggilan telanjang di dalam useEffect menembus ErrorBoundary
+  // sehingga seluruh halaman jadi layar error 500 — persis yang terjadi lewat
+  // CookieBanner pada 5 Sep 2026. Storage yang melempar dianggap "belum pernah".
+  useEffect(() => {
+    if (shouldHide) return;
+    let sudah = false;
+    try {
+      sudah = sessionStorage.getItem('sbp_fab_label') === '1';
+    } catch {
+      /* storage diblokir — perlakukan sebagai belum pernah */
+    }
+    if (sudah) return;
+    try { sessionStorage.setItem('sbp_fab_label', '1'); } catch { /* best-effort */ }
+
+    setLabelTampil(true);
+    const t = setTimeout(() => setLabelTampil(false), 4000);
+    return () => clearTimeout(t);
+  }, [shouldHide]);
 
   if (shouldHide) return null;
 
@@ -163,7 +191,12 @@ export default function ChatWidget() {
       {/* ── Chat window ──────────────────────────────────────────────────────── */}
       {showChat && (
         <div style={{
-          position: 'fixed', bottom: 90, right: 24, zIndex: 50,
+          // ⚠️ safe-area WAJIB: in-app browser Meta merender edge-to-edge, jadi
+          // tanpa ini dasar panel (tempat kolom input berada) tertimpa bar
+          // navigasi Android. Berfallback `, 0px` supaya browser tanpa inset
+          // tidak berubah sama sekali.
+          position: 'fixed', bottom: 'calc(90px + env(safe-area-inset-bottom, 0px))',
+          right: 24, zIndex: 50,
           width: 340, maxWidth: 'calc(100vw - 32px)', height: 480,
           display: 'flex', flexDirection: 'column',
           background: '#fff', borderRadius: 16, overflow: 'hidden',
@@ -343,72 +376,85 @@ export default function ChatWidget() {
         </div>
       )}
 
-      {/* ── FAB container ────────────────────────────────────────────────────── */}
-      <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 50 }}>
-        {/* Menu expand — always rendered, fades in/out */}
-        <div style={{
-          position: 'absolute', bottom: 72, right: 0,
-          display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end',
-          opacity: showMenu && !showChat ? 1 : 0,
-          transform: showMenu && !showChat ? 'translateY(0)' : 'translateY(8px)',
-          transition: 'opacity 0.2s ease, transform 0.2s ease',
-          pointerEvents: showMenu && !showChat ? 'auto' : 'none',
-        }}>
-          {/* Chat AI */}
-          <button
-            onClick={() => { setShowChat(true); setShowMenu(false); }}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '10px 16px', borderRadius: 999,
-              background: '#fff', border: '1.5px solid #1565C0', color: '#1565C0',
-              fontWeight: 600, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
-              boxShadow: '0 2px 12px rgba(0,0,0,0.12)',
-            }}
-          >
-            <Sparkles size={14} />
-            Chat dengan Asisten AI
-          </button>
-          {/* WhatsApp */}
-          <button
-            onClick={() => { trackWaClick('chat_widget'); window.open(WA_HREF, '_blank', 'noopener,noreferrer'); setShowMenu(false); }}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '10px 16px', borderRadius: 999,
-              background: '#25D366', border: 'none', color: '#fff',
-              fontWeight: 600, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap',
-              boxShadow: '0 2px 12px rgba(37,211,102,0.35)',
-            }}
-          >
-            <WaIcon />
-            WhatsApp Admin
-          </button>
-        </div>
+      {/* ── FAB kontak ───────────────────────────────────────────────────────────
+          Dua tombol bertumpuk, TANPA menu perantara (keputusan user 8 Sep 2026).
+          Sebelumnya satu FAB biru membuka menu berisi dua pilihan, sehingga jalur
+          WhatsApp berjarak DUA ketukan — di situs yang klik WA-nya cuma 0,015%
+          dari tayangan. Sekarang keduanya satu ketukan, dan chatbot justru lebih
+          mudah ditemukan karena tidak lagi tersembunyi di balik menu.
 
-        {/* Main FAB button */}
+          ⚠️ `bottom` menjumlahkan TIGA hal, ketiganya perlu:
+            24px                     jarak dasar
+            --sbp-cookie-tinggi      supaya tidak berhimpit dengan banner cookie,
+                                     yang dirender di Layout sementara widget ini
+                                     di root.tsx — keduanya tak saling tahu posisi
+            env(safe-area-inset-bottom)
+                                     in-app browser Meta merender EDGE-TO-EDGE;
+                                     tanpa ini bar navigasi Android menimpa tombol.
+                                     Berkas ini dulu TIDAK punya safe-area sama
+                                     sekali dan luput dari daftar wajib di CLAUDE.md
+      */}
+      <div style={{
+        position: 'fixed',
+        bottom: 'calc(24px + var(--sbp-cookie-tinggi, 0px) + env(safe-area-inset-bottom, 0px))',
+        right: 24, zIndex: 50,
+        display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-end',
+      }}>
+        {/* Asisten AI — sekunder, biru identitas SBP */}
         <button
-          onClick={() => {
-            if (showChat) {
-              setShowChat(false);
-            } else {
-              setShowMenu(prev => !prev);
-            }
-          }}
+          onClick={() => setShowChat(v => !v)}
           style={{
-            width: 56, height: 56, borderRadius: '50%', border: 'none',
+            width: 44, height: 44, borderRadius: '50%', border: 'none',
             background: '#1565C0',
-            boxShadow: '0 4px 16px rgba(21,101,192,0.45)',
+            boxShadow: '0 3px 12px rgba(21,101,192,0.4)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: 'pointer', transition: 'background 0.2s, transform 0.15s',
+            cursor: 'pointer', transition: 'background 0.2s',
           }}
           onMouseEnter={e => (e.currentTarget.style.background = '#1255A8')}
           onMouseLeave={e => (e.currentTarget.style.background = '#1565C0')}
-          aria-label={showChat ? 'Tutup chat' : 'Buka menu kontak'}
+          aria-label={showChat ? 'Tutup Asisten AI' : 'Buka Asisten AI'}
         >
           {showChat
-            ? <X size={24} color="white" />
-            : <MessageCircle size={24} color="white" />
+            ? <X size={20} color="white" />
+            : <Sparkles size={20} color="white" />
           }
         </button>
+
+        {/* WhatsApp — utama.
+            `<a href>`, BUKAN button + window.open: navigasi native terjadi
+            seketika dan tidak bisa diblokir in-app browser Meta, sementara
+            sendBeacon di trackWaClick tetap terkirim. Alasan lengkapnya sudah
+            ditulis di src/lib/waTrack.ts. */}
+        <a
+          href={WA_HREF}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => trackWaClick('chat_widget')}
+          className="fab-wa"
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            gap: labelTampil ? 10 : 0,
+            height: 56, minWidth: 56, padding: '0 16px', borderRadius: 999,
+            background: '#25D366', color: '#fff', textDecoration: 'none',
+            fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap',
+            boxShadow: '0 4px 16px rgba(37,211,102,0.45)',
+            transition: 'gap 0.3s ease',
+          }}
+          aria-label="Chat Admin lewat WhatsApp"
+        >
+          <WaIcon size={26} />
+          <span
+            className="fab-wa-label"
+            style={{
+              maxWidth: labelTampil ? 200 : 0,
+              opacity: labelTampil ? 1 : 0,
+              overflow: 'hidden',
+              transition: 'max-width 0.35s ease, opacity 0.25s ease',
+            }}
+          >
+            Chat Admin Sekarang
+          </span>
+        </a>
       </div>
     </>
   );
