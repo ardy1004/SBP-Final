@@ -1,7 +1,8 @@
 import { useState, useRef } from 'react';
 import { MessageCircle, X, Star, Check, AlertCircle } from 'lucide-react';
-import { postLead, formatRupiah, type NormalizedPropertyDetail, bacaJson } from '../../lib/api';
+import { postLead, formatRupiah, type NormalizedPropertyDetail } from '../../lib/api';
 import { trackEvent } from '../../lib/tracking';
+import { bukaWaProperti } from '../../lib/waProperty';
 import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnstile';
 import { cfImg } from '../../lib/img';
 
@@ -102,7 +103,10 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
     }
   };
 
-  // Jalur cadangan: simpan lead quick_wa lalu buka WA tanpa isi form
+  // Jalur cadangan: simpan lead quick_wa lalu buka WA tanpa isi form.
+  // Isinya kini di `src/lib/waProperty.ts` — dipakai bersama tombol "Chat WA
+  // Sekarang" di sticky bar & kartu CTA, supaya ketiga pintu WA properti mustahil
+  // menyimpang (perilaku, pelacakan, maupun dedup CAPI-nya).
   const handleSkip = async () => {
     if (skipLoading) return;
     setSkipLoading(true);
@@ -112,22 +116,7 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
       window.location.href = ADMIN_WA_GENERAL;
       return;
     }
-    const fallback = `https://wa.me/6281391278889?text=${encodeURIComponent(`Halo, saya tertarik dengan properti: ${property.title}`)}`;
-    let waUrl = fallback;
-    let contactEventId: string | undefined;
-    try {
-      const r = await fetch(`/api/properties/${property.slug}/wa-click`, { method: 'POST' });
-      const d = await bacaJson(r);
-      waUrl = d?.data?.wa_url ?? fallback;
-      contactEventId = d?.data?.event_id;
-    } catch { /* pakai fallback */ }
-    trackEvent('Contact', {
-      content_name: property.title,
-      content_ids: [property.kode],
-      value: property.harga,
-      currency: 'IDR',
-    }, { eventID: contactEventId });
-    window.location.href = waUrl;
+    await bukaWaProperti(property);
   };
 
   const inputClass = 'w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0] transition-all';

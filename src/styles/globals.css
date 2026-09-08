@@ -14,8 +14,25 @@
 .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
 /* Halaman detail properti: sticky bar `fixed` tidak menempati ruang layout, jadi
    konten terbawah tertutup permanen tanpa padding ini. 7rem = tinggi bar + jeda. */
-.pb-sticky-bar { padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px)); }
+/* 8,5rem, naik dari 7rem sejak sticky bar memuat DUA tombol (Chat WA / Isi Form)
+   di baris terpisah di bawah harga — bar-nya jadi lebih tinggi. */
+.pb-sticky-bar { padding-bottom: calc(8.5rem + env(safe-area-inset-bottom, 0px)); }
 @media (min-width: 1024px) { .pb-sticky-bar { padding-bottom: 0; } }
+
+/* Banner cookie duduk DI ATAS sticky bar, bukan menutupinya.
+   Sampai 8 Sep 2026 keduanya sama-sama `fixed bottom-0`, dan banner (z-50) menimpa
+   sticky bar (z-40) — satu-satunya tombol konversi mobile. Karena pengunjung iklan
+   SELALU pengunjung baru, banner selalu muncul: 6.470 tayangan → 1 klik WA (0,015%).
+   `--sbp-bottom-inset` disetel PropertyDetailPage dari tinggi bar yang DIUKUR
+   (ResizeObserver), bukan angka tetap — kalau isinya bertambah, banner ikut naik
+   sendiri dan tidak ada angka ajaib yang bisa drift.
+   ⚠️ `bottom` sengaja TIDAK diatur lewat kelas Tailwind di komponennya — dua sumber
+   dengan spesifisitas sama membuat hasilnya bergantung urutan CSS. */
+:root { --sbp-bottom-inset: 0px; }
+.cookie-banner { bottom: 0; }
+@media (max-width: 1023px) {           /* sticky bar sendiri ber-`lg:hidden` */
+  .cookie-banner { bottom: var(--sbp-bottom-inset, 0px); }
+}
 
 /* ===== SBP DESIGN TOKENS ===== */
 :root {

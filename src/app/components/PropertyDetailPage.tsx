@@ -12,6 +12,7 @@ import { formatRibuan } from '../../lib/format';
 import { trackEvent } from '../../lib/tracking';
 import { TAMPILKAN_PETA_PUBLIK } from '../../lib/fiturPublik';
 import { cfImg, cfSrcSet } from '../../lib/img';
+import TombolKontakProperti from './TombolKontakProperti';
 // KPRCalculator dimuat hanya di klien — recharts akses window saat import, crash SSR.
 // Pola mounted-flag: server & render-klien-pertama tampilkan placeholder identik → no hydration mismatch.
 function KPRCalculatorClient({ defaultHarga }: { defaultHarga: number }) {
@@ -428,6 +429,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
   const formRef = useRef<HTMLDivElement>(null);
   const [showStickyBar, setShowStickyBar] = useState(true);
   const [showSheet, setShowSheet] = useState(false);
+  const stickyRef = useRef<HTMLDivElement>(null);
 
   // Guard: kode_listing yang sudah di-fire agar tidak double-fire di StrictMode / SPA nav
   const viewContentFiredRef = useRef<string | null>(null);
@@ -444,6 +446,33 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
     if (formRef.current) observer.observe(formRef.current);
     return () => observer.disconnect();
   }, [property]); // re-attach after property loads
+
+  // Beri tahu elemen `fixed` GLOBAL (CookieBanner, dirender di Layout) bahwa dasar
+  // layar sedang dipakai sticky bar, supaya ia duduk DI ATASNYA alih-alih menimpanya.
+  //
+  // KENAPA ADA: sampai 8 Sep 2026 CookieBanner (`fixed bottom-0` z-50) menutupi
+  // sticky bar (z-40) — satu-satunya tombol konversi mobile. Pengunjung iklan selalu
+  // pengunjung baru, jadi banner SELALU muncul: 6.470 tayangan → 1 klik WA (0,015%).
+  //
+  // Tingginya DIUKUR, bukan dihardcode: bar-nya kini memuat dua tombol dan bisa
+  // berubah lagi. ⚠️ Cleanup wajib — tanpa `removeProperty`, halaman lain yang tidak
+  // punya sticky bar akan menyisakan celah kosong di bawah banner setelah navigasi SPA.
+  useEffect(() => {
+    const akar = document.documentElement;
+    const el = stickyRef.current;
+    if (!showStickyBar || !el) {
+      akar.style.removeProperty('--sbp-bottom-inset');
+      return;
+    }
+    const ukur = () => akar.style.setProperty('--sbp-bottom-inset', `${el.offsetHeight}px`);
+    ukur();
+    const ro = new ResizeObserver(ukur);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      akar.style.removeProperty('--sbp-bottom-inset');
+    };
+  }, [showStickyBar, property]);
 
   // Fetch detail + similar
   useEffect(() => {
@@ -665,9 +694,10 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                 bawah wajar untuk halaman listing properti.
                 Blok inline ini tidak bergantung pada `position: fixed` sama sekali,
                 jadi ia mustahil tertutup bar navigasi.
-                ⚠️ Perilaku tombol SENGAJA identik dengan sticky bar (buka
-                ContactAdminSheet berisi form + pintasan "Langsung WA") — keputusan
-                user 2026-09-02. Ini titik masuk baru, BUKAN alur baru. */}
+                ⚠️ Perilaku tombol SENGAJA identik dengan sticky bar — keduanya
+                memakai komponen yang SAMA (TombolKontakProperti), jadi keduanya
+                mustahil menyimpang. Sejak 8 Sep 2026 isinya dua jalur berdampingan:
+                "Chat WA Sekarang" (langsung) dan "Isi Form Dulu" (alur lama). */}
             <div className="lg:hidden bg-white rounded-2xl p-5 mb-5 shadow-sm border border-gray-100">
               <div className="flex items-end justify-between gap-3 mb-3">
                 <div className="min-w-0">
@@ -688,15 +718,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                   {property.nett && <span className="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-[#1565C0] border border-blue-200">Nett</span>}
                 </div>
               </div>
-              <button
-                onClick={() => setShowSheet(true)}
-                className="w-full flex flex-col items-center px-5 py-3 rounded-xl font-bold text-white bg-[#10B981] hover:bg-[#059669] transition-colors"
-              >
-                <span className="flex items-center gap-2 text-sm leading-tight">
-                  <MessageCircle size={16} /> Hubungi Admin Via WA
-                </span>
-                <span className="text-[10px] font-normal text-white/75 leading-tight mt-0.5">Isi form singkat dulu</span>
-              </button>
+              <TombolKontakProperti property={property} onIsiForm={() => setShowSheet(true)} />
             </div>
 
             {/* Description */}
@@ -856,23 +878,19 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
           Prasyaratnya `viewport-fit=cover` di root.tsx — tanpa itu env() = 0. */}
       {showStickyBar && (
         <div
-          className="sticky-bottom-bar fixed bottom-0 left-0 right-0 z-40 lg:hidden bg-white border-t border-gray-200 shadow-lg px-4 pt-3"
+          ref={stickyRef}
+          className="sticky-bottom-bar fixed bottom-0 left-0 right-0 z-40 lg:hidden bg-white border-t border-gray-200 shadow-lg px-4 pt-2.5"
           style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))' }}
         >
-          <div className="flex items-center justify-between max-w-lg mx-auto">
-            <div>
+          <div className="max-w-lg mx-auto">
+            {/* Harga pindah ke barisnya sendiri agar dua tombol di bawah dapat
+                lebar penuh — pada layar 360px, harga + dua tombol dalam satu baris
+                memaksa label tombol terpotong. */}
+            <div className="flex items-baseline justify-between gap-2 mb-2">
               <div className="font-bold text-[#1565C0] font-display">{formatRupiah(property.harga)}</div>
-              <div className="text-xs text-gray-500">{property.jenis} · {property.kecamatan}</div>
+              <div className="text-xs text-gray-500 truncate">{property.jenis} · {property.kecamatan}</div>
             </div>
-            <button
-              onClick={() => setShowSheet(true)}
-              className="flex flex-col items-center px-5 py-2 rounded-xl font-bold text-white bg-[#10B981] hover:bg-[#059669] transition-colors"
-            >
-              <span className="flex items-center gap-2 text-sm leading-tight">
-                <MessageCircle size={16} /> Hubungi Admin Via WA
-              </span>
-              <span className="text-[10px] font-normal text-white/75 leading-tight mt-0.5">Isi form singkat dulu</span>
-            </button>
+            <TombolKontakProperti property={property} onIsiForm={() => setShowSheet(true)} />
           </div>
         </div>
       )}

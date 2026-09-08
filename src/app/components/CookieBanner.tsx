@@ -1,16 +1,41 @@
 import { useState, useEffect } from 'react';
 import { Shield } from 'lucide-react';
 
+const KUNCI = 'sbp_cookie_consent';
+
+// ⚠️ localStorage WAJIB lewat try/catch — pola yang sama sudah dipakai
+// src/lib/titipJualDraft.ts. Panggilan telanjang di dalam useEffect MELEMPAR di
+// browser yang memblokir site data (in-app browser Meta, Safari private mode),
+// dan lemparan itu menembus ErrorBoundary sehingga SELURUH halaman berubah jadi
+// layar error 500. Terukur 3× pada 5 Sep 2026 di `/` dan `/hotel-dijual-jogja`:
+// `Failed to read the 'localStorage' property` dengan context ErrorBoundary/500.
+// Pengunjung tidak melihat properti sama sekali — di jalur iklan berbayar.
+function bacaConsent(): { tersedia: boolean; nilai: string | null } {
+  try {
+    return { tersedia: true, nilai: localStorage.getItem(KUNCI) };
+  } catch {
+    return { tersedia: false, nilai: null };
+  }
+}
+
 export default function CookieBanner() {
   const [show, setShow] = useState(false);
 
   useEffect(() => {
-    const consent = localStorage.getItem('sbp_cookie_consent');
-    if (!consent) setShow(true);
+    const { tersedia, nilai } = bacaConsent();
+    // Storage tidak tersedia → JANGAN tampilkan. Kalau getItem melempar, setItem
+    // juga akan melempar, jadi pilihan user tak pernah bisa disimpan dan banner
+    // akan muncul lagi di SETIAP navigasi. Banner abadi lebih mengganggu daripada
+    // tidak ada banner — dan halaman yang runtuh lebih buruk daripada keduanya.
+    if (tersedia && !nilai) setShow(true);
   }, []);
 
   const accept = () => {
-    localStorage.setItem('sbp_cookie_consent', 'accepted');
+    try {
+      localStorage.setItem(KUNCI, 'accepted');
+    } catch {
+      /* best-effort: banner tetap ditutup untuk sesi ini */
+    }
     setShow(false);
   };
 
@@ -21,8 +46,14 @@ export default function CookieBanner() {
     // elemen ber-`fixed bottom-0` bisa tertimpa bar navigasi sistem di in-app
     // browser Meta. Tanpa baris ini tombol "Setuju" ikut tertutup — masalahnya
     // hanya berpindah dari sticky bar ke sini. Berfallback `, 0px`.
+    //
+    // ⚠️ TIDAK ada `bottom-0` di sini, dan itu disengaja: posisinya diatur
+    // `.cookie-banner` di globals.css supaya banner bisa naik di atas sticky bar
+    // halaman properti (var `--sbp-bottom-inset`). Menaruh `bottom-0` kembali
+    // membuat dua aturan berspesifisitas sama saling menimpa menurut urutan CSS,
+    // dan banner akan kembali menutupi satu-satunya tombol konversi mobile.
     <div
-      className="fixed bottom-0 left-0 right-0 z-50 px-4 pt-4"
+      className="cookie-banner fixed left-0 right-0 z-50 px-4 pt-4"
       style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
     >
       <div className="max-w-4xl mx-auto bg-[#0B2447] text-white rounded-2xl shadow-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4">

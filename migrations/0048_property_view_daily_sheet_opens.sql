@@ -1,0 +1,24 @@
+-- 0048 — telemetri corong: berapa pengunjung membuka form kontak.
+--
+-- LATAR. Pada 5–7 Sep 2026 halaman detail properti #974 menerima 360 tampilan dari
+-- iklan berbayar (Rp128.498) dan menghasilkan NOL klik WA. Dengan data yang ada
+-- saat itu, "tidak ada yang berniat menghubungi" MUSTAHIL dibedakan dari "banyak
+-- yang berniat lalu tersangkut di dalam form" — corongnya buta persis di tengah,
+-- dan tanpa kolom ini ronde perbaikan berikutnya cuma bisa menebak.
+--
+-- Melengkapi corong dalam SATU tabel, jadi terbaca tanpa join:
+--     views  →  sheet_opens  →  wa_clicks   (lalu `leads` untuk yang mengisi form)
+--
+-- ⚠️ Percobaan pertama memakai `property_click_geo` dengan click_type='sheet_open'
+-- dan GAGAL 500 di produksi: tabel itu punya CHECK (click_type IN ('card_click',
+-- 'wa_click')) yang tidak terlihat sampai endpointnya benar-benar dipanggil —
+-- typecheck, check:functions, check:bundle, dan functions build SEMUANYA hijau.
+-- Melonggarkan CHECK di SQLite menuntut RENAME→CREATE→DROP, pola yang nyaris
+-- menghapus data di migrasi 0022. ADD COLUMN jauh lebih aman DAN hasilnya lebih
+-- baik: agregat harian, sebaris dengan penghitung yang sudah ada.
+--
+-- ⚠️ Tabel ini memakai kolom `tanggal` (TEKS WIB), bukan `created_at`. Penulisnya
+-- WAJIB memakai SQL_TANGGAL_WIB dari functions/_lib/waktu.js — `DATE('now')` di D1
+-- adalah UTC, dan bucket harian akan meleset 7 jam.
+
+ALTER TABLE property_view_daily ADD COLUMN sheet_opens INTEGER NOT NULL DEFAULT 0;
