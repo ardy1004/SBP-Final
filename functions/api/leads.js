@@ -61,6 +61,18 @@ export async function onRequestPost(context) {
   const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? null;
   const captcha = await verifyTurnstile(body.cf_turnstile_token, env.TURNSTILE_SECRET, ip, new URL(request.url).hostname);
   if (!captcha.ok) {
+    // ⚠️ WAJIB DICATAT — pola yang sama dengan titip-jual.js:120. Sampai 8 Sep 2026
+    // endpoint INI membalas 403 tanpa jejak apa pun, padahal kembarannya mencatat.
+    // Akibatnya kalau Turnstile memblokir setiap kiriman dari in-app browser Meta
+    // (lingkungan yang memang paling rawan: widget-nya butuh JS pihak ketiga), lead
+    // hilang senyap dan error_logs tetap bersih — kelas kegagalan yang persis sama
+    // dengan insiden 49 hari itu. Jangan hapus demi "menghemat baris".
+    context.waitUntil(logServerError(env, {
+      message: `[leads] Ditolak Turnstile (403): ${captcha.error ?? 'tanpa-alasan'}`,
+      url: request.url,
+      userAgent: request.headers.get('User-Agent') ?? undefined,
+      context: { kind: 'turnstile-403', reason: captcha.error ?? null, ada_token: Boolean(body.cf_turnstile_token) },
+    }));
     return jsonError('Verifikasi anti-bot gagal. Silakan muat ulang halaman dan coba lagi.', 403);
   }
 
