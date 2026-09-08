@@ -101,12 +101,57 @@ async function cariSubmitLama(db, submit_id) {
 export async function onRequestPost(context) {
   const { request, env } = context;
 
+  // 🔥 KETIGA jalur keluar paling awal WAJIB dicatat — sampai 8 Sep 2026 tidak
+  // satu pun dari 415/400/503 meninggalkan jejak, dan justru di sinilah submit
+  // nyata mati. Tiga klien (8 Sep) melapor "sudah mengisi form" sementara
+  // `error_logs` bersih, `properties`/`owners`/`agreements` nol, dan dari sisi
+  // server semuanya tampak sehat. Perbaikan 12 Agu menutup 403 dan 422 lalu
+  // BERHENTI di situ — melewatkan justru jalur yang dilalui submit besar.
+  // Aturannya sekarang: endpoint publik mencatat SELURUH jalur non-2xx.
   const ct = request.headers.get('content-type') ?? '';
-  if (!ct.includes('application/json')) return jsonError('Content-Type harus application/json', 415);
+  if (!ct.includes('application/json')) {
+    context.waitUntil(logServerError(env, {
+      message: `[titip-jual] Content-Type ditolak (415): ${ct.slice(0, 60) || '(kosong)'}`,
+      url: request.url,
+      userAgent: request.headers.get('User-Agent') ?? undefined,
+      context: { kind: 'content-type-415', content_type: ct.slice(0, 60) },
+    }));
+    return jsonError('Content-Type harus application/json', 415);
+  }
 
+  // ⚠️ Body dibaca sebagai TEKS dulu, baru di-parse — bukan gaya penulisan.
+  // Ini satu-satunya cara membedakan dua kegagalan yang gejalanya identik:
+  //   · request.text() melempar → koneksi PUTUS di tengah unggahan
+  //   · JSON.parse melempar     → body sampai utuh tapi isinya rusak
+  // Payload form ini memuat seluruh foto sebagai base64 (8–11 MB, 60–90 detik
+  // di uplink seluler), jadi putus di tengah adalah mode gagal yang PALING
+  // mungkin. `content_length` vs `byte_terbaca` memberi angka pembandingnya;
+  // tanpa itu ronde diagnosa berikutnya cuma bisa menebak lagi.
+  //
+  // ⚠️ JANGAN pernah mencatat isi body: memuat NIK, nama, alamat KTP, dan nomor
+  // WA, sedangkan error_logs terbaca di Admin dan tidak terenkripsi.
   let body;
-  try { body = await request.json(); }
-  catch { return jsonError('Body JSON tidak valid', 400); }
+  let byteTerbaca = null;
+  try {
+    const mentah = await request.text();
+    byteTerbaca = mentah.length;
+    body = JSON.parse(mentah);
+  } catch {
+    const tahap = byteTerbaca === null ? 'baca' : 'parse';
+    context.waitUntil(logServerError(env, {
+      message: `[titip-jual] Body tidak terbaca (400): gagal saat ${tahap}`
+        + (tahap === 'baca' ? ' — koneksi putus di tengah unggahan?' : ' — body sampai utuh tapi JSON rusak'),
+      url: request.url,
+      userAgent: request.headers.get('User-Agent') ?? undefined,
+      context: {
+        kind: 'body-400',
+        tahap,
+        content_length: request.headers.get('content-length'),
+        byte_terbaca: byteTerbaca,
+      },
+    }));
+    return jsonError('Body JSON tidak valid', 400);
+  }
 
   // ─── Anti-bot: verifikasi Turnstile sebelum proses berat (3 INSERT + upload R2) ──
   const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? null;
@@ -227,7 +272,35 @@ export async function onRequestPost(context) {
   // pesan yang ramah.
   const MAX_TOTAL_PHOTO_BYTES = 40 * 1024 * 1024;
   const photos_raw = Array.isArray(body.photos) ? body.photos : [];
-  if (photos_raw.length === 0) {
+
+  // 🔥 DUA BENTUK DITERIMA, DAN ITU WAJIB.
+  //   · `photo_keys` — bentuk BARU: foto sudah diunggah satu per satu lewat
+  //     /api/titip-jual-foto, di sini tinggal referensinya (beberapa KB).
+  //   · `photos`     — bentuk LAMA: seluruh foto base64 dalam body ini.
+  // Menghapus jalur lama "karena sudah tidak dipakai" adalah persis kesalahan
+  // yang mematikan submit ±3 minggu di f7bc909 dan 49 hari di insiden Turnstile:
+  // pengunjung dengan tab yang sudah lama terbuka masih memegang bundle lama.
+  // Jalur lama boleh dihapus hanya setelah terbukti nol pemakaian di produksi.
+  const photo_keys = Array.isArray(body.photo_keys) ? body.photo_keys : [];
+  const pakaiKey = photo_keys.length > 0;
+
+  if (pakaiKey) {
+    if (photo_keys.length > 20) {
+      errors.photos = 'Terlalu banyak foto (maks 20)';
+    } else {
+      for (let i = 0; i < photo_keys.length; i++) {
+        const k = photo_keys[i];
+        // Key datang dari klien, jadi tidak tepercaya. Tanpa pagar ini seseorang
+        // bisa merujuk objek mana pun di bucket — termasuk `signatures/` (NIK)
+        // dan arsip kontrak — lalu menampilkannya lewat halaman listing publik.
+        if (typeof k !== 'string' || k.length > 200 ||
+            !k.startsWith('property-photos/') || k.includes('..') || k.includes('//')) {
+          errors.photos = `Referensi foto #${i + 1} tidak valid`;
+          break;
+        }
+      }
+    }
+  } else if (photos_raw.length === 0) {
     errors.photos = 'Minimal 1 foto properti wajib diupload';
   } else if (photos_raw.length > 20) {
     errors.photos = `Terlalu banyak foto (maks 20)`;
@@ -263,6 +336,15 @@ export async function onRequestPost(context) {
 
   if (!env.NIK_ENC_KEY) {
     console.error('[titip-jual] NIK_ENC_KEY tidak terkonfigurasi');
+    // Jalur ketiga yang dulu tanpa jejak. Kalau secret ini pernah hilang dari
+    // environment (sudah terjadi pada R2_PUBLIC_BASE — deploy menghapusnya
+    // diam-diam, lihat CLAUDE.md), SELURUH submit gagal 503 dan tidak ada
+    // seorang pun yang tahu. Nama secret sengaja tidak ditulis di pesan.
+    context.waitUntil(logServerError(env, {
+      message: '[titip-jual] Konfigurasi enkripsi tidak lengkap (503) — submit ditolak',
+      url: request.url,
+      context: { kind: 'config-503' },
+    }));
     return jsonError('Konfigurasi server tidak lengkap', 503);
   }
 
@@ -510,6 +592,13 @@ export async function onRequestPost(context) {
   // Paralel per batch 5 — upload sekuensial 20 foto berisiko mendekati
   // wall-clock 30 detik Workers.
   let photos_uploaded = 0;
+  const totalFoto = pakaiKey ? photo_keys.length : photos_raw.length;
+
+  const catatGambar = (key, i) => env.DB.prepare(`
+    INSERT INTO property_images (property_id, url_webp, alt_text, urutan, is_cover)
+    VALUES (?,?,?,?,?)
+  `).bind(property_id, key, titleFinal, i, i === 0 ? 1 : 0).run();
+
   const uploadOne = async (p, i) => {
     const match = p.match(/^data:image\/(jpeg|jpg|png|webp);base64,/i);
     const ext = match[1].toLowerCase() === 'jpg' ? 'jpeg' : match[1].toLowerCase();
@@ -520,24 +609,53 @@ export async function onRequestPost(context) {
     // WebP conversion dilakukan client-side (downscale 1920px); JPEG/PNG tetap diterima
     const r2Key = `property-photos/${crypto.randomUUID()}.${ext}`;
     await env.MEDIA.put(r2Key, bytes.buffer, { httpMetadata: { contentType: `image/${ext}` } });
-    await env.DB.prepare(`
-      INSERT INTO property_images (property_id, url_webp, alt_text, urutan, is_cover)
-      VALUES (?,?,?,?,?)
-    `).bind(property_id, r2Key, titleFinal, i, i === 0 ? 1 : 0).run();
+    await catatGambar(r2Key, i);
   };
-  for (let start = 0; start < photos_raw.length; start += 5) {
-    const batch = photos_raw.slice(start, start + 5)
-      .map((p, j) => uploadOne(p, start + j));
-    const results = await Promise.allSettled(batch);
-    results.forEach((r, j) => {
-      if (r.status === 'fulfilled') photos_uploaded++;
-      else console.error(`[titip-jual] Upload foto #${start + j + 1} gagal:`, r.reason?.message);
-    });
+
+  if (pakaiKey) {
+    // Bentuk BARU: byte-nya sudah ada di R2, di sini tinggal mencatatnya.
+    // ⚠️ `head()` WAJIB sebelum INSERT. Key datang dari klien; tanpa pemeriksaan
+    // ini seseorang bisa mengirim key karangan dan listing lahir dengan foto
+    // hantu — halaman publik menampilkan kotak rusak, dan penyebabnya nyaris
+    // mustahil ditelusuri karena barisnya tampak normal di database.
+    for (let i = 0; i < photo_keys.length; i++) {
+      try {
+        const ada = await env.MEDIA.head(photo_keys[i]);
+        if (!ada) {
+          console.error(`[titip-jual] key foto #${i + 1} tidak ada di R2:`, photo_keys[i]);
+          continue;
+        }
+        await catatGambar(photo_keys[i], i);
+        photos_uploaded++;
+      } catch (err) {
+        console.error(`[titip-jual] Catat foto #${i + 1} gagal:`, err?.message);
+      }
+    }
+  } else {
+    // Bentuk LAMA: base64 di dalam body ini. Paralel per batch 5 — sekuensial
+    // 20 foto berisiko mendekati wall-clock 30 detik Workers.
+    for (let start = 0; start < photos_raw.length; start += 5) {
+      const batch = photos_raw.slice(start, start + 5)
+        .map((p, j) => uploadOne(p, start + j));
+      const results = await Promise.allSettled(batch);
+      results.forEach((r, j) => {
+        if (r.status === 'fulfilled') photos_uploaded++;
+        else console.error(`[titip-jual] Upload foto #${start + j + 1} gagal:`, r.reason?.message);
+      });
+    }
   }
 
-  const photos_failed = photos_raw.length - photos_uploaded;
+  const photos_failed = totalFoto - photos_uploaded;
   if (photos_failed > 0) {
-    console.error(`[titip-jual] ${photos_failed}/${photos_raw.length} foto gagal upload untuk property_id=${property_id}`);
+    console.error(`[titip-jual] ${photos_failed}/${totalFoto} foto gagal upload untuk property_id=${property_id}`);
+    // Listing yang lahir tanpa foto praktis tidak bisa dipasarkan, dan sampai
+    // sekarang kegagalannya hanya sampai ke console. Dicatat supaya admin tahu
+    // harus meminta ulang fotonya — datanya sendiri sudah aman tersimpan.
+    context.waitUntil(logServerError(env, {
+      message: `[titip-jual] ${photos_failed}/${totalFoto} foto gagal disimpan (listing ${kode_listing})`,
+      url: request.url,
+      context: { kind: 'foto-gagal', property_id, bentuk: pakaiKey ? 'photo_keys' : 'base64', gagal: photos_failed, total: totalFoto },
+    }));
   }
 
   // ─── Meta CAPI: CompleteRegistration (lead PENJUAL) ───────────────────────
@@ -602,7 +720,7 @@ export async function onRequestPost(context) {
     photos_warning: photos_failed > 0
       ? (photos_uploaded === 0
           ? 'Seluruh foto gagal diproses — tim SBP akan menghubungi Anda untuk melengkapi foto.'
-          : `${photos_failed} dari ${photos_raw.length} foto gagal diproses.`)
+          : `${photos_failed} dari ${totalFoto} foto gagal diproses.`)
       : null,
     status: 'draft',
     pesan: 'Data berhasil diterima. Tim SBP akan menghubungi Anda via WhatsApp untuk proses selanjutnya.',

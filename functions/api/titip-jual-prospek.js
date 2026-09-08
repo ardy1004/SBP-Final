@@ -27,6 +27,26 @@
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { normalizeWA, isValidWA } from '../_lib/waUtils.js';
 import { sendCapiEvent, extractMetaIdentity } from '../_lib/metaCapi.js';
+import { logServerError } from '../_lib/logError.js';
+import { signJWT } from './_shared/jwt.js';
+
+// Tiket unggah foto untuk /api/titip-jual-foto. Diterbitkan DI SINI, bukan di
+// endpoint fotonya, karena token Turnstile sekali pakai: memverifikasi CAPTCHA
+// di endpoint foto akan menghanguskan token yang dibutuhkan submit akhir.
+// Endpoint ini titik yang tepat — setiap orang yang sampai Step 2 melewatinya,
+// dan remnya (MAX_PER_MINUTE) sekaligus membatasi jumlah tiket per menit.
+// 1 jam: cukup untuk mengisi Step 2 sambil mengunggah 20 foto.
+const TIKET_FOTO_DETIK = 3600;
+
+async function terbitkanTiketFoto(env) {
+  if (!env.JWT_SECRET) return null;
+  const now = Math.floor(Date.now() / 1000);
+  try {
+    return await signJWT({ scope: 'titipjual-foto', iat: now, exp: now + TIKET_FOTO_DETIK }, env.JWT_SECRET);
+  } catch {
+    return null; // tiket gagal terbit tidak boleh menggagalkan pencatatan prospek
+  }
+}
 
 // Prospek titip jual volumenya rendah (produksi: < 5/bulan). Cap ini jauh di
 // atas trafik wajar tapi menutup skenario flood ke tabel leads.
@@ -57,8 +77,21 @@ async function prospekTerakhirSemenit(db) {
 export async function onRequestPost(context) {
   const { request, env } = context;
 
+  // Dicatat karena endpoint ini adalah SATU-SATUNYA jaring pengaman ketika Step 2
+  // gagal — kalau ia sendiri diam-diam menolak, prospeknya hilang total dan tidak
+  // ada yang tahu. 422 (nama/no_wa tidak valid) sengaja TIDAK dicatat: itu input
+  // buruk yang wajar bagi endpoint publik, dan mencatatnya membuka jalan banjir.
   let body = {};
-  try { body = await request.json(); } catch { return jsonError('Body JSON tidak valid', 400); }
+  try { body = await request.json(); }
+  catch {
+    context.waitUntil(logServerError(env, {
+      message: '[titip-jual-prospek] Body JSON tidak valid (400)',
+      url: request.url,
+      userAgent: request.headers.get('User-Agent') ?? undefined,
+      context: { kind: 'body-400', content_length: request.headers.get('content-length') },
+    }));
+    return jsonError('Body JSON tidak valid', 400);
+  }
 
   const nama     = sanitize(body.nama, 100);
   const no_wa_in = sanitize(body.no_wa, 20);
@@ -72,7 +105,14 @@ export async function onRequestPost(context) {
   const kabupaten = sanitize(body.kabupaten, 100);
   const asal_daerah = [kecamatan && `Kec. ${kecamatan}`, kabupaten].filter(Boolean).join(', ') || null;
 
-  if (!env.DB) return jsonError('Database tidak tersedia', 503);
+  if (!env.DB) {
+    context.waitUntil(logServerError(env, {
+      message: '[titip-jual-prospek] Binding DB tidak tersedia (503)',
+      url: request.url,
+      context: { kind: 'config-503' },
+    }));
+    return jsonError('Database tidak tersedia', 503);
+  }
 
   // Klik "Lanjut" berulang (user bolak-balik Step 1 ↔ Step 2) harus memperbarui
   // baris yang sama, bukan menumpuk prospek duplikat di papan CRM.
@@ -85,7 +125,9 @@ export async function onRequestPost(context) {
       `).bind(nama, no_wa, asal_daerah, leadIdLama, SOURCE_PAGE).run();
       // Klausa WHERE sengaja ketat: id dari klien tidak tepercaya dan tanpa
       // pagar ini seseorang bisa menimpa lead pembeli mana pun.
-      if (res.meta?.changes > 0) return jsonOk({ lead_id: leadIdLama, updated: true });
+      if (res.meta?.changes > 0) {
+        return jsonOk({ lead_id: leadIdLama, updated: true, tiket_foto: await terbitkanTiketFoto(env) });
+      }
     } catch (err) {
       console.error('[titip-jual-prospek] UPDATE gagal:', err.message);
     }
@@ -95,7 +137,10 @@ export async function onRequestPost(context) {
   if ((await prospekTerakhirSemenit(env.DB)) >= MAX_PER_MINUTE) {
     // 200, bukan 429 — klien memanggil ini fire-and-forget dan tidak menampilkan
     // error apa pun; yang penting Step 2 tidak ikut terhambat.
-    return jsonOk({ lead_id: null, throttled: true });
+    // Tiket tetap diterbitkan: rem ini menjaga tabel `leads`, dan pengunjung
+    // yang kebetulan kena batas tidak boleh ikut kehilangan kemampuan mengunggah
+    // foto — itu justru membuang submit yang sah.
+    return jsonOk({ lead_id: null, throttled: true, tiket_foto: await terbitkanTiketFoto(env) });
   }
 
   try {
@@ -155,9 +200,18 @@ export async function onRequestPost(context) {
       }
     })());
 
-    return jsonOk({ lead_id: leadId, event_id: prospekEventId });
+    return jsonOk({ lead_id: leadId, event_id: prospekEventId, tiket_foto: await terbitkanTiketFoto(env) });
   } catch (err) {
     console.error('[titip-jual-prospek] INSERT gagal:', err.message);
+    // ⚠️ Yang paling mahal dari semua jalur di berkas ini. Kalau INSERT gagal,
+    // prospeknya lenyap — dan prospek justru satu-satunya cara menindaklanjuti
+    // orang yang gagal di Step 2. Sampai 8 Sep 2026 ini hanya console.error.
+    context.waitUntil(logServerError(env, {
+      message: `[titip-jual-prospek] INSERT gagal (500): ${err.message}`,
+      stack: err.stack,
+      url: request.url,
+      context: { kind: 'insert-500' },
+    }));
     return jsonError('Gagal mencatat prospek', 500);
   }
 }

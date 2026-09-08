@@ -124,11 +124,45 @@ async function bersihkanTabel(env) {
     console.error('[purge-trash] retensi caption_history', err.message);
   }
 
+  // Foto Titip Jual yatim di R2. Sejak 8 Sep 2026 foto diunggah lebih dulu lewat
+  // /api/titip-jual-foto, jadi submit yang gagal SETELAH sebagian foto terunggah
+  // meninggalkan objek yang tidak pernah dirujuk `property_images`.
+  //
+  // ⚠️ AMBANG UMUR 24 JAM WAJIB. Tanpa itu cron ini bisa menghapus foto yang
+  // pengunggahnya masih mengisi Step 2 — kegagalan yang jauh lebih buruk daripada
+  // sampah yang dibersihkannya. Jangan diperketat "supaya lebih hemat".
+  let fotoYatim = 0;
+  try {
+    if (env.MEDIA) {
+      const batasMs = Date.now() - 24 * 60 * 60 * 1000;
+      const daftar = await env.MEDIA.list({ prefix: 'property-photos/', limit: 300 });
+      const kandidat = (daftar.objects ?? []).filter(o => o.uploaded && o.uploaded.getTime() < batasMs);
+
+      // ⚠️ D1 hanya menerima 100 bound parameter per query — dipecah 90.
+      for (let i = 0; i < kandidat.length; i += 90) {
+        const chunk = kandidat.slice(i, i + 90);
+        const ph = chunk.map(() => '?').join(',');
+        const r = await env.DB.prepare(
+          `SELECT url_webp FROM property_images WHERE url_webp IN (${ph})`
+        ).bind(...chunk.map(o => o.key)).all();
+        const dipakai = new Set((r.results ?? []).map(x => x.url_webp));
+        for (const o of chunk) {
+          if (dipakai.has(o.key)) continue;
+          await env.MEDIA.delete(o.key);
+          fotoYatim++;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[purge-trash] foto titip-jual yatim', err.message);
+  }
+
   return {
     jadwal_yatim_dihapus: jadwalYatim,
     error_logs_dihapus: errorLogs,
     view_daily_dihapus: viewDaily,
     caption_dihapus: caption,
+    foto_yatim_dihapus: fotoYatim,
   };
 }
 

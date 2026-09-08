@@ -43,6 +43,13 @@ export interface TitipJualDraft {
   submitId?: string;
   /** Berapa foto yang sempat dipilih (file-nya sendiri tidak bisa disimpan). */
   jumlahFoto?: number;
+  /**
+   * Tiket ber-HMAC untuk /api/titip-jual-foto, diterbitkan endpoint prospek saat
+   * Step 1 selesai. Berumur 1 jam dan cakupannya HANYA mengunggah foto ke bucket
+   * kita — bukan kredensial akun. Disimpan di sini (bukan state komponen) karena
+   * Step 1 dan Step 2 komponen terpisah, persis alasan `leadId` ada di sini.
+   */
+  tiketFoto?: string;
   ts: number;
 }
 

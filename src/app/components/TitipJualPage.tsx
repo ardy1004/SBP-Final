@@ -146,6 +146,35 @@ function ukuranBase64(dataUrl: string): number {
 }
 
 /**
+ * Unggah SATU foto ke R2 lewat /api/titip-jual-foto, kembalikan key-nya.
+ *
+ * KENAPA satu per satu. Sampai 8 Sep 2026 seluruh foto ikut di dalam body
+ * /api/titip-jual — 8–11 MB sekali kirim, 60–90 detik di uplink seluler. Sekali
+ * koneksi putus di tengah, `request.json()` di server gagal dan SELURUH form
+ * hilang: data diri, harga, legalitas, semuanya. Tiga klien kehilangan submitnya
+ * pada hari yang sama dan tidak satu pun meninggalkan jejak.
+ *
+ * Sekarang tiap foto request tersendiri (~1 MB): putus hanya merugikan satu foto,
+ * dan foto itu bisa diulang tanpa menyentuh sisa formulir.
+ *
+ * `tiket` diterbitkan endpoint prospek saat Step 1 selesai — BUKAN token
+ * Turnstile. Token Turnstile sekali pakai; memakainya di sini akan menghanguskan
+ * token yang dibutuhkan submit akhir beberapa detik kemudian.
+ */
+async function unggahSatuFoto(dataUrl: string, tiket: string | undefined): Promise<string> {
+  const res = await fetch('/api/titip-jual-foto', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ foto: dataUrl, tiket }),
+  });
+  const json = await bacaJson<{ key: string }>(res);
+  if (!res.ok || !json.data?.key) {
+    throw new Error(json.error ?? `Foto gagal diunggah (HTTP ${res.status})`);
+  }
+  return json.data.key;
+}
+
+/**
  * Kunci error Step 2 menurut URUTAN TAMPILNYA di layar — perhatikan `jenis`
  * ada SETELAH `harga`, mengikuti tata letak sebenarnya, bukan urutan
  * pemeriksaan di handleSubmit.
@@ -239,11 +268,16 @@ async function kirimProspek(form: Step1State): Promise<void> {
         lead_id:   bacaDraft()?.leadId,
       }),
     });
-    const json = await bacaJson<{ lead_id: number | null; event_id?: string }>(res);
+    const json = await bacaJson<{ lead_id: number | null; event_id?: string; tiket_foto?: string | null }>(res);
     const id = json.data?.lead_id;
     // Simpan id-nya supaya klik "Lanjut" berikutnya memperbarui baris yang sama,
     // bukan menumpuk prospek duplikat di papan CRM.
     if (typeof id === 'number') simpanDraft({ leadId: id });
+
+    // Tiket unggah foto. Diterbitkan di SEMUA jalur sukses endpoint prospek —
+    // termasuk UPDATE dan throttled — supaya pengunjung yang bolak-balik Step 1↔2
+    // atau kebetulan kena rem tidak ikut kehilangan kemampuan mengunggah foto.
+    if (json.data?.tiket_foto) simpanDraft({ tiketFoto: json.data.tiket_foto });
 
     // Meta Pixel — pasangan browser dari CAPI Lead yang dikirim
     // titip-jual-prospek.js. eventID WAJIB sama supaya Meta mendeduplikasi.
@@ -580,6 +614,11 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
   const turnstileRef = useRef<TurnstileHandle>(null);
   const [loading, setLoading] = useState(false);
   const [uploadPct, setUploadPct] = useState(0);
+  // dataUrl → key R2. Dipakai supaya percobaan ulang submit tidak mengunggah
+  // ulang foto yang sudah berhasil. Sengaja `useRef`: isinya tidak memengaruhi
+  // tampilan, dan menyimpannya di state akan memicu render ulang di tengah
+  // perulangan unggah.
+  const keyFotoRef = useRef<Map<string, string>>(new Map());
   const [errors, setErrors]   = useState<Record<string, string>>({});
   const [apiError, setApiError] = useState<string | null>(null);
 
@@ -817,6 +856,39 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     const submitId = bacaDraft()?.submitId ?? crypto.randomUUID();
     simpanDraft({ submitId });
 
+    // ─── Unggah foto DULU, satu per satu ────────────────────────────────────
+    // Hasilnya di-cache per dataUrl, jadi percobaan ulang setelah kegagalan
+    // hanya mengunggah foto yang memang belum berhasil — bukan mengulang
+    // semuanya dari nol dan meninggalkan salinan yatim di R2.
+    const tiketFoto = bacaDraft()?.tiketFoto;
+    const photoKeys: string[] = [];
+    for (let i = 0; i < photoPreviews.length; i++) {
+      const dataUrl = photoPreviews[i];
+      const tersimpan = keyFotoRef.current.get(dataUrl);
+      if (tersimpan) { photoKeys.push(tersimpan); continue; }
+
+      setUploadPct(Math.round((i / photoPreviews.length) * 90));
+      let gagal: unknown = null;
+      for (let coba = 0; coba < 2; coba++) {
+        try {
+          const key = await unggahSatuFoto(dataUrl, tiketFoto);
+          keyFotoRef.current.set(dataUrl, key);
+          photoKeys.push(key);
+          gagal = null;
+          break;
+        } catch (err) { gagal = err; }
+      }
+      if (gagal) {
+        setLoading(false);
+        setUploadPct(0);
+        setApiError(
+          `Foto ke-${i + 1} gagal diunggah. Isian Anda TIDAK hilang — periksa koneksi lalu tekan "Kirim" lagi; foto yang sudah berhasil tidak akan diunggah ulang.`,
+        );
+        return;
+      }
+    }
+    setUploadPct(90);
+
     try {
       const payload: Record<string, unknown> = {
         // owner (step 1)
@@ -878,7 +950,10 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         pengeluaran_per_bulan:  pengeluaranPerBulan ? parseInt(pengeluaranPerBulan) : undefined,
         harga_sewa_kamar_bulan: sewaKamarBulan     ? parseInt(sewaKamarBulan)      : undefined,
         details:           buildDetails(),
-        photos:            photoPreviews,
+        // Bentuk BARU: hanya referensi, beberapa KB. Backend tetap menerima
+        // `photos` base64 untuk pengunjung dengan bundle lama — jangan hapus
+        // jalur itu di server.
+        photo_keys:        photoKeys,
         cf_turnstile_token: turnstileToken || undefined,
         // Supaya prospek yang dicatat di Step 1 ditandai selesai — kalau tidak,
         // admin akan mengejar orang yang sebenarnya sudah menyelesaikan formnya.
