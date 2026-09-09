@@ -21,7 +21,7 @@ import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnsti
 import { pageMeta } from '../../lib/pageMeta';
 // Autosave isian ke localStorage. NIK dan foto sengaja TIDAK ikut disimpan —
 // alasannya panjang dan penting, ada di titipJualDraft.ts.
-import { bacaDraft, simpanDraft, hapusDraft } from '../../lib/titipJualDraft';
+import { bacaDraft, simpanDraft, hapusDraft, submitIdMasihSah } from '../../lib/titipJualDraft';
 
 export const meta = () => pageMeta({
   title: 'Titip Jual Properti Yogyakarta | Salam Bumi Property',
@@ -57,6 +57,16 @@ interface ApiResult {
   // objek dari cariSubmitLama() yang tidak memuatnya — itulah yang membuat
   // submit ulang tidak menembakkan konversi kedua.
   event_id?: string;
+  // 🔥 DIKIRIM SERVER SEJAK AWAL, TAPI DULU TIDAK PERNAH DIDEKLARASIKAN DI SINI
+  // — sehingga hilang diam-diam dan `SuccessPage` merender jalur "sudah pernah
+  // kami terima" PERSIS seperti sukses baru: ✅ hijau + kode listing. Diuji
+  // 2026-09-09 dengan handler sungguhan: submit ke-2 ber-submit_id sama membalas
+  // 200 + `duplikat: true` + kode listing LAMA, dan NOL listing baru dibuat.
+  // Akibatnya pengisi form dan admin sama-sama yakin datanya masuk.
+  // Field baru dari server WAJIB ditambahkan di sini, kalau tidak ia lenyap
+  // tanpa satu pun gate memerah — TypeScript tidak memvalidasi bentuk JSON.
+  duplikat?: boolean;
+  pesan?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -851,10 +861,21 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     setApiError(null);
     setUploadPct(0);
 
-    // Dibuat sekali lalu dipertahankan di draft: percobaan ulang WAJIB memakai
-    // id yang sama, kalau tidak idempotensinya tidak ada artinya.
-    const submitId = bacaDraft()?.submitId ?? crypto.randomUUID();
-    simpanDraft({ submitId });
+    // Dipertahankan di draft supaya percobaan ulang memakai id yang sama —
+    // tanpa itu idempotensinya tidak ada artinya.
+    //
+    // ⚠️ TAPI HANYA SELAMA MASIH SAH (2 jam). Dulu di sini `bacaDraft()?.submitId`
+    // telanjang, dan karena `ts` draft diperbarui tiap autosave, id itu bisa
+    // bertahan berhari-hari. Sekali ia berhasil membuat listing, pengisian
+    // properti BERIKUTNYA dari perangkat yang sama dibalas jalur idempoten:
+    // server mengembalikan listing LAMA, properti baru tidak pernah lahir, dan
+    // layar tetap menampilkan "berhasil". Terjadi 8 Sep 2026 dan butuh audit
+    // penuh untuk ketahuan, karena tidak ada satu pun error yang tercatat.
+    const sah = submitIdMasihSah(bacaDraft());
+    const submitId = sah ?? crypto.randomUUID();
+    // `submitIdTs` hanya disetel saat id BARU dibuat — memperbaruinya di tiap
+    // submit akan mengembalikan bug yang sama lewat pintu belakang.
+    simpanDraft(sah ? { submitId } : { submitId, submitIdTs: Date.now() });
 
     // ─── Unggah foto DULU, satu per satu ────────────────────────────────────
     // Hasilnya di-cache per dataUrl, jadi percobaan ulang setelah kegagalan
@@ -1506,6 +1527,53 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
 // ─── Success Page ─────────────────────────────────────────────────────────────
 
 function SuccessPage({ result }: { result: ApiResult }) {
+  // 🔥 DUA JALUR, DUA TAMPILAN — jangan pernah disamakan lagi.
+  // Server membalas 200 + `duplikat: true` ketika submit_id yang dikirim sudah
+  // pernah dipakai: TIDAK ada listing baru yang dibuat, dan kode yang dikembalikan
+  // milik listing LAMA. Sampai 2026-09-09 halaman ini merendernya identik dengan
+  // sukses baru, sehingga pengisi form DAN admin sama-sama yakin datanya masuk —
+  // padahal database tidak bertambah dan tidak ada satu pun error tercatat.
+  // Kelas kegagalan terburuk: semua pihak yakin berhasil.
+  if (result.duplikat) {
+    return (
+      <div className="text-center py-8">
+        <div className="text-6xl mb-4">📋</div>
+        <h2 className="font-display text-2xl font-bold text-[#0F172A] mb-3">
+          Data Ini Sudah Pernah Kami Terima
+        </h2>
+        <p className="text-[#64748B] leading-relaxed mb-2">
+          {result.pesan ?? 'Data properti Anda sudah tercatat sebelumnya di sistem kami.'}
+        </p>
+        <p className="text-[#64748B] text-sm mb-3">Kode listing yang sudah tersimpan:</p>
+        <div className="inline-block px-6 py-3 bg-[#FFF7ED] border border-amber-200 rounded-xl mb-5">
+          <span className="font-mono font-bold text-amber-700 text-lg">{result.kode_listing}</span>
+        </div>
+        <div className="text-left p-4 mb-6 bg-amber-50 border border-amber-200 rounded-xl">
+          <p className="text-sm text-amber-900 font-semibold mb-1">
+            Tidak ada listing baru yang dibuat.
+          </p>
+          <p className="text-xs text-amber-800 leading-relaxed">
+            Kalau Anda bermaksud mengirim properti yang <strong>berbeda</strong>, tekan tombol di
+            bawah untuk memulai formulir bersih, lalu isi ulang. Bila Anda memang sedang mengirim
+            ulang properti yang sama, tidak perlu melakukan apa-apa — tim kami sudah memegang datanya.
+          </p>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+          <button
+            onClick={() => { hapusDraft(); window.location.href = '/titip-jual'; }}
+            className="px-6 py-3 rounded-xl font-semibold text-white"
+            style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
+          >
+            Kirim properti lain →
+          </button>
+          <Link to="/" className="px-6 py-3 rounded-xl font-semibold border border-[#1565C0] text-[#1565C0] hover:bg-[#E3F2FD] transition-colors">
+            ← Kembali ke Beranda
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="text-center py-8">
       <div className="text-6xl mb-4">✅</div>

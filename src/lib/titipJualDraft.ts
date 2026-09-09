@@ -27,6 +27,29 @@ const KEY = 'sbp_titipjual_draft';
 /** Draft lebih tua dari ini dianggap basi — harga/properti sudah berubah. */
 const MAKS_UMUR_MS = 14 * 24 * 60 * 60 * 1000;
 
+/**
+ * Umur `submitId`. Jauh lebih pendek daripada draft, dan itu disengaja:
+ * idempotensi hanya berguna untuk percobaan ulang dalam hitungan menit —
+ * "kirim lagi karena responsnya tidak sampai". Di luar jendela itu, memakai
+ * ulang submitId justru membajak pengisian properti BERIKUTNYA: server
+ * mengembalikan listing lama dan tidak membuat yang baru.
+ * 2 jam = lapang untuk satu sesi pengisian panjang di HP, jauh dari 14 hari.
+ */
+const MAKS_UMUR_SUBMIT_ID_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * submitId yang masih sah untuk dipakai ulang, atau null bila sudah lewat umur.
+ * Pemanggil membuat yang baru saat menerima null.
+ */
+export function submitIdMasihSah(d: TitipJualDraft | null): string | null {
+  if (!d?.submitId) return null;
+  // Draft dari build lama tidak punya submitIdTs — perlakukan sebagai basi,
+  // justru karena itulah bentuk yang menyimpan submitId berumur berhari-hari.
+  if (typeof d.submitIdTs !== 'number') return null;
+  if (Date.now() - d.submitIdTs > MAKS_UMUR_SUBMIT_ID_MS) return null;
+  return d.submitId;
+}
+
 export interface TitipJualDraft {
   v: 1;
   /** Field Step 1 TANPA `nik`. */
@@ -41,6 +64,21 @@ export interface TitipJualDraft {
    * Lihat migrations/0042_titipjual_submit_id.sql.
    */
   submitId?: string;
+  /**
+   * Kapan `submitId` di atas dibuat. WAJIB terpisah dari `ts`.
+   *
+   * 🔥 `ts` diperbarui SETIAP simpanDraft (tiap ketikan yang di-autosave), jadi
+   * batas 14 hari di bawah praktis tidak pernah tercapai selama form sesekali
+   * dibuka. Akibatnya `submitId` berperilaku sebagai kunci PER-BROWSER, bukan
+   * per-properti: sekali ia berhasil membuat listing, setiap pengisian
+   * BERIKUTNYA dari perangkat itu dibalas jalur idempoten — properti baru tidak
+   * pernah lahir, dan layarnya tetap bilang berhasil.
+   *
+   * Jalurnya: blok `catch` di handleSubmit sengaja TIDAK menghapus draft (benar,
+   * supaya percobaan ulang aman), tapi bila pengunjung tidak mencoba ulang saat
+   * itu juga, submitId-nya tertinggal selamanya.
+   */
+  submitIdTs?: number;
   /** Berapa foto yang sempat dipilih (file-nya sendiri tidak bisa disimpan). */
   jumlahFoto?: number;
   /**

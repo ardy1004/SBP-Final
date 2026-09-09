@@ -354,7 +354,22 @@ export async function onRequestPost(context) {
   const submit_id = sanitize(body.submit_id ?? '', 40) || null;
   if (submit_id) {
     const lama = await cariSubmitLama(env.DB, submit_id);
-    if (lama) return jsonOk(lama, 200);
+    if (lama) {
+      // ⚠️ DICATAT meski ini jalur SUKSES (200), bukan error. Alasannya: dari
+      // sisi pengisi form, jalur ini TIDAK menghasilkan listing baru — dan
+      // sampai 9 Sep 2026 tidak ada satu pun jejaknya di mana pun. Sebuah
+      // pengisian properti yang dibajak submit_id basi karenanya lolos tanpa
+      // terlihat oleh siapa pun: database tidak bertambah, error_logs bersih,
+      // dan layar pengunjung menampilkan "berhasil". Volume jalur ini rendah,
+      // jadi mencatatnya tidak membanjiri tabel.
+      context.waitUntil(logServerError(env, {
+        message: `[titip-jual] Submit idempoten (200) — listing lama ${lama.kode_listing} dikembalikan, TIDAK ada listing baru`,
+        url: request.url,
+        userAgent: request.headers.get('User-Agent') ?? undefined,
+        context: { kind: 'idempoten-200', tahap: 'pra-insert', kode_listing: lama.kode_listing, property_id: lama.property_id },
+      }));
+      return jsonOk(lama, 200);
+    }
   }
 
   // ─── Optional property fields ─────────────────────────────────────────────
@@ -562,7 +577,15 @@ export async function onRequestPost(context) {
     // sedangkan yang bentrok adalah submit_id.)
     if (submit_id) {
       const lama = await cariSubmitLama(env.DB, submit_id);
-      if (lama) return jsonOk(lama, 200);
+      if (lama) {
+        context.waitUntil(logServerError(env, {
+          message: `[titip-jual] Submit idempoten (200) sesudah INSERT bentrok — listing lama ${lama.kode_listing} dikembalikan`,
+          url: request.url,
+          userAgent: request.headers.get('User-Agent') ?? undefined,
+          context: { kind: 'idempoten-200', tahap: 'pasca-insert', kode_listing: lama.kode_listing, sebab: err.message?.slice(0, 120) },
+        }));
+        return jsonOk(lama, 200);
+      }
     }
     context.waitUntil(logServerError(env, { message: `[titip-jual] INSERT error: ${err.message}`, stack: err.stack, url: request.url }));
     return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
