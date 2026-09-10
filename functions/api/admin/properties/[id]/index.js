@@ -102,8 +102,10 @@ export async function onRequestPatch(context) {
 
   // jenis_properti + harga_mode ikut diambil: PATCH bersifat partial, jadi
   // normalisasi harga di bawah butuh nilai lama untuk field yang tidak dikirim.
+  // `tujuan` ikut diambil: validasi harga di bawah bergantung padanya, dan PATCH
+  // bersifat partial sehingga tujuan bisa saja tidak dikirim.
   const exists = await env.DB
-    .prepare('SELECT id, harga, luas_tanah, jenis_properti, harga_mode FROM properties WHERE id = ?')
+    .prepare('SELECT id, harga, luas_tanah, jenis_properti, harga_mode, tujuan FROM properties WHERE id = ?')
     .bind(id).first();
   if (!exists) return jsonError('Properti tidak ditemukan', 404);
 
@@ -135,10 +137,22 @@ export async function onRequestPatch(context) {
     else pairs.push({ col: 'tujuan', val: v });
   }
 
+  // 🔥 `harga` = 0 SAH untuk properti sewa murni — kolom itu harga JUAL, dan
+  // titip-jual.js memang sengaja mengisinya 0 untuk tujuan `disewa`. Sampai
+  // 10 Sep 2026 validasi ini menolak 0 tanpa syarat, sehingga properti sewa
+  // MUSTAHIL disimpan dari Admin: form mengirim harga 0 (nilai yang bahkan tidak
+  // punya input karena `showHarga` false), lalu ditolak 422 berulang-ulang.
+  // Ketahuan pada listing sewa PERTAMA yang masuk lewat Titip Jual.
+  const tujuanEfektif = (() => {
+    const p = pairs.find(x => x.col === 'tujuan');
+    return p ? p.val : exists.tujuan;
+  })();
   if (body.harga !== undefined && body.harga !== null) {
     const v = parseInt(String(body.harga), 10);
-    if (!Number.isInteger(v) || v <= 0) errors.harga = 'Harga harus angka positif';
-    else pairs.push({ col: 'harga', val: v });
+    const nolBoleh = tujuanEfektif === 'disewa';
+    if (!Number.isInteger(v) || v < 0 || (v === 0 && !nolBoleh)) {
+      errors.harga = 'Harga harus angka positif';
+    } else pairs.push({ col: 'harga', val: v });
   }
 
   if (body.harga_lama !== undefined) {

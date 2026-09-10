@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router';
 import { Search, Filter, ChevronDown, Edit, Plus, FileUp, Trash2, ImageOff, MapPin, AlertTriangle } from 'lucide-react';
 import { getLocations, type ApiLocation, bacaJson } from '../../../lib/api';
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
+import { hargaTampil } from '../../../../functions/_lib/hargaTampil.js';
 import CsvImportModal from './CsvImportModal';
 
 interface PropertyRow {
@@ -13,6 +14,8 @@ interface PropertyRow {
   jenis_properti: string;
   tujuan: string;
   harga: number;
+  /** Harga sewa/tahun. Untuk tujuan `disewa`, kolom `harga` di atas bernilai 0. */
+  harga_sewa_tahun?: number | null;
   status_publish: string;
   kecamatan: string;
   kabupaten: string;
@@ -627,7 +630,9 @@ export default function AdminListingPage() {
                         : <span className="text-[10px] text-gray-400 mt-0.5">— no GPS</span>}
                     </td>
                     <td className="p-3 hidden lg:table-cell">
-                      <div className="font-semibold text-[#0F172A] text-xs">{formatRupiah(p.harga)}</div>
+                      <div className="font-semibold text-[#0F172A] text-xs">
+                        {(() => { const h = hargaTampil(p); return h.utama != null ? `${formatRupiah(h.utama)}${h.satuan}` : '—'; })()}
+                      </div>
                       <div className="text-xs text-[#94A3B8]">{p.tujuan}</div>
                     </td>
                     <td className="p-3 text-center">

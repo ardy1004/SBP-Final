@@ -109,7 +109,11 @@ export async function onRequestGet(context) {
     SELECT
       p.id, p.kode_listing, p.title, p.slug,
       p.jenis_properti, p.tujuan,
-      p.harga, p.nego, p.nett,
+      -- harga_sewa_tahun WAJIB ikut: tanpa ini daftar admin menampilkan kolom
+      -- harga (= harga JUAL, bernilai 0 pada listing sewa) sebagai "Rp 0".
+      -- Jangan pakai backtick di komentar SQL ini: seluruh query ada di dalam
+      -- template literal, jadi satu backtick menutupnya dan merusak berkas.
+      p.harga, p.harga_sewa_tahun, p.nego, p.nett,
       p.kelurahan, p.kecamatan, p.kabupaten, p.provinsi,
       p.latitude, p.longitude,
       p.status_publish, p.status_sold,

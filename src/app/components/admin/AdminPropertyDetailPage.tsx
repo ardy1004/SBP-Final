@@ -15,6 +15,7 @@ import PropertyPhotosCard from './PropertyPhotosCard';
 import { getLocations, type ApiLocation, bacaJson } from '../../../lib/api';
 // Reuse logic generate meta SEO yang sama dengan endpoint CREATE (jangan duplikasi).
 import { generateMetaSeo } from '../../../../functions/_lib/metaSeo.js';
+import { hargaTampil } from '../../../../functions/_lib/hargaTampil.js';
 import { readNdjsonFinal } from '../../../lib/ndjson';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -305,7 +306,10 @@ export default function AdminPropertyDetailPage() {
     const { meta_title, meta_description } = generateMetaSeo({
       jenis_properti: form.jenis_properti ?? '',
       tujuan: form.tujuan ?? '',
-      harga: form.harga ?? 0,
+      // Untuk tujuan `disewa`, `harga` bernilai 0 — memakainya membuat meta SEO
+      // berbunyi "Rp 0". Pola yang sama sudah dipakai titip-jual.js saat memanggil
+      // generateMetaSeo; helper hargaTampil menyatukan aturannya.
+      harga: hargaTampil(form).utama ?? 0,
       kecamatan: form.kecamatan ?? '',
       kabupaten: form.kabupaten ?? '',
       luas_tanah: form.luas_tanah ?? null,
@@ -468,7 +472,12 @@ export default function AdminPropertyDetailPage() {
       title: form.title ?? '',
       jenis_properti: form.jenis_properti,
       tujuan: form.tujuan,
-      harga: form.harga,
+      // ⚠️ `harga` (harga JUAL) hanya dikirim bila form memang merendernya —
+      // untuk tujuan `disewa`, input-nya disembunyikan (`showHarga` false) dan
+      // nilainya 0. Mengirim angka yang tidak pernah bisa disentuh user adalah
+      // data hantu, dan itulah yang membuat SETIAP simpan properti sewa ditolak
+      // 422 oleh validator "harga harus positif" (10 Sep 2026).
+      ...(form.tujuan === 'disewa' ? {} : { harga: form.harga }),
       // Backend yang mengalikan per-m2 x luas_tanah (satu tempat, dipakai create
       // maupun update) supaya klien tidak bisa mengirim total yang tidak konsisten.
       harga_mode: form.harga_mode ?? 'total',
