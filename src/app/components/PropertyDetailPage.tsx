@@ -18,6 +18,7 @@ import TombolKontakProperti from './TombolKontakProperti';
 // keempat titik harga di berkas ini membaca `property.harga` mentah, sehingga
 // listing sewa tampil "Rp 0" sementara meta_title-nya benar "Rp 75 Juta".
 import { hargaTampil } from '../../../functions/_lib/hargaTampil.js';
+import { laporKendalaForm } from '../../lib/laporKendala';
 // KPRCalculator dimuat hanya di klien — recharts akses window saat import, crash SSR.
 // Pola mounted-flag: server & render-klien-pertama tampilkan placeholder identik → no hydration mismatch.
 function KPRCalculatorClient({ defaultHarga }: { defaultHarga: number }) {
@@ -126,6 +127,7 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
     // Tanpa token, /api/leads pasti membalas 403. Hentikan di sini dengan
     // penjelasan, jangan tukar dengan pesan generik setelah menunggu jaringan.
     if (!turnstileToken) {
+      laporKendalaForm('lead-detail-properti', 'turnstile-menahan', { status: turnstileStatus });
       setApiError(
         turnstileStatus === 'gagal'
           ? 'Verifikasi anti-bot gagal dimuat. Klik "Verifikasi ulang" di bawah — bila tetap gagal, matikan penghemat data atau pemblokir iklan lalu coba lagi.'

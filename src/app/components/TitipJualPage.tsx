@@ -22,6 +22,7 @@ import { pageMeta } from '../../lib/pageMeta';
 // Autosave isian ke localStorage. NIK dan foto sengaja TIDAK ikut disimpan —
 // alasannya panjang dan penting, ada di titipJualDraft.ts.
 import { bacaDraft, simpanDraft, hapusDraft, submitIdMasihSah } from '../../lib/titipJualDraft';
+import { laporKendalaForm } from '../../lib/laporKendala';
 
 export const meta = () => pageMeta({
   title: 'Titip Jual Properti Yogyakarta | Salam Bumi Property',
@@ -846,6 +847,16 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         : 'Verifikasi anti-bot belum selesai. Tunggu beberapa detik hingga bertanda ✓, lalu tekan Kirim lagi.';
     }
     if (Object.keys(e).length) {
+      // Dilaporkan HANYA bila yang menahan adalah Turnstile — itu kendala SISTEM
+      // kita, dan sampai 10 Sep 2026 ia menghentikan submit tanpa jejak di mana
+      // pun. Isian yang kurang (harga, foto, centang) SENGAJA tidak dilaporkan:
+      // itu perilaku normal sepanjang hari dan akan menenggelamkan yang penting.
+      if (e.turnstile) {
+        laporKendalaForm('titip-jual', 'turnstile-menahan', {
+          status: turnstileStatus,
+          field_lain: Object.keys(e).filter(k => k !== 'turnstile').length,
+        });
+      }
       setErrors(e);
       // ⚠️ Dulu tombol Kirim di-disable saat form belum lengkap, sehingga
       // handleSubmit TIDAK PERNAH jalan dan seluruh pesan di atas mustahil
@@ -1054,6 +1065,15 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     } catch {
       // Draft SENGAJA tidak dihapus di sini — submit_id di dalamnya justru yang
       // membuat percobaan ulang aman dari duplikat.
+      //
+      // Dilaporkan: inilah jalur yang paling mungkin memutus submit besar dari
+      // uplink seluler, dan sampai sekarang ia hanya menampilkan pesan ke
+      // pengunjung lalu diam. `foto_terunggah` membedakan "putus sebelum foto
+      // selesai" dari "putus saat mengirim formulir" — dua masalah berbeda.
+      laporKendalaForm('titip-jual', 'jaringan-putus', {
+        foto_terunggah: photoKeys.length,
+        foto_total: photoPreviews.length,
+      });
       setApiError('Koneksi ke server terputus saat mengirim. Tekan Kirim sekali lagi — bila data Anda ternyata sudah masuk, sistem mengenalinya dan tidak akan membuat listing ganda.');
     } finally {
       setLoading(false);

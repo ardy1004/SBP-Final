@@ -4,6 +4,7 @@ import { postLead, formatRupiah, type NormalizedPropertyDetail } from '../../lib
 import { trackEvent } from '../../lib/tracking';
 import { bukaWaProperti } from '../../lib/waProperty';
 import { hargaTampil } from '../../../functions/_lib/hargaTampil.js';
+import { laporKendalaForm } from '../../lib/laporKendala';
 import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnstile';
 import { cfImg } from '../../lib/img';
 
@@ -58,6 +59,7 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
     // jalur itu (wa-click) memang tanpa CAPTCHA, jadi tetap jalan walau
     // challenges.cloudflare.com diblokir pemblokir iklan.
     if (!turnstileToken) {
+      laporKendalaForm('kontak-properti', 'turnstile-menahan', { status: turnstileStatus });
       setApiError(
         turnstileStatus === 'gagal'
           ? 'Verifikasi anti-bot gagal dimuat. Klik "Verifikasi ulang" di bawah — bila tetap gagal, matikan penghemat data/pemblokir iklan, atau pakai tombol "Langsung WA" di atas.'

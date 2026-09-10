@@ -5,6 +5,7 @@ import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnsti
 import { useContactEmail } from './useContactEmail';
 import { pageMeta } from '../../lib/pageMeta';
 import { trackWaClick } from '../../lib/waTrack';
+import { laporKendalaForm } from '../../lib/laporKendala';
 
 export const meta = () => pageMeta({
   title: 'Hubungi Kami | Salam Bumi Property',
@@ -48,6 +49,7 @@ export default function ContactPage() {
 
     // Tanpa token, /api/leads pasti membalas 403. Hentikan sebelum jaringan.
     if (!turnstileToken) {
+      laporKendalaForm('kontak', 'turnstile-menahan', { status: turnstileStatus });
       setError(
         turnstileStatus === 'gagal'
           ? 'Verifikasi anti-bot gagal dimuat. Klik "Verifikasi ulang" di bawah — bila tetap gagal, matikan penghemat data atau pemblokir iklan, atau pakai tombol WhatsApp di samping.'
