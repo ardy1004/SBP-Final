@@ -3,6 +3,7 @@ import { MessageCircle, X, Star, Check, AlertCircle } from 'lucide-react';
 import { postLead, formatRupiah, type NormalizedPropertyDetail } from '../../lib/api';
 import { trackEvent } from '../../lib/tracking';
 import { bukaWaProperti } from '../../lib/waProperty';
+import { hargaTampil } from '../../../functions/_lib/hargaTampil.js';
 import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnstile';
 import { cfImg } from '../../lib/img';
 
@@ -162,7 +163,12 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
                   )}
                   <div className="min-w-0">
                     <div className="font-semibold text-[#0F172A] text-sm line-clamp-1">{property.title}</div>
-                    <div className="text-xs text-[#1565C0] font-bold">{formatRupiah(property.harga)}</div>
+                    {/* `hargaTampil`, bukan `property.harga` — listing sewa punya
+                        kolom harga 0 dan akan tampil "Rp 0" tepat di kepala form
+                        kontak, persis saat pengunjung memutuskan menghubungi. */}
+                    <div className="text-xs text-[#1565C0] font-bold">
+                      {(() => { const h = hargaTampil(property); return h.utama != null ? `${formatRupiah(h.utama)}${h.satuan}` : 'Hubungi kami'; })()}
+                    </div>
                   </div>
                 </>
               ) : (

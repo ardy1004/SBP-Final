@@ -4,6 +4,10 @@ import { MapPin, Maximize2, BedDouble, Bath, Eye, ChevronLeft, ChevronRight } fr
 import type { NormalizedProperty } from '../../lib/api';
 import { formatRibuan } from '../../lib/format';
 import { cfImg, cfSrcSet } from '../../lib/img';
+// Kolom mana yang jadi harga tampil — SATU SUMBER dengan backend.
+// Listing `disewa` punya `harga` = 0 (kolom itu harga JUAL); angkanya ada di
+// harga_sewa_tahun. Jangan membaca `property.harga` langsung lagi di sini.
+import { hargaTampil } from '../../../functions/_lib/hargaTampil.js';
 
 interface Props {
   property: NormalizedProperty;
@@ -59,10 +63,14 @@ export default function PropertyCard({ property, className = '' }: Props) {
     ? `/disewa/${jenisSlug}/${property.provinsi.toLowerCase().replace(/\s+/g, '-')}/${property.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${kec}/${property.slug}`
     : `/dijual/${jenisSlug}/${property.provinsi.toLowerCase().replace(/\s+/g, '-')}/${property.kabupaten.toLowerCase().replace(/\s+/g, '-')}/${kec}/${property.slug}`;
 
-  // Harga per m² cuma relevan untuk Tanah — jenis lain dijual gelondongan.
+  const hrg = hargaTampil(property);
+
+  // Harga per m² cuma relevan untuk Tanah yang DIJUAL — `hrg.jual`, bukan
+  // `property.harga`. Untuk tanah disewa, kolom harga bernilai 0 dan membaginya
+  // dengan luas hanya menghasilkan angka 0 yang menyesatkan.
   const isTanah = jenisSlug === 'tanah';
-  const hargaPerM2 = isTanah && property.luas_tanah && property.harga
-    ? Math.round(property.harga / property.luas_tanah)
+  const hargaPerM2 = isTanah && property.luas_tanah && hrg.jual
+    ? Math.round(hrg.jual / property.luas_tanah)
     : null;
 
   // Tanah diiklankan per meter, bukan gelondongan — agen menulisnya begitu di
@@ -250,18 +258,28 @@ export default function PropertyCard({ property, className = '' }: Props) {
             <span className="text-gray-500 text-xs line-through mr-2">{formatHargaShort(property.harga_lama)}</span>
           )}
           <span className="font-bold text-[#1565C0] text-lg font-display" style={{ fontVariantNumeric: 'tabular-nums' }}>
-            {utamakanPerM2 ? <>{formatHargaShort(hargaPerM2!)}<span className="text-sm font-semibold">/m²</span></> : formatHargaShort(property.harga)}
+            {utamakanPerM2
+              ? <>{formatHargaShort(hargaPerM2!)}<span className="text-sm font-semibold">/m²</span></>
+              : hrg.utama != null
+                ? <>{formatHargaShort(hrg.utama)}{hrg.satuan && <span className="text-sm font-semibold">{hrg.satuan}</span>}</>
+                : 'Hubungi kami'}
           </span>
           {property.nego && <span className="ml-1 text-xs text-gray-500">(Nego)</span>}
           {utamakanPerM2 ? (
             <div className="text-xs text-gray-500 mt-0.5">
-              Total {formatHargaShort(property.harga)}
+              Total {formatHargaShort(hrg.jual!)}
             </div>
-          ) : hargaPerM2 && (
+          ) : hargaPerM2 ? (
             <div className="text-xs text-gray-500 mt-0.5">
               ~{formatHargaShort(hargaPerM2)}/m²
             </div>
-          )}
+          ) : hrg.sewa != null && property.tujuan === 'dijual_disewa' ? (
+            // Sampai 2026-09-10 harga sewa properti `dijual_disewa` tidak pernah
+            // tampil di mana pun, padahal datanya ada.
+            <div className="text-xs text-gray-500 mt-0.5">
+              Sewa {formatHargaShort(hrg.sewa)}/tahun
+            </div>
+          ) : null}
         </div>
 
         {/* Specs */}

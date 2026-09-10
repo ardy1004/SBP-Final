@@ -13,6 +13,11 @@ import { trackEvent } from '../../lib/tracking';
 import { TAMPILKAN_PETA_PUBLIK } from '../../lib/fiturPublik';
 import { cfImg, cfSrcSet } from '../../lib/img';
 import TombolKontakProperti from './TombolKontakProperti';
+// Kolom mana yang jadi harga tampil — SATU SUMBER dengan backend.
+// Listing `disewa` punya `harga` = 0 (kolom itu harga JUAL). Sampai 2026-09-10
+// keempat titik harga di berkas ini membaca `property.harga` mentah, sehingga
+// listing sewa tampil "Rp 0" sementara meta_title-nya benar "Rp 75 Juta".
+import { hargaTampil } from '../../../functions/_lib/hargaTampil.js';
 // KPRCalculator dimuat hanya di klien — recharts akses window saat import, crash SSR.
 // Pola mounted-flag: server & render-klien-pertama tampilkan placeholder identik → no hydration mismatch.
 function KPRCalculatorClient({ defaultHarga }: { defaultHarga: number }) {
@@ -153,7 +158,10 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
         content_name: property.title,
         content_ids: [property.kode],
         content_category: tipe,
-        value: property.harga,
+        // ⚠️ `hargaTampil`, bukan `property.harga`: pada listing sewa kolom itu 0,
+        // dan mengirim value 0 ke Meta memberi sinyal bahwa konversinya tak bernilai
+        // — algoritma lalu belajar menghindari audiens yang justru kita cari.
+        value: hargaTampil(property).utama ?? undefined,
         currency: 'IDR',
       }, { eventID: res.data.event_id });
       // Gunakan location.href (bukan window.open) agar tidak diblokir in-app browser (Meta Ads, IG)
@@ -537,7 +545,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
       content_ids: [property.kode],
       content_type: 'product',
       content_name: property.title,
-      value: property.harga,
+      value: hargaTampil(property).utama ?? undefined,
       currency: 'IDR',
     });
   }, [property]);
@@ -548,8 +556,12 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
   const images = property.images.length > 0 ? property.images : [''];
   // Harga per m² cuma relevan untuk Tanah — jenis lain dijual gelondongan.
   const isTanah = (property.jenisRaw ?? property.jenis).toLowerCase() === 'tanah';
+  const hrg = hargaTampil(property);
+  // Per-m² diturunkan dari harga JUAL (`hrg.jual`), bukan `property.harga`:
+  // pada listing sewa kolom itu 0, dan membaginya dengan luas menghasilkan
+  // "Rp 0/m²" yang tampak seperti data sungguhan.
   const hargaPerM2 = isTanah
-    ? (property.harga_per_m2 ?? (property.luas_tanah ? Math.round(property.harga / property.luas_tanah) : null))
+    ? (property.harga_per_m2 ?? (property.luas_tanah && hrg.jual ? Math.round(hrg.jual / property.luas_tanah) : null))
     : null;
   // Tanah diiklankan per meter — saat harga_mode 'per_m2', angka per-m2 jadi
   // headline dan total turun ke baris kedua. Kolom `harga` tetap total.
@@ -707,11 +719,16 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                   <div className="text-2xl font-bold font-display text-[#1565C0]" style={{ fontVariantNumeric: 'tabular-nums' }}>
                     {utamakanPerM2
                       ? <>{formatRupiah(hargaPerM2!)}<span className="text-lg font-semibold">/m²</span></>
-                      : formatRupiah(property.harga)}
+                      : hrg.utama != null
+                        ? <>{formatRupiah(hrg.utama)}{hrg.satuan && <span className="text-lg font-semibold">{hrg.satuan}</span>}</>
+                        : 'Hubungi kami'}
                   </div>
                   {utamakanPerM2
-                    ? <div className="text-xs text-gray-500">Total {formatRupiah(property.harga)}{property.luas_tanah ? ` untuk ${property.luas_tanah} m²` : ''}</div>
-                    : hargaPerM2 ? <div className="text-xs text-gray-400">~{formatRupiah(hargaPerM2)}/m²</div> : null}
+                    ? <div className="text-xs text-gray-500">Total {formatRupiah(hrg.jual!)}{property.luas_tanah ? ` untuk ${property.luas_tanah} m²` : ''}</div>
+                    : hargaPerM2 ? <div className="text-xs text-gray-400">~{formatRupiah(hargaPerM2)}/m²</div>
+                    : hrg.sewa != null && property.tujuan === 'dijual_disewa'
+                      ? <div className="text-xs text-gray-500">Sewa {formatRupiah(hrg.sewa)}/tahun</div>
+                      : null}
                 </div>
                 <div className="flex gap-1.5 flex-shrink-0">
                   {property.nego && <span className="px-2 py-0.5 rounded-full text-xs bg-orange-50 text-orange-600 border border-orange-200">Nego</span>}
@@ -729,7 +746,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                 <p className="text-sm text-[#64748B] leading-relaxed">
                   Properti {property.jenis} ini berlokasi di {property.kecamatan}, {property.kabupaten}, salah satu kawasan strategis di {property.provinsi}.
                   {property.luas_tanah ? ` Dengan luas tanah ${property.luas_tanah} m²` : ''}
-                  {property.kamar_tidur ? ` dan ${property.kamar_tidur} kamar tidur` : ''}, properti ini {property.tujuan === 'dijual' ? 'dijual' : property.tujuan === 'disewa' ? 'disewakan' : 'dijual dan disewakan'} dengan harga {formatRupiah(property.harga)}.
+                  {property.kamar_tidur ? ` dan ${property.kamar_tidur} kamar tidur` : ''}, properti ini {property.tujuan === 'dijual' ? 'dijual' : property.tujuan === 'disewa' ? 'disewakan' : 'dijual dan disewakan'}{hrg.utama != null ? ` dengan harga ${formatRupiah(hrg.utama)}${hrg.satuan}` : ''}.
                   {property.income_per_bulan ? ` Sangat cocok untuk investasi dengan income potensial ${formatRupiah(property.income_per_bulan)} per bulan.` : ''}
                 </p>
               </div>
@@ -802,7 +819,9 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                   <div className="text-3xl font-bold font-display text-[#1565C0]" style={{ fontVariantNumeric: 'tabular-nums' }}>
                     {utamakanPerM2
                       ? <>{formatRupiah(hargaPerM2!)}<span className="text-xl font-semibold">/m²</span></>
-                      : formatRupiah(property.harga)}
+                      : hrg.utama != null
+                        ? <>{formatRupiah(hrg.utama)}{hrg.satuan && <span className="text-xl font-semibold">{hrg.satuan}</span>}</>
+                        : 'Hubungi kami'}
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -821,8 +840,11 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                 </div>
               </div>
               {utamakanPerM2
-                ? <div className="text-sm text-gray-500 mb-2">Total {formatRupiah(property.harga)}{property.luas_tanah ? ` untuk ${property.luas_tanah} m²` : ''}</div>
-                : hargaPerM2 ? <div className="text-xs text-gray-400 mb-2">~{formatRupiah(hargaPerM2)}/m²</div> : null}
+                ? <div className="text-sm text-gray-500 mb-2">Total {formatRupiah(hrg.jual!)}{property.luas_tanah ? ` untuk ${property.luas_tanah} m²` : ''}</div>
+                : hargaPerM2 ? <div className="text-xs text-gray-400 mb-2">~{formatRupiah(hargaPerM2)}/m²</div>
+                : hrg.sewa != null && property.tujuan === 'dijual_disewa'
+                  ? <div className="text-sm text-gray-500 mb-2">Sewa {formatRupiah(hrg.sewa)}/tahun</div>
+                  : null}
               <div className="flex gap-2 mb-3">
                 {property.nego && <span className="px-2 py-0.5 rounded-full text-xs bg-orange-50 text-orange-600 border border-orange-200">Nego</span>}
                 {property.nett && <span className="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-[#1565C0] border border-blue-200">Nett</span>}
@@ -887,7 +909,9 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                 lebar penuh — pada layar 360px, harga + dua tombol dalam satu baris
                 memaksa label tombol terpotong. */}
             <div className="flex items-baseline justify-between gap-2 mb-2">
-              <div className="font-bold text-[#1565C0] font-display">{formatRupiah(property.harga)}</div>
+              <div className="font-bold text-[#1565C0] font-display">
+                {hrg.utama != null ? `${formatRupiah(hrg.utama)}${hrg.satuan}` : 'Hubungi kami'}
+              </div>
               <div className="text-xs text-gray-500 truncate">{property.jenis} · {property.kecamatan}</div>
             </div>
             <TombolKontakProperti property={property} onIsiForm={() => setShowSheet(true)} />

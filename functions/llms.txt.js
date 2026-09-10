@@ -5,6 +5,7 @@
 
 import { withEdgeCache } from './_lib/edgeCache.js';
 import { buildPropertyUrl } from './_lib/propertyUrl.js';
+import { hargaTampil } from './_lib/hargaTampil.js';
 
 export async function onRequestGet(context) {
   // Sama seperti sitemap.xml: header 'Cache-Control' saja tidak melewati Worker,
@@ -44,7 +45,7 @@ async function bangunLlmsTxt(context) {
 
   try {
     const props = await env.DB.prepare(`
-      SELECT slug, title, jenis_properti, tujuan, provinsi, kabupaten, kecamatan, harga
+      SELECT slug, title, jenis_properti, tujuan, provinsi, kabupaten, kecamatan, harga, harga_sewa_tahun
       FROM properties
       WHERE status_publish = 'published'
       ORDER BY published_at DESC
@@ -54,7 +55,14 @@ async function bangunLlmsTxt(context) {
     if (rows.length > 0) {
       lines.push('## Listing Terbaru', '');
       for (const p of rows) {
-        const harga = p.harga ? ` — Rp ${Number(p.harga).toLocaleString('en-US').replace(/,/g, '.')}` : '';
+        // Listing `disewa` punya kolom `harga` = 0, jadi membacanya langsung
+        // membuat properti sewa muncul di sini TANPA harga sama sekali — bukan
+        // "Rp 0" yang mencolok, melainkan hilang diam-diam dari berkas yang
+        // justru dibaca crawler AI.
+        const h = hargaTampil(p);
+        const harga = h.utama
+          ? ` — Rp ${Number(h.utama).toLocaleString('en-US').replace(/,/g, '.')}${h.satuan}`
+          : '';
         const lokasi = [p.kecamatan, p.kabupaten].filter(Boolean).join(', ');
         lines.push(`- [${p.title}](${buildPropertyUrl(p, base)}): ${p.jenis_properti || 'Properti'} ${p.tujuan === 'disewa' ? 'disewa' : 'dijual'} di ${lokasi}${harga}`);
       }
