@@ -12,6 +12,7 @@ import SlotIndicatorStrip from './viralframe/SlotIndicatorStrip';
 import AkunAgentCard from './AkunAgentCard';
 import JamPrimetimeCard from './JamPrimetimeCard';
 import PresetUtamaCard from './PresetUtamaCard';
+import PanelUnggahAgent from './viralframe/PanelUnggahAgent';
 
 // Penanda status properti — MURNI TEKS, dihitung dari flag properti yang sudah
 // ada di baris video. Ini BUKAN sisa fitur badge/logo video (overlay gambar ke
@@ -42,6 +43,8 @@ interface CharacterOption {
   id: number;
   nama: string;
   foto_url: string;
+  /** Jenis properti yang jadi spesialisasi agent ini. Kosong/undefined = bebas semua jenis. */
+  spesialis?: string[];
 }
 
 interface AnalyticsRow {
@@ -510,6 +513,12 @@ export default function AdminViralFrameAgentVideosPage() {
         {/* Grid video */}
         <div className="flex-1 min-w-0 space-y-3">
           {selectedCharId != null && <SlotIndicatorStrip characterId={selectedCharId} refreshKey={slotRefreshTick} />}
+          {/* key={selectedCharId}: remount saat ganti agent, supaya properti/file/
+              caption yang sedang diisi tidak nyasar terbawa ke agent lain. */}
+          {selectedCharId != null && (
+            <PanelUnggahAgent key={selectedCharId} characterId={selectedCharId}
+              spesialis={selectedCharacter?.spesialis ?? []} onSelesai={refreshAfterAction} />
+          )}
           {/* Tab Aktif/Sampah */}
           <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-full p-0.5 w-fit">
             {([{ v: 'active', label: 'Aktif' }, { v: 'trash', label: 'Sampah' }] as const).map(t => (
@@ -553,7 +562,11 @@ export default function AdminViralFrameAgentVideosPage() {
           ) : videos.length === 0 ? (
             <div className="text-center py-16 border border-dashed border-gray-200 rounded-2xl bg-white">
               <p className="text-sm text-[#64748B]">{view === 'trash' ? 'Sampah kosong.' : 'Belum ada video untuk karakter ini.'}</p>
-              {view === 'active' && <p className="text-xs text-[#94A3B8] mt-1">Upload dari halaman workspace properti → Step 4 → tab "Upload Hasil".</p>}
+              {view === 'active' && (
+                <p className="text-xs text-[#94A3B8] mt-1">
+                  Pakai "Upload video manual" di atas, atau lewat workspace properti → Step 4 → tab "Upload Hasil".
+                </p>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
