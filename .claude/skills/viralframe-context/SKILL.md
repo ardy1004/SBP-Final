@@ -55,6 +55,7 @@ description: ViralFrame workbench architecture (agent→listing→bahan→parame
 ### Alur video & tabel
 - **`viralframe_agent_videos`** = satu-satunya alur video: unggah manual hasil render Google Flow → dikelola di halaman **Konten Agent** → penjadwal otomatis. Metrik `views/likes/gaya` di sini (migrasi 0034).
 - **`viralframe_videos` dan `viralframe_generations` sudah TIDAK PUNYA PENULIS.** Tabelnya sengaja tidak di-DROP (destruktif tanpa manfaat), tapi jangan tulis kode baru yang membacanya. `labelGaya()` di `viralframe.js` hanya menjaga 573 baris video lama tetap terbaca manusiawi.
+- ⚠️ **`spesialis` (di `viralframe_agent_accounts`, lewat `viralframe_characters`) SEKARANG HANYA LABEL/PENGELOMPOKAN UI** (`AgentGrid.tsx` / `agentCocok()`) — **BUKAN gerbang upload.** Gate 422 `cekSpesialis()` (dulu di `functions/_lib/agentAccounts.js`, dipanggil dari `r2-sign.js` & `agent-videos/index.js`) **sengaja dihapus 2026-09-16** atas keputusan eksplisit user: alasan lamanya (tiap agent punya akun Cloudinary sendiri, salah unggah = salah tagih lintas-agent) sudah tidak berlaku sejak migrasi 0043 memindahkan semua video ke satu bucket R2 bersama (`sbp-video`) tanpa identitas per-agent di storage key. **JANGAN pasang lagi gerbang spesialis sisi server tanpa keputusan eksplisit baru dari user** — ini pilihan arsitektur yang sudah settled, bukan kealpaan yang perlu "diperbaiki".
 
 
 ## ViralFrame — Storage Video: R2, BUKAN Cloudinary (migrasi 0043, 2026-08-22)

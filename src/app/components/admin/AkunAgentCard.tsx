@@ -240,8 +240,8 @@ export default function AkunAgentCard() {
         </div>
         <p className="text-[10px] text-[#64748B] mt-2">
           {mode === 'terpusat'
-            ? `Upload & posting semua agent memakai akun ${namaUtama} — kredensial masing-masing di bawah tersimpan tapi belum dipakai. Aturan spesialis tidak berlaku.`
-            : 'Tiap agent memakai akun & storage sendiri. Agent berspesialis hanya menerima jenis properti yang cocok; agent utama bebas semua jenis.'}
+            ? `Upload & posting semua agent memakai akun ${namaUtama} — kredensial masing-masing di bawah tersimpan tapi belum dipakai.`
+            : 'Tiap agent memakai akun & storage sendiri. Spesialis hanya label pengelompokan — semua agent bisa upload listing jenis apa pun.'}
         </p>
       </div>
 
@@ -281,7 +281,7 @@ export default function AkunAgentCard() {
                       <input className={INPUT_CLS} value={form.gmail} onChange={e => ubah('gmail', e.target.value)} placeholder="agent@gmail.com" />
                     </div>
                     <div>
-                      <label className={LABEL_CLS}>Spesialis (kosong = semua jenis)</label>
+                      <label className={LABEL_CLS}>Spesialis (pengelompokan di ViralFrame · kosong = semua jenis)</label>
                       <div className="flex flex-wrap gap-1">
                         {PROPERTY_TYPES.map(t => (
                           <button key={t.value} type="button" onClick={() => toggleSpesialis(t.value)}

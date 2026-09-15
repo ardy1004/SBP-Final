@@ -163,33 +163,15 @@ export async function resolveScheduler(env, characterId) {
   };
 }
 
-// Aturan spesialis (keputusan user 2026-08-11): pembatasan mengikuti STORAGE
-// TUJUAN, bukan sekadar agent yang dipilih.
-//   • Menuju akun agent utama (entah karena mode terpusat, entah karena yang
-//     dipilih memang agent utama) -> BEBAS jenis apa pun.
-//   • Menuju akun agent spesialis -> jenis properti WAJIB cocok.
-// Agent tanpa spesialis tersimpan juga bebas — belum diatur, bukan "tidak boleh
-// apa-apa".
-export async function cekSpesialis(env, characterId, jenisProperti) {
-  const { targetId, utama } = await resolveAkunTarget(env, characterId);
-  if (!targetId || (utama && targetId === utama)) return { boleh: true };
-
-  const row = await env.DB.prepare(
-    `SELECT c.nama, a.spesialis
-     FROM viralframe_characters c LEFT JOIN viralframe_agent_accounts a ON a.character_id = c.id
-     WHERE c.id = ?`
-  ).bind(targetId).first().catch(() => null);
-  if (!row) return { boleh: true }; // agent tidak dikenal -> biarkan validator lain yang menolak
-
-  const spesialis = parseSpesialis(row.spesialis);
-  if (spesialis.length === 0) return { boleh: true };
-  if (jenisProperti && spesialis.includes(jenisProperti)) return { boleh: true };
-
-  return {
-    boleh: false,
-    pesan: `${row.nama} khusus properti ${spesialis.join('/')}, sedangkan properti ini ${jenisProperti || 'tidak diketahui jenisnya'}. Pilih agent yang sesuai, atau pakai agent utama yang bebas semua jenis.`,
-  };
-}
+// `spesialis` SEKARANG murni label/pengelompokan di workbench ViralFrame,
+// BUKAN pembatasan upload. Gerbang 422 (cekSpesialis, dulu di sini) dicabut
+// 2026-09-16 atas permintaan eksplisit user. Alasan gerbang itu ada dulu:
+// setiap agent punya akun Cloudinary sendiri, jadi upload di luar spesialis
+// berarti biaya storage tercatat di akun yang salah. Alasan itu berhenti
+// berlaku sejak migrasi 0043 memindahkan SEMUA storage video ke satu bucket
+// R2 bersama (`sbp-video`) tanpa identitas per-agent di storage key — tidak
+// ada lagi "akun siapa" yang bisa salah. Sesi mendatang JANGAN menghidupkan
+// kembali gerbang server-side di sini tanpa keputusan eksplisit baru dari user.
 
 // Cloud name dari secure_url Cloudinary — sumber paling tepercaya soal "file
 // ini mendarat di akun siapa", karena datang dari respons Cloudinary sendiri

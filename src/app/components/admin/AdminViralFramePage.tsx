@@ -444,7 +444,7 @@ export default function AdminViralFramePage() {
             <Video size={20} className="text-[#1565C0]" /> Viral Frame
           </h1>
           <p className="text-[#64748B] text-sm mt-0.5">
-            Pilih agent dulu — tiap agent hanya menangani jenis properti yang jadi spesialisasinya.
+            Pilih agent dulu — listing dikelompokkan per spesialisasi agent. Untuk jenis lain, pakai "Upload video manual" di Konten Agent.
           </p>
         </div>
 

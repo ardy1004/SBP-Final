@@ -34,8 +34,8 @@ export async function onRequestGet(context) {
 
   try {
     // spesialis + kesiapan storage ikut di sini (migrasi 0037) supaya dropdown
-    // "Karakter / Agent" di Upload Hasil bisa menyarankan agent yang cocok
-    // dengan jenis properti tanpa request kedua. LEFT JOIN: karakter tanpa
+    // "Karakter / Agent" di Upload Hasil bisa menampilkan label pengelompokan
+    // agent tanpa request kedua. LEFT JOIN: karakter tanpa
     // baris akun (mis. Vina) tetap muncul.
     const result = await env.DB.prepare(`
       SELECT c.id, c.nama, c.foto_url, c.gender, c.usia, c.etnik, c.style, c.ciri_fisik, c.created_at,
@@ -51,9 +51,9 @@ export async function onRequestGet(context) {
       spesialis: parseSpesialis(r.spesialis),
       storage_siap: !!r.storage_siap,
     }));
-    // mode ikut di sini supaya form Upload Hasil tahu apakah aturan spesialis
-    // sedang berlaku — tanpa request kedua. Saat 'terpusat', semua upload
-    // mendarat di akun agent utama dan pembatasan spesialis tidak aktif.
+    // mode ikut di sini supaya form Upload Hasil tahu ke akun mana upload
+    // akan mendarat — tanpa request kedua. Saat 'terpusat', semua upload
+    // mendarat di akun agent utama, terlepas dari label spesialis masing-masing.
     const { mode, utama } = await getModeAkun(env);
     return jsonOk({ items, total: items.length, mode, utama });
   } catch (err) {

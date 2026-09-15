@@ -1,5 +1,5 @@
 // POST /api/admin/viralframe/r2-sign
-//   Body: { property_id?, character_id? }
+//   Body: { property_id? }
 //   Mengembalikan presigned PUT URL ke bucket R2 sbp-video untuk video + poster,
 //   supaya browser mengunggah LANGSUNG ke R2 tanpa lewat Worker.
 //
@@ -14,7 +14,6 @@
 
 import { AwsClient } from 'aws4fetch';
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
-import { cekSpesialis } from '../../../_lib/agentAccounts.js';
 import { kunciVideoBaru, urlPublik, r2Siap } from '../../../_lib/videoStorage.js';
 
 const BUCKET = 'sbp-video';
@@ -26,7 +25,6 @@ export async function onRequestPost(context) {
   let body = {};
   try { body = await request.json(); } catch { /* body opsional */ }
 
-  const characterId = parseInt(body.character_id, 10);
   const propertyId = parseInt(body.property_id, 10);
 
   // Pesan menyebut PERSIS apa yang hilang. Versi lama menulis "binding VIDEO +
@@ -39,16 +37,6 @@ export async function onRequestPost(context) {
   if (!env.R2_SECRET_ACCESS_KEY) kurang.push('R2_SECRET_ACCESS_KEY');
   if (kurang.length > 0) {
     return jsonError(`Storage R2 belum siap — yang belum ada: ${kurang.join(', ')}`, 500);
-  }
-
-  // Cek kecocokan spesialis SEBELUM tanda tangan diberikan — kalau ditolak di
-  // sini, admin belum sempat mengunggah file 20 MB untuk kemudian ditolak.
-  // Gerbang sebenarnya tetap di agent-videos POST (endpoint ini bisa dilewati).
-  if (Number.isInteger(characterId) && Number.isInteger(propertyId)) {
-    const prop = await env.DB.prepare('SELECT jenis_properti FROM properties WHERE id = ?')
-      .bind(propertyId).first().catch(() => null);
-    const cek = await cekSpesialis(env, characterId, prop?.jenis_properti);
-    if (!cek.boleh) return jsonError(cek.pesan, 422);
   }
 
   const { key, posterKey } = kunciVideoBaru(propertyId);

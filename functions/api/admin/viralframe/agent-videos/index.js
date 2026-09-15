@@ -14,7 +14,7 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
-import { resolveCloudinaryByCloudName, cloudNameDariUrl, cekSpesialis } from '../../../../_lib/agentAccounts.js';
+import { resolveCloudinaryByCloudName, cloudNameDariUrl } from '../../../../_lib/agentAccounts.js';
 import { hapusAsetVideo } from '../../../../_lib/videoStorage.js';
 import { logServerError } from '../../../../_lib/logError.js';
 
@@ -220,13 +220,8 @@ export async function onRequestPost(context) {
 
   const character = await env.DB.prepare('SELECT id FROM viralframe_characters WHERE id = ?').bind(characterId).first().catch(() => null);
   if (!character) return jsonError('Karakter tidak ditemukan', 404);
-  const property = await env.DB.prepare('SELECT id, jenis_properti FROM properties WHERE id = ?').bind(propertyId).first().catch(() => null);
+  const property = await env.DB.prepare('SELECT id FROM properties WHERE id = ?').bind(propertyId).first().catch(() => null);
   if (!property) return jsonError('Properti tidak ditemukan', 404);
-
-  // Gerbang spesialis yang sebenarnya (r2-sign cuma menolak lebih awal
-  // demi UX — endpoint ini bisa dipanggil langsung tanpa lewat sana).
-  const cek = await cekSpesialis(env, characterId, property.jenis_properti);
-  if (!cek.boleh) return jsonError(cek.pesan, 422);
 
   try {
     const res = await env.DB.prepare(

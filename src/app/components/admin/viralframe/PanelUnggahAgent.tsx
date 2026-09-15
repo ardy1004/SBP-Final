@@ -8,10 +8,14 @@
 //
 // Properti WAJIB dipilih (bukan opsional) — `viralframe_agent_videos.property_id`
 // NOT NULL, dan hampir semua tampilan (judul, kode listing, badge SOLD/Premium)
-// bergantung padanya. Daftar pilihannya disaring `agentCocok()` (sama seperti
-// AgentGrid) supaya agent berspesialis (mis. Hana = rumah) tidak menembak 422
-// dari `cekSpesialis()` di r2-sign.js / agent-videos POST — validasi asli tetap
-// di server, ini cuma mencegah percobaan yang pasti ditolak.
+// bergantung padanya. Daftar pilihannya TIDAK disaring lagi (keputusan user,
+// 2026-09-16): admin boleh memilih listing jenis apa pun untuk agent mana pun.
+// `agentCocok()` (sama seperti AgentGrid) sekarang cuma dipakai untuk
+// menampilkan chip "di luar spesialis" pada listing yang berada di luar
+// `spesialis` agent — sekadar info, karena videonya akan dijadwalkan ke akun
+// sosial media agent itu sendiri, bukan pemblokir. Gate server `cekSpesialis()`
+// di r2-sign.js / agent-videos POST juga sudah DICABUT — lihat
+// `functions/_lib/agentAccounts.js`.
 import { useState, useCallback } from 'react';
 import { Upload, Loader2, Check, ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 import { bacaJson } from '../../../../lib/api';
@@ -29,6 +33,14 @@ interface Presign {
   key: string; posterKey: string;
   uploadUrl: string; posterUploadUrl: string;
   publicUrl: string; posterPublicUrl: string;
+}
+
+function ChipLuarSpesialis() {
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-100">
+      di luar spesialis
+    </span>
+  );
 }
 
 export default function PanelUnggahAgent({ characterId, spesialis, onSelesai }: {
@@ -64,7 +76,7 @@ export default function PanelUnggahAgent({ characterId, spesialis, onSelesai }: 
     } finally { setLoadingProperti(false); }
   }, [properti, loadingProperti]);
 
-  const kandidat = (properti ?? []).filter(p => agentCocok(spesialis, p.jenis_properti));
+  const kandidat = properti ?? [];
   const q = cari.trim().toLowerCase();
   const hasilCari = q
     ? kandidat.filter(p => p.title.toLowerCase().includes(q) || p.kode_listing.toLowerCase().includes(q))
@@ -147,7 +159,7 @@ export default function PanelUnggahAgent({ characterId, spesialis, onSelesai }: 
         <div>
           <h2 className="font-display font-bold text-[#0F172A] text-sm">Upload video manual</h2>
           <p className="text-xs text-[#64748B] mt-0.5">
-            {bebas ? 'Agent ini bebas — bisa untuk properti jenis apa pun.' : `Khusus properti jenis ${spesialis.join('/')}.`}
+            {bebas ? 'Agent ini bebas — bisa untuk properti jenis apa pun.' : `Semua jenis bisa dipilih · spesialis: ${spesialis.join('/')}`}
           </p>
         </div>
         {terbuka ? <ChevronDown size={16} className="text-[#94A3B8] flex-shrink-0" /> : <ChevronRight size={16} className="text-[#94A3B8] flex-shrink-0" />}
@@ -162,7 +174,10 @@ export default function PanelUnggahAgent({ characterId, spesialis, onSelesai }: 
               <div className="flex items-center justify-between gap-2 px-3 py-2 border border-[#1565C0]/30 bg-[#F0F7FF] rounded-xl">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-[#0F172A] truncate">{dipilih.title}</div>
-                  <div className="text-[11px] text-[#64748B]">{dipilih.kode_listing} · {dipilih.jenis_properti}</div>
+                  <div className="flex items-center flex-wrap gap-1.5 mt-0.5">
+                    <span className="text-[11px] text-[#64748B]">{dipilih.kode_listing} · {dipilih.jenis_properti}</span>
+                    {!agentCocok(spesialis, dipilih.jenis_properti) && <ChipLuarSpesialis />}
+                  </div>
                 </div>
                 <button type="button" onClick={() => setDipilih(null)} disabled={sibuk}
                   className="p-1 rounded-lg text-[#94A3B8] hover:text-[#1565C0] hover:bg-white flex-shrink-0" title="Ganti properti">
@@ -183,7 +198,7 @@ export default function PanelUnggahAgent({ characterId, spesialis, onSelesai }: 
                   ) : hasilCari.length === 0 ? (
                     <p className="text-xs text-[#94A3B8] p-3">
                       {kandidat.length === 0
-                        ? `Belum ada listing yang cocok dengan spesialisasi agent ini${spesialis.length ? ` (${spesialis.join('/')})` : ''}.`
+                        ? 'Belum ada listing.'
                         : 'Tidak ada listing yang cocok dengan pencarian.'}
                     </p>
                   ) : (
@@ -192,7 +207,10 @@ export default function PanelUnggahAgent({ characterId, spesialis, onSelesai }: 
                         className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-[#F0F7FF]">
                         <div className="min-w-0">
                           <div className="text-sm text-[#0F172A] truncate">{p.title}</div>
-                          <div className="text-[11px] text-[#94A3B8]">{p.kode_listing} · {p.jenis_properti}</div>
+                          <div className="flex items-center flex-wrap gap-1.5 mt-0.5">
+                            <span className="text-[11px] text-[#94A3B8]">{p.kode_listing} · {p.jenis_properti}</span>
+                            {!agentCocok(spesialis, p.jenis_properti) && <ChipLuarSpesialis />}
+                          </div>
                         </div>
                       </button>
                     ))
