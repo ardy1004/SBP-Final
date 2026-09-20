@@ -154,13 +154,14 @@ export async function onRequestPost({ request, env }) {
     // pernah jalan untuk agent yang stoknya habis.
     let videos = [];
     if (butuh > 0) {
-      // FIFO: video terlama yang diupload lebih dulu. hashtags WAJIB diikutkan —
-      // tanpa ini hashtag tersimpan di DB tapi tidak pernah ikut terkirim ke
-      // Buffer/Zernio (dilaporkan user 2026-08-15, sama seperti jalur manual).
+      // Urutan kirim manual (drag & drop admin), bukan lagi FIFO created_at —
+      // hashtags WAJIB diikutkan, tanpa ini hashtag tersimpan di DB tapi tidak
+      // pernah ikut terkirim ke Buffer/Zernio (dilaporkan user 2026-08-15, sama
+      // seperti jalur manual).
       const antre = await env.DB.prepare(
         `SELECT id, cloudinary_url, caption, hashtags FROM viralframe_agent_videos
          WHERE character_id = ? AND trashed_at IS NULL AND cloudinary_url IS NOT NULL
-         ORDER BY created_at ASC, id ASC LIMIT ?`
+         ORDER BY urutan_kirim ASC, id ASC LIMIT ?`
       ).bind(ag.id, butuh).all().catch(() => null);
       videos = antre?.results ?? [];
       if (videos.length === 0) hasilAgent.alasan = 'stok video habis';

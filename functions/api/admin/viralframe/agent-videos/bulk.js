@@ -33,8 +33,38 @@ export async function onRequestPost(context) {
     }
 
     if (action === 'restore') {
-      await env.DB.prepare(`UPDATE viralframe_agent_videos SET trashed_at = NULL WHERE id IN (${placeholders})`).bind(...ids).run();
-      return jsonOk({ affected: ids.length });
+      // ids di sini bisa lintas karakter. Video pulih WAJIB dapat urutan_kirim
+      // baru di akhir antrean karakternya masing-masing — NULL/nilai basi di
+      // SQLite ORDER BY ASC muncul PALING DEPAN, jadi tanpa ini video pulih bisa
+      // diam-diam menyerobot jadi prioritas #1 scheduler. Antrean akhir dihitung
+      // PER GRUP character_id, bukan sekali untuk seluruh batch.
+      const rows = await env.DB.prepare(
+        `SELECT id, character_id FROM viralframe_agent_videos WHERE id IN (${placeholders})`
+      ).bind(...ids).all();
+      const found = rows.results ?? [];
+
+      const grupPerKarakter = new Map();
+      for (const row of found) {
+        if (!grupPerKarakter.has(row.character_id)) grupPerKarakter.set(row.character_id, []);
+        grupPerKarakter.get(row.character_id).push(row.id);
+      }
+
+      const statements = [];
+      for (const [characterId, videoIds] of grupPerKarakter) {
+        const { maxUrutan } = await env.DB.prepare(
+          'SELECT COALESCE(MAX(urutan_kirim), 0) AS maxUrutan FROM viralframe_agent_videos WHERE character_id = ? AND trashed_at IS NULL'
+        ).bind(characterId).first();
+        let base = maxUrutan ?? 0;
+        for (const videoId of videoIds.sort((a, b) => a - b)) {
+          base += 1000;
+          statements.push(
+            env.DB.prepare('UPDATE viralframe_agent_videos SET trashed_at = NULL, urutan_kirim = ? WHERE id = ?').bind(base, videoId)
+          );
+        }
+      }
+
+      if (statements.length > 0) await env.DB.batch(statements);
+      return jsonOk({ affected: statements.length });
     }
 
     // delete: HANYA video yang sudah di Sampah (trashed_at IS NOT NULL) — dulu

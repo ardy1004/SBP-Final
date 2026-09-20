@@ -3,8 +3,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router';
 import {
   Users, Loader2, Download, Trash2, Pencil, Check, X, Copy,
-  Archive, RotateCcw, CheckCircle2, Circle, Send, BarChart3,
+  Archive, RotateCcw, CheckCircle2, Circle, Send, BarChart3, GripVertical,
 } from 'lucide-react';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, rectSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { toImageThumbnailUrl } from '../../lib/cloudinaryUrl';
 import { unduhVideo } from '../../lib/posterVideo';
 import { labelGaya } from '../../../../functions/_lib/viralframe.js';
@@ -101,6 +104,10 @@ interface AgentVideo {
   // Platform yang gagal dijadwalkan dan belum punya pengganti aktif, dipisah
   // koma (GROUP_CONCAT di agent-videos/index.js). null = tidak ada yang gagal.
   platform_gagal: string | null;
+  // Posisi dalam antrean kirim scheduler (ASC = duluan dikirim), diatur lewat
+  // drag & drop di grid ini. NULL untuk baris di Sampah (trashed_at terisi) —
+  // tidak relevan, dan diisi ulang otomatis saat video dipulihkan.
+  urutan_kirim: number | null;
 }
 
 function mediaUrl(key: string) {
@@ -140,6 +147,33 @@ const CARD_SIZE_STORAGE_KEY = 'sbp_agent_videos_card_size';
 type ViewMode = 'active' | 'trash';
 
 interface ContextMenuState { x: number; y: number; videoId: number }
+
+// Wrapper tipis di sekitar `useSortable` — kartu video sudah render besar
+// (video, textarea, checkbox, context menu klik-kanan), jadi drag-nya tidak
+// dipasang di seluruh kartu (akan merusak semua kontrol itu) melainkan cuma di
+// elemen pegangan kecil. `useSortable` WAJIB dipanggil di komponen tersendiri
+// per item (bukan langsung di dalam .map() milik komponen induk) — jumlah
+// panggilan hook per instance harus tetap, dan instance di sini berubah
+// mengikuti panjang array video, bukan panggilan hook di satu komponen induk.
+interface SortableCardArgs {
+  setNodeRef: ReturnType<typeof useSortable>['setNodeRef'];
+  style: React.CSSProperties;
+  attributes: ReturnType<typeof useSortable>['attributes'];
+  listeners: ReturnType<typeof useSortable>['listeners'];
+  isDragging: boolean;
+}
+function SortableItem({ id, disabled, children }: {
+  id: number;
+  disabled?: boolean;
+  children: (args: SortableCardArgs) => React.ReactElement;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition: transition ?? undefined,
+  };
+  return children({ setNodeRef, style, attributes, listeners, isDragging });
+}
 
 export default function AdminViralFrameAgentVideosPage() {
   const [characters, setCharacters] = useState<CharacterOption[]>([]);
@@ -256,6 +290,36 @@ export default function AdminViralFrameAgentVideosPage() {
   const refreshAfterAction = () => {
     if (selectedCharId != null) loadVideos(selectedCharId, view);
     loadCharacters();
+  };
+
+  // `videos` sudah datang terurut `urutan_kirim ASC` dari server — dipakai untuk
+  // badge nomor antrean supaya nomornya tetap posisi kirim sungguhan walau
+  // grid sedang difilter rasio, bukan cuma posisi di dalam subset yang tampil.
+  const globalOrderIndex = new Map(videos.map((vid, i) => [vid.id, i]));
+
+  // Reorder hanya masuk akal saat grid menampilkan SELURUH video aktif
+  // karakter itu dalam urutan aslinya — endpoint reorder menolak (422) kalau
+  // `ordered_ids` bukan permutasi PENUH video aktif, dan Sampah tidak punya
+  // konsep antrean kirim sama sekali.
+  const dragEnabled = view === 'active' && ratioFilter === 'semua';
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!dragEnabled || selectedCharId == null || !over || active.id === over.id) return;
+    const oldIndex = filteredVideos.findIndex(v => v.id === active.id);
+    const newIndex = filteredVideos.findIndex(v => v.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const reordered = arrayMove(filteredVideos, oldIndex, newIndex);
+    setVideos(reordered);
+    setAksiError('');
+    const ok = await kirimAksi('/api/admin/viralframe/agent-videos/reorder',
+      { method: 'PATCH', headers: JSON_HEADER, body: JSON.stringify({ character_id: selectedCharId, ordered_ids: reordered.map(v => v.id) }) },
+      'Ubah urutan kirim');
+    // Batalkan optimistic update kalau server menolak (mis. drift karena tab
+    // lain trash/restore/upload video yang sama saat drag berlangsung).
+    if (!ok) refreshAfterAction();
   };
 
   // ── Seleksi multi ──
@@ -596,13 +660,21 @@ export default function AdminViralFrameAgentVideosPage() {
                 </div>
               </div>
 
+              {view === 'active' && ratioFilter !== 'semua' && (
+                <p className="text-[11px] text-amber-600 -mt-1.5">
+                  Set filter ke "Semua" untuk mengatur urutan kirim lewat drag & drop.
+                </p>
+              )}
+
               {filteredVideos.length === 0 ? (
                 <div className="text-center py-16 border border-dashed border-gray-200 rounded-2xl bg-white">
                   <p className="text-sm text-[#64748B]">Tidak ada video dengan rasio ini.</p>
                 </div>
               ) : (
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={filteredVideos.map(v => v.id)} strategy={rectSortingStrategy}>
               <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${CARD_SIZE_PX[cardSize]}px, ${CARD_SIZE_PX[cardSize]}px))` }}>
-              {filteredVideos.map(v => {
+              {filteredVideos.map((v, idx) => {
                 const e = edits[v.id] ?? { caption: '', hashtags: '' };
                 const m = metricEdits[v.id] ?? { post_url: '', views: '', likes: '' };
                 const editing = editingId === v.id;
@@ -610,9 +682,12 @@ export default function AdminViralFrameAgentVideosPage() {
                 const statusProperti = pickStatusProperti(v);
                 const selected = selectedIds.has(v.id);
                 const purgeDays = v.trashed_at ? daysUntilPurge(v.trashed_at) : null;
+                const urutanBadge = (globalOrderIndex.get(v.id) ?? idx) + 1;
                 return (
-                  <div key={v.id} onContextMenu={e2 => openContextMenu(e2, v.id)}
-                    className={`border rounded-2xl overflow-hidden bg-white flex flex-col transition-colors ${selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-gray-100'}`}>
+                  <SortableItem key={v.id} id={v.id} disabled={!dragEnabled}>
+                    {({ setNodeRef, style, attributes, listeners, isDragging }) => (
+                  <div ref={setNodeRef} style={style} onContextMenu={e2 => openContextMenu(e2, v.id)}
+                    className={`border rounded-2xl overflow-hidden bg-white flex flex-col transition-colors ${selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-gray-100'} ${isDragging ? 'opacity-60 shadow-lg relative z-10' : ''}`}>
                     <div className="relative">
                       {/* poster_url = .jpg yang sudah jadi di R2 (nol biaya).
                           Fallback ke turunan Cloudinary HANYA untuk baris lama —
@@ -627,6 +702,18 @@ export default function AdminViralFrameAgentVideosPage() {
                         title="Pilih video">
                         {selected ? <CheckCircle2 size={16} className="text-[#4FC3F7]" /> : <Circle size={16} />}
                       </button>
+                      {dragEnabled && (
+                        <button {...attributes} {...listeners} type="button"
+                          className="absolute top-2 left-10 w-6 h-6 rounded-full bg-black/50 hover:bg-black/70 flex items-center justify-center text-white cursor-grab active:cursor-grabbing touch-none"
+                          title="Geser untuk ubah urutan kirim">
+                          <GripVertical size={14} />
+                        </button>
+                      )}
+                      {view === 'active' && (
+                        <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-semibold text-white bg-[#0F172A]/70">
+                          #{urutanBadge}
+                        </span>
+                      )}
                       {purgeDays != null && (
                         <span className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-semibold text-white ${purgeDays <= 0 ? 'bg-[#94A3B8]' : 'bg-red-500'}`}>
                           {purgeDays <= 0 ? 'Menunggu pembersihan…' : `Terhapus otomatis ${purgeDays} hari lagi`}
@@ -752,9 +839,13 @@ export default function AdminViralFrameAgentVideosPage() {
                       )}
                     </div>
                   </div>
+                    )}
+                  </SortableItem>
                 );
               })}
               </div>
+              </SortableContext>
+              </DndContext>
               )}
             </div>
           )}

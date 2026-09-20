@@ -21,7 +21,7 @@ import { logServerError } from '../../../../_lib/logError.js';
 const SELECT_COLS = `
   v.id, v.character_id, v.property_id, v.caption, v.hashtags,
   v.cloudinary_public_id, v.cloudinary_url, v.cloudinary_name, v.resource_type,
-  v.storage, v.r2_key, v.poster_url,
+  v.storage, v.r2_key, v.poster_url, v.urutan_kirim,
   v.duration_sec, v.bytes, v.format, v.width, v.height,
   v.status, v.scheduled_at, v.posted_at,
   v.post_url, v.platform_targets, v.trashed_at, v.created_at,
@@ -138,7 +138,7 @@ export async function onRequestGet(context) {
   if (Number.isInteger(characterId) && characterId > 0) { conds.push('v.character_id = ?'); binds.push(characterId); }
   if (Number.isInteger(propertyId) && propertyId > 0) { conds.push('v.property_id = ?'); binds.push(propertyId); }
   const where = `WHERE ${conds.join(' AND ')}`;
-  const orderBy = view === 'trash' ? 'v.trashed_at DESC, v.id DESC' : 'v.created_at DESC, v.id DESC';
+  const orderBy = view === 'trash' ? 'v.trashed_at DESC, v.id DESC' : 'v.urutan_kirim ASC, v.id ASC';
 
   try {
     const stmt = env.DB.prepare(
@@ -223,12 +223,19 @@ export async function onRequestPost(context) {
   const property = await env.DB.prepare('SELECT id FROM properties WHERE id = ?').bind(propertyId).first().catch(() => null);
   if (!property) return jsonError('Properti tidak ditemukan', 404);
 
+  // Video baru masuk AKHIR antrean kirim karakter ini, bukan menyerobot yang
+  // sudah diurutkan manual. Gap 1000 sejalan dengan backfill migrasi 0050.
+  const { maxUrutan } = await env.DB.prepare(
+    'SELECT COALESCE(MAX(urutan_kirim), 0) AS maxUrutan FROM viralframe_agent_videos WHERE character_id = ? AND trashed_at IS NULL'
+  ).bind(characterId).first();
+  const urutanKirim = (maxUrutan ?? 0) + 1000;
+
   try {
     const res = await env.DB.prepare(
       `INSERT INTO viralframe_agent_videos
-        (character_id, property_id, caption, hashtags, cloudinary_public_id, cloudinary_url, cloudinary_name, storage, r2_key, poster_url, resource_type, duration_sec, bytes, format, width, height, gaya)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).bind(characterId, propertyId, caption, hashtags, cloudinaryPublicId, cloudinaryUrl, cloudinaryName, storage, r2Key, posterUrl, resourceType, durationSec, bytes, format, width, height, gaya).run();
+        (character_id, property_id, caption, hashtags, cloudinary_public_id, cloudinary_url, cloudinary_name, storage, r2_key, poster_url, resource_type, duration_sec, bytes, format, width, height, gaya, urutan_kirim)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(characterId, propertyId, caption, hashtags, cloudinaryPublicId, cloudinaryUrl, cloudinaryName, storage, r2Key, posterUrl, resourceType, durationSec, bytes, format, width, height, gaya, urutanKirim).run();
     return jsonOk({ id: res.meta?.last_row_id }, 201);
   } catch (err) {
     console.error('[vf agent-videos] insert', err.message);

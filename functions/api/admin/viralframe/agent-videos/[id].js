@@ -69,7 +69,20 @@ export async function onRequestPatch(context) {
   // trash: true -> pindah ke Sampah (soft-delete, dihapus permanen otomatis 30 hari
   // kemudian oleh worker cron); false -> pulihkan ke Aktif.
   if (trash === true) { sets.push("trashed_at = datetime('now')"); }
-  else if (trash === false) { sets.push('trashed_at = NULL'); }
+  else if (trash === false) {
+    sets.push('trashed_at = NULL');
+    // Video pulih WAJIB dapat urutan_kirim baru di akhir antrean karakternya —
+    // NULL/nilai basi di SQLite ORDER BY ASC muncul PALING DEPAN, jadi tanpa ini
+    // video yang baru dipulihkan bisa diam-diam menyerobot jadi prioritas #1
+    // scheduler tanpa diminta siapa pun.
+    const row = await env.DB.prepare('SELECT character_id FROM viralframe_agent_videos WHERE id = ?').bind(id).first().catch(() => null);
+    if (row?.character_id) {
+      const { maxUrutan } = await env.DB.prepare(
+        'SELECT COALESCE(MAX(urutan_kirim), 0) AS maxUrutan FROM viralframe_agent_videos WHERE character_id = ? AND trashed_at IS NULL'
+      ).bind(row.character_id).first();
+      sets.push('urutan_kirim = ?'); binds.push((maxUrutan ?? 0) + 1000);
+    }
+  }
   if (sets.length === 0) return jsonError('Tidak ada field diupdate', 400);
 
   try {
