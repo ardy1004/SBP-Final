@@ -1,0 +1,663 @@
+Saya akan jadikan ini **contoh benchmark** yang bisa Anda kirim kembali ke Claude. Saya sengaja tidak memilih konsep generik “kamera masuk rumah → lihat kamar → CTA”. Dari materi yang Anda kirim, saya melihat *creative opportunity* yang lebih kuat.
+
+## BENCHMARK — Mrican 10 Detik
+
+### 1. Creative Opportunity Analysis
+
+**Fakta utama listing:**
+
+* Mrican / Demangan / Gejayan, Sleman, Yogyakarta
+* LT **492 m²**
+* LB **200 m²**
+* **4 KT / 4 KM**
+* 1 lantai
+* SHGB + IMB/PBG
+* Harga jual **Rp6,2 Miliar, nego**
+* Dekat UNY, UAJY Hukum, Sanata Dharma
+* Foto menunjukkan halaman/area terbuka yang cukup luas, ruang dalam lega, serta frontage yang pada foto diberi keterangan sekitar **22 m**
+
+Hal yang menurut saya paling menarik bukan sekadar “rumah 4 kamar”.
+
+**Creative opportunity-nya adalah kontras:**
+
+> **“Di kawasan kampus yang padat, ternyata ada rumah dengan tanah 492 m².”**
+
+Ini menghasilkan *curiosity gap* yang jauh lebih kuat daripada membuka video dengan:
+
+> “Dijual rumah di Mrican…”
+
+Audiens diberi alasan untuk bertahan karena informasi dibuka bertahap.
+
+---
+
+# 2. CREATIVE DNA
+
+```text
+CONTENT TYPE:
+Faceless property discovery
+
+CORE ANGLE:
+Unexpectedly large land in a dense strategic campus area
+
+HOOK FAMILY:
+Pattern interrupt + location/value contrast
+
+EMOTIONAL DRIVER:
+Surprise → curiosity → spatial proof → consideration
+
+VISUAL STRATEGY:
+Outside context → reveal scale → enter property → interior payoff
+
+PACING:
+Progressive discovery
+
+CAMERA LANGUAGE:
+Natural handheld property exploration with controlled cinematic movement
+
+RETENTION MECHANISM:
+New meaningful information approximately every 1.5–2.5 seconds
+
+CTA:
+Link di Bio
+
+FORMAT:
+9:16 vertical
+
+DURATION:
+10 seconds
+
+VOICEOVER:
+±8 seconds
+```
+
+Ini penting untuk ViralFrame:
+
+**Creative DNA muncul dari listing terlebih dahulu.**
+
+Bukan:
+
+`randomizer memilih montase_cepat → pertanyaan → kamera push-in`
+
+lalu listing dipaksa masuk ke template tersebut.
+
+---
+
+# 3. HOOK
+
+Saya tidak akan membuka dengan interior.
+
+Saya justru menggunakan foto eksterior/frontage sebagai **context establishing shot**.
+
+### Voice-over
+
+```text
+“Nyari rumah dekat kawasan kampus Jogja?
+Yang ini tanahnya 492 meter.
+Empat kamar, empat kamar mandi.
+Cek lengkapnya di link bio.”
+```
+
+Kurang lebih cocok untuk ±8 detik dengan delivery yang cukup cepat tetapi natural.
+
+Perhatikan bahwa VO **tidak mencoba memasukkan semua spesifikasi**.
+
+Harga, legalitas, LB 200 m², dll. bisa masuk caption/landing page.
+
+Kesalahan umum AI adalah berpikir:
+
+> semakin banyak informasi dalam 10 detik = semakin bagus.
+
+Padahal dalam short-form:
+
+> **information hierarchy > information quantity.**
+
+---
+
+# 4. STORYBOARD 10 DETIK
+
+### BEAT 1 — 0.0–2.2s
+
+**STOP-SCROLL**
+
+Visual:
+
+Exterior rumah dari jalan.
+
+Tetapi jangan statis.
+
+Mulai sedikit lebih dekat ke jalan lalu kamera bergerak maju secara natural menuju rumah sehingga frontage terbaca.
+
+**VO:**
+
+> “Nyari rumah dekat kawasan kampus Jogja?”
+
+**On-screen text:**
+
+```text
+RUMAH DI KAWASAN KAMPUS JOGJA?
+```
+
+### Temporal Intent
+
+```text
+start_state:
+viewer masih berada di jalan
+
+action:
+camera advances toward property
+
+reveal:
+rumah dengan frontage panjang mulai terbaca
+
+end_state:
+camera mengarah menuju akses masuk
+```
+
+**Tujuan psikologis:** viewer belum diberi semua jawaban.
+
+---
+
+### BEAT 2 — 2.2–5.0s
+
+**SURPRISE / SCALE REVEAL**
+
+Match-cut dari gerakan maju eksterior menuju halaman/koridor properti.
+
+Kamera terus bergerak dalam arah yang sama.
+
+Tampilkan area terbuka/halaman dan bangunan.
+
+**VO:**
+
+> “Yang ini tanahnya empat ratus sembilan puluh dua meter.”
+
+**On-screen text:**
+
+```text
+LT 492 m²
+```
+
+Text muncul setelah visual sudah mulai membuka halaman, bukan bersamaan dengan frame pertama.
+
+### Temporal Intent
+
+```text
+start_state:
+viewer baru memasuki property
+
+action:
+camera glides through entrance
+
+reveal:
+depth + open land becomes visible
+
+end_state:
+camera approaches main interior entrance
+```
+
+Di sinilah ada **information change**:
+
+`lokasi → skala tanah`
+
+Bukan sekadar mengganti angle kamera.
+
+---
+
+### BEAT 3 — 5.0–7.8s
+
+**INTERIOR PAYOFF**
+
+Masuk ke ruang utama yang paling luas dan terang.
+
+Gunakan ruangan dengan lantai putih glossy.
+
+Kamera melakukan controlled forward glide dengan sedikit lateral reveal.
+
+**VO:**
+
+> “Empat kamar, empat kamar mandi.”
+
+**On-screen text:**
+
+```text
+4 KT • 4 KM
+```
+
+### Temporal Intent
+
+```text
+start_state:
+camera arrives at doorway
+
+action:
+camera crosses threshold
+
+reveal:
+large bright main interior
+
+end_state:
+wide spatial composition established
+```
+
+Sekarang viewer memperoleh payoff bahwa bangunannya juga memiliki ruang yang lega.
+
+---
+
+### BEAT 4 — 7.8–10.0s
+
+**CTA + LOOPABLE END**
+
+Jangan pindah ke gambar CTA polos.
+
+Teruskan movement di ruang utama / bukaan menuju area lain.
+
+**VO:**
+
+> “Cek lengkapnya di link bio.”
+
+**On-screen text:**
+
+```text
+MRICAN • YOGYAKARTA
+
+LIHAT DETAIL
+LINK DI BIO
+```
+
+Gerakan kamera jangan berhenti total pada frame terakhir.
+
+Tujuannya supaya video terasa masih memiliki dunia di luar frame dan tidak seperti slideshow yang selesai mendadak.
+
+---
+
+# 5. RETENTION MAP
+
+| Waktu   | Pertanyaan di kepala viewer | Informasi baru       |
+| ------- | --------------------------- | -------------------- |
+| 0–2.2s  | “Rumah apa ini?”            | Kawasan kampus Jogja |
+| 2.2–5s  | “Apa istimewanya?”          | LT 492 m²            |
+| 5–7.8s  | “Dalamnya bagaimana?”       | Interior + 4 KT/4 KM |
+| 7.8–10s | “Detailnya di mana?”        | Mrican + CTA         |
+
+Ini yang saya maksud dengan:
+
+> **Information Change > Cut Count**
+
+Video ini hanya membutuhkan beberapa perubahan visual, tetapi **state pengetahuan penonton berubah terus**.
+
+---
+
+# 6. PROMPT GOOGLE FLOW
+
+Ini bagian yang menurut saya penting untuk Claude.
+
+Saya tidak akan membuat prompt Flow hanya seperti:
+
+```text
+Cinematic real estate video.
+Camera slowly pushes forward.
+Luxury lighting.
+4K.
+```
+
+Prompt harus menjelaskan **apa yang terjadi sepanjang waktu**, bukan cuma estetika.
+
+Gunakan foto listing sebagai **environment/property references**.
+
+```text
+Create a premium, highly realistic 10-second vertical 9:16 real-estate discovery video using the supplied Mrican property photographs as strict visual references.
+
+PRIMARY OBJECTIVE:
+Make the viewer feel that they are personally discovering an unexpectedly spacious property in the Mrican / Demangan / Gejayan campus area of Yogyakarta.
+
+The video must feel like authentic professional property footage captured on location, NOT an AI architectural visualization.
+
+PROPERTY FIDELITY:
+Preserve the actual architecture, dimensions, wall positions, roof design, doors, windows, flooring, columns, garden areas, gates, exterior condition, interior condition and spatial relationships visible in the supplied reference photographs.
+
+Do not redesign, renovate, beautify, modernize, enlarge or replace the property.
+Do not invent furniture, swimming pools, additional floors, landscaping, luxury finishes, architectural elements, people or facilities that are not supported by the references.
+
+VISUAL STORY:
+
+0.0–2.2 SECONDS — CURIOSITY
+
+Begin outside the property from the street-side perspective shown in the exterior reference.
+
+Natural daylight in Yogyakarta.
+
+Start with a slightly observational handheld framing, as if a real property videographer has just noticed the house.
+
+Immediately begin a subtle but confident forward camera movement toward the property.
+
+Preserve the real surrounding street, roofline, gate, fence and frontage.
+
+The movement should create the feeling:
+“there is more behind this frontage than expected.”
+
+Do not reveal everything immediately.
+
+VOICEOVER:
+“Nyari rumah dekat kawasan kampus Jogja?”
+
+On-screen text:
+“RUMAH DI KAWASAN KAMPUS JOGJA?”
+
+Text must be clean, minimal, highly readable and positioned safely for vertical social media.
+
+
+2.2–5.0 SECONDS — SCALE REVEAL
+
+Continue the same forward visual momentum.
+
+Use a motivated seamless transition into the actual entrance / courtyard / garden area shown in the supplied property references.
+
+Movement direction must remain perceptually consistent with the previous shot.
+
+Reveal the depth and open area naturally.
+
+Do not create impossible architecture or change the actual property layout.
+
+The camera should behave like a real videographer walking into the property with stabilized handheld equipment.
+
+VOICEOVER:
+“Yang ini tanahnya empat ratus sembilan puluh dua meter.”
+
+On-screen text:
+“LT 492 m²”
+
+Allow the visual reveal to begin slightly before the text appears.
+
+This moment is the main surprise/payoff of the opening hook.
+
+
+5.0–7.8 SECONDS — INTERIOR PAYOFF
+
+Transition naturally through an actual doorway into the large bright main room represented in the supplied interior reference.
+
+Maintain forward motion continuity.
+
+Camera crosses the threshold and performs a subtle lateral reveal while moving forward, allowing the viewer to perceive the width and depth of the room.
+
+Preserve the real white tiled floor, walls, wooden window/door elements, structural column and lighting characteristics.
+
+Do not stage fake luxury furniture.
+
+VOICEOVER:
+“Empat kamar, empat kamar mandi.”
+
+On-screen text:
+“4 KT • 4 KM”
+
+
+7.8–10.0 SECONDS — DECISION / CTA
+
+Remain inside the authentic property environment.
+
+Continue a gentle exploratory camera movement instead of freezing into a static advertisement.
+
+Let the viewer feel that there are still more areas of the house to discover.
+
+VOICEOVER:
+“Cek lengkapnya di link bio.”
+
+On-screen text:
+“MRICAN • YOGYAKARTA”
+then
+“LIHAT DETAIL — LINK DI BIO”
+
+End while the camera is still subtly moving so the final frame feels alive and naturally loopable.
+
+
+CAMERA BEHAVIOR:
+
+realistic stabilized handheld property videography,
+human walking speed,
+natural micro movement,
+controlled forward momentum,
+physically plausible camera path,
+realistic lens perspective,
+no impossible drone movement indoors,
+no floating camera,
+no aggressive zoom,
+no excessive speed ramp,
+no random camera direction changes.
+
+
+EDITING AND RETENTION:
+
+The video must introduce meaningful new information approximately every 2 seconds.
+
+Do not create random rapid cuts merely to appear energetic.
+
+Every transition must advance the viewer's understanding:
+
+street/location
+→ property scale
+→ interior space
+→ CTA.
+
+Use movement-matched transitions where possible.
+
+The visual rhythm should accelerate curiosity without becoming chaotic.
+
+
+VISUAL QUALITY:
+
+photorealistic,
+authentic Indonesian residential property,
+natural daylight,
+realistic exposure,
+realistic shadows,
+realistic materials,
+subtle cinematic dynamic range,
+professional property videography,
+high detail,
+natural white balance,
+real-world imperfections preserved,
+no artificial luxury grading,
+no oversaturated colors,
+no plastic textures,
+no excessive HDR,
+no CGI appearance.
+
+
+VOICE:
+
+Natural Indonesian male or female property-content creator.
+
+Age impression approximately 25–35.
+
+Confident, conversational, energetic but not shouting.
+
+Natural Indonesian pronunciation.
+
+Voiceover should sound like social-media property discovery content, not a formal television commercial.
+
+VOICEOVER EXACT TEXT:
+
+“Nyari rumah dekat kawasan kampus Jogja? Yang ini tanahnya empat ratus sembilan puluh dua meter. Empat kamar, empat kamar mandi. Cek lengkapnya di link bio.”
+
+
+AUDIO:
+
+subtle modern social-media background music,
+light rhythmic momentum,
+voice remains dominant and clearly intelligible,
+subtle environmental ambience,
+no exaggerated cinematic boom effects.
+
+
+STRICT NEGATIVE CONSTRAINTS:
+
+no invented architecture,
+no property redesign,
+no renovation,
+no fake furniture,
+no additional rooms,
+no additional floors,
+no swimming pool,
+no fake city skyline,
+no people suddenly appearing,
+no warped doors,
+no morphing windows,
+no changing floor patterns,
+no changing roof geometry,
+no changing gate geometry,
+no spatial distortion,
+no surreal camera motion,
+no floating objects,
+no AI shimmer,
+no flickering architecture,
+no inconsistent lighting,
+no unreadable text,
+no random text,
+no watermark,
+no logo hallucination.
+```
+
+---
+
+# 7. Kenapa Saya Tidak Membuat 3 Prompt Flow untuk 10 Detik Ini
+
+Ini justru poin arsitektur penting untuk Claude.
+
+Untuk konfigurasi:
+
+**10 detik = 1 part**
+
+saya memilih:
+
+**1 storyboard → 1 temporal sequence → 1 Flow prompt.**
+
+Bukan secara otomatis:
+
+**1 storyboard → 3 shot → 3 Flow prompt.**
+
+Tiga **beat** tidak harus berarti tiga **generation job**.
+
+Ini distinction yang menurut saya perlu dimiliki ViralFrame:
+
+```text
+STORY BEAT ≠ GENERATION PART
+```
+
+Video 30 detik misalnya dapat berupa:
+
+```text
+PART 1 — 10s
+3–4 story beats
+
+PART 2 — 10s
+3–4 story beats
+
+PART 3 — 10s
+3–4 story beats
+```
+
+Maka:
+
+```text
+30s
+↓
+3 generation parts
+↓
+masing-masing mempunyai temporal story
+↓
+continuity antar-part
+```
+
+Ini jauh lebih masuk akal daripada menganggap setiap perubahan informasi sebagai request Flow baru.
+
+---
+
+# 8. Yang Saya Ingin Claude Tangkap dari Contoh Ini
+
+Perbedaan terbesar bukan prompt saya lebih panjang.
+
+**Prompt panjang bukan tujuan.**
+
+Pipeline berpikirnya yang berbeda:
+
+```text
+LISTING + PHOTOS
+        ↓
+FACT EXTRACTION
+        ↓
+VISUAL OPPORTUNITY
+        ↓
+CREATIVE OPPORTUNITY
+        ↓
+CORE ANGLE
+        ↓
+HOOK
+        ↓
+CURIOSITY GAP
+        ↓
+INFORMATION SEQUENCE
+        ↓
+TEMPORAL STORY
+        ↓
+RETENTION CHECK
+        ↓
+STORYBOARD
+        ↓
+FLOW COMPILER
+```
+
+Sedangkan yang sebaiknya dihindari:
+
+```text
+LISTING
+   ↓
+RANDOM:
+montase cepat
+pertanyaan
+energetic
+push-in
+   ↓
+paksa listing mengikuti recipe
+   ↓
+PROMPT
+```
+
+Dan saya akan menambahkan satu konsep ke usulan Claude:
+
+## **Narrative State**
+
+Jangan hanya menyimpan:
+
+```json
+{
+  "camera": "push_in",
+  "duration": 2.2
+}
+```
+
+Simpan sesuatu seperti:
+
+```json
+{
+  "start_state": "viewer_is_outside_property",
+  "viewer_question": "what_is_special_about_this_house",
+  "action": "approach_property",
+  "reveal": "unexpected_property_depth",
+  "new_information": "land_area_492m2",
+  "end_state": "viewer_has_entered_property",
+  "next_question": "what_does_the_inside_feel_like"
+}
+```
+
+**Renderer/Flow Compiler** kemudian menerjemahkan intent itu menjadi bahasa kamera.
+
+Dengan demikian ViralFrame tidak sekadar mengetahui:
+
+> kamera harus bergerak ke depan.
+
+Tetapi mengetahui:
+
+> **mengapa kamera bergerak ke depan, informasi apa yang harus terungkap akibat gerakan tersebut, dan pertanyaan apa yang harus masih tersisa setelah shot itu selesai.**
+
+Menurut saya, justru di sinilah lompatan terbesar ViralFrame dari **“AI prompt generator”** menjadi **“AI creative director.”**
+
+Dan setelah melihat contoh konkret ini, saya setuju dengan Claude bahwa **Creative Opportunity Station + Temporal Intent + Continuity + Diversity Controller** layak menjadi Tahap 1. Saya hanya akan menambahkan **Narrative State / Viewer Knowledge State** ke Tahap 1, karena implementasinya relatif ringan tetapi dampaknya ke cara AI menyusun cerita bisa sangat besar.
