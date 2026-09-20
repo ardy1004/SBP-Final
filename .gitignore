@@ -45,12 +45,14 @@ npm-debug.log*
 pnpm-debug.log*
 
 # Claude Code / ruflo tooling (local only — not part of the website)
-# KECUALI dua skill yang isinya DOKUMENTASI PROJECT, bukan tooling: keduanya
-# menampung ~131 baris yang dulu ada di CLAUDE.md (insiden Turnstile 49 hari,
-# aturan fbc/fbp jangan di-hash, migrasi events_enabled, aturan prompt ViralFrame).
-# CLAUDE.md sekarang MENUNJUK ke sana, jadi kalau keduanya tidak ikut ter-commit,
-# instruksi repo menunjuk berkas yang tidak ada dan pengetahuannya cuma hidup di
-# satu mesin. 35 skill lain di folder itu tooling claude-flow — tetap diabaikan.
+# KECUALI skill yang isinya DOKUMENTASI PROJECT, bukan tooling: menampung baris
+# yang dulu ada di CLAUDE.md (insiden Turnstile 49 hari, aturan fbc/fbp jangan
+# di-hash, migrasi events_enabled, aturan prompt ViralFrame, dan — sejak
+# /doctor 2026-09-21 — hydration #418/in-app-browser, mekanisme deploy gate,
+# dan jebakan skrip wrangler d1). CLAUDE.md sekarang MENUNJUK ke semuanya, jadi
+# kalau tidak ikut ter-commit, instruksi repo menunjuk berkas yang tidak ada
+# dan pengetahuannya cuma hidup di satu mesin. Skill lain di folder itu tooling
+# claude-flow — tetap diabaikan.
 # ⚠️ JANGAN memakai pola ber-kurung-kurawal di berkas ini: `.gitignore` ikut
 # dibaca pemindai @source Tailwind v4, dan brace tak berpasangan membuat CSS
 # runtuh jadi ~13 KB tanpa satu pun gate memerah (insiden 2026-07-27).
@@ -59,6 +61,9 @@ pnpm-debug.log*
 .claude/skills/*
 !.claude/skills/meta-ads-tracking/
 !.claude/skills/viralframe-context/
+!.claude/skills/hydration-injection-debug/
+!.claude/skills/deploy-gates/
+!.claude/skills/d1-migrations-and-scripts/
 .claude-flow/
 .mcp.json
 
