@@ -109,7 +109,16 @@ export async function onRequestGet(context) {
   const url = new URL(request.url);
   const characterId = parseInt(url.searchParams.get('character_id') ?? '', 10);
   const propertyId = parseInt(url.searchParams.get('property_id') ?? '', 10);
-  const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '', 10) || 100, 200);
+  // Cap dinaikkan 200 → 2000 (2026-09-21): endpoint ini SELALU dipanggil
+  // ter-scope satu character_id (Konten Agent, AdminViralFrameAgentVideosPage.tsx),
+  // bukan listing global tanpa filter — risiko "200 baris" lama (komentar di
+  // bawah, audit 2026-07-28) itu soal query TANPA filter (counts_by), tidak
+  // berlaku di sini. Perlu naik karena reorder.js (migrasi 0050) mewajibkan
+  // client memegang SELURUH video aktif karakter untuk validasi permutasi;
+  // produksi sudah punya karakter dengan 209 video aktif (>100 lama), jadi cap
+  // lama membuat reorder SELALU gagal 422 untuk karakter itu walau di-reload
+  // berkali-kali (audit 2026-09-21).
+  const limit = Math.min(parseInt(url.searchParams.get('limit') ?? '', 10) || 100, 2000);
   const offset = parseInt(url.searchParams.get('offset') ?? '', 10) || 0;
   const view = url.searchParams.get('view') === 'trash' ? 'trash' : 'active';
 

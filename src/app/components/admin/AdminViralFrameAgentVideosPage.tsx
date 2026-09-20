@@ -246,7 +246,12 @@ export default function AdminViralFrameAgentVideosPage() {
   const loadVideos = useCallback(async (characterId: number, viewMode: ViewMode) => {
     setLoadingVideos(true);
     try {
-      const r = await fetch(`/api/admin/viralframe/agent-videos?character_id=${characterId}&view=${viewMode}`, { credentials: 'include' });
+      // limit=2000: halaman ini mengelola SELURUH antrean aktif satu karakter
+      // sekaligus — drag & drop reorder butuh SEMUA video aktif ter-load,
+      // bukan sebagian (reorder.js menolak kalau ordered_ids bukan permutasi
+      // penuh). Default 100 lama membuat reorder gagal untuk karakter
+      // ber-video >100 (produksi sudah ada yang 209 — audit 2026-09-21).
+      const r = await fetch(`/api/admin/viralframe/agent-videos?character_id=${characterId}&view=${viewMode}&limit=2000`, { credentials: 'include' });
       const j = await bacaJson(r);
       if (j.success) {
         const items: AgentVideo[] = j.data?.items ?? [];
