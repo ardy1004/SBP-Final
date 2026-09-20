@@ -31,8 +31,16 @@ export const meta = () => pageMeta({
 });
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+//
+// 🔥 ALUR DIBALIK 2026-09-19: dulu Step1=Data Diri→Step2=Properti (submit sekali
+// di akhir Step2). Sekarang StepProperti (termasuk No. WA) submit DULUAN ke
+// /api/titip-jual-mulai — properti+owner ringan lahir nyata di DB walau user
+// berhenti di situ. StepDataDiri (KYC, TANPA WA — sudah diisi di StepProperti)
+// jadi OPSIONAL, submit belakangan ke /api/titip-jual-lengkapi memakai tiket
+// JWT `tiket_lanjut` (BUKAN property_id mentah — lihat PLAN-TITIP-JUAL-PROPERTI-DULU.md
+// §2.3 soal kenapa: property_id dari klien tidak tepercaya/IDOR).
 
-interface Step1State {
+interface DataDiriState {
   nama_ktp: string;
   nik: string;
   rt_rw: string;
@@ -40,32 +48,42 @@ interface Step1State {
   kecamatan: string;
   prov_owner: string;
   kab_owner: string;
-  bertindak: string;
+  bertindak_sebagai: string;
   ahli_waris_jumlah: string;
   ahli_waris_sepakat: boolean;
   ahli_waris_kuasa: boolean;
   ahli_waris_turun: boolean;
-  no_wa: string;
-  no_wa_2: string;
 }
 
-interface ApiResult {
+interface Stage1Result {
   kode_listing: string;
-  kode_perjanjian: string;
+  // Opsional: absen saat state ini direkonstruksi dari draft sesudah reload
+  // (lihat efek pemulihan di TitipJualPage) — draft hanya menyimpan
+  // kode_listing + tiket_lanjut, bukan ID mentah (lihat titipJualDraft.ts).
+  // Tidak dipakai untuk apa pun di StepDataDiri, jadi aman kosong.
+  property_id?: number;
+  owner_id?: number;
+  /** Tiket JWT (scope titipjual-lanjut) — satu-satunya kunci menuju Tahap 2. */
+  tiket_lanjut: string;
   photos_uploaded?: number;
+  photos_failed?: number;
   photos_total_sent?: number;
-  // Hanya ada pada respons 201 (submit BARU). Jalur idempoten mengembalikan
-  // objek dari cariSubmitLama() yang tidak memuatnya — itulah yang membuat
-  // submit ulang tidak menembakkan konversi kedua.
+  photos_warning?: string | null;
+  // Hanya ada pada respons 201 (submit BARU) — lihat catatan di ApiResult lama
+  // soal kenapa field ini WAJIB dideklarasikan: kalau tidak, ia lenyap diam-diam
+  // dan jalur idempoten tidak bisa dibedakan dari sukses baru.
   event_id?: string;
-  // 🔥 DIKIRIM SERVER SEJAK AWAL, TAPI DULU TIDAK PERNAH DIDEKLARASIKAN DI SINI
-  // — sehingga hilang diam-diam dan `SuccessPage` merender jalur "sudah pernah
-  // kami terima" PERSIS seperti sukses baru: ✅ hijau + kode listing. Diuji
-  // 2026-09-09 dengan handler sungguhan: submit ke-2 ber-submit_id sama membalas
-  // 200 + `duplikat: true` + kode listing LAMA, dan NOL listing baru dibuat.
-  // Akibatnya pengisi form dan admin sama-sama yakin datanya masuk.
-  // Field baru dari server WAJIB ditambahkan di sini, kalau tidak ia lenyap
-  // tanpa satu pun gate memerah — TypeScript tidak memvalidasi bentuk JSON.
+  duplikat?: boolean;
+  pesan?: string;
+}
+
+interface Stage2Result {
+  kode_perjanjian: string;
+  kode_listing: string;
+  property_id: number;
+  owner_id: number;
+  agreement_id: number;
+  event_id?: string;
   duplikat?: boolean;
   pesan?: string;
 }
@@ -168,9 +186,10 @@ function ukuranBase64(dataUrl: string): number {
  * Sekarang tiap foto request tersendiri (~1 MB): putus hanya merugikan satu foto,
  * dan foto itu bisa diulang tanpa menyentuh sisa formulir.
  *
- * `tiket` diterbitkan endpoint prospek saat Step 1 selesai — BUKAN token
- * Turnstile. Token Turnstile sekali pakai; memakainya di sini akan menghanguskan
- * token yang dibutuhkan submit akhir beberapa detik kemudian.
+ * `tiket` diterbitkan /api/titip-jual-tiket-foto saat StepProperti mount —
+ * BUKAN token Turnstile. Token Turnstile sekali pakai; memakainya di sini akan
+ * menghanguskan token yang dibutuhkan submit akhir beberapa detik kemudian.
+ * titip-jual-foto.js sendiri TIDAK berubah — scope tiket (`titipjual-foto`) sama persis.
  */
 async function unggahSatuFoto(dataUrl: string, tiket: string | undefined): Promise<string> {
   const res = await fetch('/api/titip-jual-foto', {
@@ -186,22 +205,42 @@ async function unggahSatuFoto(dataUrl: string, tiket: string | undefined): Promi
 }
 
 /**
- * Kunci error Step 2 menurut URUTAN TAMPILNYA di layar — perhatikan `jenis`
- * ada SETELAH `harga`, mengikuti tata letak sebenarnya, bukan urutan
- * pemeriksaan di handleSubmit.
+ * Minta tiket unggah foto begitu StepProperti mount — dipanggil sedini mungkin
+ * karena foto sekarang diunggah progresif SEJAK Tahap 1 (dulu dipicu selesainya
+ * Step 1 lewat kirimProspek(); prospek/leads sekarang dipensiunkan dari alur
+ * baru — baris `properties` nyata di akhir Tahap 1 sudah jauh lebih kaya
+ * informasi daripada baris `leads`). Tanpa Turnstile (token sekali pakai, lihat
+ * unggahSatuFoto), gagal-diam (tiket adalah pendukung, bukan jalur utama).
  */
-const URUTAN_FIELD_STEP2 = [
-  'harga', 'harga_sewa_tahun', 'jenis', 'lokasi', 'gmaps_link', 'legalitas',
+async function mintaTiketFoto(): Promise<void> {
+  try {
+    const res = await fetch('/api/titip-jual-tiket-foto', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const json = await bacaJson<{ tiket_foto: string | null }>(res);
+    if (json.data?.tiket_foto) simpanDraft({ tiketFoto: json.data.tiket_foto });
+  } catch {
+    /* diam: tiket foto adalah pendukung, kegagalannya tidak boleh menghentikan pengisian form */
+  }
+}
+
+/**
+ * Kunci error StepProperti menurut URUTAN TAMPILNYA di layar.
+ */
+const URUTAN_FIELD_PROPERTI = [
+  'no_wa', 'harga', 'harga_sewa_tahun', 'jenis', 'lokasi', 'gmaps_link', 'legalitas',
   'photos', 'consent', 'turnstile',
 ];
 
 /**
  * Gulir ke field bermasalah pertama. Memakai id DOM, bukan ref per-field:
- * titik error tersebar di ±600 baris JSX dan menambahkan delapan ref semata-mata
+ * titik error tersebar di ±600 baris JSX dan menambahkan ref per-field semata-mata
  * untuk menggulir jauh lebih berisik daripada satu id di tiap pembungkus.
  */
-function fokuskanErrorPertama(errs: Record<string, string>): void {
-  const kunci = URUTAN_FIELD_STEP2.find(k => errs[k]);
+function fokuskanErrorPertama(errs: Record<string, string>, urutan: string[] = URUTAN_FIELD_PROPERTI): void {
+  const kunci = urutan.find(k => errs[k]);
   if (!kunci) return;
   document.getElementById(`f-${kunci}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
@@ -225,7 +264,7 @@ function FieldErr({ msg }: { msg?: string }) {
 function Stepper({ step }: { step: number }) {
   return (
     <div className="flex items-center justify-center gap-0 mb-8">
-      {[{ num: 1, label: 'Data Diri' }, { num: 2, label: 'Info Properti' }].map((s, i) => (
+      {[{ num: 1, label: 'Info Properti' }, { num: 2, label: 'Data Diri' }].map((s, i) => (
         <div key={s.num} className="flex items-center">
           <div className="flex flex-col items-center">
             <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-all ${
@@ -246,315 +285,40 @@ function Stepper({ step }: { step: number }) {
   );
 }
 
-// ─── STEP 1: Data Diri ────────────────────────────────────────────────────────
-
-const BERTINDAK_OPTIONS = [
-  { value: 'pemilik_sertifikat', label: 'Pemilik A/n Sertifikat' },
-  { value: 'suami_istri',        label: 'Suami/Istri (Bukan A/n Sertifikat)' },
-  { value: 'ahli_waris',         label: 'Ahli Waris' },
-  { value: 'lainnya',            label: 'Lainnya' },
-];
-
-/**
- * Catat calon penjual ke CRM begitu Step 1 valid — tanpa menunggu Step 2 selesai.
- *
- * Sengaja TIDAK di-await oleh pemanggil: kegagalan mencatat prospek tidak boleh
- * menahan user satu milidetik pun, dan `keepalive` membuat request tetap
- * terkirim walau tab langsung ditutup setelah klik "Lanjut".
- *
- * ⚠️ NIK sengaja tidak ikut. Tabel `leads` tidak terenkripsi — lihat alasan
- * lengkapnya di functions/api/titip-jual-prospek.js.
- */
-async function kirimProspek(form: Step1State): Promise<void> {
-  try {
-    const res = await fetch('/api/titip-jual-prospek', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      keepalive: true,
-      body: JSON.stringify({
-        nama:      form.nama_ktp,
-        no_wa:     form.no_wa,
-        kecamatan: form.kecamatan,
-        kabupaten: form.kab_owner,
-        lead_id:   bacaDraft()?.leadId,
-      }),
-    });
-    const json = await bacaJson<{ lead_id: number | null; event_id?: string; tiket_foto?: string | null }>(res);
-    const id = json.data?.lead_id;
-    // Simpan id-nya supaya klik "Lanjut" berikutnya memperbarui baris yang sama,
-    // bukan menumpuk prospek duplikat di papan CRM.
-    if (typeof id === 'number') simpanDraft({ leadId: id });
-
-    // Tiket unggah foto. Diterbitkan di SEMUA jalur sukses endpoint prospek —
-    // termasuk UPDATE dan throttled — supaya pengunjung yang bolak-balik Step 1↔2
-    // atau kebetulan kena rem tidak ikut kehilangan kemampuan mengunggah foto.
-    if (json.data?.tiket_foto) simpanDraft({ tiketFoto: json.data.tiket_foto });
-
-    // Meta Pixel — pasangan browser dari CAPI Lead yang dikirim
-    // titip-jual-prospek.js. eventID WAJIB sama supaya Meta mendeduplikasi.
-    //
-    // Digantungkan pada ADANYA event_id: server hanya menyertakannya di jalur
-    // INSERT (prospek baru). Klik "Lanjut" berulang masuk jalur UPDATE dan
-    // respons throttled tidak memuatnya, jadi orang yang sama tidak pernah
-    // terhitung dua kali.
-    if (json.data?.event_id) {
-      trackEvent('Lead', { content_category: 'titip_jual_prospek' }, { eventID: json.data.event_id });
-    }
-  } catch {
-    /* diam: prospek adalah jaring pengaman, bukan jalur utama */
-  }
-}
-
-function Step1({ onNext }: { onNext: (data: Step1State) => void }) {
-  const [form, setForm] = useState<Step1State>({
-    nama_ktp: '', nik: '', rt_rw: '',
-    kelurahan: '', kecamatan: '', prov_owner: '', kab_owner: '', bertindak: '',
-    ahli_waris_jumlah: '', ahli_waris_sepakat: false, ahli_waris_kuasa: false, ahli_waris_turun: false,
-    no_wa: '', no_wa_2: '',
-  });
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  // Pulihkan draft. WAJIB di useEffect, bukan initializer useState: halaman ini
-  // publik dan ikut dirender di server, sedangkan localStorage hanya ada di
-  // client — membacanya saat render = hydration mismatch (aturan CLAUDE.md).
-  // `nik: ''` ditulis eksplisit: NIK memang tidak pernah disimpan, dan penegasan
-  // ini menutup draft lama dari build yang barangkali sempat menyimpannya.
-  useEffect(() => {
-    const d = bacaDraft();
-    if (d?.s1) setForm(p => ({ ...p, ...(d.s1 as Partial<Step1State>), nik: '' }));
-  }, []);
-
-  // Autosave (debounce 800 ms). Efek ini juga jalan saat mount dengan form
-  // kosong, tapi timernya dibatalkan oleh cleanup begitu efek pemulihan di atas
-  // memicu render ulang — jadi draft yang sudah ada tidak tertimpa kosong.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const { nik: _nik, ...tanpaNik } = form;
-      if (adaIsi(tanpaNik)) simpanDraft({ s1: tanpaNik });
-    }, 800);
-    return () => clearTimeout(t);
-  }, [form]);
-
-  const f = (k: keyof Step1State, v: string | boolean) =>
-    setForm(p => ({ ...p, [k]: v }));
-  const clearErr = (k: string) => setErrors(p => ({ ...p, [k]: '' }));
-
-  const validate = () => {
-    const e: Record<string, string> = {};
-    if (!form.nama_ktp) e.nama_ktp = 'Nama sesuai KTP wajib diisi';
-    if (!form.nik) e.nik = 'NIK wajib diisi';
-    else if (!/^\d{16}$/.test(form.nik)) e.nik = 'NIK harus tepat 16 digit angka';
-    if (!form.prov_owner) e.prov_owner = 'Provinsi wajib diisi';
-    if (!form.kab_owner) e.kab_owner = 'Kabupaten/Kota wajib diisi';
-    if (!form.kecamatan) e.kecamatan = 'Kecamatan wajib diisi';
-    if (!form.kelurahan) e.kelurahan = 'Kelurahan wajib diisi';
-    if (!form.rt_rw) e.rt_rw = 'RT/RW wajib diisi';
-    if (!form.bertindak) e.bertindak = 'Wajib dipilih';
-    if (!form.no_wa) e.no_wa = 'Nomor WhatsApp wajib diisi';
-    else if (!/^(0|62|8)\d{8,12}$/.test(form.no_wa.replace(/\D/g, ''))) e.no_wa = 'Nomor WhatsApp tidak valid';
-    return e;
-  };
-
-  const handleNext = () => {
-    const e = validate();
-    if (Object.keys(e).length) { setErrors(e); return; }
-    // Tanpa await — Step 2 harus tampil seketika.
-    void kirimProspek(form);
-    onNext(form);
-  };
-
-  return (
-    <div>
-      <h2 className="font-display text-xl font-bold text-[#0F172A] mb-1">Data Diri Pemilik</h2>
-      <p className="text-sm text-[#64748B] mb-6">Isi sesuai KTP yang masih berlaku.</p>
-
-      <div className="space-y-4">
-        {/* Nama KTP */}
-        <div>
-          <label className="block text-xs font-semibold text-[#64748B] mb-1">Nama Lengkap Sesuai KTP *</label>
-          <input value={form.nama_ktp} onChange={e => { f('nama_ktp', e.target.value); clearErr('nama_ktp'); }}
-            placeholder="Sesuai KTP" className={inputCls(errors.nama_ktp)} />
-          <FieldErr msg={errors.nama_ktp} />
-        </div>
-
-        {/* NIK */}
-        <div>
-          <label className="block text-xs font-semibold text-[#64748B] mb-1">NIK (KTP) *</label>
-          <input
-            type="text"
-            value={form.nik}
-            onChange={e => { f('nik', e.target.value.replace(/\D/g, '').slice(0, 16)); clearErr('nik'); }}
-            placeholder="16 digit NIK"
-            className={inputCls(errors.nik)}
-          />
-          <p className="text-xs text-gray-400 mt-0.5">NIK dienkripsi untuk keamanan data Anda.</p>
-          <FieldErr msg={errors.nik} />
-        </div>
-
-        {/* Alamat Lengkap Sesuai KTP — label statis (input dihapus; detail alamat diisi via kolom lokasi di bawah) */}
-        <div>
-          <label className="block text-xs font-semibold text-[#64748B] mb-1">Alamat Lengkap Sesuai KTP</label>
-        </div>
-
-        {/* Provinsi + Kab./Kota KTP */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-[#64748B] mb-1">Provinsi (KTP) *</label>
-            <input value={form.prov_owner} onChange={e => { f('prov_owner', e.target.value); clearErr('prov_owner'); }}
-              placeholder="Mis: Jawa Timur" className={inputCls(errors.prov_owner)} />
-            <FieldErr msg={errors.prov_owner} />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-[#64748B] mb-1">Kab./Kota (KTP) *</label>
-            <input value={form.kab_owner} onChange={e => { f('kab_owner', e.target.value); clearErr('kab_owner'); }}
-              placeholder="Mis: Kabupaten Sleman" className={inputCls(errors.kab_owner)} />
-            <FieldErr msg={errors.kab_owner} />
-          </div>
-        </div>
-
-        {/* Kecamatan + Kelurahan/Desa */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-[#64748B] mb-1">Kecamatan *</label>
-            <input value={form.kecamatan} onChange={e => { f('kecamatan', e.target.value); clearErr('kecamatan'); }}
-              placeholder="Kecamatan" className={inputCls(errors.kecamatan)} />
-            <FieldErr msg={errors.kecamatan} />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-[#64748B] mb-1">Kelurahan/Desa *</label>
-            <input value={form.kelurahan} onChange={e => { f('kelurahan', e.target.value); clearErr('kelurahan'); }}
-              placeholder="Kelurahan" className={inputCls(errors.kelurahan)} />
-            <FieldErr msg={errors.kelurahan} />
-          </div>
-        </div>
-
-        {/* RT/RW */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-[#64748B] mb-1">RT/RW *</label>
-            <input value={form.rt_rw} onChange={e => { f('rt_rw', e.target.value); clearErr('rt_rw'); }} placeholder="001/002"
-              className={inputCls(errors.rt_rw)} />
-            <FieldErr msg={errors.rt_rw} />
-          </div>
-          <div />
-        </div>
-
-        {/* Bertindak Sebagai */}
-        <div>
-          <label className="block text-xs font-semibold text-[#64748B] mb-2">Bertindak Sebagai *</label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {BERTINDAK_OPTIONS.map(o => (
-              <label key={o.value} className={`flex items-center gap-2 p-3 rounded-xl border cursor-pointer transition-all ${
-                form.bertindak === o.value ? 'border-[#1565C0] bg-[#E3F2FD]' : 'border-gray-200 hover:border-[#1565C0]'
-              }`}>
-                <input type="radio" name="bertindak" value={o.value}
-                  checked={form.bertindak === o.value}
-                  onChange={() => { f('bertindak', o.value); clearErr('bertindak'); }}
-                  className="accent-[#1565C0]" />
-                <span className="text-sm">{o.label}</span>
-              </label>
-            ))}
-          </div>
-          <FieldErr msg={errors.bertindak} />
-        </div>
-
-        {/* Kondisional: Ahli Waris */}
-        {form.bertindak === 'ahli_waris' && (
-          <div className="border border-amber-200 bg-amber-50 rounded-xl p-4 space-y-3">
-            <p className="text-xs font-semibold text-amber-800">Detail Ahli Waris</p>
-            <div>
-              <label className="block text-xs font-semibold text-[#64748B] mb-1">Total Ahli Waris</label>
-              <input type="number" min="1" value={form.ahli_waris_jumlah}
-                onChange={e => f('ahli_waris_jumlah', e.target.value)}
-                placeholder="Jumlah ahli waris" className={inputCls()} />
-            </div>
-            {([
-              { key: 'ahli_waris_sepakat', label: 'Semua ahli waris sepakat untuk dijual/disewakan?' },
-              { key: 'ahli_waris_kuasa',   label: 'Sudah dikuasakan via notaris?' },
-              { key: 'ahli_waris_turun',   label: 'Turun waris sudah diurus via notaris?' },
-            ] as const).map(({ key, label }) => (
-              <div key={key} className="flex items-center justify-between">
-                <span className="text-sm text-[#0F172A]">{label}</span>
-                <div className="flex gap-2">
-                  {(['Ya', 'Tidak'] as const).map(opt => (
-                    <button key={opt} type="button"
-                      onClick={() => f(key, opt === 'Ya')}
-                      className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${
-                        form[key] === (opt === 'Ya') ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'border-gray-300 text-gray-600'
-                      }`}>
-                      {opt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* No WA */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-[#64748B] mb-1">No. WA Aktif 1 *</label>
-            <div className="flex">
-              <span className="px-3 py-3 bg-gray-100 border border-r-0 border-gray-200 rounded-l-xl text-sm text-gray-500">+62</span>
-              <input value={form.no_wa} onChange={e => { f('no_wa', e.target.value); clearErr('no_wa'); }}
-                placeholder="81391278889" className={`${inputCls(errors.no_wa)} rounded-l-none`} />
-            </div>
-            <FieldErr msg={errors.no_wa} />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-[#64748B] mb-1">No. WA Aktif 2 <span className="font-normal text-gray-400">(Opsional)</span></label>
-            <div className="flex">
-              <span className="px-3 py-3 bg-gray-100 border border-r-0 border-gray-200 rounded-l-xl text-sm text-gray-500">+62</span>
-              <input value={form.no_wa_2} onChange={e => f('no_wa_2', e.target.value)}
-                placeholder="Opsional" className="w-full border border-gray-200 rounded-r-xl px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0]" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <button onClick={handleNext}
-        className="w-full mt-6 py-3.5 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all hover:brightness-110"
-        style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
-        Lanjut ke Info Properti <ChevronRight size={18} />
-      </button>
-    </div>
-  );
-}
-
-// ─── STEP 2: Info Properti ────────────────────────────────────────────────────
+// ─── STEP 1: Info Properti (dulu "Step2") ─────────────────────────────────────
 
 const JENIS_OPTIONS = PROPERTY_TYPES.map(t => ({ value: t.value, label: t.label }));
 
-// Key error milik Step 1 — tidak punya field terikat di Step 2, jadi kalau
-// backend menolak salah satunya, setErrors() saja membuat pesannya HILANG dan
-// user cuma melihat kalimat generik tanpa satu pun kolom disorot. Persis inilah
-// yang membuat regresi 422 `nama_pemilik` (f7bc909, 18 Jul 2026) tidak
-// terdiagnosa selama ±3 minggu. Key di sini ditampilkan apa adanya di banner.
-const STEP1_ERROR_KEYS = new Set([
-  'nama_pemilik', 'nama_ktp', 'nik', 'alamat_ktp', 'rt_rw',
-  'kelurahan', 'kecamatan', 'bertindak_sebagai', 'no_wa', 'no_wa_2',
-]);
-
-// ⚠️ Fungsi show*() lokal DIHAPUS — aturannya sudah melenceng dari form admin
-// (Lantai muncul untuk gudang/komersial, KT/KM untuk ruko/komersial, sedangkan
-// Kelengkapan Furnitur justru TIDAK muncul untuk kost). Sekarang seluruhnya
-// memakai Set bersama dari lib/propertyFields.ts — jangan bikin salinan lagi.
-
-// Preview kode listing (display only; server assigns actual sequence)
+// Preview kode listing (display only; server assigns actual sequence).
+// ⚠️ `new Date()` — HANYA boleh dipanggil setelah mount client (lihat guard
+// `siapTampilKode` di StepProperti). StepProperti sekarang komponen PERTAMA yang
+// dirender (ikut SSR), beda dari dulu ketika genDisplayKode() ada di Step2 yang
+// tidak pernah dirender server. Memanggilnya tanpa guard = hydration mismatch
+// (aturan CLAUDE.md).
 function genDisplayKode() {
   const d = new Date();
   const ds = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
   return `SBP-${ds}-???`;
 }
 
-interface Step2Props {
-  step1: Step1State;
-  onBack: () => void;
-  onSuccess: (result: ApiResult) => void;
+interface StepPropertiProps {
+  onSuccess: (result: Stage1Result) => void;
 }
 
-function Step2({ step1, onBack, onSuccess }: Step2Props) {
+function StepProperti({ onSuccess }: StepPropertiProps) {
+  // Tiket foto — diminta begitu komponen ini mount (lihat mintaTiketFoto()).
+  useEffect(() => { void mintaTiketFoto(); }, []);
+
+  // Guard hydration untuk genDisplayKode() — lihat komentar di atas fungsinya.
+  const [siapTampilKode, setSiapTampilKode] = useState(false);
+  useEffect(() => { setSiapTampilKode(true); }, []);
+
+  // No. WA — DIPINDAH ke sini dari komponen Data Diri (2026-09-19): properti
+  // yang lahir di akhir langkah ini harus sudah punya nomor kontak yang bisa
+  // dihubungi admin, walau user tidak pernah lanjut ke Data Diri.
+  const [noWa, setNoWa]   = useState('');
+  const [noWa2, setNoWa2] = useState('');
+
   // Location cascade
   const [provId, setProvId] = useState<number | null>(null);
   const [kabId, setKabId]   = useState<number | null>(null);
@@ -635,13 +399,14 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
 
   const clearErr = (k: string) => setErrors(p => ({ ...p, [k]: '' }));
 
-  // ─── Autosave & pemulihan draft Step 2 ──────────────────────────────────────
-  // Satu snapshot datar berisi seluruh field yang layak dipulihkan. FOTO tidak
-  // ikut — 20 foto base64 (8–11 MB) melewati kuota localStorage dan melempar
-  // QuotaExceededError yang menggagalkan SELURUH autosave, bukan cuma fotonya.
-  // Yang disimpan hanya jumlahnya, supaya UI bisa memberi tahu berapa yang
-  // perlu dipilih ulang. Selengkapnya di lib/titipJualDraft.ts.
-  const snapshotS2 = {
+  // ─── Autosave & pemulihan draft ──────────────────────────────────────────
+  // Satu snapshot datar berisi seluruh field yang layak dipulihkan (termasuk
+  // No. WA sekarang). FOTO tidak ikut — 20 foto base64 (8–11 MB) melewati kuota
+  // localStorage dan melempar QuotaExceededError yang menggagalkan SELURUH
+  // autosave, bukan cuma fotonya. Yang disimpan hanya jumlahnya, supaya UI bisa
+  // memberi tahu berapa yang perlu dipilih ulang. Selengkapnya di titipJualDraft.ts.
+  const snapshot = {
+    noWa, noWa2,
     provId, kabId, kecId, kelId, provinsi, kabupaten, kecProp, kelProp,
     judul, jenis, tujuan, harga, hargaSewa, hargaMode, kondisi, alamat,
     lt, lb, kt, km, lebar_depan, lantai, lebar_jalan,
@@ -652,10 +417,11 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
 
   useEffect(() => {
     const d = bacaDraft();
-    const s = (d?.s2 ?? {}) as Partial<typeof snapshotS2>;
+    const s = (d?.s2 ?? {}) as Partial<typeof snapshot>;
     const str = (v: unknown, set: (x: string) => void) => { if (typeof v === 'string' && v) set(v); };
     const num = (v: unknown, set: (x: number | null) => void) => { if (typeof v === 'number') set(v); };
 
+    str(s.noWa, setNoWa); str(s.noWa2, setNoWa2);
     num(s.provId, setProvId); num(s.kabId, setKabId); num(s.kecId, setKecId); num(s.kelId, setKelId);
     str(s.provinsi, setProvinsi); str(s.kabupaten, setKabupaten); str(s.kecProp, setKecProp); str(s.kelProp, setKelProp);
     str(s.judul, setJudul); str(s.jenis, setJenis); str(s.tujuan, setTujuan);
@@ -673,7 +439,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
     if (s.statusLeg === 'on_hand' || s.statusLeg === 'on_bank') setStatusLeg(s.statusLeg);
 
     if (d?.jumlahFoto) setFotoPerluUlang(d.jumlahFoto);
-    // Sekali saat mount saja — snapshotS2 sengaja tidak jadi dependensi.
+    // Sekali saat mount saja — snapshot sengaja tidak jadi dependensi.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -681,17 +447,17 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
   // boleh ikut menentukan "sudah ada isian" — kalau ikut, autosave menulis draft
   // pada setiap pengunjung yang cuma membuka halaman, dan banner pemulihan
   // muncul tanpa sebab di kunjungan berikutnya.
-  const s2Json = JSON.stringify(snapshotS2);
-  const adaIsiS2 = adaIsi({ ...snapshotS2, tujuan: '', hargaMode: '', kondisi: '' });
+  const snapshotJson = JSON.stringify(snapshot);
+  const adaIsiSnapshot = adaIsi({ ...snapshot, tujuan: '', hargaMode: '', kondisi: '' });
   const jumlahFoto = photoPreviews.length;
   useEffect(() => {
-    if (!adaIsiS2 && jumlahFoto === 0) return;
+    if (!adaIsiSnapshot && jumlahFoto === 0) return;
     const t = setTimeout(() => {
-      try { simpanDraft({ s2: JSON.parse(s2Json) as Record<string, unknown>, jumlahFoto }); }
+      try { simpanDraft({ s2: JSON.parse(snapshotJson) as Record<string, unknown>, jumlahFoto }); }
       catch { /* snapshot tak terbaca — autosave memang best-effort */ }
     }, 800);
     return () => clearTimeout(t);
-  }, [s2Json, adaIsiS2, jumlahFoto]);
+  }, [snapshotJson, adaIsiSnapshot, jumlahFoto]);
 
   // Load all provinces
   useEffect(() => {
@@ -813,6 +579,9 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
 
   const handleSubmit = async () => {
     const e: Record<string, string> = {};
+    if (!noWa) { e.no_wa = 'Nomor WhatsApp wajib diisi'; }
+    else if (!/^(0|62|8)\d{8,12}$/.test(noWa.replace(/\D/g, ''))) e.no_wa = 'Nomor WhatsApp tidak valid';
+    if (noWa2 && !/^(0|62|8)\d{8,12}$/.test(noWa2.replace(/\D/g, ''))) e.no_wa_2 = 'Nomor WA kedua tidak valid';
     if (!jenis) e.jenis = 'Jenis properti wajib dipilih';
     if (!harga || parseInt(harga) <= 0) e.harga = 'Harga wajib diisi';
     // Cegah 422 dari normalisasiHarga(): mode per-m² mustahil dihitung tanpa
@@ -923,27 +692,8 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
 
     try {
       const payload: Record<string, unknown> = {
-        // owner (step 1)
-        nama_ktp:         step1.nama_ktp,
-        nik:              step1.nik,
-        // alamat_ktp tidak lagi punya input sendiri — disusun dari field lokasi terstruktur (semua wajib)
-        alamat_ktp:       `Kel. ${step1.kelurahan}, Kec. ${step1.kecamatan}, ${step1.kab_owner}, ${step1.prov_owner} (RT/RW ${step1.rt_rw})`,
-        rt_rw:            step1.rt_rw || undefined,
-        prov_owner:       step1.prov_owner || undefined,
-        kab_owner:        step1.kab_owner || undefined,
-        kelurahan_owner:  step1.kelurahan,
-        kecamatan_owner:  step1.kecamatan,
-        bertindak_sebagai: step1.bertindak,
-        gmaps_link:       gmaps || undefined,
-        no_wa:            step1.no_wa,
-        no_wa_2:          step1.no_wa_2 || undefined,
-        data_ahli_waris:  step1.bertindak === 'ahli_waris' ? {
-          jumlah_ahli_waris: parseInt(step1.ahli_waris_jumlah) || 0,
-          semua_sepakat:     step1.ahli_waris_sepakat,
-          kuasa_notaris:     step1.ahli_waris_kuasa,
-          turun_waris:       step1.ahli_waris_turun,
-        } : undefined,
-        // property (step 2)
+        no_wa:  noWa,
+        no_wa_2: noWa2 || undefined,
         jenis_properti:    jenis,
         tujuan,
         title:             judul.trim() || undefined,
@@ -986,10 +736,8 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         // `photos` base64 untuk pengunjung dengan bundle lama — jangan hapus
         // jalur itu di server.
         photo_keys:        photoKeys,
+        gmaps_link:        gmaps || undefined,
         cf_turnstile_token: turnstileToken || undefined,
-        // Supaya prospek yang dicatat di Step 1 ditandai selesai — kalau tidak,
-        // admin akan mengejar orang yang sebenarnya sudah menyelesaikan formnya.
-        prospek_lead_id:   bacaDraft()?.leadId,
         // Kunci idempotensi: SAMA sepanjang sesi form ini, termasuk saat
         // mencoba ulang setelah gagal. Tanpa ini, submit yang datanya sudah
         // tersimpan tapi response-nya tidak sampai akan melahirkan listing
@@ -1001,9 +749,9 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
       Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
 
       const { status, text } = await postDenganProgres(
-        '/api/titip-jual', JSON.stringify(payload), setUploadPct,
+        '/api/titip-jual-mulai', JSON.stringify(payload), setUploadPct,
       );
-      let json: { success?: boolean; data?: ApiResult; error?: string; details?: Record<string, string> };
+      let json: { success?: boolean; data?: Stage1Result; error?: string; details?: Record<string, string> };
       try {
         json = JSON.parse(text);
       } catch {
@@ -1016,16 +764,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
       if (!res.ok) {
         if (res.status === 422 && json.details) {
           setErrors(json.details);
-          // Error milik Step 1 tidak punya kolom di layar ini — tanpa penanganan
-          // khusus pesannya lenyap dan user tidak punya petunjuk sama sekali.
-          const pesanStep1 = Object.entries(json.details)
-            .filter(([k]) => STEP1_ERROR_KEYS.has(k))
-            .map(([, v]) => v);
-          setApiError(
-            pesanStep1.length
-              ? `Ada masalah pada Data Diri (Step 1): ${pesanStep1.join(', ')}. Klik "← Kembali" untuk memperbaikinya.`
-              : 'Mohon periksa kembali isian form Anda.'
-          );
+          setApiError('Mohon periksa kembali isian form Anda.');
           fokuskanErrorPertama(json.details);
         } else if (res.status === 403) {
           // Token anti-bot ditolak (paling sering: kedaluwarsa karena form ini
@@ -1043,33 +782,30 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         return;
       }
 
-      // Meta Pixel — pasangan browser dari CAPI CompleteRegistration yang
-      // dikirim titip-jual.js. eventID WAJIB sama supaya Meta mendeduplikasi
-      // keduanya; tanpa itu satu konversi terhitung dua kali.
+      // Meta Pixel — pasangan browser dari CAPI Lead yang dikirim
+      // titip-jual-mulai.js. eventID WAJIB sama supaya Meta mendeduplikasi;
+      // tanpa itu satu konversi terhitung dua kali.
       //
       // Digantungkan pada ADANYA event_id, bukan pada kode status: respons
       // jalur idempoten (submit ulang) tidak memuatnya, jadi percobaan ulang
       // otomatis tidak menembakkan konversi kedua.
       if (json.data?.event_id) {
-        trackEvent('CompleteRegistration', {
-          content_ids: [json.data.kode_listing],
-          content_category: 'titip_jual',
-        }, { eventID: json.data.event_id });
+        // content_category HARUS 'titip_jual_prospek' — sama dengan yang dikirim
+        // CAPI di titip-jual-mulai.js. 'titip_jual' dipakai khusus event
+        // CompleteRegistration (Tahap 2 tuntas); memakainya di sini menyamakan
+        // dua tahap corong yang berbeda (lihat skill meta-ads-tracking).
+        trackEvent('Lead', { content_category: 'titip_jual_prospek' }, { eventID: json.data.event_id });
       }
 
-      // Sudah tersimpan di server — draft lokal tidak lagi diperlukan dan
-      // justru berbahaya kalau tertinggal (submit berikutnya akan dimulai
-      // dengan isian properti lama).
-      hapusDraft();
+      // ⚠️ Draft SENGAJA TIDAK dihapus di sini (beda dari alur lama) — Tahap 2
+      // opsional masih mungkin dipakai, dan `tiket_lanjut` disimpan justru untuk
+      // itu. hapusDraft() baru terjadi setelah Tahap 2 benar-benar tuntas, atau
+      // saat user memilih "Mulai baru".
+      simpanDraft({ tiketLanjut: json.data!.tiket_lanjut, kodeListingTahap1: json.data!.kode_listing });
       onSuccess({ ...json.data!, photos_total_sent: photoPreviews.length });
     } catch {
       // Draft SENGAJA tidak dihapus di sini — submit_id di dalamnya justru yang
       // membuat percobaan ulang aman dari duplikat.
-      //
-      // Dilaporkan: inilah jalur yang paling mungkin memutus submit besar dari
-      // uplink seluler, dan sampai sekarang ia hanya menampilkan pesan ke
-      // pengunjung lalu diam. `foto_terunggah` membedakan "putus sebelum foto
-      // selesai" dari "putus saat mengirim formulir" — dua masalah berbeda.
       laporKendalaForm('titip-jual', 'jaringan-putus', {
         foto_terunggah: photoKeys.length,
         foto_total: photoPreviews.length,
@@ -1086,13 +822,38 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
       <h2 className="font-display text-xl font-bold text-[#0F172A] mb-1">Informasi Properti</h2>
       <p className="text-sm text-[#64748B] mb-2">Lengkapi data properti yang ingin Anda pasarkan.</p>
 
-      <div className="flex items-center gap-2 mb-6 px-4 py-2 bg-[#F0F4F8] rounded-xl">
-        <span className="text-xs text-[#64748B]">Kode Listing:</span>
-        <span className="font-mono font-bold text-[#1565C0] text-sm">{genDisplayKode()}</span>
-        <span className="text-xs text-gray-400">(ditetapkan saat submit)</span>
-      </div>
+      {siapTampilKode && (
+        <div className="flex items-center gap-2 mb-6 px-4 py-2 bg-[#F0F4F8] rounded-xl">
+          <span className="text-xs text-[#64748B]">Kode Listing:</span>
+          <span className="font-mono font-bold text-[#1565C0] text-sm">{genDisplayKode()}</span>
+          <span className="text-xs text-gray-400">(ditetapkan saat submit)</span>
+        </div>
+      )}
 
       <div className="space-y-4">
+        {/* No. WA — dipindah dari Data Diri: properti butuh kontak yang bisa
+            dihubungi admin sejak lahir, walau user tidak lanjut ke Tahap 2. */}
+        <div id="f-no_wa" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">No. WA Aktif 1 *</label>
+            <div className="flex">
+              <span className="px-3 py-3 bg-gray-100 border border-r-0 border-gray-200 rounded-l-xl text-sm text-gray-500">+62</span>
+              <input value={noWa} onChange={e => { setNoWa(e.target.value); clearErr('no_wa'); }}
+                placeholder="81391278889" className={`${inputCls(errors.no_wa)} rounded-l-none`} />
+            </div>
+            <FieldErr msg={errors.no_wa} />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">No. WA Aktif 2 <span className="font-normal text-gray-400">(Opsional)</span></label>
+            <div className="flex">
+              <span className="px-3 py-3 bg-gray-100 border border-r-0 border-gray-200 rounded-l-xl text-sm text-gray-500">+62</span>
+              <input value={noWa2} onChange={e => { setNoWa2(e.target.value); clearErr('no_wa_2'); }}
+                placeholder="Opsional" className={`${inputCls(errors.no_wa_2)} rounded-l-none`} />
+            </div>
+            <FieldErr msg={errors.no_wa_2} />
+          </div>
+        </div>
+
         {/* Judul Properti */}
         <div>
           <label className="block text-xs font-semibold text-[#64748B] mb-1">Judul Properti <span className="font-normal text-gray-400">(Opsional)</span></label>
@@ -1182,8 +943,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
           </div>
         )}
 
-        {/* Jenis Hotel (kondisional) — padanan Jenis Kost, sebelumnya hanya ada
-            di form admin sehingga owner hotel tidak punya cara mengisinya. */}
+        {/* Jenis Hotel (kondisional) — padanan Jenis Kost. */}
         {jenis === 'hotel' && (
           <div>
             <label className="block text-xs font-semibold text-[#64748B] mb-1">Jenis Hotel</label>
@@ -1203,9 +963,8 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
           </div>
         )}
 
-        {/* Kelengkapan Furnitur — kini termasuk KOST (inventori terbesar, 184
-            listing). Sebelumnya kondisinya hardcoded tanpa kost, sehingga kolom
-            `furnished` selalu kosong untuk kost dari jalur Titip Jual. */}
+        {/* Kelengkapan Furnitur — termasuk KOST. Pakai Set bersama dari
+            propertyFields.ts, jangan bikin salinan lagi. */}
         {SHOW_FURNISHED.has(jenis) && (
           <div>
             <label className="block text-xs font-semibold text-[#64748B] mb-2">Kelengkapan Furnitur</label>
@@ -1272,8 +1031,6 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
               <input type="number" value={pengeluaranPerBulan} onChange={e => setPengeluaranPerBulan(e.target.value)}
                 placeholder="Opsional" className={inputCls()} />
             </div>
-            {/* Dulu dibatasi `jenis === 'kost'` saja, padahal admin memberikannya
-                ke hotel/homestay/villa juga. */}
             {SHOW_SEWA_KAMAR.has(jenis) && (
               <div>
                 <label className="block text-xs font-semibold text-[#64748B] mb-1">Harga Sewa/Kamar/Bulan (Rp)</label>
@@ -1295,11 +1052,6 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
                 <option value="">-- Pilih Provinsi --</option>
                 {provList.map(p => <option key={p.id} value={p.id}>{p.nama}</option>)}
               </select>
-              {/* Ketiga select di bawah WAJIB controlled (`value=`), bukan
-                  `defaultValue=""`: isian yang dipulihkan dari draft tersimpan
-                  benar di state, tapi dengan defaultValue dropdown-nya tetap
-                  menampilkan "-- Pilih ... --" sehingga user mengira lokasinya
-                  hilang lalu memilih ulang. */}
               <select onChange={handleKabChange} value={kabId ?? ''} className={selectCls()} disabled={!provId}>
                 <option value="">-- Pilih Kabupaten --</option>
                 {kabList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
@@ -1310,14 +1062,6 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
                   {kecList.map(k => <option key={k.id} value={k.id}>{k.nama}</option>)}
                 </select>
               )}
-              {/* Kelurahan/Desa — diaktifkan 2026-08-10. Komentar lama "TODO
-                  aktifkan jika data kelurahan siap" sudah usang: D1 berisi
-                  81.903 kelurahan (Kec. Depok DIY mengembalikan tepat 3:
-                  Caturtunggal, Condongcatur, Maguwoharjo). Selama dimatikan,
-                  kolom `kelurahan` SELALU lahir kosong dari jalur Titip Jual —
-                  padahal dipakai meta_title SEO dan halaman programmatic
-                  /kost-dijual-condongcatur. Pola disabled + peringatan amber
-                  mengikuti form admin. */}
               {kecId && (
                 <>
                   <select onChange={handleKelChange} value={kelId ?? ''} className={selectCls()}>
@@ -1414,9 +1158,6 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
             multiple className="hidden" onChange={handleFileSelect} />
           <FieldErr msg={errors.photos} />
 
-          {/* Foto tidak ikut tersimpan di draft (terlalu besar untuk
-              localStorage) — katakan terus terang alih-alih membiarkan user
-              mengira fotonya masih ada. */}
           {fotoPerluUlang > 0 && photoPreviews.length === 0 && (
             <div className="flex items-start gap-2 p-3 mt-2 bg-amber-50 border border-amber-200 rounded-xl">
               <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
@@ -1471,11 +1212,7 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         <FieldErr msg={errors.consent} />
 
         {/* Anti-bot Turnstile — statusnya WAJIB terlihat. Backend fail-closed,
-            jadi widget yang gagal dimuat berarti setiap submit ditolak 403.
-            Sampai audit 12 Agu 2026 kondisi itu sama sekali tidak ditampilkan:
-            user mengisi form, mengunggah 20 foto, lalu ditolak tanpa tahu
-            sebabnya — dan pesan errornya menyuruh "muat ulang halaman" yang
-            justru menghapus seluruh isiannya. */}
+            jadi widget yang gagal dimuat berarti setiap submit ditolak 403. */}
         <div id="f-turnstile" className="mt-1">
           <Turnstile
             ref={turnstileRef}
@@ -1514,82 +1251,399 @@ function Step2({ step1, onBack, onSuccess }: Step2Props) {
         )}
       </div>
 
-      <div className="flex gap-3 mt-6">
-        <button onClick={onBack} disabled={loading}
-          className="px-6 py-3 rounded-xl font-semibold border border-gray-200 text-gray-600 hover:border-[#1565C0] transition-colors disabled:opacity-50">
-          ← Kembali
-        </button>
-        {/* ⚠️ JANGAN kembalikan `disabled={!isValid || loading}`. Selama tombol
-            ini mati saat form belum lengkap, handleSubmit tidak pernah jalan,
-            sehingga SELURUH pesan error per-field mustahil muncul untuk field
-            yang justru memblokir. Form ini ±1000px: user yang melewatkan satu
-            centang di paling bawah cuma melihat tombol abu-abu diam, dan itu
-            dilaporkan sebagai "upload gagal". Biarkan diklik — handleSubmit yang
-            menjelaskan apa yang kurang lalu menggulir ke sana. */}
+      <button onClick={handleSubmit} disabled={loading}
+        className={`w-full mt-6 py-3.5 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all ${loading ? 'opacity-60 cursor-not-allowed' : 'hover:brightness-110'}`}
+        style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
+        {loading ? (
+          <>
+            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            {uploadPct > 0 && uploadPct < 100 ? `Mengunggah ${uploadPct}%…` : 'Menyimpan…'}
+          </>
+        ) : '📄 Kirim Properti →'}
+      </button>
+    </div>
+  );
+}
+
+// ─── STEP 2: Data Diri (dulu "Step1", sekarang OPSIONAL & belakangan) ────────
+
+const BERTINDAK_OPTIONS = [
+  { value: 'pemilik_sertifikat', label: 'Pemilik A/n Sertifikat' },
+  { value: 'suami_istri',        label: 'Suami/Istri (Bukan A/n Sertifikat)' },
+  { value: 'ahli_waris',         label: 'Ahli Waris' },
+  { value: 'lainnya',            label: 'Lainnya' },
+];
+
+interface StepDataDiriProps {
+  /** Kode Listing dari Tahap 1 — ditampilkan sebagai pengingat kecil, BUKAN
+   *  layar sukses penuh (lihat catatan 2026-09-19 di bawah kenapa dihapus). */
+  kodeListing: string;
+  /** true bila sebagian foto Tahap 1 gagal tersimpan — ditampilkan sebagai
+   *  peringatan kecil, dulu bagian dari AntaraScreen yang sudah dihapus. */
+  photosBelumLengkap?: boolean;
+  /** Ganti "← Kembali" lama — tidak ada lagi form properti untuk dikembalikan
+   *  (sudah tersimpan di Tahap 1), jadi ini keluar ke DitundaPage. */
+  onNanti: () => void;
+  onSuccess: (result: Stage2Result) => void;
+}
+
+function StepDataDiri({ kodeListing, photosBelumLengkap, onNanti, onSuccess }: StepDataDiriProps) {
+  const [form, setForm] = useState<DataDiriState>({
+    nama_ktp: '', nik: '', rt_rw: '',
+    kelurahan: '', kecamatan: '', prov_owner: '', kab_owner: '', bertindak_sebagai: '',
+    ahli_waris_jumlah: '', ahli_waris_sepakat: false, ahli_waris_kuasa: false, ahli_waris_turun: false,
+  });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
+  // Tiket kedaluwarsa/rusak = jalan buntu permanen untuk sesi ini (tidak ada
+  // rute penerbitan tiket_lanjut baru tanpa admin) — layar tetap, bukan retry.
+  const [tiketKedaluwarsa, setTiketKedaluwarsa] = useState(false);
+
+  // Pulihkan draft. WAJIB di useEffect, bukan initializer useState: halaman ini
+  // publik dan ikut dirender di server, sedangkan localStorage hanya ada di
+  // client — membacanya saat render = hydration mismatch (aturan CLAUDE.md).
+  useEffect(() => {
+    const d = bacaDraft();
+    if (d?.s1) setForm(p => ({ ...p, ...(d.s1 as Partial<DataDiriState>), nik: '' }));
+  }, []);
+
+  // Autosave (debounce 800 ms).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const { nik: _nik, ...tanpaNik } = form;
+      if (adaIsi(tanpaNik)) simpanDraft({ s1: tanpaNik });
+    }, 800);
+    return () => clearTimeout(t);
+  }, [form]);
+
+  const f = (k: keyof DataDiriState, v: string | boolean) =>
+    setForm(p => ({ ...p, [k]: v }));
+  const clearErr = (k: string) => setErrors(p => ({ ...p, [k]: '' }));
+
+  const validate = () => {
+    const e: Record<string, string> = {};
+    if (!form.nama_ktp) e.nama_ktp = 'Nama sesuai KTP wajib diisi';
+    if (!form.nik) e.nik = 'NIK wajib diisi';
+    else if (!/^\d{16}$/.test(form.nik)) e.nik = 'NIK harus tepat 16 digit angka';
+    if (!form.prov_owner) e.prov_owner = 'Provinsi wajib diisi';
+    if (!form.kab_owner) e.kab_owner = 'Kabupaten/Kota wajib diisi';
+    if (!form.kecamatan) e.kecamatan = 'Kecamatan wajib diisi';
+    if (!form.kelurahan) e.kelurahan = 'Kelurahan wajib diisi';
+    if (!form.rt_rw) e.rt_rw = 'RT/RW wajib diisi';
+    if (!form.bertindak_sebagai) e.bertindak_sebagai = 'Wajib dipilih';
+    return e;
+  };
+
+  const handleSubmit = async () => {
+    const e = validate();
+    if (Object.keys(e).length) { setErrors(e); return; }
+
+    const tiketLanjut = bacaDraft()?.tiketLanjut;
+    if (!tiketLanjut) {
+      setTiketKedaluwarsa(true);
+      return;
+    }
+
+    setLoading(true);
+    setApiError(null);
+
+    try {
+      const payload = {
+        tiket_lanjut: tiketLanjut,
+        nama_ktp: form.nama_ktp,
+        nik: form.nik,
+        // alamat_ktp disusun dari field lokasi terstruktur (semua wajib) —
+        // pola yang sama dengan alur lama.
+        alamat_ktp: `Kel. ${form.kelurahan}, Kec. ${form.kecamatan}, ${form.kab_owner}, ${form.prov_owner} (RT/RW ${form.rt_rw})`,
+        rt_rw: form.rt_rw,
+        kelurahan_owner: form.kelurahan,
+        kecamatan_owner: form.kecamatan,
+        bertindak_sebagai: form.bertindak_sebagai,
+        data_ahli_waris: form.bertindak_sebagai === 'ahli_waris' ? {
+          jumlah_ahli_waris: parseInt(form.ahli_waris_jumlah) || 0,
+          semua_sepakat:     form.ahli_waris_sepakat,
+          kuasa_notaris:     form.ahli_waris_kuasa,
+          turun_waris:       form.ahli_waris_turun,
+        } : undefined,
+      };
+
+      const res = await fetch('/api/titip-jual-lengkapi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await bacaJson<Stage2Result>(res);
+
+      if (!res.ok) {
+        if (res.status === 422 && json.details) {
+          setErrors(json.details);
+          setApiError('Mohon periksa kembali isian Data Diri Anda.');
+        } else if (res.status === 403) {
+          setTiketKedaluwarsa(true);
+        } else {
+          setApiError(json.error ?? 'Terjadi kesalahan. Silakan coba lagi.');
+        }
+        return;
+      }
+
+      // Meta Pixel — pasangan browser dari CAPI CompleteRegistration yang
+      // dikirim titip-jual-lengkapi.js. Sama seperti Tahap 1: hanya menyala
+      // saat event_id ada (jalur fresh), jalur idempoten tetap diam.
+      if (json.data?.event_id) {
+        trackEvent('CompleteRegistration', {
+          content_ids: [json.data.kode_listing],
+          content_category: 'titip_jual',
+        }, { eventID: json.data.event_id });
+      }
+
+      // Sudah tersimpan di server — draft lokal tidak lagi diperlukan.
+      hapusDraft();
+      onSuccess(json.data!);
+    } catch {
+      laporKendalaForm('titip-jual', 'jaringan-putus');
+      setApiError('Koneksi ke server terputus saat mengirim. Tekan Kirim sekali lagi — bila data Anda ternyata sudah masuk, sistem mengenalinya dan tidak akan membuat perjanjian ganda.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (tiketKedaluwarsa) {
+    return (
+      <div className="text-center py-8">
+        <div className="text-4xl mb-4">⏳</div>
+        <h2 className="font-display text-xl font-bold text-[#0F172A] mb-3">Sesi Kedaluwarsa</h2>
+        <p className="text-[#64748B] leading-relaxed mb-6">
+          Sesi kedaluwarsa — admin kami akan menghubungi Anda via WhatsApp untuk melanjutkan proses.
+        </p>
+        <Link to="/" className="inline-block px-6 py-3 rounded-xl font-semibold border border-[#1565C0] text-[#1565C0] hover:bg-[#E3F2FD] transition-colors">
+          ← Kembali ke Beranda
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h2 className="font-display text-xl font-bold text-[#0F172A] mb-1">Data Diri Pemilik</h2>
+      <p className="text-sm text-[#64748B] mb-4">Isi sesuai KTP yang masih berlaku.</p>
+
+      {/* Pengingat kecil, BUKAN layar sukses penuh — lihat catatan 2026-09-19:
+          layar "Properti Anda Sudah Tercatat!" dengan tombol "Nanti Saja"
+          dihapus karena membuat sebagian user mengira prosesnya sudah selesai
+          padahal Data Diri di bawah ini masih wajib untuk proses perjanjian
+          resmi. Kode Listing tetap ditampilkan di sini supaya tidak hilang. */}
+      <div className="flex items-start gap-2 mb-4 p-3 bg-[#E3F2FD] border border-[#90CAF9] rounded-xl">
+        <Check size={16} className="text-[#1565C0] flex-shrink-0 mt-0.5" />
+        <p className="text-xs text-[#0F172A]">
+          Properti Anda sudah tercatat dengan Kode Listing{' '}
+          <strong className="font-mono">{kodeListing}</strong>. Lengkapi data diri di bawah untuk
+          melanjutkan proses perjanjian resmi.
+        </p>
+      </div>
+      {photosBelumLengkap && (
+        <div className="flex items-start gap-2 mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+          <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-amber-800">
+            Sebagian foto properti belum sepenuhnya tersimpan — tim kami akan menghubungi Anda untuk melengkapinya.
+          </p>
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {/* Nama KTP */}
+        <div>
+          <label className="block text-xs font-semibold text-[#64748B] mb-1">Nama Lengkap Sesuai KTP *</label>
+          <input value={form.nama_ktp} onChange={e => { f('nama_ktp', e.target.value); clearErr('nama_ktp'); }}
+            placeholder="Sesuai KTP" className={inputCls(errors.nama_ktp)} />
+          <FieldErr msg={errors.nama_ktp} />
+        </div>
+
+        {/* NIK */}
+        <div>
+          <label className="block text-xs font-semibold text-[#64748B] mb-1">NIK (KTP) *</label>
+          <input
+            type="text"
+            value={form.nik}
+            onChange={e => { f('nik', e.target.value.replace(/\D/g, '').slice(0, 16)); clearErr('nik'); }}
+            placeholder="16 digit NIK"
+            className={inputCls(errors.nik)}
+          />
+          <p className="text-xs text-gray-400 mt-0.5">NIK dienkripsi untuk keamanan data Anda.</p>
+          <FieldErr msg={errors.nik} />
+        </div>
+
+        {/* Alamat Lengkap Sesuai KTP — label statis (input dihapus; detail alamat diisi via kolom lokasi di bawah) */}
+        <div>
+          <label className="block text-xs font-semibold text-[#64748B] mb-1">Alamat Lengkap Sesuai KTP</label>
+          <FieldErr msg={errors.alamat_ktp} />
+        </div>
+
+        {/* Provinsi + Kab./Kota KTP */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">Provinsi (KTP) *</label>
+            <input value={form.prov_owner} onChange={e => { f('prov_owner', e.target.value); clearErr('prov_owner'); }}
+              placeholder="Mis: Jawa Timur" className={inputCls(errors.prov_owner)} />
+            <FieldErr msg={errors.prov_owner} />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">Kab./Kota (KTP) *</label>
+            <input value={form.kab_owner} onChange={e => { f('kab_owner', e.target.value); clearErr('kab_owner'); }}
+              placeholder="Mis: Kabupaten Sleman" className={inputCls(errors.kab_owner)} />
+            <FieldErr msg={errors.kab_owner} />
+          </div>
+        </div>
+
+        {/* Kecamatan + Kelurahan/Desa */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">Kecamatan *</label>
+            <input value={form.kecamatan} onChange={e => { f('kecamatan', e.target.value); clearErr('kecamatan'); }}
+              placeholder="Kecamatan" className={inputCls(errors.kecamatan)} />
+            <FieldErr msg={errors.kecamatan} />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">Kelurahan/Desa *</label>
+            <input value={form.kelurahan} onChange={e => { f('kelurahan', e.target.value); clearErr('kelurahan'); }}
+              placeholder="Kelurahan" className={inputCls(errors.kelurahan)} />
+            <FieldErr msg={errors.kelurahan} />
+          </div>
+        </div>
+
+        {/* RT/RW */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">RT/RW *</label>
+            <input value={form.rt_rw} onChange={e => { f('rt_rw', e.target.value); clearErr('rt_rw'); }} placeholder="001/002"
+              className={inputCls(errors.rt_rw)} />
+            <FieldErr msg={errors.rt_rw} />
+          </div>
+          <div />
+        </div>
+
+        {/* Bertindak Sebagai */}
+        <div>
+          <label className="block text-xs font-semibold text-[#64748B] mb-2">Bertindak Sebagai *</label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {BERTINDAK_OPTIONS.map(o => (
+              <label key={o.value} className={`flex items-center gap-2 p-3 rounded-xl border cursor-pointer transition-all ${
+                form.bertindak_sebagai === o.value ? 'border-[#1565C0] bg-[#E3F2FD]' : 'border-gray-200 hover:border-[#1565C0]'
+              }`}>
+                <input type="radio" name="bertindak" value={o.value}
+                  checked={form.bertindak_sebagai === o.value}
+                  onChange={() => { f('bertindak_sebagai', o.value); clearErr('bertindak_sebagai'); }}
+                  className="accent-[#1565C0]" />
+                <span className="text-sm">{o.label}</span>
+              </label>
+            ))}
+          </div>
+          <FieldErr msg={errors.bertindak_sebagai} />
+        </div>
+
+        {/* Kondisional: Ahli Waris */}
+        {form.bertindak_sebagai === 'ahli_waris' && (
+          <div className="border border-amber-200 bg-amber-50 rounded-xl p-4 space-y-3">
+            <p className="text-xs font-semibold text-amber-800">Detail Ahli Waris</p>
+            <div>
+              <label className="block text-xs font-semibold text-[#64748B] mb-1">Total Ahli Waris</label>
+              <input type="number" min="1" value={form.ahli_waris_jumlah}
+                onChange={e => f('ahli_waris_jumlah', e.target.value)}
+                placeholder="Jumlah ahli waris" className={inputCls()} />
+            </div>
+            {([
+              { key: 'ahli_waris_sepakat', label: 'Semua ahli waris sepakat untuk dijual/disewakan?' },
+              { key: 'ahli_waris_kuasa',   label: 'Sudah dikuasakan via notaris?' },
+              { key: 'ahli_waris_turun',   label: 'Turun waris sudah diurus via notaris?' },
+            ] as const).map(({ key, label }) => (
+              <div key={key} className="flex items-center justify-between">
+                <span className="text-sm text-[#0F172A]">{label}</span>
+                <div className="flex gap-2">
+                  {(['Ya', 'Tidak'] as const).map(opt => (
+                    <button key={opt} type="button"
+                      onClick={() => f(key, opt === 'Ya')}
+                      className={`px-3 py-1 rounded-lg text-xs font-medium border transition-all ${
+                        form[key] === (opt === 'Ya') ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'border-gray-300 text-gray-600'
+                      }`}>
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* API Error */}
+        {apiError && (
+          <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl">
+            <AlertCircle size={16} className="text-red-500 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-red-700">{apiError}</p>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-6 space-y-2">
         <button onClick={handleSubmit} disabled={loading}
-          className={`flex-1 py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all ${loading ? 'opacity-60 cursor-not-allowed' : 'hover:brightness-110'}`}
+          className={`w-full py-3 rounded-xl font-bold text-white flex items-center justify-center gap-2 transition-all ${loading ? 'opacity-60 cursor-not-allowed' : 'hover:brightness-110'}`}
           style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}>
           {loading ? (
             <>
               <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              {/* Angka yang bergerak, bukan spinner buta: mengunggah 20 foto di
-                  jaringan seluler bisa 60–90 detik dan tanpa umpan balik user
-                  menyimpulkan formnya menggantung lalu menutup tab. */}
-              {uploadPct > 0 && uploadPct < 100 ? `Mengunggah ${uploadPct}%…` : 'Menyimpan…'}
+              Menyimpan…
             </>
-          ) : '📄 Kirim Properti →'}
+          ) : <>Kirim Data Diri <ChevronRight size={18} /></>}
+        </button>
+        {/* Sengaja diredupkan (bukan tombol setara "Kembali") — supaya "Kirim
+            Data Diri" tetap satu-satunya aksi yang menonjol. Properti tetap
+            aman tersimpan dari Tahap 1 walau ini diklik. */}
+        <button onClick={onNanti} disabled={loading}
+          className="w-full py-2 text-xs font-medium text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50">
+          Nanti saja, lengkapi belakangan
         </button>
       </div>
     </div>
   );
 }
 
-// ─── Success Page ─────────────────────────────────────────────────────────────
+function DitundaPage({ kodeListing }: { kodeListing: string }) {
+  return (
+    <div className="text-center py-8">
+      <div className="text-6xl mb-4">👍</div>
+      <h2 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Baik, Sudah Kami Catat</h2>
+      <p className="text-[#64748B] leading-relaxed mb-2">
+        Properti Anda dengan Kode Listing <strong className="font-mono">{kodeListing}</strong> sudah aman di sistem kami.
+      </p>
+      <p className="text-[#64748B] text-sm mb-8">
+        Tim Salam Bumi Property akan menghubungi Anda via WhatsApp dalam <strong>1×24 jam</strong> untuk melengkapi data diri dan proses selanjutnya.
+      </p>
+      <Link to="/" className="inline-block px-6 py-3 rounded-xl font-semibold border border-[#1565C0] text-[#1565C0] hover:bg-[#E3F2FD] transition-colors">
+        ← Kembali ke Beranda
+      </Link>
+    </div>
+  );
+}
 
-function SuccessPage({ result }: { result: ApiResult }) {
-  // 🔥 DUA JALUR, DUA TAMPILAN — jangan pernah disamakan lagi.
-  // Server membalas 200 + `duplikat: true` ketika submit_id yang dikirim sudah
-  // pernah dipakai: TIDAK ada listing baru yang dibuat, dan kode yang dikembalikan
-  // milik listing LAMA. Sampai 2026-09-09 halaman ini merendernya identik dengan
-  // sukses baru, sehingga pengisi form DAN admin sama-sama yakin datanya masuk —
-  // padahal database tidak bertambah dan tidak ada satu pun error tercatat.
-  // Kelas kegagalan terburuk: semua pihak yakin berhasil.
-  if (result.duplikat) {
+// ─── Selesai: Tahap 2 tuntas ──────────────────────────────────────────────────
+
+function SelesaiPage({ stage2 }: { stage2: Stage2Result }) {
+  // 🔥 DUA JALUR, DUA TAMPILAN — jangan pernah disamakan lagi (lihat catatan
+  // lama di alur ini soal kenapa: jalur idempoten TIDAK membuat baris baru).
+  if (stage2.duplikat) {
     return (
       <div className="text-center py-8">
         <div className="text-6xl mb-4">📋</div>
-        <h2 className="font-display text-2xl font-bold text-[#0F172A] mb-3">
-          Data Ini Sudah Pernah Kami Terima
-        </h2>
+        <h2 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Data Diri Ini Sudah Pernah Kami Terima</h2>
         <p className="text-[#64748B] leading-relaxed mb-2">
-          {result.pesan ?? 'Data properti Anda sudah tercatat sebelumnya di sistem kami.'}
+          {stage2.pesan ?? 'Data diri Anda sudah tercatat sebelumnya di sistem kami.'}
         </p>
-        <p className="text-[#64748B] text-sm mb-3">Kode listing yang sudah tersimpan:</p>
-        <div className="inline-block px-6 py-3 bg-[#FFF7ED] border border-amber-200 rounded-xl mb-5">
-          <span className="font-mono font-bold text-amber-700 text-lg">{result.kode_listing}</span>
+        <p className="text-[#64748B] text-sm mb-3">Kode Perjanjian:</p>
+        <div className="inline-block px-6 py-3 bg-[#FFF7ED] border border-amber-200 rounded-xl mb-6">
+          <span className="font-mono font-bold text-amber-700 text-lg">{stage2.kode_perjanjian}</span>
         </div>
-        <div className="text-left p-4 mb-6 bg-amber-50 border border-amber-200 rounded-xl">
-          <p className="text-sm text-amber-900 font-semibold mb-1">
-            Tidak ada listing baru yang dibuat.
-          </p>
-          <p className="text-xs text-amber-800 leading-relaxed">
-            Kalau Anda bermaksud mengirim properti yang <strong>berbeda</strong>, tekan tombol di
-            bawah untuk memulai formulir bersih, lalu isi ulang. Bila Anda memang sedang mengirim
-            ulang properti yang sama, tidak perlu melakukan apa-apa — tim kami sudah memegang datanya.
-          </p>
-        </div>
-        <div className="flex flex-col sm:flex-row gap-3 justify-center">
-          <button
-            onClick={() => { hapusDraft(); window.location.href = '/titip-jual'; }}
-            className="px-6 py-3 rounded-xl font-semibold text-white"
-            style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
-          >
-            Kirim properti lain →
-          </button>
-          <Link to="/" className="px-6 py-3 rounded-xl font-semibold border border-[#1565C0] text-[#1565C0] hover:bg-[#E3F2FD] transition-colors">
-            ← Kembali ke Beranda
-          </Link>
-        </div>
+        <Link to="/" className="inline-block px-6 py-3 rounded-xl font-semibold border border-[#1565C0] text-[#1565C0] hover:bg-[#E3F2FD] transition-colors">
+          ← Kembali ke Beranda
+        </Link>
       </div>
     );
   }
@@ -1597,21 +1651,13 @@ function SuccessPage({ result }: { result: ApiResult }) {
   return (
     <div className="text-center py-8">
       <div className="text-6xl mb-4">✅</div>
-      <h2 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Properti Berhasil Terkirim!</h2>
+      <h2 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Data Diri Berhasil Dilengkapi!</h2>
       <p className="text-[#64748B] leading-relaxed mb-2">
-        Terima kasih! Tim Salam Bumi Property telah menerima data properti Anda dengan Kode Listing:
+        Terima kasih! Perjanjian Titip Jual Anda sudah kami buat dengan Kode:
       </p>
       <div className="inline-block px-6 py-3 bg-[#E3F2FD] rounded-xl mb-4">
-        <span className="font-mono font-bold text-[#1565C0] text-lg">{result.kode_listing}</span>
+        <span className="font-mono font-bold text-[#1565C0] text-lg">{stage2.kode_perjanjian}</span>
       </div>
-      {typeof result.photos_uploaded === 'number' && typeof result.photos_total_sent === 'number' && result.photos_uploaded < result.photos_total_sent && (
-        <div className="flex items-start gap-2 p-3 mb-4 bg-amber-50 border border-amber-200 rounded-xl text-left">
-          <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-amber-800">
-            {result.photos_uploaded} dari {result.photos_total_sent} foto berhasil tersimpan. Jika Anda butuh foto lengkap tersimpan, silakan hubungi admin kami via WhatsApp setelah menerima konfirmasi.
-          </p>
-        </div>
-      )}
       <p className="text-[#64748B] text-sm mb-6">
         Kami akan menghubungi Anda via WhatsApp dalam <strong>1×24 jam</strong> untuk proses selanjutnya.
       </p>
@@ -1627,54 +1673,71 @@ function SuccessPage({ result }: { result: ApiResult }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-export default function TitipJualPage() {
-  const [step, setStep]         = useState<1 | 2>(1);
-  const [step1Data, setStep1Data] = useState<Step1State | null>(null);
-  const [result, setResult]     = useState<ApiResult | null>(null);
+type Layar = 'properti' | 'datadiri' | 'selesai' | 'ditunda';
 
-  const handleStep1 = (data: Step1State) => { setStep1Data(data); setStep(2); };
-  const handleSuccess = (r: ApiResult) => setResult(r);
+export default function TitipJualPage() {
+  const [layar, setLayar] = useState<Layar>('properti');
+  const [stage1, setStage1] = useState<Stage1Result | null>(null);
+  const [stage2, setStage2] = useState<Stage2Result | null>(null);
+
+  // 🔥 2026-09-19: layar "Antara" (✅ "Properti Anda Sudah Tercatat!" dengan
+  // pilihan "Lengkapi Sekarang"/"Nanti Saja") DIHAPUS setelah uji langsung —
+  // sebagian user mengira prosesnya sudah selesai di situ dan tidak lanjut ke
+  // Data Diri, padahal itu masih wajib untuk proses perjanjian resmi. Sekarang
+  // Tahap 1 sukses langsung lanjut ke StepDataDiri; pengingat Kode Listing
+  // dipindah jadi banner kecil di dalam StepDataDiri sendiri (lihat di atas).
+  const handleStage1Success = (r: Stage1Result) => { setStage1(r); setLayar('datadiri'); };
+  const handleStage2Success = (r: Stage2Result) => { setStage2(r); setLayar('selesai'); };
 
   // Banner "isian dipulihkan". Dibaca di useEffect (bukan saat render) karena
   // halaman ini SSR — localStorage tidak ada di server dan membacanya saat
-  // render menghasilkan hydration mismatch. Efek induk berjalan SETELAH efek
-  // anak, tapi autosave anak di-debounce 800 ms sehingga pembacaan di sini
-  // masih melihat draft lama, bukan tulisan barusan.
+  // render menghasilkan hydration mismatch.
   const [adaDraftPulih, setAdaDraftPulih] = useState(false);
-  useEffect(() => { setAdaDraftPulih(bacaDraft() !== null); }, []);
+  useEffect(() => {
+    const d = bacaDraft();
+    setAdaDraftPulih(d !== null);
+
+    // Pulihkan langsung ke Data Diri bila Tahap 1 sudah pernah sukses tapi
+    // user reload/tutup-tab sebelum sempat menyelesaikan Tahap 2. Tanpa ini,
+    // `layar` selalu mulai dari 'properti' — user mendarat lagi di form
+    // properti, padahal `tiketLanjut` masih sah 7 hari. `hapusDraft()` selalu
+    // dipanggil begitu Tahap 2 benar-benar tuntas (StepDataDiri.handleSubmit),
+    // jadi draft yang masih memuat tiketLanjut di sini berarti Tahap 2 memang
+    // belum diselesaikan.
+    if (d?.tiketLanjut && d?.kodeListingTahap1) {
+      setStage1({ kode_listing: d.kodeListingTahap1, tiket_lanjut: d.tiketLanjut });
+      setLayar('datadiri');
+    }
+  }, []);
 
   const mulaiBaru = () => { hapusDraft(); window.location.reload(); };
 
-  // Gulir ke atas tiap ganti step. Formulir ini panjang: tanpa ini user bisa
-  // mendarat di tengah halaman dan mengira isiannya hilang — persis persepsi
-  // yang sedang diperbaiki. Render pertama dilewati agar tidak mengganggu
-  // pemuatan halaman (mis. saat masuk lewat anchor).
-  const stepPertamaKali = useRef(true);
+  // Gulir ke atas tiap ganti layar. Render pertama dilewati agar tidak
+  // mengganggu pemuatan halaman (mis. saat masuk lewat anchor).
+  const layarPertamaKali = useRef(true);
   useEffect(() => {
-    if (stepPertamaKali.current) { stepPertamaKali.current = false; return; }
+    if (layarPertamaKali.current) { layarPertamaKali.current = false; return; }
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [step]);
+  }, [layar]);
 
-  if (result) {
-    return (
-      <div className="pt-nav min-h-screen" style={{ background: '#F0F4F8' }}>
-        <div className="max-w-2xl mx-auto px-4 py-12">
-          <div className="bg-white rounded-2xl shadow-sm p-6 sm:p-8">
-            <SuccessPage result={result} />
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const tampilkanStepper = layar === 'properti' || layar === 'datadiri';
+  const stepAktif = layar === 'datadiri' ? 2 : 1;
+  // 'selesai' hanya tercapai lewat StepDataDiri.onSuccess, jadi StepDataDiri
+  // pasti sudah pernah dipasang begitu 'selesai' tercapai — dipakai untuk
+  // menjaga StepDataDiri tetap terpasang (CSS-toggle, bukan unmount) begitu
+  // pertama kali disentuh, persis alasan StepProperti selalu terpasang.
+  const dataDiriSudahDipasang = layar === 'datadiri' || layar === 'selesai';
 
   return (
     <div className="pt-nav min-h-screen" style={{ background: '#F0F4F8' }}>
       <div className="max-w-2xl mx-auto px-4 py-12">
-        <div className="text-center mb-6">
-          <h1 className="font-display text-2xl font-bold text-[#0F172A]">Titip Jual Properti</h1>
-          <p className="text-[#64748B] text-sm mt-1">Pasarkan properti Anda bersama tim SBP</p>
-        </div>
-        {adaDraftPulih && (
+        {tampilkanStepper && (
+          <div className="text-center mb-6">
+            <h1 className="font-display text-2xl font-bold text-[#0F172A]">Titip Jual Properti</h1>
+            <p className="text-[#64748B] text-sm mt-1">Pasarkan properti Anda bersama tim SBP</p>
+          </div>
+        )}
+        {tampilkanStepper && adaDraftPulih && (
           <div className="flex items-start gap-2 mb-4 p-3 bg-[#E3F2FD] border border-[#90CAF9] rounded-xl">
             <Check size={16} className="text-[#1565C0] flex-shrink-0 mt-0.5" />
             <p className="text-xs text-[#0F172A] flex-1">
@@ -1687,34 +1750,36 @@ export default function TitipJualPage() {
           </div>
         )}
         <div className="bg-white rounded-2xl shadow-sm p-6 sm:p-8">
-          <Stepper step={step} />
-          {/* ⚠️ Kedua step SENGAJA tetap terpasang; yang tidak aktif hanya
-              disembunyikan CSS. JANGAN kembalikan ke
-              `{step === 1 ? <Step1/> : <Step2/>}` — mengganti tipe komponen
-              membuat React MELEPAS yang lama sehingga seluruh isian terhapus,
-              termasuk foto yang sudah dikonversi WebP (bisa 20 file, kerja
-              berat di HP). Ditemukan 2026-08-10: klik "← Kembali" mengosongkan
-              Step 1 DAN Step 2 sekaligus.
-              Step 1 tidak perlu prop nilai awal — state internalnya bertahan
-              sendiri justru karena tidak pernah dilepas. */}
-          <div style={{ display: step === 1 ? undefined : 'none' }}>
-            <Step1 onNext={handleStep1} />
+          {tampilkanStepper && <Stepper step={stepAktif} />}
+
+          {/* ⚠️ StepProperti SENGAJA tetap terpasang sepanjang sesi (CSS-toggle,
+              bukan unmount) — mengganti tipe komponen membuat React MELEPAS yang
+              lama sehingga seluruh isian terhapus, termasuk foto yang sudah
+              dikonversi WebP. Ditemukan 2026-08-10 untuk pasangan step lama;
+              aturannya tetap berlaku di sini. StepProperti ikut SSR (ini layar
+              pertama), jadi ia selalu terpasang sejak render pertama. */}
+          <div style={{ display: layar === 'properti' ? undefined : 'none' }}>
+            <StepProperti onSuccess={handleStage1Success} />
           </div>
-          {/* Step 2 WAJIB tetap lazy (baru dipasang setelah Step 1 selesai),
-              dua alasan keras:
-              1. Hidrasi SSR — Step 2 merender genDisplayKode() yang memanggil
-                 `new Date()`. Selama ini aman HANYA karena Step 2 tak pernah
-                 dirender di server; memasangnya sejak awal = hydration mismatch.
-              2. Token Turnstile — widgetnya dirender saat mount dan tokennya
-                 kedaluwarsa. Dipasang sejak halaman dibuka, token bisa basi
-                 sebelum user sampai ke tombol Kirim.
-              Sesudah terpasang ia TIDAK dilepas lagi, jadi isian Step 2 aman
-              saat user bolak-balik. */}
-          {step1Data !== null && (
-            <div style={{ display: step === 2 ? undefined : 'none' }}>
-              <Step2 step1={step1Data} onBack={() => setStep(1)} onSuccess={handleSuccess} />
+
+          {/* StepDataDiri baru dipasang setelah pertama dibutuhkan (tidak pernah
+              ikut SSR — genDisplayKode tidak ada di sini jadi aman, tapi tetap
+              dijaga lazy untuk konsistensi pola). Sesudah terpasang ia TIDAK
+              dilepas lagi, jadi isian KYC aman kalau layar berpindah lagi. */}
+          {dataDiriSudahDipasang && (
+            <div style={{ display: layar === 'datadiri' ? undefined : 'none' }}>
+              <StepDataDiri
+                kodeListing={stage1?.kode_listing ?? ''}
+                photosBelumLengkap={!!(stage1 && typeof stage1.photos_uploaded === 'number'
+                  && typeof stage1.photos_total_sent === 'number'
+                  && stage1.photos_uploaded < stage1.photos_total_sent)}
+                onNanti={() => setLayar('ditunda')}
+                onSuccess={handleStage2Success}
+              />
             </div>
           )}
+          {layar === 'selesai' && stage2 && <SelesaiPage stage2={stage2} />}
+          {layar === 'ditunda' && stage1 && <DitundaPage kodeListing={stage1.kode_listing} />}
         </div>
       </div>
     </div>

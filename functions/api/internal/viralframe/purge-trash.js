@@ -157,12 +157,26 @@ async function bersihkanTabel(env) {
     console.error('[purge-trash] foto titip-jual yatim', err.message);
   }
 
+  // Retensi titip_jual_tiket_log (migrasi 0049). Murni penghitung rate-limit
+  // untuk /api/titip-jual-tiket-foto — hanya pernah dibaca sebagai COUNT() 60
+  // detik terakhir, jadi retensi 1 hari jauh di atas kebutuhan sesungguhnya.
+  let tiketLog = 0;
+  try {
+    const r = await env.DB.prepare(
+      `DELETE FROM titip_jual_tiket_log WHERE created_at < datetime('now', '-1 day')`
+    ).run();
+    tiketLog = r?.meta?.changes ?? 0;
+  } catch (err) {
+    console.error('[purge-trash] retensi titip_jual_tiket_log', err.message);
+  }
+
   return {
     jadwal_yatim_dihapus: jadwalYatim,
     error_logs_dihapus: errorLogs,
     view_daily_dihapus: viewDaily,
     caption_dihapus: caption,
     foto_yatim_dihapus: fotoYatim,
+    tiket_log_dihapus: tiketLog,
   };
 }
 

@@ -82,12 +82,26 @@ export interface TitipJualDraft {
   /** Berapa foto yang sempat dipilih (file-nya sendiri tidak bisa disimpan). */
   jumlahFoto?: number;
   /**
-   * Tiket ber-HMAC untuk /api/titip-jual-foto, diterbitkan endpoint prospek saat
-   * Step 1 selesai. Berumur 1 jam dan cakupannya HANYA mengunggah foto ke bucket
-   * kita — bukan kredensial akun. Disimpan di sini (bukan state komponen) karena
-   * Step 1 dan Step 2 komponen terpisah, persis alasan `leadId` ada di sini.
+   * Tiket ber-HMAC untuk /api/titip-jual-foto, diterbitkan
+   * /api/titip-jual-tiket-foto saat StepProperti mount. Berumur 1 jam dan
+   * cakupannya HANYA mengunggah foto ke bucket kita — bukan kredensial akun.
+   * Disimpan di sini (bukan state komponen) karena StepProperti dan
+   * StepDataDiri komponen terpisah, persis alasan `leadId` ada di sini.
    */
   tiketFoto?: string;
+  /**
+   * Tiket JWT (scope `titipjual-lanjut`) yang dikembalikan
+   * /api/titip-jual-mulai di akhir Tahap 1 (StepProperti) — satu-satunya kunci
+   * menuju Tahap 2 (StepDataDiri, opsional). Berumur 7 hari: user boleh kembali
+   * besok/lusa untuk melengkapi data diri, bukan hanya dalam satu sesi.
+   * `property_id`/`owner_id` TIDAK pernah disimpan mentah di draft — keduanya
+   * hanya hidup di dalam isi tiket ini, diverifikasi server, supaya klien tidak
+   * bisa mengarang property_id sendiri (IDOR — lihat
+   * PLAN-TITIP-JUAL-PROPERTI-DULU.md §2.3).
+   */
+  tiketLanjut?: string;
+  /** Kode listing dari respons Tahap 1 — ditampilkan ulang bila user reload sebelum lanjut Tahap 2. */
+  kodeListingTahap1?: string;
   ts: number;
 }
 
