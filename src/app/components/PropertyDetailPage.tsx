@@ -435,6 +435,11 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
   const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true });
   const [currentImg, setCurrentImg] = useState(0);
   const [lightbox, setLightbox] = useState(false);
+  // Swipe di dalam lightbox — <img>-nya bukan bagian dari emblaRef (lightbox
+  // adalah overlay terpisah), jadi drag bawaan embla tidak berlaku di sana.
+  // Pola sama dengan PropertyCard.tsx: threshold 40px + translateX hidup saat drag.
+  const touchStartX = useRef(0);
+  const [dragOffset, setDragOffset] = useState(0);
   const [favorited, setFavorited] = useState(false);
   const formRef = useRef<HTMLDivElement>(null);
   const [showStickyBar, setShowStickyBar] = useState(true);
@@ -449,6 +454,20 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
     if (!emblaApi) return;
     emblaApi.on('select', () => setCurrentImg(emblaApi.selectedScrollSnap()));
   }, [emblaApi]);
+
+  // Navigasi keyboard + Escape untuk lightbox — reuse emblaApi galeri utama
+  // (bukan instance embla kedua) supaya currentImg tetap satu sumber kebenaran
+  // dan tidak menduplikasi loading gambar 1600px.
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight') emblaApi?.scrollNext();
+      if (e.key === 'ArrowLeft') emblaApi?.scrollPrev();
+      if (e.key === 'Escape') setLightbox(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [lightbox, emblaApi]);
 
   // Sticky bar — hide when form is visible
   useEffect(() => {
@@ -930,13 +949,43 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
 
       {/* Lightbox */}
       {lightbox && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; setDragOffset(0); }}
+          onTouchMove={(e) => { if (images.length > 1) setDragOffset(e.touches[0].clientX - touchStartX.current); }}
+          onTouchEnd={(e) => {
+            const dx = e.changedTouches[0].clientX - touchStartX.current;
+            if (images.length > 1 && Math.abs(dx) > 40) { dx < 0 ? emblaApi?.scrollNext() : emblaApi?.scrollPrev(); }
+            setDragOffset(0);
+          }}
+        >
           <button onClick={() => setLightbox(false)} className="absolute top-4 right-4 p-2 text-white hover:text-gray-300">
             <X size={24} />
           </button>
+          {images.length > 1 && (
+            <>
+              <button onClick={() => emblaApi?.scrollPrev()} className="absolute left-4 top-1/2 -translate-y-1/2 p-2 text-white hover:text-gray-300">
+                <ChevronLeft size={32} />
+              </button>
+              <button onClick={() => emblaApi?.scrollNext()} className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-white hover:text-gray-300">
+                <ChevronRight size={32} />
+              </button>
+              <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex gap-1.5">
+                {images.map((_, i) => (
+                  <div key={i} className={`h-1.5 rounded-full transition-all ${i === currentImg ? 'w-5 bg-white' : 'w-1.5 bg-white/50'}`} />
+                ))}
+              </div>
+            </>
+          )}
           {/* Lightbox = tampilan penuh, jadi lebarnya besar (1600) — tapi tetap lewat
               cfImg supaya format auto (AVIF/WebP) dan bukan file asli mentah. */}
-          <img src={cfImg(images[currentImg], 1600)} alt={`${property.title} ${currentImg + 1}`} className="max-w-full max-h-full object-contain rounded-xl" suppressHydrationWarning />
+          <img
+            src={cfImg(images[currentImg], 1600)}
+            alt={`${property.title} ${currentImg + 1}`}
+            className="max-w-full max-h-full object-contain rounded-xl"
+            style={{ transform: `translateX(${dragOffset}px)`, transition: dragOffset !== 0 ? 'none' : 'transform 0.2s ease' }}
+            suppressHydrationWarning
+          />
         </div>
       )}
     </div>
