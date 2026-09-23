@@ -40,6 +40,13 @@ import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnsti
 // Jenis properti yang menghasilkan income sewa — analisis investasi relevan di sini
 const INCOME_TYPES = ['kost', 'hotel', 'homestay', 'villa', 'apartment', 'gudang', 'komersial'];
 
+// WAJIB dipakai SAMA PERSIS oleh <img> lightbox dan preloader-nya. Kalau beda,
+// browser bisa memilih kandidat srcSet yang berbeda dan preload-nya MELESET —
+// unduhan tetap mulai dari nol saat diklik. 800/1200 sengaja ikut: keduanya
+// sudah dimuat galeri, jadi di mobile lightbox tampil tanpa request baru.
+const LIGHTBOX_WIDTHS = [800, 1200, 1600];
+const LIGHTBOX_SIZES = '100vw';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Investment Intelligence Panel — pakai nilai pre-computed dari API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -468,6 +475,27 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [lightbox, emblaApi]);
+
+  // Preload foto tetangga (±1) selagi lightbox terbuka. Tanpa ini setiap klik
+  // panah memulai unduhan dari NOL sementara foto lama bertahan di layar —
+  // itulah yang terasa "tidak responsif" (diukur: 0,13-1,0 s per foto).
+  // Sengaja hanya ±1, bukan semua: properti 9 foto = 630 KB kalau diborong.
+  // Sengaja TANPA cleanup: membatalkan preload justru merugikan, unduhan yang
+  // selesai itu memang tujuannya (cache panas). Tidak ada setState di sini.
+  // ⚠️ Baca dari `property`, BUKAN dari `images` — `images` baru dideklarasikan
+  // setelah early-return `if (loading)` di bawah, jadi menyebutnya di dep array
+  // hook ini (dievaluasi saat render) = TDZ ReferenceError, layar putih.
+  useEffect(() => {
+    const fotos = property?.images ?? [];
+    if (!lightbox || fotos.length < 2) return;
+    for (const i of [(currentImg + 1) % fotos.length, (currentImg - 1 + fotos.length) % fotos.length]) {
+      const pre = new Image();
+      pre.sizes = LIGHTBOX_SIZES;
+      const ss = cfSrcSet(fotos[i], LIGHTBOX_WIDTHS);
+      if (ss) pre.srcset = ss;
+      pre.src = cfImg(fotos[i], 1600);
+    }
+  }, [lightbox, currentImg, property]);
 
   // Sticky bar — hide when form is visible
   useEffect(() => {
@@ -959,18 +987,23 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
             setDragOffset(0);
           }}
         >
-          <button onClick={() => setLightbox(false)} className="absolute top-4 right-4 p-2 text-white hover:text-gray-300">
+          {/* z-10 WAJIB: <img> di bawah adalah SAUDARA BERIKUTNYA di DOM, jadi tanpa
+              z-index ia terlukis DI ATAS tombol-tombol ini. Di HP foto landscape
+              memenuhi lebar layar sehingga menutupi kedua panah — tombolnya mati
+              total, dan hanya terlihat di mobile (di desktop foto dibatasi tinggi
+              sehingga kotaknya lebih sempit dari layar). */}
+          <button onClick={() => setLightbox(false)} className="absolute z-10 top-4 right-4 p-2 text-white hover:text-gray-300">
             <X size={24} />
           </button>
           {images.length > 1 && (
             <>
-              <button onClick={() => emblaApi?.scrollPrev()} className="absolute left-4 top-1/2 -translate-y-1/2 p-2 text-white hover:text-gray-300">
+              <button onClick={() => emblaApi?.scrollPrev()} className="absolute z-10 left-4 top-1/2 -translate-y-1/2 p-2 text-white hover:text-gray-300">
                 <ChevronLeft size={32} />
               </button>
-              <button onClick={() => emblaApi?.scrollNext()} className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-white hover:text-gray-300">
+              <button onClick={() => emblaApi?.scrollNext()} className="absolute z-10 right-4 top-1/2 -translate-y-1/2 p-2 text-white hover:text-gray-300">
                 <ChevronRight size={32} />
               </button>
-              <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex gap-1.5">
+              <div className="absolute z-10 bottom-5 left-1/2 -translate-x-1/2 flex gap-1.5">
                 {images.map((_, i) => (
                   <div key={i} className={`h-1.5 rounded-full transition-all ${i === currentImg ? 'w-5 bg-white' : 'w-1.5 bg-white/50'}`} />
                 ))}
@@ -981,6 +1014,8 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
               cfImg supaya format auto (AVIF/WebP) dan bukan file asli mentah. */}
           <img
             src={cfImg(images[currentImg], 1600)}
+            srcSet={cfSrcSet(images[currentImg], LIGHTBOX_WIDTHS)}
+            sizes={LIGHTBOX_SIZES}
             alt={`${property.title} ${currentImg + 1}`}
             className="max-w-full max-h-full object-contain rounded-xl"
             style={{ transform: `translateX(${dragOffset}px)`, transition: dragOffset !== 0 ? 'none' : 'transform 0.2s ease' }}
