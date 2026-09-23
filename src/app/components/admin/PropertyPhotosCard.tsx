@@ -1,5 +1,5 @@
 import { bacaJson } from '../../../lib/api';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Star, Trash2, ImageOff, ChevronDown, ChevronUp, Upload } from 'lucide-react';
 import { PHOTO_LABELS } from '../../../../functions/_lib/viralframe.js';
 
@@ -18,6 +18,11 @@ interface Props {
   isNew: boolean;
   initialPhotos?: PropertyImage[];
 }
+
+// Sama dengan atribut `accept` pada <input type="file"> di bawah — dataTransfer
+// bisa membawa apa saja (PDF, folder), dan tanpa filter convertToWebP() gagal
+// satu per satu dengan pesan "Gagal membaca gambar" yang menyesatkan.
+const JENIS_DITERIMA = ['image/jpeg', 'image/png', 'image/webp'];
 
 function coverSrc(url: string | null | undefined) {
   if (!url) return null;
@@ -93,7 +98,23 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
   };
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
+  const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Cegah browser membuka file yang MELESET dari drop zone. Perilaku bawaannya
+  // adalah menavigasi ke file itu — artinya seluruh isian form properti yang
+  // belum disimpan hilang. Aman terhadap drop zone kita sendiri: event
+  // menggelembung dari target ke window, jadi handleDrop sudah jalan lebih dulu
+  // dan handler ini hanya mematikan aksi bawaan.
+  useEffect(() => {
+    const tolak = (e: DragEvent) => e.preventDefault();
+    window.addEventListener('dragover', tolak);
+    window.addEventListener('drop', tolak);
+    return () => {
+      window.removeEventListener('dragover', tolak);
+      window.removeEventListener('drop', tolak);
+    };
+  }, []);
 
   const id = String(propertyId);
 
@@ -140,7 +161,9 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
     }
   };
 
-  const handleUploadPhotos = async (files: FileList) => {
+  // FileList (jalur klik) maupun File[] (jalur drop, hasil filter jenis file).
+  // Isinya sudah `Array.from(files)` sejak awal, jadi keduanya jalan apa adanya.
+  const handleUploadPhotos = async (files: FileList | File[]) => {
     if (photos.length >= 20) { setPhotoError('Maksimal 20 foto per properti'); return; }
     setUploading(true);
     setPhotoError('');
@@ -168,6 +191,17 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
     setUploading(false);
     setUploadProgress('');
     if (errors === 0) { setPhotoMsg('Upload selesai ✓'); setTimeout(() => setPhotoMsg(''), 3000); }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    // handleUploadPhotos tidak punya guard pemanggilan ganda — dua loop
+    // bersamaan saling menimpa uploadProgress dan meng-append foto kacau.
+    if (uploading) return;
+    const berkas = Array.from(e.dataTransfer.files).filter(f => JENIS_DITERIMA.includes(f.type));
+    if (berkas.length === 0) { setPhotoError('Hanya JPEG, PNG, atau WebP yang bisa diunggah'); return; }
+    handleUploadPhotos(berkas); // batas 20 foto sudah diguard di dalamnya
   };
 
   const handleReorder = async (photoId: number, direction: 'up' | 'down') => {
@@ -336,16 +370,25 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
           className="hidden"
           onChange={e => { if (e.target.files?.length) handleUploadPhotos(e.target.files); e.target.value = ''; }}
         />
+        {/* preventDefault() di onDragOver adalah baris paling menentukan: tanpanya
+            event drop TIDAK PERNAH dipancarkan dan browser tetap membuka file.
+            Anak-anak diberi pointer-events-none supaya dragleave tidak ikut
+            terpancar saat kursor melintasinya (penanda visual jadi berkedip). */}
         <button
           onClick={() => fileInputRef.current?.click()}
+          onDrop={handleDrop}
+          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
           disabled={uploading || photos.length >= 20}
-          className="w-full flex flex-col items-center gap-1.5 py-4 border-2 border-dashed border-gray-200 rounded-xl text-center cursor-pointer hover:border-[#1565C0]/50 hover:bg-blue-50/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className={`w-full flex flex-col items-center gap-1.5 py-4 border-2 border-dashed rounded-xl text-center cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            dragOver ? 'border-[#1565C0] bg-blue-50' : 'border-gray-200 hover:border-[#1565C0]/50 hover:bg-blue-50/30'
+          }`}
         >
-          <Upload size={20} className="text-[#94A3B8]" />
-          <span className="text-xs font-medium text-[#64748B]">
-            {photos.length >= 20 ? 'Batas 20 foto tercapai' : 'Klik untuk tambah foto'}
+          <Upload size={20} className="text-[#94A3B8] pointer-events-none" />
+          <span className="text-xs font-medium text-[#64748B] pointer-events-none">
+            {photos.length >= 20 ? 'Batas 20 foto tercapai' : 'Seret foto ke sini, atau klik untuk memilih'}
           </span>
-          <span className="text-xs text-[#94A3B8]">JPEG, PNG, WebP • Dikonversi ke WebP otomatis</span>
+          <span className="text-xs text-[#94A3B8] pointer-events-none">JPEG, PNG, WebP • Dikonversi ke WebP otomatis</span>
         </button>
         {uploadProgress && (
           <p className="mt-2 text-xs text-[#1565C0] font-medium">{uploadProgress}</p>
