@@ -1,9 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type ComponentType } from 'react';
 import { Link } from 'react-router';
-import { Check, ChevronRight, Upload, X, AlertCircle } from 'lucide-react';
+import { Check, ChevronRight, Upload, AlertCircle } from 'lucide-react';
 import { getLocations, bacaJson, type ApiLocation } from '../../lib/api';
 import { trackEvent } from '../../lib/tracking';
 import { PROPERTY_TYPES } from '../../lib/propertyTypes';
+import KartuFoto, { type FotoLokal } from './titipjual/KartuFoto';
+// Hanya TIPE (terhapus saat kompilasi). Komponennya dimuat lewat import() dinamis
+// di StepProperti — impor statis menyeret @dnd-kit ke bundle SSR eager.
+import type { GridFotoSortableProps } from './titipjual/GridFotoSortable';
 // Aturan tampil per jenis + opsi dropdown: SATU SUMBER bersama form admin
 // (src/app/components/admin/AdminPropertyDetailPage.tsx). Sebelumnya form ini
 // punya salinan sendiri (showLT/showKTKM/dst) yang sudah melenceng dari admin —
@@ -305,6 +309,12 @@ interface StepPropertiProps {
   onSuccess: (result: Stage1Result) => void;
 }
 
+// ID foto dari penghitung, BUKAN crypto.randomUUID() — tidak tersedia di WebView
+// Android lama (in-app browser Meta, sumber mayoritas trafik form ini). Foto hanya
+// lahir di klien, jadi tidak ada risiko ketidakcocokan SSR.
+let seqFoto = 0;
+const idFotoBaru = () => `f${++seqFoto}`;
+
 function StepProperti({ onSuccess }: StepPropertiProps) {
   // Tiket foto — diminta begitu komponen ini mount (lihat mintaTiketFoto()).
   useEffect(() => { void mintaTiketFoto(); }, []);
@@ -375,8 +385,15 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
 
   // Photo upload
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [photoFiles, setPhotoFiles]     = useState<File[]>([]);
-  const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
+  // Satu array berisi {id, preview}. Dulu dua array sejajar (File[] + string[])
+  // ber-key index — tak bisa diurutkan ulang dengan aman. File-nya sendiri tak
+  // pernah dibaca lagi setelah jadi pratinjau (hanya .length), jadi dibuang.
+  const [photos, setPhotos] = useState<FotoLokal[]>([]);
+  // Titik BACA lama (loop submit, validasi, autosave, penghitung) sengaja tetap
+  // memakai array pratinjau biasa — hanya titik TULIS yang berubah. Urutan array
+  // ini = urutan yang dikirim = `urutan` di DB (foto pertama = foto utama).
+  const photoPreviews = photos.map(p => p.preview);
+  const [dragOverFoto, setDragOverFoto] = useState(false);
   // Berapa foto yang ada di sesi sebelumnya. File-nya sendiri tidak bisa ikut
   // disimpan di draft, jadi satu-satunya hal jujur yang bisa dilakukan adalah
   // memberi tahu user berapa yang perlu dipilih ulang.
@@ -509,13 +526,13 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
     setKelId(id); setKelProp(nama); clearErr('kelurahan_prop');
   }, [kelList]);
 
-  // Photo handlers
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
+  // Photo handlers — dipakai input file (klik) DAN drop zone (seret file).
+  const tambahFoto = async (files: FileList | File[]) => {
+    const list = Array.from(files);
     const toAdd: File[] = [];
     let photoErr = '';
-    for (const file of files) {
-      if (photoFiles.length + toAdd.length >= 20) { photoErr = 'Maksimal 20 foto'; break; }
+    for (const file of list) {
+      if (photos.length + toAdd.length >= 20) { photoErr = 'Maksimal 20 foto'; break; }
       if (!file.type.startsWith('image/')) {
         photoErr = `${file.name}: Hanya file gambar yang didukung.`; continue;
       }
@@ -525,24 +542,20 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
     if (!toAdd.length) {
       if (photoErr) setErrors(p => ({ ...p, photos: photoErr }));
       else clearErr('photos');
-      e.target.value = '';
       return;
     }
     const settled = await Promise.allSettled(toAdd.map(convertToWebP));
-    const okFiles: File[] = [];
     const okPreviews: string[] = [];
     const failedNames: string[] = [];
     settled.forEach((result, i) => {
-      if (result.status === 'fulfilled') {
-        okFiles.push(toAdd[i]);
-        okPreviews.push(result.value);
-      } else {
-        failedNames.push(toAdd[i].name);
-      }
+      if (result.status === 'fulfilled') okPreviews.push(result.value);
+      else failedNames.push(toAdd[i].name);
     });
-    if (okFiles.length) {
-      setPhotoFiles(p => [...p, ...okFiles]);
-      setPhotoPreviews(p => [...p, ...okPreviews]);
+    if (okPreviews.length) {
+      // slice(0, 20) di SINI, bukan hanya cek di atas: `photos.length` di atas
+      // bisa basi bila dua batch dikonversi bersamaan (klik lalu langsung drop),
+      // dan keduanya sama-sama lolos cek → lebih dari 20 foto.
+      setPhotos(p => [...p, ...okPreviews.map(preview => ({ id: idFotoBaru(), preview }))].slice(0, 20));
     }
     const convertErr = failedNames.length
       ? `${failedNames.join(', ')}: format foto ini tidak didukung browser Anda — coba screenshot foto lalu upload ulang, atau export sebagai JPG dari galeri HP.`
@@ -550,13 +563,48 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
     const combinedErr = [photoErr, convertErr].filter(Boolean).join(' ');
     if (combinedErr) setErrors(p => ({ ...p, photos: combinedErr }));
     else clearErr('photos');
-    e.target.value = '';
   };
 
-  const removePhoto = (idx: number) => {
-    setPhotoFiles(p => p.filter((_, i) => i !== idx));
-    setPhotoPreviews(p => p.filter((_, i) => i !== idx));
+  const removePhoto = (id: string) => {
+    setPhotos(p => p.filter(f => f.id !== id));
   };
+
+  // Foto pertama = foto utama (backend: is_cover = index 0, dijaga _lib/fotoUtama.js).
+  const jadikanUtama = (id: string) => {
+    setPhotos(p => {
+      const i = p.findIndex(f => f.id === id);
+      if (i <= 0) return p;
+      return [p[i], ...p.slice(0, i), ...p.slice(i + 1)];
+    });
+  };
+
+  // Cegah browser membuka FILE yang meleset dari drop zone foto — perilaku bawaannya
+  // pindah halaman, dan foto yang sudah dipilih hilang (draft hanya menyimpan
+  // jumlahnya). Sengaja hanya untuk seretan berisi file: seret TEKS ke kolom
+  // isian tetap berfungsi seperti biasa.
+  useEffect(() => {
+    const tolak = (e: DragEvent) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); };
+    window.addEventListener('dragover', tolak);
+    window.addEventListener('drop', tolak);
+    return () => {
+      window.removeEventListener('dragover', tolak);
+      window.removeEventListener('drop', tolak);
+    };
+  }, []);
+
+  // Grid seret-urutkan (@dnd-kit) dimuat BELAKANGAN, begitu ada foto — pola sama
+  // dengan KPRCalculatorClient. Selama chunk belum tiba atau GAGAL dimuat, grid
+  // biasa di bawah tetap berfungsi penuh (★ jadikan utama + hapus).
+  const [GridSortable, setGridSortable] = useState<ComponentType<GridFotoSortableProps> | null>(null);
+  const adaFoto = photos.length > 0;
+  useEffect(() => {
+    if (!adaFoto || GridSortable) return;
+    let alive = true;
+    import('./titipjual/GridFotoSortable')
+      .then(m => { if (alive) setGridSortable(() => m.default); })
+      .catch(() => { /* grid biasa tetap dipakai */ });
+    return () => { alive = false; };
+  }, [adaFoto, GridSortable]);
 
   // Mode per-m² hanya sah untuk tanah dijual; jenis lain dipaksa total oleh
   // modeHargaValid() di backend, tapi UI-nya juga tidak boleh menawarkannya.
@@ -1147,15 +1195,28 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
           <label className="block text-xs font-semibold text-[#64748B] mb-2">
             Upload Foto Properti * <span className="font-normal text-gray-400">({photoPreviews.length}/20 foto)</span>
           </label>
+          {/* Teks "drag foto ke sini" sudah lama ada, tapi sampai 2026-09-26 zona
+              ini tidak punya satu pun handler drop. preventDefault() di onDragOver
+              WAJIB — tanpanya event drop tak pernah dipancarkan. Anak-anak diberi
+              pointer-events-none agar dragleave tak berkedip saat melintasinya. */}
           <div
             onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${errors.photos ? 'border-red-400 bg-red-50' : 'border-gray-200 hover:border-[#1565C0]'}`}>
-            <Upload size={28} className="mx-auto mb-2 text-gray-400" />
-            <p className="text-sm text-[#64748B]">Klik atau drag foto ke sini</p>
-            <p className="text-xs text-gray-400 mt-1">JPG/PNG/WebP · Maks 20 foto · Maks 8MB/foto · Foto pertama jadi cover</p>
+            onDrop={e => { e.preventDefault(); setDragOverFoto(false); void tambahFoto(e.dataTransfer.files); }}
+            onDragOver={e => { e.preventDefault(); setDragOverFoto(true); }}
+            onDragLeave={() => setDragOverFoto(false)}
+            className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${
+              errors.photos ? 'border-red-400 bg-red-50'
+              : dragOverFoto ? 'border-[#1565C0] bg-blue-50'
+              : 'border-gray-200 hover:border-[#1565C0]'}`}>
+            <Upload size={28} className="mx-auto mb-2 text-gray-400 pointer-events-none" />
+            <p className="text-sm text-[#64748B] pointer-events-none">Klik atau drag foto ke sini</p>
+            <p className="text-xs text-gray-400 mt-1 pointer-events-none">JPG/PNG/WebP · Maks 20 foto · Maks 8MB/foto · Foto pertama jadi foto utama</p>
           </div>
+          {/* Salin daftar file SEBELUM mengosongkan value: FileList milik input
+              ikut kosong begitu value di-reset. */}
           <input ref={fileInputRef} type="file" accept="image/*"
-            multiple className="hidden" onChange={handleFileSelect} />
+            multiple className="hidden"
+            onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ''; void tambahFoto(files); }} />
           <FieldErr msg={errors.photos} />
 
           {fotoPerluUlang > 0 && photoPreviews.length === 0 && (
@@ -1168,22 +1229,21 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
             </div>
           )}
 
-          {photoPreviews.length > 0 && (
+          {photos.length > 1 && (
+            <p className="text-xs text-[#64748B] mt-3">
+              Tahan &amp; geser foto untuk mengatur urutan, atau ketuk ★ untuk menjadikannya foto utama.
+            </p>
+          )}
+          {photos.length > 0 && (GridSortable ? (
+            <GridSortable photos={photos} onUrutkan={setPhotos} onHapus={removePhoto} onJadikanUtama={jadikanUtama} />
+          ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-3">
-              {photoPreviews.map((src, i) => (
-                <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-gray-200">
-                  <img src={src} alt="" className="w-full h-full object-cover" suppressHydrationWarning />
-                  {i === 0 && (
-                    <span className="absolute top-1 left-1 bg-[#1565C0] text-white text-[10px] px-1.5 py-0.5 rounded font-semibold">Cover</span>
-                  )}
-                  <button onClick={() => removePhoto(i)}
-                    className="absolute top-1 right-1 w-5 h-5 bg-black/60 hover:bg-red-600 rounded-full flex items-center justify-center transition-colors">
-                    <X size={10} className="text-white" />
-                  </button>
-                </div>
+              {photos.map((f, i) => (
+                <KartuFoto key={f.id} src={f.preview} utama={i === 0}
+                  onHapus={() => removePhoto(f.id)} onJadikanUtama={() => jadikanUtama(f.id)} />
               ))}
             </div>
-          )}
+          ))}
         </div>
 
         {/* Info Tambahan */}
