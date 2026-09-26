@@ -469,7 +469,12 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
   // pada setiap pengunjung yang cuma membuka halaman, dan banner pemulihan
   // muncul tanpa sebab di kunjungan berikutnya.
   const snapshotJson = JSON.stringify(snapshot);
-  const adaIsiSnapshot = adaIsi({ ...snapshot, tujuan: '', hargaMode: '', kondisi: '' });
+  // ⚠️ SETIAP field ber-nilai-bawaan WAJIB dikosongkan di sini. `statusLeg`
+  // (bawaan 'on_hand') sempat terlewat: form yang sama sekali tak disentuh
+  // dihitung "ada isian", s2 tersimpan di kunjungan pertama, dan banner
+  // "isian dipulihkan" muncul palsu setelah reload (terverifikasi di produksi
+  // 2026-09-26). Menambah field ber-default baru = tambahkan juga ke sini.
+  const adaIsiSnapshot = adaIsi({ ...snapshot, tujuan: '', hargaMode: '', kondisi: '', statusLeg: '' });
   const jumlahFoto = photoPreviews.length;
   useEffect(() => {
     if (!adaIsiSnapshot && jumlahFoto === 0) return;
@@ -1798,7 +1803,11 @@ export default function TitipJualPage() {
   const [adaDraftPulih, setAdaDraftPulih] = useState(false);
   useEffect(() => {
     const d = bacaDraft();
-    setAdaDraftPulih(d !== null);
+    // Hanya bila ada ISIAN yang benar-benar dipulihkan. Draft juga menampung
+    // data teknis — `tiketFoto` ditulis untuk SETIAP pengunjung saat halaman
+    // dibuka — jadi `d !== null` saja membuat banner menyala untuk orang yang
+    // belum mengetik apa pun.
+    setAdaDraftPulih(!!d && (!!d.s1 || !!d.s2 || (d.jumlahFoto ?? 0) > 0 || !!d.tiketLanjut));
 
     // Pulihkan langsung ke Data Diri bila Tahap 1 sudah pernah sukses tapi
     // user reload/tutup-tab sebelum sempat menyelesaikan Tahap 2. Tanpa ini,
