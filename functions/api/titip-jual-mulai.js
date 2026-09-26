@@ -29,6 +29,7 @@ import { nextKodeSeq, fmtSeq, isUniqueErr } from '../_lib/kodeSeq.js';
 import { normalisasiHarga } from '../_lib/hargaTanah.js';
 import { logServerError } from '../_lib/logError.js';
 import { sendCapiEvent, extractMetaIdentity } from '../_lib/metaCapi.js';
+import { stmtNormalisasiCover } from '../_lib/fotoUtama.js';
 
 const TIKET_LANJUT_DETIK = 7 * 24 * 3600; // 7 hari — cukup untuk mengisi Tahap 2 tanpa terburu-buru
 
@@ -506,6 +507,14 @@ export async function onRequestPost(context) {
         else console.error(`[titip-jual-mulai] Upload foto #${start + j + 1} gagal:`, r.reason?.message);
       });
     }
+  }
+
+  // Foto #0 bisa gagal (key tak ada di R2 / upload ditolak) sehingga tak ada baris
+  // is_cover=1. Normalisasi menjadikan foto terendah yang BERHASIL sebagai utama.
+  // Properti sudah tercipta — kegagalan di sini tidak boleh menggagalkan lead.
+  if (photos_uploaded > 0) {
+    try { await stmtNormalisasiCover(env.DB, property_id).run(); }
+    catch (err) { console.error('[titip-jual-mulai] normalisasi cover gagal:', err?.message); }
   }
 
   const photos_failed = totalFoto - photos_uploaded;

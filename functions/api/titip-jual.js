@@ -9,6 +9,7 @@ import { nextKodeSeq, fmtSeq, isUniqueErr } from '../_lib/kodeSeq.js';
 import { normalisasiHarga } from '../_lib/hargaTanah.js';
 import { logServerError } from '../_lib/logError.js';
 import { sendCapiEvent, extractMetaIdentity } from '../_lib/metaCapi.js';
+import { stmtNormalisasiCover } from '../_lib/fotoUtama.js';
 
 function sanitize(val, maxLen = 500) {
   if (typeof val !== 'string') return '';
@@ -666,6 +667,12 @@ export async function onRequestPost(context) {
         else console.error(`[titip-jual] Upload foto #${start + j + 1} gagal:`, r.reason?.message);
       });
     }
+  }
+
+  // Foto #0 bisa gagal sehingga tak ada baris is_cover=1 — lihat titip-jual-mulai.js.
+  if (photos_uploaded > 0) {
+    try { await stmtNormalisasiCover(env.DB, property_id).run(); }
+    catch (err) { console.error('[titip-jual] normalisasi cover gagal:', err?.message); }
   }
 
   const photos_failed = totalFoto - photos_uploaded;

@@ -1,6 +1,9 @@
 import { bacaJson } from '../../../lib/api';
 import { useState, useRef, useEffect } from 'react';
-import { Star, Trash2, ImageOff, ChevronDown, ChevronUp, Upload } from 'lucide-react';
+import { Star, Trash2, ImageOff, GripVertical, Upload } from 'lucide-react';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, rectSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { PHOTO_LABELS } from '../../../../functions/_lib/viralframe.js';
 
 interface PropertyImage {
@@ -57,12 +60,35 @@ function convertToWebP(file: File): Promise<string> {
   });
 }
 
+// Pola sama dengan Konten Agent (AdminViralFrameAgentVideosPage.tsx): `useSortable`
+// WAJIB di komponen tersendiri per item, bukan di dalam .map() milik induk — jumlah
+// panggilan hook per instance harus tetap. Seret dipasang HANYA di pegangan kecil,
+// karena kartu foto penuh kontrol (tombol hover, dropdown label).
+interface SortableCardArgs {
+  setNodeRef: ReturnType<typeof useSortable>['setNodeRef'];
+  style: React.CSSProperties;
+  attributes: ReturnType<typeof useSortable>['attributes'];
+  listeners: ReturnType<typeof useSortable>['listeners'];
+  isDragging: boolean;
+}
+function SortableItem({ id, disabled, children }: {
+  id: number;
+  disabled?: boolean;
+  children: (args: SortableCardArgs) => React.ReactElement;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition: transition ?? undefined,
+  };
+  return children({ setNodeRef, style, attributes, listeners, isDragging });
+}
+
 export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }: Props) {
   const [photos, setPhotos] = useState<PropertyImage[]>(initialPhotos ?? []);
   const [photoMsg, setPhotoMsg] = useState('');
   const [photoError, setPhotoError] = useState('');
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [coveringId, setCoveringId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [labelingId, setLabelingId] = useState<number | null>(null);
 
@@ -118,25 +144,36 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
 
   const id = String(propertyId);
 
-  const handleSetCover = async (imageId: number) => {
-    setCoveringId(imageId);
+  // Satu-satunya jalur mengubah urutan (seret maupun "Jadikan utama"). Posisi
+  // pertama otomatis jadi foto utama di server (_lib/fotoUtama.js), jadi tidak
+  // ada lagi endpoint cover terpisah. Optimistic: grid langsung berubah, dan
+  // dikembalikan bila server menolak (mis. tab lain menambah/menghapus foto).
+  const simpanUrutan = async (baru: PropertyImage[]) => {
+    const sebelumnya = photos;
+    setPhotos(baru);
     setPhotoMsg('');
     setPhotoError('');
     try {
-      const res = await fetch(`/api/admin/properties/${id}/photos/${imageId}/cover`, {
+      const res = await fetch(`/api/admin/properties/${id}/photos/reorder`, {
         method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        body: JSON.stringify({ order: baru.map(p => p.id) }),
       });
-      const json = await bacaJson(res);
-      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-      setPhotos(json.data?.images ?? []);
-      setPhotoMsg('Cover diubah ✓');
+      const json = await bacaJson<{ images: PropertyImage[] }>(res);
+      if (!res.ok || !Array.isArray(json.data?.images)) throw new Error(json.error ?? `HTTP ${res.status}`);
+      setPhotos(json.data.images);
+      setPhotoMsg('Urutan disimpan ✓');
       setTimeout(() => setPhotoMsg(''), 3000);
     } catch (err: unknown) {
-      setPhotoError(err instanceof Error ? err.message : 'Gagal mengubah cover');
-    } finally {
-      setCoveringId(null);
+      setPhotos(sebelumnya);
+      setPhotoError(err instanceof Error ? err.message : 'Gagal menyimpan urutan');
     }
+  };
+
+  const jadikanUtama = (photoId: number) => {
+    const idx = photos.findIndex(p => p.id === photoId);
+    if (idx > 0) void simpanUrutan(arrayMove(photos, idx, 0));
   };
 
   const handleDeletePhoto = async (imageId: number) => {
@@ -204,31 +241,19 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
     handleUploadPhotos(berkas); // batas 20 foto sudah diguard di dalamnya
   };
 
-  const handleReorder = async (photoId: number, direction: 'up' | 'down') => {
-    const idx = photos.findIndex(p => p.id === photoId);
-    if (idx === -1) return;
-    if (direction === 'up' && idx === 0) return;
-    if (direction === 'down' && idx === photos.length - 1) return;
-    const newPhotos = [...photos];
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
-    [newPhotos[idx], newPhotos[swapIdx]] = [newPhotos[swapIdx], newPhotos[idx]];
-    setPhotos(newPhotos);
-    setPhotoMsg('');
-    setPhotoError('');
-    const prevPhotos = photos;
-    try {
-      const res = await fetch(`/api/admin/properties/${id}/photos/reorder`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ order: newPhotos.map(p => p.id) }),
-      });
-      const json = await bacaJson(res);
-      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-    } catch (err: unknown) {
-      setPhotos(prevPhotos);
-      setPhotoError(err instanceof Error ? err.message : 'Gagal reorder');
-    }
+  // Reorder di tengah upload/hapus mengirim daftar foto yang tak lengkap →
+  // server menolak 422 (wajib permutasi penuh). Kunci saja selama itu.
+  const urutanTerkunci = uploading || deletingId !== null;
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (urutanTerkunci || !over || active.id === over.id) return;
+    const lama = photos.findIndex(p => p.id === active.id);
+    const baru = photos.findIndex(p => p.id === over.id);
+    if (lama === -1 || baru === -1) return;
+    void simpanUrutan(arrayMove(photos, lama, baru));
   };
 
   if (isNew) {
@@ -254,47 +279,53 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
           <p className="text-sm">Belum ada foto</p>
         </div>
       ) : (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={photos.map(p => p.id)} strategy={rectSortingStrategy}>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
           {photos.map((photo, photoIdx) => {
             const src = coverSrc(photo.url_webp);
-            const isProcessing = coveringId === photo.id || deletingId === photo.id;
+            const isProcessing = deletingId === photo.id;
+            // Foto utama diturunkan dari POSISI, bukan photo.is_cover: server menjaga
+            // keduanya sama, tapi posisi sudah benar seketika saat update optimistic.
+            const utama = photoIdx === 0;
             return (
-              <div key={photo.id} className={`relative group rounded-xl overflow-hidden border-2 ${photo.is_cover ? 'border-[#1565C0]' : 'border-gray-100'}`}>
+              <SortableItem key={photo.id} id={photo.id} disabled={urutanTerkunci}>
+                {({ setNodeRef, style, attributes, listeners, isDragging }) => (
+              <div
+                ref={setNodeRef}
+                style={style}
+                className={`relative group rounded-xl overflow-hidden border-2 ${utama ? 'border-[#1565C0]' : 'border-gray-100'} ${isDragging ? 'opacity-60 z-20 shadow-lg' : ''}`}
+              >
+                {/* draggable={false}: seret-native gambar akan jatuh ke drop zone
+                    upload di bawah dan memicu pesan "Hanya JPEG, PNG, atau WebP". */}
                 {src ? (
-                  <img src={src} alt={photo.alt_text ?? ''} className="w-full aspect-square object-cover" />
+                  <img src={src} alt={photo.alt_text ?? ''} draggable={false} className="w-full aspect-square object-cover" />
                 ) : (
                   <div className="w-full aspect-square bg-gray-100 flex items-center justify-center">
                     <ImageOff size={20} className="text-gray-300" />
                   </div>
                 )}
 
-                {photo.is_cover ? (
+                {utama && (
                   <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-md bg-[#1565C0] text-white text-xs font-semibold flex items-center gap-1">
-                    <Star size={10} fill="currentColor" /> Cover
+                    <Star size={10} fill="currentColor" /> Utama
                   </div>
-                ) : null}
+                )}
 
+                {/* z-10 WAJIB: overlay hover di bawah adalah saudara berikutnya di
+                    DOM (absolute inset-0) dan tanpa z-index terlukis DI ATAS pegangan. */}
                 {!isProcessing && photos.length > 1 && (
-                  <div className="absolute top-1.5 right-1.5 flex flex-col gap-0.5 z-10">
-                    {photoIdx > 0 && (
-                      <button
-                        onClick={() => handleReorder(photo.id, 'up')}
-                        className="p-0.5 rounded bg-white/80 text-gray-700 hover:bg-white shadow-sm transition-colors"
-                        title="Pindah ke atas"
-                      >
-                        <ChevronUp size={13} />
-                      </button>
-                    )}
-                    {photoIdx < photos.length - 1 && (
-                      <button
-                        onClick={() => handleReorder(photo.id, 'down')}
-                        className="p-0.5 rounded bg-white/80 text-gray-700 hover:bg-white shadow-sm transition-colors"
-                        title="Pindah ke bawah"
-                      >
-                        <ChevronDown size={13} />
-                      </button>
-                    )}
-                  </div>
+                  <button
+                    type="button"
+                    {...attributes}
+                    {...listeners}
+                    disabled={urutanTerkunci}
+                    className="absolute top-1.5 right-1.5 z-10 p-1 rounded bg-white/85 text-gray-700 hover:bg-white shadow-sm cursor-grab active:cursor-grabbing touch-none disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Seret untuk mengatur urutan — posisi pertama jadi foto utama"
+                    aria-label="Seret untuk mengatur urutan foto"
+                  >
+                    <GripVertical size={14} />
+                  </button>
                 )}
 
                 {isProcessing && (
@@ -305,13 +336,14 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
 
                 {!isProcessing && (
                   <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-center pb-2 gap-2">
-                    {!photo.is_cover && (
+                    {!utama && (
                       <button
-                        onClick={() => handleSetCover(photo.id)}
-                        className="px-2 py-1 rounded-lg bg-[#1565C0] text-white text-xs font-semibold hover:bg-[#1e40af] transition-colors"
-                        title="Jadikan Cover"
+                        onClick={() => jadikanUtama(photo.id)}
+                        disabled={urutanTerkunci}
+                        className="px-2 py-1 rounded-lg bg-[#1565C0] text-white text-xs font-semibold hover:bg-[#1e40af] transition-colors disabled:opacity-50"
+                        title="Pindahkan ke posisi pertama sebagai foto utama"
                       >
-                        <Star size={11} className="inline mr-0.5" />Cover
+                        <Star size={11} className="inline mr-0.5" />Jadikan utama
                       </button>
                     )}
                     {confirmDeleteId === photo.id ? (
@@ -356,9 +388,13 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
                   </select>
                 )}
               </div>
+                )}
+              </SortableItem>
             );
           })}
         </div>
+        </SortableContext>
+        </DndContext>
       )}
 
       <div className="mt-4 pt-3 border-t border-gray-100">

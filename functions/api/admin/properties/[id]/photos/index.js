@@ -3,6 +3,7 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../../_shared/response.js';
+import { stmtNormalisasiCover } from '../../../../../_lib/fotoUtama.js';
 
 export async function onRequestPost(context) {
   const { env, params, request } = context;
@@ -70,10 +71,16 @@ export async function onRequestPost(context) {
   try {
     await env.MEDIA.put(r2Key, uploadBuf, { httpMetadata: { contentType } });
 
-    const result = await env.DB.prepare(`
-      INSERT INTO property_images (property_id, url_webp, urutan, is_cover)
-      VALUES (?, ?, (SELECT COALESCE(MAX(urutan), 0) + 1 FROM property_images WHERE property_id = ?), 0)
-    `).bind(propertyId, r2Key, propertyId).run();
+    // Normalisasi di batch yang sama: tanpa itu foto pertama properti kosong
+    // tidak pernah jadi cover (is_cover selalu 0) — asal 507 properti tanpa cover.
+    // Jalur ini juga dipakai Phase 2 impor CSV (CsvImportModal.tsx).
+    const [result] = await env.DB.batch([
+      env.DB.prepare(`
+        INSERT INTO property_images (property_id, url_webp, urutan, is_cover)
+        VALUES (?, ?, (SELECT COALESCE(MAX(urutan), 0) + 1 FROM property_images WHERE property_id = ?), 0)
+      `).bind(propertyId, r2Key, propertyId),
+      stmtNormalisasiCover(env.DB, propertyId),
+    ]);
 
     const imageId = result.meta?.last_row_id;
     const image = await env.DB.prepare(

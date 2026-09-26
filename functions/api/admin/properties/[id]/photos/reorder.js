@@ -1,8 +1,10 @@
 // PATCH /api/admin/properties/:id/photos/reorder
-// Ubah urutan foto berdasarkan array ID
+//   Body JSON: { order: number[] } — SELURUH id foto properti, urutan baru.
+//   Posisi pertama otomatis jadi foto utama (lihat _lib/fotoUtama.js).
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../../_shared/response.js';
+import { stmtNormalisasiCover } from '../../../../../_lib/fotoUtama.js';
 
 export async function onRequestPatch(context) {
   const { env, params, request } = context;
@@ -20,17 +22,29 @@ export async function onRequestPatch(context) {
   const existing = await env.DB.prepare(
     'SELECT id FROM property_images WHERE property_id = ?'
   ).bind(propertyId).all();
-  const validIds = new Set((existing.results ?? []).map(r => r.id));
-  const invalid = order.find(id => !validIds.has(id));
-  if (invalid !== undefined) return jsonError(`ID foto ${invalid} tidak milik properti ini`, 400);
+  const ada = new Set((existing.results ?? []).map(r => r.id));
+
+  // Wajib PERMUTASI PENUH. Versi lama menerima urutan parsial: foto yang tidak
+  // dikirim mempertahankan urutan lamanya dan bisa bertabrakan dengan yang baru.
+  const dikirim = new Set(order);
+  const permutasi = order.length === ada.size && dikirim.size === ada.size && order.every(id => ada.has(id));
+  if (!permutasi) return jsonError('Daftar foto tidak sinkron, muat ulang halaman', 422);
 
   try {
-    for (let i = 0; i < order.length; i++) {
-      await env.DB.prepare(
+    // Satu batch = atomik. Versi lama memakai N .run() berurutan: gagal di tengah
+    // meninggalkan foto setengah terurut dan cover di posisi sembarang.
+    await env.DB.batch([
+      ...order.map((id, i) => env.DB.prepare(
         'UPDATE property_images SET urutan = ? WHERE id = ? AND property_id = ?'
-      ).bind(i, order[i], propertyId).run();
-    }
-    return jsonOk({ pesan: 'Urutan foto berhasil diperbarui' });
+      ).bind(i, id, propertyId)),
+      stmtNormalisasiCover(env.DB, propertyId),
+    ]);
+
+    const photos = await env.DB.prepare(
+      'SELECT id, url_webp, alt_text, urutan, is_cover, label_ruangan FROM property_images WHERE property_id = ? ORDER BY urutan ASC, id ASC'
+    ).bind(propertyId).all();
+
+    return jsonOk({ images: photos.results ?? [] });
   } catch (err) {
     console.error('[admin photo reorder PATCH]', err.message);
     return jsonError('Gagal memperbarui urutan foto', 500);
