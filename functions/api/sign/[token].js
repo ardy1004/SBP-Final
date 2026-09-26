@@ -7,6 +7,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../_shared/response.js';
 import { decryptNIK } from '../../_lib/crypto.js';
+import { IDENTITAS, normalisasiJenisIdentitas } from '../../_lib/identitas.js';
 import { generateAgreementPDF } from '../../_lib/pdf.js';
 import { logServerError } from '../../_lib/logError.js';
 
@@ -25,7 +26,7 @@ async function getAgreementByToken(db, token) {
       p.legalitas, p.deskripsi,
       o.nama_pemilik, o.nik_encrypted, o.nama_ktp, o.alamat_ktp,
       o.rt_rw, o.kelurahan AS owner_kelurahan, o.kecamatan AS owner_kecamatan,
-      o.bertindak_sebagai, o.no_wa_1
+      o.bertindak_sebagai, o.no_wa_1, o.jenis_identitas
     FROM agreements a
     JOIN properties p ON p.id = a.property_id
     JOIN owners     o ON o.id = a.owner_id
@@ -35,13 +36,17 @@ async function getAgreementByToken(db, token) {
 
 // ─── Hash SHA-256 konten dokumen (untuk audit_hash_dokumen) ──────────────────
 async function hashDokumen(agr, nikPlain, signedAt) {
+  // Label mengikuti jenis identitas. Untuk KTP teks ini IDENTIK byte-per-byte
+  // dengan sebelum fitur SIM ("NIK", "KTP"). Hash ini tidak pernah dihitung ulang
+  // di mana pun (hanya disimpan + dicetak di PDF), jadi mengubah label SIM aman.
+  const id = IDENTITAS[normalisasiJenisIdentitas(agr.jenis_identitas)];
   const doc = [
     `PERJANJIAN PEMASARAN PROPERTI`,
     `Kode: ${agr.kode_perjanjian}`,
     `Tanggal TTD: ${signedAt}`,
     `Pihak Pertama: CV Salam Bumi Property`,
-    `Pihak Kedua: ${agr.nama_ktp} (NIK: ${nikPlain})`,
-    `Alamat KTP: ${agr.alamat_ktp}, ${agr.owner_kelurahan}, ${agr.owner_kecamatan}`,
+    `Pihak Kedua: ${agr.nama_ktp} (${id.label}: ${nikPlain})`,
+    `Alamat ${id.kartu}: ${agr.alamat_ktp}, ${agr.owner_kelurahan}, ${agr.owner_kecamatan}`,
     `Bertindak sebagai: ${agr.bertindak_sebagai}`,
     `Properti: ${agr.title} | ${agr.kode_perjanjian}`,
     `Jenis Transaksi: ${agr.jenis_transaksi}`,
@@ -186,6 +191,7 @@ export async function onRequestGet(context) {
       kelurahan: agr.owner_kelurahan,
       kecamatan: agr.owner_kecamatan,
       bertindak_sebagai: agr.bertindak_sebagai,
+      jenis_identitas: normalisasiJenisIdentitas(agr.jenis_identitas),
     },
     // Data properti
     properti: {

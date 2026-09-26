@@ -4,6 +4,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { decryptNIK, encryptNIK } from '../../../../_lib/crypto.js';
+import { normalisasiJenisIdentitas, validasiNomorIdentitas } from '../../../../_lib/identitas.js';
 
 function sanitize(val, max = 500) {
   if (typeof val !== 'string') return '';
@@ -35,6 +36,7 @@ async function fetchAgreementById(db, id) {
       o.kelurahan    AS owner_kelurahan,
       o.kecamatan    AS owner_kecamatan,
       o.bertindak_sebagai, o.no_wa_1, o.no_wa_2, o.data_ahli_waris,
+      o.jenis_identitas,
       p.id           AS p_id,
       p.kode_listing, p.title, p.slug, p.jenis_properti, p.tujuan,
       p.harga, p.nego, p.nett,
@@ -108,6 +110,7 @@ export async function onRequestGet(context) {
       no_wa_1: agr.no_wa_1,
       no_wa_2: agr.no_wa_2,
       data_ahli_waris: agr.data_ahli_waris,
+      jenis_identitas: normalisasiJenisIdentitas(agr.jenis_identitas),
     },
     properti: {
       id: agr.p_id,
@@ -161,7 +164,8 @@ export async function onRequestPatch(context) {
   let agr;
   try {
     agr = await env.DB.prepare(
-      'SELECT id, status, owner_id, property_id FROM agreements WHERE id = ?'
+      `SELECT a.id, a.status, a.owner_id, a.property_id, o.jenis_identitas
+         FROM agreements a LEFT JOIN owners o ON o.id = a.owner_id WHERE a.id = ?`
     ).bind(id).first();
   } catch (err) {
     console.error('[admin patch] SELECT error:', err.message);
@@ -185,10 +189,24 @@ export async function onRequestPatch(context) {
     else ownerPairs.push({ col: 'nama_pemilik', val: v });
   }
 
+  // Jenis efektif = yang dikirim, atau yang tersimpan (UI admin lama tidak
+  // mengirimnya). Nomor WAJIB divalidasi dengan jenis efektif: dulu selalu
+  // /^\d{16}$/, dan karena UI selalu mengirim ulang nomornya, pemilik ber-SIM
+  // 12/14 digit membuat SETIAP simpan — bahkan cuma ganti WA — ditolak 422.
+  const jenisTersimpan = normalisasiJenisIdentitas(agr.jenis_identitas);
+  const jenisBaru = body.jenis_identitas !== undefined
+    ? normalisasiJenisIdentitas(body.jenis_identitas)
+    : jenisTersimpan;
+  if (jenisBaru !== jenisTersimpan) {
+    // Nomor lama belum tentu sah untuk jenis baru (SIM 12 digit ≠ NIK).
+    if (body.nik === undefined) errors.nik = 'Isi ulang nomor identitas saat mengganti jenisnya';
+    ownerPairs.push({ col: 'jenis_identitas', val: jenisBaru });
+  }
+
   if (body.nik !== undefined) {
-    const v = sanitize(body.nik, 20);
-    if (!v)              errors.nik = 'NIK tidak boleh kosong';
-    else if (!/^\d{16}$/.test(v)) errors.nik = 'NIK harus 16 digit angka';
+    const v = sanitize(body.nik, 25).replace(/[\s-]/g, '');
+    const galat = validasiNomorIdentitas(jenisBaru, v);
+    if (galat) errors.nik = galat;
     else nikRaw = v;
   }
 
@@ -292,6 +310,7 @@ export async function onRequestPatch(context) {
       nik,
       alamat_ktp: updated?.alamat_ktp,
       no_wa_1: updated?.no_wa_1,
+      jenis_identitas: normalisasiJenisIdentitas(updated?.jenis_identitas),
     },
     properti: {
       jenis_properti: updated?.jenis_properti,

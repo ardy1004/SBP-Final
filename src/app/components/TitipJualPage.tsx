@@ -5,6 +5,7 @@ import { getLocations, bacaJson, type ApiLocation } from '../../lib/api';
 import { trackEvent } from '../../lib/tracking';
 import { PROPERTY_TYPES } from '../../lib/propertyTypes';
 import KartuFoto, { type FotoLokal } from './titipjual/KartuFoto';
+import { IDENTITAS, normalisasiJenisIdentitas, validasiNomorIdentitas } from '../../../functions/_lib/identitas.js';
 // Hanya TIPE (terhapus saat kompilasi). Komponennya dimuat lewat import() dinamis
 // di StepProperti — impor statis menyeret @dnd-kit ke bundle SSR eager.
 import type { GridFotoSortableProps } from './titipjual/GridFotoSortable';
@@ -46,7 +47,10 @@ export const meta = () => pageMeta({
 
 interface DataDiriState {
   nama_ktp: string;
+  /** Nomor identitas — NIK maupun No. SIM (lihat jenisIdentitas). Tetap bernama
+   *  `nik` supaya pembuangan `nik` dari draft ikut melindungi nomor SIM. */
   nik: string;
+  jenisIdentitas: 'ktp' | 'sim';
   rt_rw: string;
   kelurahan: string;
   kecamatan: string;
@@ -1349,7 +1353,7 @@ interface StepDataDiriProps {
 
 function StepDataDiri({ kodeListing, photosBelumLengkap, onNanti, onSuccess }: StepDataDiriProps) {
   const [form, setForm] = useState<DataDiriState>({
-    nama_ktp: '', nik: '', rt_rw: '',
+    nama_ktp: '', nik: '', jenisIdentitas: 'ktp', rt_rw: '',
     kelurahan: '', kecamatan: '', prov_owner: '', kab_owner: '', bertindak_sebagai: '',
     ahli_waris_jumlah: '', ahli_waris_sepakat: false, ahli_waris_kuasa: false, ahli_waris_turun: false,
   });
@@ -1365,14 +1369,23 @@ function StepDataDiri({ kodeListing, photosBelumLengkap, onNanti, onSuccess }: S
   // client — membacanya saat render = hydration mismatch (aturan CLAUDE.md).
   useEffect(() => {
     const d = bacaDraft();
-    if (d?.s1) setForm(p => ({ ...p, ...(d.s1 as Partial<DataDiriState>), nik: '' }));
+    // jenisIdentitas dari localStorage = input TIDAK tepercaya (bisa dari build
+    // mana pun / diubah tangan) — normalisasi, jangan spread mentah.
+    if (d?.s1) setForm(p => ({
+      ...p, ...(d.s1 as Partial<DataDiriState>), nik: '',
+      jenisIdentitas: normalisasiJenisIdentitas((d.s1 as Record<string, unknown>).jenisIdentitas),
+    }));
   }, []);
 
   // Autosave (debounce 800 ms).
   useEffect(() => {
     const t = setTimeout(() => {
       const { nik: _nik, ...tanpaNik } = form;
-      if (adaIsi(tanpaNik)) simpanDraft({ s1: tanpaNik });
+      // jenisIdentitas SELALU terisi (default 'ktp'), jadi jangan ikut dihitung
+      // "ada isian": kalau ikut, autosave jalan di kunjungan pertama dan pengunjung
+      // baru melihat banner palsu "isian dipulihkan" setelah reload.
+      const { jenisIdentitas: _jenis, ...isiNyata } = tanpaNik;
+      if (adaIsi(isiNyata)) simpanDraft({ s1: tanpaNik });
     }, 800);
     return () => clearTimeout(t);
   }, [form]);
@@ -1383,9 +1396,9 @@ function StepDataDiri({ kodeListing, photosBelumLengkap, onNanti, onSuccess }: S
 
   const validate = () => {
     const e: Record<string, string> = {};
-    if (!form.nama_ktp) e.nama_ktp = 'Nama sesuai KTP wajib diisi';
-    if (!form.nik) e.nik = 'NIK wajib diisi';
-    else if (!/^\d{16}$/.test(form.nik)) e.nik = 'NIK harus tepat 16 digit angka';
+    if (!form.nama_ktp) e.nama_ktp = `Nama sesuai ${IDENTITAS[form.jenisIdentitas].kartu} wajib diisi`;
+    const galatNomor = validasiNomorIdentitas(form.jenisIdentitas, form.nik);
+    if (galatNomor) e.nik = galatNomor;
     if (!form.prov_owner) e.prov_owner = 'Provinsi wajib diisi';
     if (!form.kab_owner) e.kab_owner = 'Kabupaten/Kota wajib diisi';
     if (!form.kecamatan) e.kecamatan = 'Kecamatan wajib diisi';
@@ -1413,6 +1426,7 @@ function StepDataDiri({ kodeListing, photosBelumLengkap, onNanti, onSuccess }: S
         tiket_lanjut: tiketLanjut,
         nama_ktp: form.nama_ktp,
         nik: form.nik,
+        jenis_identitas: form.jenisIdentitas,
         // alamat_ktp disusun dari field lokasi terstruktur (semua wajib) —
         // pola yang sama dengan alur lama.
         alamat_ktp: `Kel. ${form.kelurahan}, Kec. ${form.kecamatan}, ${form.kab_owner}, ${form.prov_owner} (RT/RW ${form.rt_rw})`,
@@ -1483,10 +1497,13 @@ function StepDataDiri({ kodeListing, photosBelumLengkap, onNanti, onSuccess }: S
     );
   }
 
+  // Label nama/nomor/alamat mengikuti kartu yang sedang disalin pemilik.
+  const idPilih = IDENTITAS[form.jenisIdentitas];
+
   return (
     <div>
       <h2 className="font-display text-xl font-bold text-[#0F172A] mb-1">Data Diri Pemilik</h2>
-      <p className="text-sm text-[#64748B] mb-4">Isi sesuai KTP yang masih berlaku.</p>
+      <p className="text-sm text-[#64748B] mb-4">Isi sesuai {idPilih.kartu} yang masih berlaku.</p>
 
       {/* Pengingat kecil, BUKAN layar sukses penuh — lihat catatan 2026-09-19:
           layar "Properti Anda Sudah Tercatat!" dengan tombol "Nanti Saja"
@@ -1512,43 +1529,69 @@ function StepDataDiri({ kodeListing, photosBelumLengkap, onNanti, onSuccess }: S
 
       <div className="space-y-4">
         {/* Nama KTP */}
+        {/* Jenis identitas — dipilih PALING AWAL karena label nama, nomor, dan
+            alamat di bawah mengikuti kartu yang sedang disalin pemilik. KTP default.
+            Aturan (16 digit NIK / 12-16 digit SIM) di functions/_lib/identitas.js. */}
         <div>
-          <label className="block text-xs font-semibold text-[#64748B] mb-1">Nama Lengkap Sesuai KTP *</label>
+          <p className="block text-xs font-semibold text-[#64748B] mb-1">Identitas yang dipakai *</p>
+          <div role="radiogroup" aria-label="Jenis identitas" className="grid grid-cols-2 gap-2">
+            {(['ktp', 'sim'] as const).map(j => (
+              <button
+                key={j}
+                type="button"
+                role="radio"
+                aria-checked={form.jenisIdentitas === j}
+                onClick={() => { setForm(p => ({ ...p, jenisIdentitas: j })); clearErr('nik'); }}
+                className={`py-2.5 rounded-xl border-2 text-sm font-semibold transition-colors ${
+                  form.jenisIdentitas === j
+                    ? 'border-[#1565C0] bg-blue-50 text-[#1565C0]'
+                    : 'border-gray-200 text-[#64748B] hover:border-gray-300'}`}
+              >
+                {IDENTITAS[j].pilihan}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-[#64748B] mb-1">Nama Lengkap Sesuai {idPilih.kartu} *</label>
           <input value={form.nama_ktp} onChange={e => { f('nama_ktp', e.target.value); clearErr('nama_ktp'); }}
-            placeholder="Sesuai KTP" className={inputCls(errors.nama_ktp)} />
+            placeholder={`Sesuai ${idPilih.kartu}`} className={inputCls(errors.nama_ktp)} />
           <FieldErr msg={errors.nama_ktp} />
         </div>
 
-        {/* NIK */}
+        {/* Nomor identitas — NIK atau No. SIM, keduanya disimpan di form.nik. */}
         <div>
-          <label className="block text-xs font-semibold text-[#64748B] mb-1">NIK (KTP) *</label>
+          <label className="block text-xs font-semibold text-[#64748B] mb-1">{idPilih.pilihan} *</label>
           <input
             type="text"
+            inputMode="numeric"
+            autoComplete="off"
             value={form.nik}
             onChange={e => { f('nik', e.target.value.replace(/\D/g, '').slice(0, 16)); clearErr('nik'); }}
-            placeholder="16 digit NIK"
+            placeholder={idPilih.placeholder}
             className={inputCls(errors.nik)}
           />
-          <p className="text-xs text-gray-400 mt-0.5">NIK dienkripsi untuk keamanan data Anda.</p>
+          <p className="text-xs text-gray-400 mt-0.5">Nomor identitas dienkripsi untuk keamanan data Anda.</p>
           <FieldErr msg={errors.nik} />
         </div>
 
-        {/* Alamat Lengkap Sesuai KTP — label statis (input dihapus; detail alamat diisi via kolom lokasi di bawah) */}
+        {/* Alamat Lengkap Sesuai KTP/SIM — label statis (input dihapus; detail alamat diisi via kolom lokasi di bawah) */}
         <div>
-          <label className="block text-xs font-semibold text-[#64748B] mb-1">Alamat Lengkap Sesuai KTP</label>
+          <label className="block text-xs font-semibold text-[#64748B] mb-1">Alamat Lengkap Sesuai {idPilih.kartu}</label>
           <FieldErr msg={errors.alamat_ktp} />
         </div>
 
         {/* Provinsi + Kab./Kota KTP */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-semibold text-[#64748B] mb-1">Provinsi (KTP) *</label>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">Provinsi ({idPilih.kartu}) *</label>
             <input value={form.prov_owner} onChange={e => { f('prov_owner', e.target.value); clearErr('prov_owner'); }}
               placeholder="Mis: Jawa Timur" className={inputCls(errors.prov_owner)} />
             <FieldErr msg={errors.prov_owner} />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-[#64748B] mb-1">Kab./Kota (KTP) *</label>
+            <label className="block text-xs font-semibold text-[#64748B] mb-1">Kab./Kota ({idPilih.kartu}) *</label>
             <input value={form.kab_owner} onChange={e => { f('kab_owner', e.target.value); clearErr('kab_owner'); }}
               placeholder="Mis: Kabupaten Sleman" className={inputCls(errors.kab_owner)} />
             <FieldErr msg={errors.kab_owner} />
@@ -1801,7 +1844,7 @@ export default function TitipJualPage() {
           <div className="flex items-start gap-2 mb-4 p-3 bg-[#E3F2FD] border border-[#90CAF9] rounded-xl">
             <Check size={16} className="text-[#1565C0] flex-shrink-0 mt-0.5" />
             <p className="text-xs text-[#0F172A] flex-1">
-              Isian Anda sebelumnya sudah dipulihkan. Demi keamanan, <strong>NIK</strong> dan{' '}
+              Isian Anda sebelumnya sudah dipulihkan. Demi keamanan, <strong>nomor identitas</strong> dan{' '}
               <strong>foto</strong> tidak ikut tersimpan — keduanya perlu diisi ulang.
             </p>
             <button onClick={mulaiBaru} className="text-xs font-semibold text-[#1565C0] hover:underline flex-shrink-0">

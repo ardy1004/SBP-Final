@@ -9,6 +9,7 @@
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { verifyJWT } from './_shared/jwt.js';
 import { encryptNIK } from '../_lib/crypto.js';
+import { normalisasiJenisIdentitas, validasiNomorIdentitas, IDENTITAS } from '../_lib/identitas.js';
 import { nextKodeSeq, fmtSeq, isUniqueErr } from '../_lib/kodeSeq.js';
 import { logServerError } from '../_lib/logError.js';
 import { sendCapiEvent, extractMetaIdentity } from '../_lib/metaCapi.js';
@@ -151,7 +152,11 @@ export async function onRequestPost(context) {
   // ─── Validasi field KYC ───────────────────────────────────────────────────
   const errors = {};
   const nama_ktp        = sanitize(body.nama_ktp ?? '', 100);
-  const nik_raw          = sanitize(body.nik ?? '', 20);
+  // 'ktp' | 'sim'. Klien lama tidak mengirimnya → 'ktp' + aturan 16 digit, persis
+  // seperti sebelum fitur SIM ada. Nomornya (NIK maupun SIM) tetap di field `nik`.
+  const jenis_identitas  = normalisasiJenisIdentitas(body.jenis_identitas);
+  // Nomor SIM lazim tertulis dengan tanda hubung/spasi di kartunya.
+  const nik_raw          = sanitize(body.nik ?? '', 25).replace(/[\s-]/g, '');
   const alamat_ktp       = sanitize(body.alamat_ktp ?? '', 300);
   const rt_rw            = sanitize(body.rt_rw ?? '', 10);
   const kelurahan_owner  = sanitize(body.kelurahan_owner ?? '', 100);
@@ -165,10 +170,11 @@ export async function onRequestPost(context) {
     data_ahli_waris = body.data_ahli_waris.trim().slice(0, 2000);
   }
 
-  if (!nik_raw) { errors.nik = 'NIK wajib diisi'; }
-  else if (!/^\d{16}$/.test(nik_raw)) { errors.nik = 'NIK harus 16 digit angka'; }
-  if (!nama_ktp) errors.nama_ktp = 'Nama KTP wajib diisi';
-  if (!alamat_ktp) errors.alamat_ktp = 'Alamat KTP wajib diisi';
+  const galatNomor = validasiNomorIdentitas(jenis_identitas, nik_raw);
+  if (galatNomor) errors.nik = galatNomor; // kunci tetap `nik`: pemetaan 422 di klien tak berubah
+  const kartu = IDENTITAS[jenis_identitas].kartu;
+  if (!nama_ktp) errors.nama_ktp = `Nama sesuai ${kartu} wajib diisi`;
+  if (!alamat_ktp) errors.alamat_ktp = `Alamat sesuai ${kartu} wajib diisi`;
   if (!rt_rw) errors.rt_rw = 'RT/RW wajib diisi';
   if (!kelurahan_owner) errors.kelurahan = 'Kelurahan wajib diisi';
   if (!kecamatan_owner) errors.kecamatan = 'Kecamatan wajib diisi';
@@ -217,12 +223,12 @@ export async function onRequestPost(context) {
       UPDATE owners SET
         nama_pemilik = ?, nik_encrypted = ?, nama_ktp = ?, alamat_ktp = ?, rt_rw = ?,
         kelurahan = ?, kecamatan = ?, bertindak_sebagai = ?, data_ahli_waris = ?,
-        updated_at = CURRENT_TIMESTAMP
+        jenis_identitas = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND nik_encrypted IS NULL
     `).bind(
       nama_ktp, nik_encrypted, nama_ktp, alamat_ktp, rt_rw,
       kelurahan_owner, kecamatan_owner, bertindak, data_ahli_waris,
-      owner_id
+      jenis_identitas, owner_id
     ).run();
   } catch (err) {
     console.error('[titip-jual-lengkapi] UPDATE owners gagal:', err.message);

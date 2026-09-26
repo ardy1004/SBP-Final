@@ -1,6 +1,7 @@
 import { bacaJson } from '../../../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router';
+import { IDENTITAS, normalisasiJenisIdentitas } from '../../../../functions/_lib/identitas.js';
 import {
   ArrowLeft, Edit2, Check, X, AlertCircle, Copy, MessageCircle,
   FileText, ExternalLink, User, Home, Image as ImageIcon, CheckCircle,
@@ -37,6 +38,8 @@ interface AgreementDetail {
     no_wa_1: string;
     no_wa_2: string | null;
     data_ahli_waris: string | null;
+    /** 'ktp' | 'sim' — nomornya ada di `nik` untuk keduanya. */
+    jenis_identitas?: string;
   };
   properti: {
     id: number;
@@ -195,7 +198,9 @@ export default function AdminAgreementDetailPage() {
 
   // Owner edit state
   const [editingOwner, setEditingOwner] = useState(false);
-  const [ownerForm, setOwnerForm] = useState({ nama_pemilik: '', nik: '', alamat_ktp: '', no_wa: '' });
+  const [ownerForm, setOwnerForm] = useState({
+    nama_pemilik: '', nik: '', alamat_ktp: '', no_wa: '', jenis_identitas: 'ktp' as 'ktp' | 'sim',
+  });
   const [ownerSaving, setOwnerSaving] = useState(false);
   const [ownerError, setOwnerError] = useState<string | null>(null);
 
@@ -231,6 +236,7 @@ export default function AdminAgreementDetailPage() {
       nik: d.owner.nik ?? '',
       alamat_ktp: d.owner.alamat_ktp ?? '',
       no_wa: d.owner.no_wa_1 ?? '',
+      jenis_identitas: normalisasiJenisIdentitas(d.owner.jenis_identitas),
     });
     // Pre-fill property form
     setPropForm({
@@ -277,6 +283,9 @@ export default function AdminAgreementDetailPage() {
           nik: ownerForm.nik,
           alamat_ktp: ownerForm.alamat_ktp,
           no_wa: ownerForm.no_wa,
+          // Server memvalidasi nomor dengan jenis ini — tanpanya pemilik ber-SIM
+          // 12/14 digit gagal disimpan walau yang diubah cuma nomor WA.
+          jenis_identitas: ownerForm.jenis_identitas,
         }),
       });
       const json = await bacaJson(res);
@@ -439,11 +448,30 @@ export default function AdminAgreementDetailPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <InlineInput label="Nama Pemilik" value={ownerForm.nama_pemilik}
                 onChange={v => setOwnerForm(f => ({ ...f, nama_pemilik: v }))} />
-              <InlineInput label="NIK (16 digit)" value={ownerForm.nik}
-                onChange={v => setOwnerForm(f => ({ ...f, nik: v }))} placeholder="0000000000000000" />
+              <div>
+                <label className="block text-xs font-medium text-[#64748B] mb-1">Nomor Identitas</label>
+                <div className="flex gap-2">
+                  <select
+                    value={ownerForm.jenis_identitas}
+                    onChange={e => setOwnerForm(f => ({ ...f, jenis_identitas: normalisasiJenisIdentitas(e.target.value) }))}
+                    className="px-2 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] bg-white"
+                    aria-label="Jenis identitas"
+                  >
+                    {(['ktp', 'sim'] as const).map(j => <option key={j} value={j}>{IDENTITAS[j].pilihan}</option>)}
+                  </select>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={ownerForm.nik}
+                    onChange={e => setOwnerForm(f => ({ ...f, nik: e.target.value.replace(/\D/g, '').slice(0, 16) }))}
+                    placeholder={IDENTITAS[ownerForm.jenis_identitas].placeholder}
+                    className="flex-1 min-w-0 px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] focus:ring-1 focus:ring-[#1565C0]/20 transition-colors"
+                  />
+                </div>
+              </div>
             </div>
             <div>
-              <label className="block text-xs font-medium text-[#64748B] mb-1">Alamat KTP</label>
+              <label className="block text-xs font-medium text-[#64748B] mb-1">Alamat {IDENTITAS[ownerForm.jenis_identitas].kartu}</label>
               <textarea
                 value={ownerForm.alamat_ktp}
                 onChange={e => setOwnerForm(f => ({ ...f, alamat_ktp: e.target.value }))}
@@ -475,11 +503,11 @@ export default function AdminAgreementDetailPage() {
         ) : (
           <dl className="space-y-2.5">
             <InfoRow label="Nama Pemilik" value={data.owner.nama_pemilik} />
-            <InfoRow label="NIK" value={data.owner.nik
+            <InfoRow label={IDENTITAS[normalisasiJenisIdentitas(data.owner.jenis_identitas)].label} value={data.owner.nik
               ? <span className="font-mono tracking-widest">{data.owner.nik}</span>
               : <span className="text-[#94A3B8] italic text-xs">Tidak tersedia</span>} />
-            <InfoRow label="Nama KTP" value={data.owner.nama_ktp} />
-            <InfoRow label="Alamat KTP" value={data.owner.alamat_ktp} />
+            <InfoRow label={`Nama ${IDENTITAS[normalisasiJenisIdentitas(data.owner.jenis_identitas)].kartu}`} value={data.owner.nama_ktp} />
+            <InfoRow label={`Alamat ${IDENTITAS[normalisasiJenisIdentitas(data.owner.jenis_identitas)].kartu}`} value={data.owner.alamat_ktp} />
             {data.owner.rt_rw && <InfoRow label="RT/RW" value={data.owner.rt_rw} />}
             {(data.owner.kelurahan || data.owner.kecamatan) && (
               <InfoRow label="Kelurahan/Kec." value={[data.owner.kelurahan, data.owner.kecamatan].filter(Boolean).join(', ')} />

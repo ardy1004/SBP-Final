@@ -1,6 +1,7 @@
 import { bacaJson } from '../../lib/api';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router';
+import { IDENTITAS, normalisasiJenisIdentitas } from '../../../functions/_lib/identitas.js';
 import {
   CheckCircle, AlertTriangle, Clock, RotateCcw,
   FileText, Shield, ExternalLink, Loader2,
@@ -32,6 +33,8 @@ interface AgreementData {
     kelurahan: string | null;
     kecamatan: string | null;
     bertindak_sebagai: string;
+    /** 'ktp' | 'sim' — tak ada pada respons server lama → dianggap 'ktp'. */
+    jenis_identitas?: string;
   };
   properti: {
     title: string;
@@ -302,8 +305,8 @@ function PerjanjianDocument({ data, today, canvasRef, hasSigned, onStart, onMove
         <div className="space-y-1">
           <p className="font-bold text-xs uppercase text-[#64748B] tracking-wider">Pihak Kedua — Pemilik</p>
           <p className="font-semibold">{owner.nama_ktp}</p>
-          <p className="text-xs text-[#374151]">NIK: {owner.nik ?? 'Tidak tersedia'}</p>
-          <p className="text-xs text-[#374151]">Alamat KTP: {alamatOwner || '-'}</p>
+          <p className="text-xs text-[#374151]">{IDENTITAS[normalisasiJenisIdentitas(owner.jenis_identitas)].label}: {owner.nik ?? 'Tidak tersedia'}</p>
+          <p className="text-xs text-[#374151]">Alamat {IDENTITAS[normalisasiJenisIdentitas(owner.jenis_identitas)].kartu}: {alamatOwner || '-'}</p>
           <p className="text-xs text-[#374151]">
             Bertindak sebagai: {labelBertindak(owner.bertindak_sebagai)}
           </p>

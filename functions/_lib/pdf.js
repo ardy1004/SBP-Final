@@ -3,6 +3,7 @@
 // Image fetches are best-effort: failures produce an empty slot, not an error.
 
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { IDENTITAS, normalisasiJenisIdentitas } from './identitas.js';
 
 const TTD_ARDY_URL = 'https://images.salambumi.xyz/materai/gsd-removebg-preview%20-%20Copy.png';
 const MATERAI_URL  = 'https://images.salambumi.xyz/materai/hg.png';
@@ -211,9 +212,12 @@ export async function generateAgreementPDF({ agr, nikPlain, signedAt, auditIp, a
 
   drawRawText('PIHAK KEDUA — PEMILIK', col2X, y2, { f: fB, sz: 8, col: C.gray }); y2 -= 8 * 1.6;
   drawRawText(agr.nama_ktp, col2X, y2, { f: fB, sz: 9 }); y2 -= 9 * 1.6;
+  // Dokumen hukum WAJIB menyebut identitas yang benar-benar dipakai pemilik —
+  // tanpa ini pemilik ber-SIM tercetak "NIK: <nomor SIM>".
+  const identitas = IDENTITAS[normalisasiJenisIdentitas(agr.jenis_identitas)];
   for (const s of [
-    `NIK: ${nikPlain}`,
-    `Alamat KTP: ${alamatOwner || '-'}`,
+    `${identitas.label}: ${nikPlain}`,
+    `Alamat ${identitas.kartu}: ${alamatOwner || '-'}`,
     `Bertindak sebagai: ${bertindak}`,
   ]) {
     for (const l of wrapText(s, fN, 8, colW)) {

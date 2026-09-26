@@ -24,7 +24,7 @@ export default function PrivacyPage() {
             {[
               {
                 title: '1. Data yang Kami Kumpulkan',
-                content: 'Kami mengumpulkan data pribadi yang Anda berikan secara sukarela, termasuk: nama lengkap, nomor KTP (NIK) untuk keperluan perjanjian pemasaran, nomor WhatsApp/telepon, alamat email, alamat properti, dan data properti yang ingin dipasarkan. Data dikumpulkan melalui form pendaftaran, form titip jual, dan form kontak.',
+                content: 'Kami mengumpulkan data pribadi yang Anda berikan secara sukarela, termasuk: nama lengkap, nomor identitas (NIK KTP atau nomor SIM) untuk keperluan perjanjian pemasaran, nomor WhatsApp/telepon, alamat email, alamat properti, dan data properti yang ingin dipasarkan. Data dikumpulkan melalui form pendaftaran, form titip jual, dan form kontak.',
               },
               {
                 title: '2. Tujuan Penggunaan Data',
@@ -36,7 +36,7 @@ export default function PrivacyPage() {
               },
               {
                 title: '4. Penyimpanan & Keamanan Data',
-                content: 'Data sensitif seperti NIK/KTP dienkripsi menggunakan standar AES. Akses data terbatas hanya pada personel yang berwenang dengan log akses tercatat. Kami menerapkan langkah-langkah keamanan teknis dan organisasi yang sesuai untuk melindungi data Anda dari akses tidak sah, kehilangan, atau pengungkapan.',
+                content: 'Data sensitif seperti nomor identitas (NIK KTP atau nomor SIM) dienkripsi menggunakan standar AES. Akses data terbatas hanya pada personel yang berwenang dengan log akses tercatat. Kami menerapkan langkah-langkah keamanan teknis dan organisasi yang sesuai untuk melindungi data Anda dari akses tidak sah, kehilangan, atau pengungkapan.',
               },
               {
                 title: '5. Retensi Data',
