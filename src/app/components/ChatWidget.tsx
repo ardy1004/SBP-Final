@@ -55,10 +55,16 @@ export default function ChatWidget() {
   // Sembunyikan di halaman detail properti (sudah punya CTA WA sendiri) dan di
   // seluruh panel admin — G-CHAT adalah widget untuk calon pembeli, tidak ada
   // gunanya mengambang di atas alat kerja internal.
+  // /sign: yang membuka PEMILIK yang sedang menandatangani, bukan pembeli. Kedua
+  // FAB menutupi dokumen, kotak persetujuan & tombol Kirim, dan klik WA-nya
+  // tercatat sebagai lead pembeli + CAPI Contact. Jalur bantuannya diganti
+  // tautan biasa di SignPage (BantuanWa).
   const shouldHide =
     /^\/(dijual|disewa)\/[^/]+\//.test(pathname) ||
     pathname === '/admin' ||
-    pathname.startsWith('/admin/');
+    pathname.startsWith('/admin/') ||
+    pathname === '/sign' ||
+    pathname.startsWith('/sign/');
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });

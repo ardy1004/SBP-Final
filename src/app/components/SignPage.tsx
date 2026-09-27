@@ -29,6 +29,22 @@ const TTD_ARDY_URL  = 'https://images.salambumi.xyz/materai/gsd-removebg-preview
 const MATERAI_URL   = 'https://images.salambumi.xyz/materai/hg.png';
 const WA_ADMIN      = 'https://wa.me/6281391278889';
 
+// Jalur bantuan di tampilan tanda tangan & sukses — tautan biasa, BUKAN FAB
+// (ChatWidget sengaja disembunyikan di /sign karena menutupi dokumen). Tanpa
+// trackWaClick: pemilik bukan lead pembeli. Pesan hanya memuat kode perjanjian,
+// tidak pernah token/NIK.
+function BantuanWa({ kode, teks }: { kode: string; teks: string }) {
+  return (
+    <a
+      href={`${WA_ADMIN}?text=${encodeURIComponent(`Halo SBP, saya ada pertanyaan tentang perjanjian ${kode}`)}`}
+      target="_blank" rel="noopener noreferrer"
+      className="block text-center text-sm font-medium text-[#1565C0] hover:underline"
+    >
+      {teks}
+    </a>
+  );
+}
+
 // ──────────────────────────────────────────────────────────────
 // Types
 // ──────────────────────────────────────────────────────────────
@@ -236,6 +252,7 @@ function SuccessView({ data }: { data: Extract<PageState, { kind: 'success' }> }
               <FileText size={16} /> Download PDF Perjanjian
             </a>
           )}
+          <BantuanWa kode={data.kode_perjanjian} teks="Ada pertanyaan? Hubungi admin via WhatsApp" />
         </div>
       </div>
     </div>
@@ -661,6 +678,8 @@ export default function SignPage() {
             <><CheckCircle size={18} /> Kirim Perjanjian yang Ditandatangani</>
           )}
         </button>
+
+        <BantuanWa kode={data.kode_perjanjian} teks="Ada yang kurang jelas? Tanyakan admin via WhatsApp" />
 
         <p className="text-center text-xs text-[#94A3B8]">
           <Shield size={12} className="inline mr-1" />
