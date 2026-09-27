@@ -153,6 +153,20 @@ export default function PadTandaTangan({ nama, onSimpan, onTutup }: Props) {
     gambarUlang();
   }, [ukuran, gambarUlang]);
 
+  // Tahan touchmove bawaan browser di area gambar (listener NON-pasif — onTouchMove
+  // React selalu pasif). `touch-action: none` saja tidak cukup: gores jari yang
+  // cepat tetap dibaca Chrome sebagai fling, lalu ketukan berikutnya (tombol
+  // Simpan!) ditelan sebagai "hentikan fling" tanpa klik — terukur 4/8 gagal di
+  // halaman uji polos, 0/8 setelah ini. Sekaligus mencegah scroll/tarik-refresh
+  // di browser yang dukungan touch-action-nya lemah (Safari iOS lama).
+  useEffect(() => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const tahan = (e: TouchEvent) => { if (e.cancelable) e.preventDefault(); };
+    c.addEventListener('touchmove', tahan, { passive: false });
+    return () => c.removeEventListener('touchmove', tahan);
+  }, [ukuran]);
+
   const jadwalGambar = useCallback(() => {
     if (rafRef.current) return;
     rafRef.current = requestAnimationFrame(() => { rafRef.current = 0; gambarUlang(); });
