@@ -24,6 +24,8 @@ interface PropertyRow {
   cover_url: string | null;
   jumlah_foto: number;
   created_at: string;
+  /** Asal listing — definisi di functions/_lib/titipJualAdmin.js (SQL_DARI_TITIP_JUAL). */
+  sumber?: 'titip_jual' | 'admin';
 }
 
 const JENIS_COLORS: Record<string, string> = {
@@ -76,6 +78,7 @@ export default function AdminListingPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('Semua');
   const [filterJenis, setFilterJenis] = useState<string>(''); // '' = semua jenis
+  const [filterSumber, setFilterSumber] = useState<string>(''); // '' | 'titip_jual' | 'admin'
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -102,6 +105,7 @@ export default function AdminListingPage() {
       const qs = new URLSearchParams();
       if (statusFilter !== 'Semua') qs.set('status', statusFilter);
       if (filterJenis) qs.set('jenis', filterJenis);
+      if (filterSumber) qs.set('sumber', filterSumber);
       const params = qs.toString() ? `?${qs.toString()}` : '';
       const res = await fetch(`/api/admin/properties${params}`, { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -117,10 +121,10 @@ export default function AdminListingPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, filterJenis]);
+  }, [statusFilter, filterJenis, filterSumber]);
 
   useEffect(() => { fetchProperties(); }, [fetchProperties]);
-  useEffect(() => { setSelectedIds(new Set()); setDisplayLimit(20); }, [statusFilter, filterJenis, search]);
+  useEffect(() => { setSelectedIds(new Set()); setDisplayLimit(20); }, [statusFilter, filterJenis, filterSumber, search]);
 
   // Cascade lokasi: muat provinsi saat panel Set Lokasi pertama dibuka.
   useEffect(() => {
@@ -384,6 +388,20 @@ export default function AdminListingPage() {
             <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#94A3B8] pointer-events-none" />
           </div>
           <div className="relative">
+            {/* Asal listing — draft hasil Titip Jual dulu tak bisa dibedakan dari draft buatan admin. */}
+            <select
+              value={filterSumber}
+              onChange={e => setFilterSumber(e.target.value)}
+              className="appearance-none pl-3 pr-7 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] bg-white cursor-pointer"
+              aria-label="Asal listing"
+            >
+              <option value="">Semua Asal</option>
+              <option value="titip_jual">Titip Jual</option>
+              <option value="admin">Input Admin</option>
+            </select>
+            <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#94A3B8] pointer-events-none" />
+          </div>
+          <div className="relative">
             <select
               value={statusFilter}
               onChange={e => setStatusFilter(e.target.value)}
@@ -617,6 +635,11 @@ export default function AdminListingPage() {
                               {p.jenis_properti}
                             </span>
                             <span className="text-xs text-[#94A3B8]">{p.kode_listing}</span>
+                            {p.sumber === 'titip_jual' && (
+                              <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold" style={{ fontSize: '10px' }}>
+                                Titip Jual
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

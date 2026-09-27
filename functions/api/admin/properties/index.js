@@ -7,6 +7,7 @@ import { generateMetaSeo } from '../../../_lib/metaSeo.js';
 import { parseGmapsCoords } from '../../../_lib/parseGmapsCoords.js';
 import { nextKodeSeq, fmtSeq, isUniqueErr } from '../../../_lib/kodeSeq.js';
 import { normalisasiHarga } from '../../../_lib/hargaTanah.js';
+import { SQL_DARI_TITIP_JUAL } from '../../../_lib/titipJualAdmin.js';
 
 // Plafon baris untuk daftar admin (belum ada paginasi). 533 properti per Juli 2026.
 // Response menyertakan total sebenarnya + flag truncated supaya pemotongan terlihat
@@ -103,6 +104,11 @@ export async function onRequestGet(context) {
     conditions.push(`(${badgeFilter.map(b => `p.${BADGE_COL_FILTER[b]} = 1`).join(' OR ')})`);
   }
 
+  // Asal listing — definisi tunggal di functions/_lib/titipJualAdmin.js
+  const sumberFilter = url.searchParams.get('sumber') ?? '';
+  if (sumberFilter === 'titip_jual') conditions.push(SQL_DARI_TITIP_JUAL);
+  else if (sumberFilter === 'admin') conditions.push(`NOT ${SQL_DARI_TITIP_JUAL}`);
+
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const sql = `
@@ -122,7 +128,8 @@ export async function onRequestGet(context) {
       p.created_at, p.updated_at, p.published_at,
       (SELECT url_webp FROM property_images
          WHERE property_id = p.id ORDER BY is_cover DESC, urutan ASC LIMIT 1) AS cover_url,
-      (SELECT COUNT(*) FROM property_images WHERE property_id = p.id) AS jumlah_foto
+      (SELECT COUNT(*) FROM property_images WHERE property_id = p.id) AS jumlah_foto,
+      CASE WHEN ${SQL_DARI_TITIP_JUAL} THEN 'titip_jual' ELSE 'admin' END AS sumber
     FROM properties p
     ${where}
     ORDER BY p.created_at DESC

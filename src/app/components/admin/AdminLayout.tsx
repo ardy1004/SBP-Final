@@ -46,6 +46,7 @@ export default function AdminLayout() {
   const [checking, setChecking] = useState(true);
   const [leadsBadge, setLeadsBadge] = useState(0);
   const [errorsBadge, setErrorsBadge] = useState(0);
+  const [titipJualBadge, setTitipJualBadge] = useState(0);
   const [showNotif, setShowNotif] = useState(false);
   const [notifLeads, setNotifLeads] = useState<NotifLead[]>([]);
   const [notifLoading, setNotifLoading] = useState(false);
@@ -60,6 +61,13 @@ export default function AdminLayout() {
         const count = d?.data?.count;
         if (count !== undefined) setLeadsBadge(count);
       })
+      .catch(() => {});
+    // Titip Jual yang menunggu tindakan admin (tertunda di Tahap 1, draft belum
+    // dikonfigurasi, link ttd kedaluwarsa, perlu versi perbaikan). Dulu badge
+    // ini di-hardcode 0 dan admin tidak diberi tahu pengajuan baru sama sekali.
+    fetch('/api/admin/titip-jual/ringkasan', { credentials: 'include' })
+      .then(r => r.ok ? bacaJson<{ total: number }>(r) : null)
+      .then(d => { const total = d?.data?.total; if (total !== undefined) setTitipJualBadge(total); })
       .catch(() => {});
   }, []);
 
@@ -143,7 +151,7 @@ export default function AdminLayout() {
 
   const navItems: { to: string; label: string; icon: typeof LayoutDashboard; end: boolean; badge: number; excludePrefix?: string }[] = [
     { to: '/admin', label: 'Ringkasan', icon: LayoutDashboard, end: true,  badge: 0 },
-    { to: '/admin/agreements', label: 'Titip Jual', icon: FileText, end: false, badge: 0 },
+    { to: '/admin/agreements', label: 'Titip Jual', icon: FileText, end: false, badge: titipJualBadge },
     { to: '/admin/listing', label: 'Properti', icon: List, end: false, badge: 0 },
     // excludePrefix: jangan aktif kalau path masuk sub-route lain yang punya menu sendiri
     { to: '/admin/viralframe', label: 'Viral Frame', icon: Video, end: false, badge: 0, excludePrefix: '/admin/viralframe/agent-videos' },

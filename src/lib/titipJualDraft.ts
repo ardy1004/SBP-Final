@@ -141,6 +141,28 @@ export function simpanDraft(patch: Partial<Omit<TitipJualDraft, 'v' | 'ts'>>): v
   }
 }
 
+/**
+ * Isi (payload) tiket JWT, TANPA verifikasi tanda tangan — hanya untuk hal yang
+ * aman ditebak klien: kapan kedaluwarsa (`exp`) dan kode listing untuk tampilan.
+ * Keabsahan tiket tetap sepenuhnya diputuskan server.
+ */
+export function bacaPayloadTiket(tiket: string | null | undefined): { exp?: number; kode_listing?: string } | null {
+  if (!tiket || typeof tiket !== 'string') return null;
+  try {
+    const b64 = (tiket.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/');
+    const j = JSON.parse(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)));
+    return j && typeof j === 'object' ? j : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Tiket masih berlaku minimal `sisaDetik` lagi? Tiket tanpa `exp` dianggap tidak berlaku. */
+export function tiketMasihBerlaku(tiket: string | null | undefined, sisaDetik = 0): boolean {
+  const exp = bacaPayloadTiket(tiket)?.exp;
+  return typeof exp === 'number' && exp * 1000 > Date.now() + sisaDetik * 1000;
+}
+
 export function hapusDraft(): void {
   if (typeof window === 'undefined') return;
   try { localStorage.removeItem(KEY); } catch { /* noop */ }

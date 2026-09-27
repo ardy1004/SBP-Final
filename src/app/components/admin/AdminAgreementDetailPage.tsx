@@ -2,7 +2,7 @@ import { bacaJson } from '../../../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { IDENTITAS, normalisasiJenisIdentitas } from '../../../../functions/_lib/identitas.js';
-import { labelBertindak, jenisTransaksi } from '../../../../functions/_lib/isiPerjanjian.js';
+import { labelBertindak, jenisTransaksi, teksHargaPenawaran, LABEL_BERTINDAK, BERTINDAK_VALID } from '../../../../functions/_lib/isiPerjanjian.js';
 import {
   ArrowLeft, Edit2, Check, X, AlertCircle, Copy, MessageCircle,
   FileText, ExternalLink, User, Home, Image as ImageIcon, CheckCircle,
@@ -32,6 +32,8 @@ interface AgreementDetail {
   menggantikan_id: number | null;
   menggantikan_kode: string | null;
   perlu_versi_perbaikan: boolean;
+  /** menunggu_ttd tapi link tanda tangannya sudah lewat masa berlaku (72 jam). */
+  link_kedaluwarsa: boolean;
   owner: {
     id: number;
     nama_pemilik: string;
@@ -56,6 +58,7 @@ interface AgreementDetail {
     jenis_properti: string;
     tujuan: string;
     harga: number;
+    harga_sewa_tahun: number | null;
     nego: 0 | 1;
     nett: 0 | 1;
     provinsi: string;
@@ -181,6 +184,44 @@ function InlineInput({
   );
 }
 
+/**
+ * Data ahli waris yang diisi pemilik di Tahap 2 — dulu dikumpulkan tapi TIDAK
+ * PERNAH ditampilkan ke admin, sehingga jawaban "semua ahli waris sepakat?
+ * Tidak" tidak terlihat sebelum kontrak dikirim. Bentuknya JSON dari form
+ * ({jumlah_ahli_waris, semua_sepakat, kuasa_notaris, turun_waris}) atau teks
+ * bebas dari alur lama — keduanya input tak tepercaya, jadi diurai hati-hati.
+ */
+function DataAhliWaris({ raw }: { raw: string | null }) {
+  if (!raw) return null;
+  let d: Record<string, unknown> | null = null;
+  try { const v = JSON.parse(raw); if (v && typeof v === 'object') d = v as Record<string, unknown>; } catch { /* teks lama */ }
+  const yaTidak = (v: unknown, bahaya = false) => v === true
+    ? <span className="font-semibold text-[#166534]">Ya</span>
+    : v === false
+      ? <span className={`font-semibold ${bahaya ? 'text-[#B91C1C]' : 'text-[#475569]'}`}>Tidak</span>
+      : <span className="text-[#94A3B8]">—</span>;
+  return (
+    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+      <p className="text-xs font-semibold text-amber-900 mb-2">Data Ahli Waris</p>
+      {d ? (
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-[#374151]">
+          <dt className="text-[#64748B]">Jumlah ahli waris</dt><dd>{typeof d.jumlah_ahli_waris === 'number' && d.jumlah_ahli_waris > 0 ? d.jumlah_ahli_waris : '—'}</dd>
+          <dt className="text-[#64748B]">Semua sepakat dijual/disewakan</dt><dd>{yaTidak(d.semua_sepakat, true)}</dd>
+          <dt className="text-[#64748B]">Sudah dikuasakan via notaris</dt><dd>{yaTidak(d.kuasa_notaris)}</dd>
+          <dt className="text-[#64748B]">Turun waris sudah diurus</dt><dd>{yaTidak(d.turun_waris)}</dd>
+        </dl>
+      ) : (
+        <p className="text-xs text-[#374151] whitespace-pre-wrap">{raw}</p>
+      )}
+      {d?.semua_sepakat === false && (
+        <p className="mt-2 text-xs font-semibold text-[#B91C1C]">
+          ⚠ Pemilik menyatakan TIDAK semua ahli waris sepakat — pastikan sebelum mengirim link tanda tangan.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AdminAgreementDetailPage() {
@@ -193,19 +234,15 @@ export default function AdminAgreementDetailPage() {
 
   // Owner edit state
   const [editingOwner, setEditingOwner] = useState(false);
+  // nama_ktp, rt_rw, kelurahan/kecamatan, dan bertindak_sebagai TERCETAK di
+  // kontrak — dulu tidak bisa dikoreksi sama sekali (hanya nama_pemilik, yang
+  // tidak pernah tercetak).
   const [ownerForm, setOwnerForm] = useState({
-    nama_pemilik: '', nik: '', alamat_ktp: '', no_wa: '', jenis_identitas: 'ktp' as 'ktp' | 'sim',
+    nama_pemilik: '', nama_ktp: '', nik: '', alamat_ktp: '', rt_rw: '', kelurahan: '', kecamatan: '',
+    bertindak_sebagai: '', no_wa: '', jenis_identitas: 'ktp' as 'ktp' | 'sim',
   });
   const [ownerSaving, setOwnerSaving] = useState(false);
   const [ownerError, setOwnerError] = useState<string | null>(null);
-
-  // Property edit state
-  const [editingProp, setEditingProp] = useState(false);
-  const [propForm, setPropForm] = useState({
-    jenis_properti: '', harga: '', nego: false, nett: false, kecamatan: '', kabupaten: '',
-  });
-  const [propSaving, setPropSaving] = useState(false);
-  const [propError, setPropError] = useState<string | null>(null);
 
   // Configure state
   const [configForm, setConfigForm] = useState({
@@ -228,19 +265,15 @@ export default function AdminAgreementDetailPage() {
     // Pre-fill owner form
     setOwnerForm({
       nama_pemilik: d.owner.nama_pemilik ?? '',
+      nama_ktp: d.owner.nama_ktp ?? '',
       nik: d.owner.nik ?? '',
       alamat_ktp: d.owner.alamat_ktp ?? '',
+      rt_rw: d.owner.rt_rw ?? '',
+      kelurahan: d.owner.kelurahan ?? '',
+      kecamatan: d.owner.kecamatan ?? '',
+      bertindak_sebagai: d.owner.bertindak_sebagai ?? '',
       no_wa: d.owner.no_wa_1 ?? '',
       jenis_identitas: normalisasiJenisIdentitas(d.owner.jenis_identitas),
-    });
-    // Pre-fill property form
-    setPropForm({
-      jenis_properti: d.properti.jenis_properti ?? '',
-      harga: d.properti.harga ? String(d.properti.harga) : '',
-      nego: !!d.properti.nego,
-      nett: !!d.properti.nett,
-      kecamatan: d.properti.kecamatan ?? '',
-      kabupaten: d.properti.kabupaten ?? '',
     });
     // Pre-fill config form from existing data
     setConfigForm({
@@ -273,15 +306,23 @@ export default function AdminAgreementDetailPage() {
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        // Kolom kosong TIDAK dikirim: data lama (mis. dari alur sebelum Tahap 2)
+        // bisa belum punya RT/RW atau kelurahan, dan server menolak nilai kosong
+        // — tanpa penyaring ini koreksi WA saja pun gagal.
+        body: JSON.stringify(Object.fromEntries(Object.entries({
           nama_pemilik: ownerForm.nama_pemilik,
+          nama_ktp: ownerForm.nama_ktp,
           nik: ownerForm.nik,
           alamat_ktp: ownerForm.alamat_ktp,
+          rt_rw: ownerForm.rt_rw,
+          kelurahan_owner: ownerForm.kelurahan,
+          kecamatan_owner: ownerForm.kecamatan,
+          bertindak_sebagai: ownerForm.bertindak_sebagai,
           no_wa: ownerForm.no_wa,
           // Server memvalidasi nomor dengan jenis ini — tanpanya pemilik ber-SIM
           // 12/14 digit gagal disimpan walau yang diubah cuma nomor WA.
           jenis_identitas: ownerForm.jenis_identitas,
-        }),
+        }).filter(([, v]) => v !== ''))),
       });
       const json = await bacaJson(res);
       if (json.success) {
@@ -294,39 +335,6 @@ export default function AdminAgreementDetailPage() {
       setOwnerError('Gagal menyimpan perubahan');
     } finally {
       setOwnerSaving(false);
-    }
-  };
-
-  // ─── Save property ───────────────────────────────────────────────
-  const handleSaveProp = async () => {
-    setPropSaving(true);
-    setPropError(null);
-    try {
-      const hargaNum = parseInt(propForm.harga, 10);
-      const res = await fetch(`/api/admin/agreements/${id}`, {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jenis_properti: propForm.jenis_properti,
-          harga: isNaN(hargaNum) ? undefined : hargaNum,
-          nego: propForm.nego,
-          nett: propForm.nett,
-          kecamatan: propForm.kecamatan,
-          kabupaten: propForm.kabupaten,
-        }),
-      });
-      const json = await bacaJson(res);
-      if (json.success) {
-        await loadDetail();
-        setEditingProp(false);
-      } else {
-        setPropError(json.error ?? 'Gagal menyimpan');
-      }
-    } catch {
-      setPropError('Gagal menyimpan perubahan');
-    } finally {
-      setPropSaving(false);
     }
   };
 
@@ -497,8 +505,10 @@ export default function AdminAgreementDetailPage() {
         {editingOwner ? (
           <div className="space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <InlineInput label="Nama Pemilik" value={ownerForm.nama_pemilik}
+              <InlineInput label="Nama Pemilik (sapaan)" value={ownerForm.nama_pemilik}
                 onChange={v => setOwnerForm(f => ({ ...f, nama_pemilik: v }))} />
+              <InlineInput label={`Nama sesuai ${IDENTITAS[ownerForm.jenis_identitas].kartu} (tercetak di kontrak)`} value={ownerForm.nama_ktp}
+                onChange={v => setOwnerForm(f => ({ ...f, nama_ktp: v }))} />
               <div>
                 <label className="block text-xs font-medium text-[#64748B] mb-1">Nomor Identitas</label>
                 <div className="flex gap-2">
@@ -529,6 +539,25 @@ export default function AdminAgreementDetailPage() {
                 rows={2}
                 className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] focus:ring-1 focus:ring-[#1565C0]/20 transition-colors resize-none"
               />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <InlineInput label="RT/RW" value={ownerForm.rt_rw} placeholder="001/002"
+                onChange={v => setOwnerForm(f => ({ ...f, rt_rw: v }))} />
+              <InlineInput label="Kelurahan" value={ownerForm.kelurahan}
+                onChange={v => setOwnerForm(f => ({ ...f, kelurahan: v }))} />
+              <InlineInput label="Kecamatan" value={ownerForm.kecamatan}
+                onChange={v => setOwnerForm(f => ({ ...f, kecamatan: v }))} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[#64748B] mb-1">Bertindak sebagai (tercetak di kontrak)</label>
+              <select value={ownerForm.bertindak_sebagai}
+                onChange={e => setOwnerForm(f => ({ ...f, bertindak_sebagai: e.target.value }))}
+                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] bg-white">
+                {!ownerForm.bertindak_sebagai && <option value="">— pilih —</option>}
+                {BERTINDAK_VALID.map(k => (
+                  <option key={k} value={k}>{LABEL_BERTINDAK[k as keyof typeof LABEL_BERTINDAK]}</option>
+                ))}
+              </select>
             </div>
             <InlineInput label="Nomor WhatsApp" value={ownerForm.no_wa}
               onChange={v => setOwnerForm(f => ({ ...f, no_wa: v }))} placeholder="08xxxxxxxxxx" />
@@ -573,79 +602,27 @@ export default function AdminAgreementDetailPage() {
             {data.owner.no_wa_2 && <InfoRow label="WA Kedua" value={data.owner.no_wa_2} />}
           </dl>
         )}
+        {!editingOwner && <DataAhliWaris raw={data.owner.data_ahli_waris} />}
       </div>
 
       {/* ─── Property Card ───────────────────────────────────────── */}
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-        <CardHeader
-          icon={Home} title="Data Properti" color="#10B981"
-          onEdit={isEditable && !editingProp ? () => setEditingProp(true) : undefined}
-        />
+        <CardHeader icon={Home} title="Data Properti" color="#10B981" />
 
-        {editingProp ? (
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-[#64748B] mb-1">Jenis Properti</label>
-                <select value={propForm.jenis_properti}
-                  onChange={e => setPropForm(f => ({ ...f, jenis_properti: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-[#1565C0] bg-white">
-                  {['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'].map(j => (
-                    <option key={j} value={j}>{j.charAt(0).toUpperCase() + j.slice(1)}</option>
-                  ))}
-                </select>
-              </div>
-              <InlineInput label="Harga (Rp)" value={propForm.harga} type="number"
-                onChange={v => setPropForm(f => ({ ...f, harga: v }))} />
-              <InlineInput label="Kecamatan" value={propForm.kecamatan}
-                onChange={v => setPropForm(f => ({ ...f, kecamatan: v }))} />
-              <InlineInput label="Kabupaten / Kota" value={propForm.kabupaten}
-                onChange={v => setPropForm(f => ({ ...f, kabupaten: v }))} />
-            </div>
-            <div className="flex gap-5">
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={propForm.nego}
-                  onChange={e => setPropForm(f => ({ ...f, nego: e.target.checked }))}
-                  className="accent-[#1565C0]" />
-                Nego
-              </label>
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={propForm.nett}
-                  onChange={e => setPropForm(f => ({ ...f, nett: e.target.checked }))}
-                  className="accent-[#1565C0]" />
-                Nett
-              </label>
-            </div>
-            {propError && (
-              <p className="text-xs text-[#EF4444] flex items-center gap-1">
-                <AlertCircle size={12} /> {propError}
-              </p>
-            )}
-            <div className="flex gap-2 pt-1">
-              <button onClick={handleSaveProp} disabled={propSaving}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white bg-[#1565C0] hover:bg-[#1251A3] disabled:opacity-60 transition-colors">
-                {propSaving
-                  ? <div className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />
-                  : <Check size={13} />}
-                Simpan Koreksi
-              </button>
-              <button onClick={() => { setEditingProp(false); setPropError(null); }}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-[#64748B] bg-gray-100 hover:bg-gray-200 transition-colors">
-                <X size={13} /> Batal
-              </button>
-            </div>
-          </div>
-        ) : (
+        {/* Data properti diedit di SATU tempat — halaman Properti — yang sudah
+            menangani harga per-m² tanah (normalisasiHarga) dan meta SEO. Edit
+            dari sini dulu menulis `harga` mentah sehingga harga_per_m2 &
+            meta_title basi. */}
+        {(
           <dl className="space-y-2.5">
             <InfoRow label="Kode Listing" value={<span className="font-mono text-xs">{data.properti.kode_listing}</span>} />
             <InfoRow label="Judul" value={data.properti.title} />
             <InfoRow label="Jenis Properti" value={<span className="capitalize">{data.properti.jenis_properti}</span>} />
             <InfoRow label="Tujuan" value={<span className="capitalize">{data.properti.tujuan?.replace('_', ' ')}</span>} />
             <InfoRow label="Harga" value={
-              <span className="font-semibold">
-                {formatRupiah(data.properti.harga)}
-                {data.properti.nego ? ' (Nego)' : data.properti.nett ? ' (Nett)' : ''}
-              </span>
+              // Kalimat yang SAMA dengan Pasal 1 kontrak — `harga` saja bernilai
+              // 0 pada listing sewa (harga sewa ada di harga_sewa_tahun).
+              <span className="font-semibold">{teksHargaPenawaran(data.properti)}</span>
             } />
             <InfoRow label="Lokasi" value={
               [data.properti.kecamatan, data.properti.kabupaten, data.properti.provinsi].filter(Boolean).join(', ')
@@ -677,6 +654,10 @@ export default function AdminAgreementDetailPage() {
             } />
           </dl>
         )}
+        <button onClick={() => navigate(`/admin/listing/${data.properti.id}`)}
+          className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#1565C0] bg-[#EFF6FF] hover:bg-[#DBEAFE] transition-colors">
+          <ExternalLink size={12} /> Edit di halaman Properti
+        </button>
       </div>
 
       {/* ─── Photo Gallery ───────────────────────────────────────── */}
@@ -817,7 +798,7 @@ export default function AdminAgreementDetailPage() {
               {configuring
                 ? <div className="w-4 h-4 border border-white/30 border-t-white rounded-full animate-spin" />
                 : <FileText size={15} />}
-              Konfirmasi &amp; Generate Link TTD
+              {data.status === 'menunggu_ttd' ? 'Simpan & Buat Link TTD Baru' : 'Konfirmasi & Generate Link TTD'}
             </button>
           </div>
         </div>
@@ -834,9 +815,15 @@ export default function AdminAgreementDetailPage() {
           </div>
 
           <div className="space-y-3">
-            {data.token_expires_at && (
+            {data.link_kedaluwarsa ? (
+              <p className="text-xs font-semibold text-[#B91C1C] bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                Link ini sudah kedaluwarsa ({formatDateTime(data.token_expires_at)}) — pemilik tidak bisa lagi
+                menandatanganinya. Tekan "Simpan &amp; Buat Link TTD Baru" di atas, lalu kirim link barunya.
+              </p>
+            ) : data.token_expires_at && (
               <p className="text-xs text-[#94A3B8]">
                 Berlaku hingga: <span className="font-medium text-[#64748B]">{formatDateTime(data.token_expires_at)}</span>
+                {' · '}Dibuka pemilik: <span className="font-medium text-[#64748B]">{data.link_opened_count}×</span>
               </p>
             )}
 
@@ -865,8 +852,9 @@ export default function AdminAgreementDetailPage() {
               </a>
             </div>
 
-            {/* WA button */}
-            {waUrl && (
+            {/* WA button — disembunyikan bila link kedaluwarsa, supaya admin tidak
+                mengirim link mati ke pemilik. */}
+            {waUrl && !data.link_kedaluwarsa && (
               <a
                 href={waUrl}
                 target="_blank"
@@ -890,12 +878,16 @@ export default function AdminAgreementDetailPage() {
             </h2>
           </div>
           <p className="text-sm text-[#166534] mb-4">
-            Ditandatangani pada {formatDateTime(data.signed_at)}. Properti telah dipublikasikan.
+            Ditandatangani pada {formatDateTime(data.signed_at)}.{' '}
+            {data.properti.status_publish === 'published' ? 'Properti sudah tayang.' : 'Properti belum tayang — publikasikan dari halaman Properti.'}
           </p>
           <div className="flex gap-3 flex-wrap">
-            {data.sign_token && data.pdf_url && (
+            {data.pdf_url && (
               <a
-                href={`/api/sign/${data.sign_token}/pdf`}
+                // Lewat sesi admin, BUKAN link publik /api/sign/<token>/pdf —
+                // link publik itu sengaja kedaluwarsa 7 hari setelah tanda tangan
+                // (PDF memuat NIK). Admin tetap harus bisa membuka arsip kapan saja.
+                href={`/api/admin/media?key=${encodeURIComponent(data.pdf_url)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-[#1565C0] hover:bg-[#1251A3] transition-colors">

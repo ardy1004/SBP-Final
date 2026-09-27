@@ -59,6 +59,8 @@ interface AgreementData {
   durasi_kontrak: number | null;
   fee_persen: number;
   pasal: Pasal[];
+  /** SHA-256 isi dokumen yang ditampilkan — dikirim balik saat menandatangani. */
+  versi_dokumen: string;
 }
 
 type PageState =
@@ -528,9 +530,18 @@ export default function SignPage() {
       const res = await fetch(`/api/sign/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signature: dataUrl, persetujuan: true }),
+        // versi_dokumen = sidik jari isi yang sedang dibaca. Server menolak (409)
+        // bila admin mengubah data sejak halaman ini dimuat.
+        body: JSON.stringify({ signature: dataUrl, persetujuan: true, versi_dokumen: state.data.versi_dokumen }),
       });
       const json = await bacaJson(res);
+      if (!json.success && json.details?.kode === 'dokumen_berubah') {
+        // Tanda tangan di kanvas ikut hilang saat dimuat ulang — memang harus:
+        // pemilik wajib membaca versi terbaru sebelum menandatangani lagi.
+        setSubmitError(json.error ?? 'Isi perjanjian diperbarui. Memuat ulang…');
+        setTimeout(() => window.location.reload(), 2500);
+        return;
+      }
       if (!json.success) throw new Error(json.error || 'Gagal mengirim tanda tangan');
       const d = json.data;
       const propertyUrl = buildPropertyUrl(state.data.properti);

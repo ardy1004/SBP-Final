@@ -5,7 +5,8 @@
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { decryptNIK, encryptNIK } from '../../../../_lib/crypto.js';
 import { normalisasiJenisIdentitas, validasiNomorIdentitas } from '../../../../_lib/identitas.js';
-import { perluVersiPerbaikan } from '../../../../_lib/isiPerjanjian.js';
+import { perluVersiPerbaikan, BERTINDAK_VALID } from '../../../../_lib/isiPerjanjian.js';
+import { linkKedaluwarsa } from '../../../../_lib/titipJualAdmin.js';
 
 function sanitize(val, max = 500) {
   if (typeof val !== 'string') return '';
@@ -44,7 +45,7 @@ async function fetchAgreementById(db, id) {
       o.jenis_identitas,
       p.id           AS p_id,
       p.kode_listing, p.title, p.slug, p.jenis_properti, p.tujuan,
-      p.harga, p.nego, p.nett,
+      p.harga, p.harga_sewa_tahun, p.nego, p.nett,
       p.provinsi, p.kabupaten, p.kecamatan, p.kelurahan, p.alamat,
       p.luas_tanah, p.luas_bangunan, p.lebar_depan, p.lantai,
       p.jumlah_kamar_tidur, p.jumlah_kamar_mandi,
@@ -107,6 +108,7 @@ export async function onRequestGet(context) {
     digantikan_kode: agr.digantikan_kode ?? null,
     menggantikan_id: agr.menggantikan_id ?? null,
     menggantikan_kode: agr.menggantikan_kode ?? null,
+    link_kedaluwarsa: linkKedaluwarsa(agr),
     perlu_versi_perbaikan: perluVersiPerbaikan({
       status: agr.status, digantikan_oleh: agr.digantikan_oleh, signed_at: agr.signed_at,
       bertindak_sebagai: agr.bertindak_sebagai, tujuan: agr.tujuan,
@@ -134,6 +136,7 @@ export async function onRequestGet(context) {
       jenis_properti: agr.jenis_properti,
       tujuan: agr.tujuan,
       harga: agr.harga,
+      harga_sewa_tahun: agr.harga_sewa_tahun,
       nego: agr.nego,
       nett: agr.nett,
       provinsi: agr.provinsi,
@@ -191,9 +194,17 @@ export async function onRequestPatch(context) {
     return jsonError('Agreement yang sudah signed tidak dapat diedit', 409);
   }
 
+  // Data PROPERTI tidak lagi diedit dari sini. PATCH properti
+  // (admin/properties/[id]) sudah menangani normalisasiHarga (harga per-m² tanah)
+  // dan meta SEO; jalur lama di sini menulis `harga` mentah sehingga
+  // harga_per_m2 & meta_title basi. Satu tempat edit = satu set aturan.
+  const FIELD_PROPERTI = ['jenis_properti', 'harga', 'nego', 'nett', 'kecamatan', 'kabupaten'];
+  if (FIELD_PROPERTI.some(k => body[k] !== undefined)) {
+    return jsonError('Data properti diedit lewat halaman Properti (Admin → Properti), bukan dari halaman perjanjian.', 400);
+  }
+
   const errors = {};
   const ownerPairs = []; // { col, val }
-  const propPairs  = [];
   let nikRaw = null;
 
   // ─── Owner fields ─────────────────────────────────────────────────
@@ -201,6 +212,27 @@ export async function onRequestPatch(context) {
     const v = sanitize(body.nama_pemilik, 100);
     if (!v) errors.nama_pemilik = 'Nama pemilik tidak boleh kosong';
     else ownerPairs.push({ col: 'nama_pemilik', val: v });
+  }
+
+  // Kolom yang TERCETAK di kontrak (halaman /sign, PDF, hash audit). Dulu tidak
+  // bisa diedit sama sekali — admin hanya bisa mengubah nama_pemilik, yang tidak
+  // pernah tercetak di dokumen. Edit saat menunggu_ttd aman: pemilik yang sedang
+  // membuka link akan diminta memuat ulang (versi_dokumen di sign/[token].js).
+  const teksWajib = [
+    ['nama_ktp', 100, 'Nama sesuai identitas tidak boleh kosong'],
+    ['rt_rw', 10, 'RT/RW tidak boleh kosong'],
+    ['kelurahan_owner', 100, 'Kelurahan tidak boleh kosong', 'kelurahan'],
+    ['kecamatan_owner', 100, 'Kecamatan tidak boleh kosong', 'kecamatan'],
+  ];
+  for (const [kunci, maks, galat, kolom = kunci] of teksWajib) {
+    if (body[kunci] === undefined) continue;
+    const v = sanitize(body[kunci], maks);
+    if (!v) errors[kunci] = galat;
+    else ownerPairs.push({ col: kolom, val: v });
+  }
+  if (body.bertindak_sebagai !== undefined) {
+    if (!BERTINDAK_VALID.includes(body.bertindak_sebagai)) errors.bertindak_sebagai = 'Pilihan "bertindak sebagai" tidak valid';
+    else ownerPairs.push({ col: 'bertindak_sebagai', val: body.bertindak_sebagai });
   }
 
   // Jenis efektif = yang dikirim, atau yang tersimpan (UI admin lama tidak
@@ -237,33 +269,6 @@ export async function onRequestPatch(context) {
     else ownerPairs.push({ col: 'no_wa_1', val: normalizeWA(v) });
   }
 
-  // ─── Property fields ──────────────────────────────────────────────
-  if (body.jenis_properti !== undefined) {
-    const VALID = ['rumah','tanah','kost','hotel','homestay','villa','apartment','ruko','gudang','komersial'];
-    const v = sanitize(body.jenis_properti, 30);
-    if (!VALID.includes(v)) errors.jenis_properti = 'jenis_properti tidak valid';
-    else propPairs.push({ col: 'jenis_properti', val: v });
-  }
-
-  if (body.harga !== undefined && body.harga !== null) {
-    const v = parseInt(String(body.harga), 10);
-    if (!Number.isInteger(v) || v <= 0) errors.harga = 'Harga harus angka positif';
-    else propPairs.push({ col: 'harga', val: v });
-  }
-
-  if (body.nego !== undefined) propPairs.push({ col: 'nego', val: body.nego ? 1 : 0 });
-  if (body.nett !== undefined) propPairs.push({ col: 'nett', val: body.nett ? 1 : 0 });
-
-  if (body.kecamatan !== undefined) {
-    const v = sanitize(body.kecamatan, 100);
-    if (v) propPairs.push({ col: 'kecamatan', val: v });
-  }
-
-  if (body.kabupaten !== undefined) {
-    const v = sanitize(body.kabupaten, 100);
-    if (v) propPairs.push({ col: 'kabupaten', val: v });
-  }
-
   if (Object.keys(errors).length > 0) return jsonError('Validasi gagal', 422, errors);
 
   // ─── Encrypt NIK jika diubah ──────────────────────────────────────
@@ -278,32 +283,19 @@ export async function onRequestPatch(context) {
     }
   }
 
-  if (ownerPairs.length === 0 && propPairs.length === 0) {
+  if (ownerPairs.length === 0) {
     return jsonError('Tidak ada field yang dikirim untuk diupdate', 400);
   }
 
-  // ─── Build & run SQL ──────────────────────────────────────────────
+  // ─── Build & run SQL (atomik: owner + penanda waktu perjanjian) ───
+  // Nama kolom berasal dari daftar tetap di atas, bukan dari klien.
   try {
-    if (ownerPairs.length > 0) {
-      const setClauses = ownerPairs.map(p => `${p.col} = ?`).join(', ');
-      const vals = ownerPairs.map(p => p.val);
-      await env.DB.prepare(
-        `UPDATE owners SET ${setClauses}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-      ).bind(...vals, agr.owner_id).run();
-    }
-
-    if (propPairs.length > 0) {
-      const setClauses = propPairs.map(p => `${p.col} = ?`).join(', ');
-      const vals = propPairs.map(p => p.val);
-      await env.DB.prepare(
-        `UPDATE properties SET ${setClauses}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-      ).bind(...vals, agr.property_id).run();
-    }
-
-    await env.DB.prepare(
-      'UPDATE agreements SET updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-    ).bind(id).run();
-
+    const setClauses = ownerPairs.map(p => `${p.col} = ?`).join(', ');
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE owners SET ${setClauses}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .bind(...ownerPairs.map(p => p.val), agr.owner_id),
+      env.DB.prepare('UPDATE agreements SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(id),
+    ]);
   } catch (err) {
     console.error('[admin patch] UPDATE error:', err.message);
     return jsonError('Gagal menyimpan perubahan', 500);
@@ -321,18 +313,15 @@ export async function onRequestPatch(context) {
     pesan: 'Data berhasil diperbarui',
     owner: {
       nama_pemilik: updated?.nama_pemilik,
+      nama_ktp: updated?.nama_ktp,
       nik,
       alamat_ktp: updated?.alamat_ktp,
+      rt_rw: updated?.rt_rw,
+      kelurahan: updated?.owner_kelurahan,
+      kecamatan: updated?.owner_kecamatan,
+      bertindak_sebagai: updated?.bertindak_sebagai,
       no_wa_1: updated?.no_wa_1,
       jenis_identitas: normalisasiJenisIdentitas(updated?.jenis_identitas),
-    },
-    properti: {
-      jenis_properti: updated?.jenis_properti,
-      harga: updated?.harga,
-      nego: updated?.nego,
-      nett: updated?.nett,
-      kecamatan: updated?.kecamatan,
-      kabupaten: updated?.kabupaten,
     },
   });
 }

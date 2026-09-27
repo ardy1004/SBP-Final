@@ -23,6 +23,11 @@ export default function CookieBanner() {
   const bannerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Halaman tanda tangan: TIDAK memuat pelacak apa pun (tanpaPelacak() di
+    // root.tsx), jadi tidak ada cookie yang perlu disetujui — dan banner fixed
+    // ini justru menutupi kanvas tanda tangan di dasar layar (terverifikasi
+    // Playwright 2026-09-27: elementFromPoint di kanvas = .cookie-banner).
+    if (window.location.pathname.startsWith('/sign')) return;
     const { tersedia, nilai } = bacaConsent();
     // Storage tidak tersedia → JANGAN tampilkan. Kalau getItem melempar, setItem
     // juga akan melempar, jadi pilihan user tak pernah bisa disimpan dan banner

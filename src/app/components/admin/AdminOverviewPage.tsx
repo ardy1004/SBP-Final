@@ -70,6 +70,15 @@ function SkeletonCard() {
   );
 }
 
+/** GET /api/admin/titip-jual/ringkasan */
+interface TitipJualRingkasan {
+  tahap1_tertunda: number;
+  perlu_konfigurasi: number;
+  link_kedaluwarsa: number;
+  perlu_versi_perbaikan: number;
+  total: number;
+}
+
 export default function AdminOverviewPage() {
   const admin = useOutletContext<AdminUser | null>();
   const [data, setData]       = useState<OverviewData | null>(null);
@@ -81,6 +90,7 @@ export default function AdminOverviewPage() {
   const [gaError, setGaError]     = useState<string | null>(null);
   const [gaNotConfigured, setGaNotConfigured] = useState(false);
   const [vfAnalytics, setVfAnalytics] = useState<VfAnalyticsItem[]>([]);
+  const [tjRingkasan, setTjRingkasan] = useState<TitipJualRingkasan | null>(null);
 
   useEffect(() => {
     fetch('/api/admin/overview', { credentials: 'include' })
@@ -107,6 +117,11 @@ export default function AdminOverviewPage() {
     fetch('/api/admin/viralframe/analytics', { credentials: 'include' })
       .then(r => bacaJson(r))
       .then(res => { if (res.success) setVfAnalytics(res.data?.items ?? []); })
+      .catch(() => {});
+
+    fetch('/api/admin/titip-jual/ringkasan', { credentials: 'include' })
+      .then(r => bacaJson<TitipJualRingkasan>(r))
+      .then(res => { if (res.success && res.data) setTjRingkasan(res.data); })
       .catch(() => {});
   }, []);
 
@@ -187,6 +202,25 @@ export default function AdminOverviewPage() {
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
           ⚠️ {error}
         </div>
+      )}
+
+      {tjRingkasan && tjRingkasan.total > 0 && (
+        // Pengajuan Titip Jual tidak memberi notifikasi apa pun — kartu inilah
+        // pemberitahuannya. Hanya tampil bila ada yang menunggu tindakan.
+        <Link to="/admin/agreements"
+          className="block rounded-2xl border border-amber-200 bg-amber-50 p-4 hover:border-amber-400 transition-colors">
+          <div className="flex items-center gap-2 mb-2">
+            <FileText size={16} className="text-amber-700" />
+            <span className="font-semibold text-sm text-amber-900">Titip Jual perlu tindakan ({tjRingkasan.total})</span>
+            <ArrowUpRight size={14} className="text-amber-700 ml-auto" />
+          </div>
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-amber-900/80">
+            {tjRingkasan.tahap1_tertunda > 0 && <span>{tjRingkasan.tahap1_tertunda} belum lengkapi data diri</span>}
+            {tjRingkasan.perlu_konfigurasi > 0 && <span>{tjRingkasan.perlu_konfigurasi} draft perlu dikonfigurasi</span>}
+            {tjRingkasan.link_kedaluwarsa > 0 && <span>{tjRingkasan.link_kedaluwarsa} link TTD kedaluwarsa</span>}
+            {tjRingkasan.perlu_versi_perbaikan > 0 && <span>{tjRingkasan.perlu_versi_perbaikan} perlu versi perbaikan</span>}
+          </div>
+        </Link>
       )}
 
       {/* KPI Cards */}

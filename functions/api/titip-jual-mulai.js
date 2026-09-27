@@ -286,8 +286,13 @@ export async function onRequestPost(context) {
   // ─── Idempotensi ──────────────────────────────────────────────────────────
   // Diperiksa sedini mungkin: sesudah ini ada fetch ke Google Maps dan 2 INSERT
   // — percuma bila submit ini sebenarnya percobaan ulang.
-  const submit_id = sanitize(body.submit_id ?? '', 40) || null;
-  if (submit_id) {
+  const submitIdKlien = sanitize(body.submit_id ?? '', 40) || null;
+  // Klien tanpa submit_id (bundle lama / WebView tanpa randomUUID) tetap
+  // mendapat satu dari server: kolom ini juga PENANDA ASAL "dari Titip Jual"
+  // bagi admin (SQL_DARI_TITIP_JUAL di functions/_lib/titipJualAdmin.js).
+  // Idempotensi tetap hanya berlaku untuk id yang dikirim klien.
+  const submit_id = submitIdKlien ?? crypto.randomUUID();
+  if (submitIdKlien) {
     const lama = await cariSubmitLamaTahap1(env, submit_id);
     if (lama) {
       context.waitUntil(logServerError(env, {
@@ -438,7 +443,8 @@ export async function onRequestPost(context) {
     console.error('[titip-jual-mulai] INSERT error:', err.message);
     // Dua submit dengan submit_id sama berbalapan — yang kalah kena UNIQUE.
     // Datanya sudah tersimpan oleh yang menang; kembalikan itu, jangan 500.
-    if (submit_id) {
+    // Hanya untuk id dari KLIEN — id buatan server tidak mungkin bentrok.
+    if (submitIdKlien) {
       const lama = await cariSubmitLamaTahap1(env, submit_id);
       if (lama) {
         context.waitUntil(logServerError(env, {

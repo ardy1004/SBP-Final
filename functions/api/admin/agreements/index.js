@@ -5,6 +5,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { perluVersiPerbaikan } from '../../../_lib/isiPerjanjian.js';
+import { linkKedaluwarsa } from '../../../_lib/titipJualAdmin.js';
 
 const VALID_STATUSES = new Set(['draft', 'opsi_dikonfigurasi', 'menunggu_ttd', 'signed', 'expired']);
 
@@ -24,6 +25,7 @@ export async function onRequestGet(context) {
       a.created_at,
       a.signed_at,
       a.digantikan_oleh,
+      a.token_expires_at,
       o.nama_pemilik,
       o.bertindak_sebagai,
       p.tujuan,
@@ -53,6 +55,9 @@ export async function onRequestGet(context) {
     const agreements = (result.results ?? []).map(a => ({
       ...a,
       perlu_versi_perbaikan: perluVersiPerbaikan(a),
+      // Status TURUNAN, tanpa cron: tidak ada yang pernah mengubah status ke
+      // 'expired', jadi 8 dari 9 link kedaluwarsa tampil "Menunggu TTD" selamanya.
+      link_kedaluwarsa: linkKedaluwarsa(a),
     }));
     return jsonOk({ agreements, total: agreements.length });
   } catch (err) {

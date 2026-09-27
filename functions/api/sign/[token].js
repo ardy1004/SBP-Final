@@ -202,10 +202,23 @@ export async function onRequestGet(context) {
     }
   }
 
+  const dokumen = susunDokumen(agr, nik_owner);
   return jsonOk({
     status: 'valid',
-    kode_perjanjian: agr.kode_perjanjian,
     token_expires_at: agr.token_expires_at,
+    ...dokumen,
+    // Sidik jari isi yang SEDANG DIBACA pemilik — wajib dikirim balik saat
+    // menandatangani (lihat POST). Tanpa ini admin bisa mengubah data di antara
+    // pemilik membaca dan menandatangani, dan PDF memuat isi yang tidak pernah ia lihat.
+    versi_dokumen: await versiDokumen(dokumen),
+  });
+}
+
+// Isi dokumen yang ditampilkan halaman /sign — SATU fungsi untuk GET (tampil)
+// dan POST (verifikasi versi), supaya keduanya tidak mungkin berbeda.
+function susunDokumen(agr, nik_owner) {
+  return {
+    kode_perjanjian: agr.kode_perjanjian,
     // Data owner (untuk Pihak Kedua di dokumen)
     owner: {
       nama_pemilik: agr.nama_pemilik,
@@ -249,7 +262,12 @@ export async function onRequestGet(context) {
     fee_persen: agr.fee_persen,
     // Pasal-pasal dokumen (spec 12.6)
     pasal: buildPasalPasal(agr),
-  });
+  };
+}
+
+async function versiDokumen(dokumen) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(dokumen)));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -344,6 +362,18 @@ export async function onRequestPost(context) {
       context: { kode_perjanjian: agr.kode_perjanjian, ada_ciphertext: Boolean(agr.nik_encrypted), ada_kunci: Boolean(env.NIK_ENC_KEY) },
     }));
     return jsonError('Dokumen belum bisa ditandatangani karena kendala teknis. Tim SBP sudah menerima laporannya dan akan menghubungi Anda.', 500);
+  }
+
+  // ─── [0b] Yang ditandatangani = yang dibaca ──────────────────────────────
+  // Dokumen disusun ulang dari data TERKINI. Bila berbeda dari versi yang
+  // dibaca pemilik (admin mengedit data saat link masih terbuka), tolak dan
+  // minta muat ulang — jangan pernah menandatangani isi yang tidak ia lihat.
+  if (body.versi_dokumen !== await versiDokumen(susunDokumen(agr, nikPlain))) {
+    return jsonError(
+      'Isi perjanjian baru saja diperbarui. Halaman akan dimuat ulang — mohon baca kembali sebelum menandatangani.',
+      409,
+      { kode: 'dokumen_berubah' },
+    );
   }
 
   // ─── [1] Upload signature ke R2 ───────────────────────────────────────────
