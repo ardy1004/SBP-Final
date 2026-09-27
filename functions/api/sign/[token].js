@@ -11,6 +11,7 @@ import { IDENTITAS, normalisasiJenisIdentitas } from '../../_lib/identitas.js';
 import { labelBertindak, susunAlamatPemilik, jenisTransaksi, teksHargaPenawaran } from '../../_lib/isiPerjanjian.js';
 import { generateAgreementPDF } from '../../_lib/pdf.js';
 import { logServerError } from '../../_lib/logError.js';
+import { redaksiUrl } from '../../_lib/redaksiUrl.js';
 
 // ─── Ambil & validasi agreement dari token ────────────────────────────────────
 async function getAgreementByToken(db, token) {
@@ -19,7 +20,8 @@ async function getAgreementByToken(db, token) {
       a.id, a.kode_perjanjian, a.property_id, a.owner_id,
       a.jenis_transaksi, a.jenis_listing, a.durasi_kontrak, a.fee_persen,
       a.status, a.sign_token, a.token_expires_at, a.token_used,
-      a.link_opened_count,
+      a.link_opened_count, a.digantikan_oleh,
+      p.kode_listing,
       p.title, p.slug, p.jenis_properti, p.tujuan,
       p.harga, p.harga_sewa_tahun, p.nego, p.nett, p.luas_tanah, p.luas_bangunan,
       p.jumlah_kamar_tidur, p.jumlah_kamar_mandi,
@@ -33,6 +35,36 @@ async function getAgreementByToken(db, token) {
     JOIN owners     o ON o.id = a.owner_id
     WHERE a.sign_token = ?
   `).bind(token).first();
+}
+
+/**
+ * Versi TERBARU dalam rantai versi perbaikan (`digantikan_oleh`), maks 5 lompatan.
+ *
+ * SENGAJA tanpa sign_token: link lama dari sebelum 2026-09-27 mungkin pernah
+ * terbaca Meta Pixel/GA4 (lihat tanpaPelacak di root.tsx), jadi pemegang link lama
+ * tidak boleh mendapat jalan ke dokumen ber-NIK versi baru. Cukup memberi tahu
+ * bahwa versi baru ADA, nomornya, dan statusnya — link baru dikirim admin.
+ * Gagal baca → null (pemanggil jatuh ke "sudah ditandatangani" seperti dulu).
+ */
+async function ambilPengganti(db, id) {
+  try {
+    let terakhir = null;
+    for (let i = 0; i < 5 && id; i++) {
+      const row = await db.prepare(
+        'SELECT id, kode_perjanjian, status, token_expires_at, digantikan_oleh FROM agreements WHERE id = ?'
+      ).bind(id).first();
+      if (!row) break;
+      terakhir = row;
+      id = row.digantikan_oleh;
+    }
+    if (!terakhir) return null;
+    const kedaluwarsa = terakhir.status === 'menunggu_ttd'
+      && !!terakhir.token_expires_at && new Date(terakhir.token_expires_at) < new Date();
+    return { kode_perjanjian: terakhir.kode_perjanjian, status: terakhir.status, link_kedaluwarsa: kedaluwarsa };
+  } catch (err) {
+    console.error('[sign GET] baca pengganti gagal:', err?.message);
+    return null;
+  }
 }
 
 // ─── Hash SHA-256 konten dokumen (untuk audit_hash_dokumen) ──────────────────
@@ -148,7 +180,7 @@ function buildPasalPasal(agr) {
 // GET /api/sign/:token
 // ═════════════════════════════════════════════════════════════════════════════
 export async function onRequestGet(context) {
-  const { env, params } = context;
+  const { env, params, request } = context;
   const token = params.token?.trim();
 
   if (!token) {
@@ -164,10 +196,33 @@ export async function onRequestGet(context) {
 
   // [b] Sudah ditandatangani
   if (agr.token_used === 1) {
+    // [b1] …tapi sudah DIGANTIKAN versi perbaikan. Dulu tetap berbunyi "sudah
+    // ditandatangani" — pemilik yang membuka link lama dari riwayat WA mengira
+    // urusannya selesai, padahal versi baru menunggu tanda tangannya (kasus
+    // SBP-AGR-20260926-001 → -20260927-002, 27 Sep 2026).
+    if (agr.digantikan_oleh) {
+      const pengganti = await ambilPengganti(env.DB, agr.digantikan_oleh);
+      if (pengganti) {
+        // Sinyal untuk admin: pemilik memegang link yang salah → kirim ulang link baru.
+        context.waitUntil(logServerError(env, {
+          message: `[sign GET] Link lama dibuka — ${agr.kode_perjanjian} sudah digantikan ${pengganti.kode_perjanjian} (status ${pengganti.status}${pengganti.link_kedaluwarsa ? ', link kedaluwarsa' : ''})`,
+          url: redaksiUrl(request.url),
+          userAgent: request.headers.get('User-Agent') ?? undefined,
+          context: { kind: 'link-lama-dibuka', kode_lama: agr.kode_perjanjian, kode_baru: pengganti.kode_perjanjian, status_baru: pengganti.status },
+        }));
+        return jsonOk({
+          status: 'digantikan',
+          kode_perjanjian: agr.kode_perjanjian,
+          kode_listing: agr.kode_listing,
+          pengganti,
+        });
+      }
+    }
     return jsonOk({
       status: 'sudah_ditandatangani',
       slug_properti: agr.slug,
       kode_perjanjian: agr.kode_perjanjian,
+      kode_listing: agr.kode_listing,
     });
   }
 
@@ -206,6 +261,10 @@ export async function onRequestGet(context) {
   return jsonOk({
     status: 'valid',
     token_expires_at: agr.token_expires_at,
+    // Di LUAR susunDokumen(): kode listing tak pernah berubah dan bukan isi yang
+    // ditandatangani — memasukkannya ke hash versi_dokumen hanya membuat halaman
+    // yang sedang terbuka saat deploy terkena 409 "dokumen berubah" tanpa alasan.
+    kode_listing: agr.kode_listing,
     ...dokumen,
     // Sidik jari isi yang SEDANG DIBACA pemilik — wajib dikirim balik saat
     // menandatangani (lihat POST). Tanpa ini admin bisa mengubah data di antara
@@ -281,43 +340,60 @@ export async function onRequestPost(context) {
     return jsonError('Token tidak disertakan', 400);
   }
 
+  // ─── Validasi token (server-side, jangan percaya client) ─────────────────
+  // Token dicari PALING DULU: penolakan hanya dicatat bila token dikenali, supaya
+  // permintaan acak ke /api/sign/<apa-saja> tidak bisa membanjiri error_logs.
+  const agr = await getAgreementByToken(env.DB, token);
+  if (!agr) {
+    return jsonError('Link tidak valid', 404);
+  }
+
+  // Setiap penolakan setelah ini WAJIB tercatat (tanpa token, NIK, atau isi TTD).
+  // Dulu hanya 500 yang tercatat, sehingga "pemilik sudah mencoba tapi ditolak?"
+  // mustahil dibuktikan (kasus SBP-AGR-20260927-002, 27 Sep 2026).
+  const urlAman = redaksiUrl(request.url);
+  const ua = request.headers.get('User-Agent') ?? undefined;
+  const tolak = (http, kind, pesan, details) => {
+    context.waitUntil(logServerError(env, {
+      message: `[sign POST] Ditolak ${http} (${kind}) — ${agr.kode_perjanjian}`,
+      url: urlAman,
+      userAgent: ua,
+      context: { kind, http, kode_perjanjian: agr.kode_perjanjian },
+    }));
+    return jsonError(pesan, http, details);
+  };
+
   const ct = request.headers.get('content-type') ?? '';
   if (!ct.includes('application/json')) {
-    return jsonError('Content-Type harus application/json', 415);
+    return tolak(415, 'content-type', 'Content-Type harus application/json');
   }
 
   let body;
   try {
     body = await request.json();
   } catch {
-    return jsonError('Body JSON tidak valid', 400);
+    return tolak(400, 'body-rusak', 'Body JSON tidak valid');
   }
 
   // Persetujuan wajib true
   if (body.persetujuan !== true) {
-    return jsonError('Persetujuan wajib dicentang sebelum menandatangani', 422);
+    return tolak(422, 'tanpa-persetujuan', 'Persetujuan wajib dicentang sebelum menandatangani');
   }
 
   // Validasi signature ada dan format benar
   const signatureDataUrl = body.signature ?? '';
   if (!signatureDataUrl.startsWith('data:image/png;base64,')) {
-    return jsonError('Tanda tangan harus berformat PNG base64 (data:image/png;base64,...)', 422);
+    return tolak(422, 'format-ttd', 'Tanda tangan harus berformat PNG base64 (data:image/png;base64,...)');
   }
 
-  // ─── Validasi token (server-side, jangan percaya client) ─────────────────
-  const agr = await getAgreementByToken(env.DB, token);
-
-  if (!agr) {
-    return jsonError('Link tidak valid', 404);
-  }
   if (agr.token_used === 1) {
-    return jsonError('Link tanda tangan sudah digunakan sebelumnya', 409);
+    return tolak(409, 'sudah-dipakai', 'Link tanda tangan sudah digunakan sebelumnya');
   }
   if (agr.token_expires_at && new Date(agr.token_expires_at) < new Date()) {
-    return jsonError('Link tanda tangan sudah kedaluwarsa', 410);
+    return tolak(410, 'kedaluwarsa', 'Link tanda tangan sudah kedaluwarsa');
   }
   if (agr.status !== 'menunggu_ttd') {
-    return jsonError('Perjanjian belum siap untuk ditandatangani', 409);
+    return tolak(409, 'belum-siap', 'Perjanjian belum siap untuk ditandatangani');
   }
 
   // ─── Decode signature PNG ─────────────────────────────────────────────────
@@ -327,19 +403,19 @@ export async function onRequestPost(context) {
     const binaryStr = atob(base64Sig);
     sigBytes = Uint8Array.from(binaryStr, c => c.charCodeAt(0));
   } catch {
-    return jsonError('Data tanda tangan tidak valid (base64 rusak)', 422);
+    return tolak(422, 'base64-rusak', 'Data tanda tangan tidak valid (base64 rusak)');
   }
 
   // Validasi ukuran: maks 2MB
   if (sigBytes.length > 2 * 1024 * 1024) {
-    return jsonError('Ukuran tanda tangan terlalu besar (maks 2MB)', 413);
+    return tolak(413, 'terlalu-besar', 'Ukuran tanda tangan terlalu besar (maks 2MB)');
   }
 
   // Validasi magic bytes PNG (\x89PNG\r\n\x1a\n) — jangan simpan payload
   // sembarang yang cuma berlabel data:image/png
   const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (sigBytes.length < 8 || !PNG_MAGIC.every((b, i) => sigBytes[i] === b)) {
-    return jsonError('Data tanda tangan bukan file PNG yang valid', 422);
+    return tolak(422, 'bukan-png', 'Data tanda tangan bukan file PNG yang valid');
   }
 
   // ─── [0] Dekripsi nomor identitas SEBELUM apa pun ditulis ─────────────────
@@ -358,7 +434,7 @@ export async function onRequestPost(context) {
   if (!nikPlain) {
     context.waitUntil(logServerError(env, {
       message: '[sign POST] Nomor identitas tidak bisa didekripsi — penandatanganan ditolak (500)',
-      url: request.url,
+      url: urlAman,
       context: { kode_perjanjian: agr.kode_perjanjian, ada_ciphertext: Boolean(agr.nik_encrypted), ada_kunci: Boolean(env.NIK_ENC_KEY) },
     }));
     return jsonError('Dokumen belum bisa ditandatangani karena kendala teknis. Tim SBP sudah menerima laporannya dan akan menghubungi Anda.', 500);
@@ -369,9 +445,10 @@ export async function onRequestPost(context) {
   // dibaca pemilik (admin mengedit data saat link masih terbuka), tolak dan
   // minta muat ulang — jangan pernah menandatangani isi yang tidak ia lihat.
   if (body.versi_dokumen !== await versiDokumen(susunDokumen(agr, nikPlain))) {
-    return jsonError(
-      'Isi perjanjian baru saja diperbarui. Halaman akan dimuat ulang — mohon baca kembali sebelum menandatangani.',
+    return tolak(
       409,
+      'dokumen-berubah',
+      'Isi perjanjian baru saja diperbarui. Halaman akan dimuat ulang — mohon baca kembali sebelum menandatangani.',
       { kode: 'dokumen_berubah' },
     );
   }
@@ -386,7 +463,7 @@ export async function onRequestPost(context) {
     signature_image_url = r2Key;
   } catch (err) {
     console.error('[sign POST] Upload R2 gagal:', err.message);
-    context.waitUntil(logServerError(env, { message: `[sign POST] Upload R2 gagal: ${err.message}`, stack: err.stack, url: request.url, context: { kode_perjanjian: agr.kode_perjanjian } }));
+    context.waitUntil(logServerError(env, { message: `[sign POST] Upload R2 gagal: ${err.message}`, stack: err.stack, url: urlAman, context: { kode_perjanjian: agr.kode_perjanjian } }));
     // Jika R2 gagal, JANGAN set token_used — tolak request
     return jsonError('Gagal menyimpan tanda tangan. Silakan coba lagi.', 500);
   }
@@ -425,7 +502,7 @@ export async function onRequestPost(context) {
     ).run();
   } catch (err) {
     console.error('[sign POST] UPDATE agreements gagal:', err.message);
-    context.waitUntil(logServerError(env, { message: `[sign POST] UPDATE agreements gagal: ${err.message}`, stack: err.stack, url: request.url, context: { kode_perjanjian: agr.kode_perjanjian } }));
+    context.waitUntil(logServerError(env, { message: `[sign POST] UPDATE agreements gagal: ${err.message}`, stack: err.stack, url: urlAman, context: { kode_perjanjian: agr.kode_perjanjian } }));
     return jsonError('Gagal merekam tanda tangan. Silakan coba lagi.', 500);
   }
 
@@ -435,7 +512,8 @@ export async function onRequestPost(context) {
   // dan mengembalikan respons "signed" palsu.
   if ((updateResult?.meta?.changes ?? 0) === 0) {
     await env.MEDIA.delete(signature_image_url).catch(() => {});
-    return jsonError('Link tanda tangan sudah digunakan sebelumnya', 409);
+    // Biasanya ketukan ganda — permintaan satunya SUDAH berhasil menandatangani.
+    return tolak(409, 'kalah-race', 'Link tanda tangan sudah digunakan sebelumnya');
   }
 
   // ─── [6] Auto-publish properti ────────────────────────────────────────────
@@ -490,6 +568,8 @@ export async function onRequestPost(context) {
     pdf_tersedia = true;
   } catch (err) {
     console.error('[sign POST] Generate/simpan PDF gagal (non-fatal):', err.message);
+    // Tanda tangan SAH tapi arsip PDF tidak ada — admin perlu tahu (dulu senyap).
+    context.waitUntil(logServerError(env, { message: `[sign POST] PDF gagal dibuat (TTD tetap sah): ${err.message}`, stack: err.stack, url: urlAman, context: { kind: 'pdf-gagal', kode_perjanjian: agr.kode_perjanjian } }));
   }
 
   return jsonOk({

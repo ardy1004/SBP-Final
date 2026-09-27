@@ -8,6 +8,7 @@
 
 import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { logServerError } from '../_lib/logError.js';
+import { redaksiUrl } from '../_lib/redaksiUrl.js';
 
 // Endpoint ini publik dan tanpa CAPTCHA, jadi laju insert-nya harus dibatasi di
 // sisi server. Satu error nyata biasanya datang beberapa kali per menit; angka di
@@ -48,11 +49,13 @@ export async function onRequestPost(context) {
   let body;
   try { body = await request.json(); } catch { return jsonError('Body JSON tidak valid', 400); }
 
-  const message = clip(body.message, 1000);
+  // redaksiUrl: browser mengirim window.location.href apa adanya — di /sign itu
+  // memuat token dokumen ber-NIK, di ?lanjut= tiket Tahap 2. error_logs terbaca Admin.
+  const message = redaksiUrl(clip(body.message, 1000));
   if (!message) return jsonError('message wajib diisi', 400);
 
-  const stack = clip(body.stack, 4000);
-  const url = clip(body.url, 500);
+  const stack = redaksiUrl(clip(body.stack, 4000));
+  const url = redaksiUrl(clip(body.url, 500));
   const userAgent = clip(request.headers.get('User-Agent') ?? '', 500);
 
   const errCtx = body.context && typeof body.context === 'object' ? body.context : undefined;

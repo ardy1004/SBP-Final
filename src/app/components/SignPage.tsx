@@ -1,4 +1,5 @@
 import { bacaJson } from '../../lib/api';
+import { laporKendalaForm } from '../../lib/laporKendala';
 import { useEffect, useState, useCallback, lazy, Suspense } from 'react';
 import { useParams, Link } from 'react-router';
 import { IDENTITAS, normalisasiJenisIdentitas } from '../../../functions/_lib/identitas.js';
@@ -95,6 +96,15 @@ interface AgreementData {
   pasal: Pasal[];
   /** SHA-256 isi dokumen yang ditampilkan — dikirim balik saat menandatangani. */
   versi_dokumen: string;
+  /** Kode listing properti (SBP-YYYYMMDD-NNN) — BERBEDA dari nomor perjanjian (SBP-AGR-…). */
+  kode_listing?: string | null;
+}
+
+/** Versi perbaikan yang menggantikan perjanjian ini — TANPA token (lihat GET di server). */
+interface Pengganti {
+  kode_perjanjian: string;
+  status: string;
+  link_kedaluwarsa: boolean;
 }
 
 type PageState =
@@ -102,9 +112,10 @@ type PageState =
   | { kind: 'not_found' }
   | { kind: 'kedaluwarsa' }
   | { kind: 'belum_dikonfigurasi' }
-  | { kind: 'sudah_ditandatangani'; slug_properti: string | null; kode_perjanjian: string }
+  | { kind: 'sudah_ditandatangani'; slug_properti: string | null; kode_perjanjian: string; kode_listing: string | null }
+  | { kind: 'digantikan'; kode_perjanjian: string; kode_listing: string | null; pengganti: Pengganti }
   | { kind: 'valid'; data: AgreementData }
-  | { kind: 'success'; property_url: string; kode_perjanjian: string; token: string; pdf_tersedia: boolean; properti_tayang: boolean };
+  | { kind: 'success'; property_url: string; kode_perjanjian: string; kode_listing: string | null; token: string; pdf_tersedia: boolean; properti_tayang: boolean };
 
 // ──────────────────────────────────────────────────────────────
 // Helpers
@@ -191,7 +202,8 @@ function AlreadySignedView({ data }: { data: Extract<PageState, { kind: 'sudah_d
         </div>
         <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">Perjanjian Sudah Ditandatangani</h1>
         <p className="text-[#64748B] mb-6">
-          Perjanjian kode <strong>{data.kode_perjanjian}</strong> sudah pernah ditandatangani sebelumnya.
+          Perjanjian nomor <strong className="whitespace-nowrap">{data.kode_perjanjian}</strong>
+          {data.kode_listing && <> untuk listing <strong className="whitespace-nowrap">{data.kode_listing}</strong></>} sudah pernah ditandatangani sebelumnya.
           Hubungi tim SBP jika ada pertanyaan.
         </p>
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
@@ -216,6 +228,52 @@ function AlreadySignedView({ data }: { data: Extract<PageState, { kind: 'sudah_d
   );
 }
 
+// Link LAMA yang perjanjiannya sudah digantikan versi perbaikan. Dulu tampil
+// "Perjanjian Sudah Ditandatangani" — pemilik mengira urusannya selesai padahal
+// versi baru menunggu tanda tangannya. Link baru SENGAJA tidak diberikan di sini
+// (server tidak mengirim tokennya): link lama dari sebelum 27 Sep 2026 mungkin
+// pernah terbaca Meta/GA — admin yang mengirim ulang link lewat WhatsApp.
+function DigantikanView({ data }: { data: Extract<PageState, { kind: 'digantikan' }> }) {
+  const { pengganti } = data;
+  const sudahTtd = pengganti.status === 'signed';
+  const menunggu = pengganti.status === 'menunggu_ttd' && !pengganti.link_kedaluwarsa;
+  const listing = data.kode_listing ? ` (listing ${data.kode_listing})` : '';
+  const pesanWa = sudahTtd
+    ? `Halo SBP, saya ada pertanyaan tentang perjanjian ${pengganti.kode_perjanjian}${listing}.`
+    : `Halo SBP, saya membuka link perjanjian lama ${data.kode_perjanjian}${listing}. Mohon kirim ulang link tanda tangan versi terbaru ${pengganti.kode_perjanjian}.`;
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 pt-nav" style={{ background: '#F0F4F8' }}>
+      <div className="text-center max-w-md">
+        <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 ${sudahTtd ? 'bg-[#10B981]' : 'bg-[#F5A623]'}`}>
+          {sudahTtd ? <CheckCircle size={40} className="text-white" /> : <AlertTriangle size={40} className="text-white" />}
+        </div>
+        <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">
+          {sudahTtd ? 'Versi Terbaru Sudah Ditandatangani' : 'Perjanjian Ini Sudah Diperbarui'}
+        </h1>
+        <p className="text-[#64748B] mb-3">
+          Perjanjian nomor <strong className="whitespace-nowrap">{data.kode_perjanjian}</strong>
+          {data.kode_listing && <> untuk listing <strong className="whitespace-nowrap">{data.kode_listing}</strong></>} sudah digantikan oleh
+          versi perbaikan nomor <strong className="text-[#1565C0] whitespace-nowrap">{pengganti.kode_perjanjian}</strong>.
+        </p>
+        <p className="text-[#64748B] mb-6">
+          {sudahTtd
+            ? 'Versi terbaru tersebut sudah Anda tandatangani. Tidak ada lagi yang perlu dilakukan.'
+            : menunggu
+              ? 'Versi terbaru menunggu tanda tangan Anda. Silakan buka link terbaru yang dikirim admin melalui WhatsApp. Belum menerima atau link-nya hilang? Tekan tombol di bawah.'
+              : 'Link versi terbaru sedang disiapkan atau perlu diperbarui. Tekan tombol di bawah agar admin mengirimkan link tanda tangan kepada Anda.'}
+        </p>
+        <a
+          href={`${WA_ADMIN}?text=${encodeURIComponent(pesanWa)}`}
+          target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-[#1565C0] hover:bg-[#1976D2] transition-colors"
+        >
+          {sudahTtd ? 'Hubungi SBP' : 'Minta link versi terbaru via WhatsApp'}
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function SuccessView({ data }: { data: Extract<PageState, { kind: 'success' }> }) {
   return (
     <div className="min-h-screen flex items-center justify-center px-4 pt-nav" style={{ background: '#F0F4F8' }}>
@@ -228,7 +286,8 @@ function SuccessView({ data }: { data: Extract<PageState, { kind: 'success' }> }
           Tanda tangan elektronik Anda telah berhasil direkam.
         </p>
         <p className="text-[#64748B] mb-6 text-sm">
-          Kode perjanjian: <span className="font-semibold text-[#1565C0]">{data.kode_perjanjian}</span>.
+          Nomor perjanjian: <span className="font-semibold text-[#1565C0]">{data.kode_perjanjian}</span>
+          {data.kode_listing && <> · Kode listing: <span className="font-semibold text-[#1565C0]">{data.kode_listing}</span></>}
         </p>
         <div className="bg-[#F0FFF4] border border-[#10B981]/30 rounded-xl p-4 text-sm text-[#10B981] mb-6">
           <Shield size={16} className="inline mr-2" />
@@ -352,6 +411,7 @@ function PerjanjianDocument({ data, today, ttd, onBukaPad }: PerjanjianDocumentP
           Jenis: {labelListingDurasi(data.jenis_listing, data.durasi_kontrak)}&nbsp;·&nbsp;
           Jenis Perjanjian: {data.jenis_transaksi_label}&nbsp;·&nbsp;
           Nomor: {data.kode_perjanjian}
+          {data.kode_listing && <>&nbsp;·&nbsp;Kode listing: {data.kode_listing}</>}
         </p>
         <p className="text-xs text-[#64748B]" suppressHydrationWarning>Tanggal: {today}</p>
       </div>
@@ -510,7 +570,10 @@ export default function SignPage() {
             setState({ kind: 'valid', data: d });
             break;
           case 'sudah_ditandatangani':
-            setState({ kind: 'sudah_ditandatangani', slug_properti: d.slug_properti ?? null, kode_perjanjian: d.kode_perjanjian });
+            setState({ kind: 'sudah_ditandatangani', slug_properti: d.slug_properti ?? null, kode_perjanjian: d.kode_perjanjian, kode_listing: d.kode_listing ?? null });
+            break;
+          case 'digantikan':
+            setState({ kind: 'digantikan', kode_perjanjian: d.kode_perjanjian, kode_listing: d.kode_listing ?? null, pengganti: d.pengganti });
             break;
           case 'kedaluwarsa':
           case 'belum_dikonfigurasi':
@@ -529,6 +592,10 @@ export default function SignPage() {
 
     setSubmitting(true);
     setSubmitError(null);
+    // true begitu server membalas. Penolakan server sudah tercatat di sisi server
+    // (sign POST → error_logs); yang TIDAK pernah sampai server (koneksi putus)
+    // hanya bisa dilaporkan dari sini.
+    let sampaiServer = false;
     try {
       // PNG sudah dirender di popup pada ukuran akhirnya (tataLetakTtd.js).
       const dataUrl = ttd.dataUrl;
@@ -539,6 +606,7 @@ export default function SignPage() {
         // bila admin mengubah data sejak halaman ini dimuat.
         body: JSON.stringify({ signature: dataUrl, persetujuan: true, versi_dokumen: state.data.versi_dokumen }),
       });
+      sampaiServer = true;
       const json = await bacaJson(res);
       if (!json.success && json.details?.kode === 'dokumen_berubah') {
         // Tanda tangan di kanvas ikut hilang saat dimuat ulang — memang harus:
@@ -554,12 +622,17 @@ export default function SignPage() {
         kind: 'success',
         property_url: propertyUrl,
         kode_perjanjian: d.kode_perjanjian,
+        kode_listing: state.data.kode_listing ?? null,
         token: token!,
         pdf_tersedia: d.pdf_tersedia === true,
         // Server lama tidak mengirim field ini → anggap tayang (perilaku lama).
         properti_tayang: d.properti_tayang !== false,
       });
     } catch (err: any) {
+      // URL halaman (berisi token) diredaksi di /api/client-error sebelum disimpan.
+      if (!sampaiServer) {
+        laporKendalaForm('sign', 'jaringan-putus', { kode_perjanjian: state.data.kode_perjanjian });
+      }
       setSubmitError(err.message || 'Terjadi kesalahan. Silakan coba lagi.');
     } finally {
       setSubmitting(false);
@@ -572,6 +645,7 @@ export default function SignPage() {
   if (state.kind === 'kedaluwarsa')           return <ExpiredView />;
   if (state.kind === 'belum_dikonfigurasi')   return <ExpiredView />;
   if (state.kind === 'sudah_ditandatangani')  return <AlreadySignedView data={state} />;
+  if (state.kind === 'digantikan')            return <DigantikanView data={state} />;
   if (state.kind === 'success')               return <SuccessView data={state} />;
 
   const { data } = state;
@@ -610,7 +684,7 @@ export default function SignPage() {
             <FileText size={20} className="text-[#1565C0]" />
             <div>
               <div className="font-semibold text-[#0F172A] text-sm">Dokumen Perjanjian (Read-Only)</div>
-              <div className="text-xs text-[#64748B]">Nomor: {data.kode_perjanjian} · Fee: {data.fee_persen}% · {data.properti.harga_penawaran}</div>
+              <div className="text-xs text-[#64748B]">Nomor: {data.kode_perjanjian}{data.kode_listing ? ` · Listing: ${data.kode_listing}` : ''} · Fee: {data.fee_persen}% · {data.properti.harga_penawaran}</div>
             </div>
           </div>
           {/* Scrollable document area */}
