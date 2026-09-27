@@ -25,6 +25,9 @@ function KPRCalculatorClient({ defaultHarga }: { defaultHarga: number }) {
   type KPRComp = ComponentType<{ defaultHarga: number }>;
   const [Comp, setComp] = useState<KPRComp | null>(null);
   useEffect(() => {
+    // Effect tak pernah jalan di server; penjaga ini membuat Rollup membuang
+    // KPRCalculator + recharts dari build server/Worker (lihat MODUL_KOSONG).
+    if (import.meta.env.SSR) return;
     let alive = true;
     import('./KPRCalculator').then((m) => { if (alive) setComp(() => m.default as KPRComp); });
     return () => { alive = false; };

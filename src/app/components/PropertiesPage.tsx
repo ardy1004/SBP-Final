@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } fro
 import { useSearchParams, useNavigate } from 'react-router';
 import { SlidersHorizontal, Grid3X3, List, Map, X, ChevronDown, ChevronLeft, ChevronRight, RotateCcw, MapPin, AlertCircle, RefreshCw, Search, Building2 } from 'lucide-react';
 
-const LazyPropertyMap = lazy(() => import('./PropertyMap'));
+// leaflet: hanya browser. MODUL_KOSONG membuang modul ini dari build server/Worker.
+const LazyPropertyMap = lazy(() => import.meta.env.SSR ? MODUL_KOSONG : import('./PropertyMap'));
 import {
   getProperties, getLocations, getAllLocations, normalizeProperty,
   type NormalizedProperty, type ApiLocation, type PropertiesParams,
@@ -14,6 +15,7 @@ import { urlHalaman, deretHalaman, type PaginationInfo } from '../../lib/paginat
 import { parseSmartQuery, type LocationIndex, type FlatLoc, type SmartFilters } from './smartSearchParser';
 import { trackEvent } from '../../lib/tracking';
 import { TAMPILKAN_PETA_PUBLIK } from '../../lib/fiturPublik';
+import { MODUL_KOSONG } from '../lib/clientOnly';
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
 

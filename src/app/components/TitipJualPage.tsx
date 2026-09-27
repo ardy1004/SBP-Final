@@ -703,7 +703,8 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
   const [GridSortable, setGridSortable] = useState<ComponentType<GridFotoSortableProps> | null>(null);
   const adaFoto = photos.length > 0;
   useEffect(() => {
-    if (!adaFoto || GridSortable) return;
+    // import.meta.env.SSR: buang @dnd-kit dari build server/Worker (lihat MODUL_KOSONG).
+    if (import.meta.env.SSR || !adaFoto || GridSortable) return;
     let alive = true;
     import('./titipjual/GridFotoSortable')
       .then(m => { if (alive) setGridSortable(() => m.default); })

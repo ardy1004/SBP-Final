@@ -95,7 +95,13 @@ const BUDGET_SSR_MAIN_CHUNK = 560_000;    // 503.003 +11% — headroom nyata, bu
 //    disentuh dan tetap 8 paket. Itulah yang menjaga startup, bukan angka ini.
 // Ratchet tetap berlaku untuk pertumbuhan berikutnya: pangkas dulu, menaikkan
 // angka ini tetap keputusan user.
-const BUDGET_FUNCTIONS_RAW  = 6_200_000;  // 6.149.161 (2026-09-02) + ruang ~51 KB
+//
+// 2026-09-27  RATCHET TURUN 6.200.000 → 3.300.000. Bundle 5.932.874 → 2.985.904 B
+//             (−49%) setelah impor khusus-browser dijaga MODUL_KOSONG (Asersi E):
+//             17 halaman admin + recharts/leaflet/lodash/react-grid-layout/dnd-kit/
+//             d3/papaparse tak lagi ikut ke Worker. CPU startup lokal (wrangler
+//             check startup, median 3×) 143 → 105 ms. Angka ini = terukur + ±10%.
+const BUDGET_FUNCTIONS_RAW  = 3_300_000;
 const BUDGET_FUNCTIONS_GZIP = 8_000_000;  // jauh di bawah batas 10 MB; alarm jaring pengaman saja
 
 /**
@@ -118,6 +124,25 @@ const SSR_IMPORT_ALLOWLIST = new Set([
   'clsx',
   'tailwind-merge',
   'embla-carousel-react',   // publik (HomePage, PropertyDetailPage) — sah
+]);
+
+/**
+ * Chunk MALAS yang boleh ada di build SERVER (Asersi E).
+ *
+ * 2026-09-27: dist/server/assets ternyata memuat ke-17 halaman admin + peta, KPR,
+ * dan grid foto — berikut recharts, leaflet, lodash, react-grid-layout, dnd-kit,
+ * d3, papaparse — karena `import()` di pembungkus clientOnly tetap dibaca build
+ * server. Tidak pernah dijalankan di Worker, tapi ikut terbundel: ±2,9 MB dari
+ * 5,9 MB, CPU startup lokal 143 → 105 ms setelah dibuang. Perbaikannya pola
+ * `import.meta.env.SSR ? MODUL_KOSONG : import(...)` (src/app/lib/clientOnly.tsx).
+ *
+ * Chunk malas BARU di luar daftar ini = hampir pasti impor khusus-browser yang
+ * lupa dijaga. Pasang MODUL_KOSONG — JANGAN sekadar menambah nama ke sini.
+ * Yang tersisa sah: komponen lazy publik tanpa dependensi berat.
+ */
+const SSR_CHUNK_MALAS_DIIZINKAN = new Set([
+  'StepDataDiri',     // Titip Jual Tahap 2 (React.lazy, tanpa dependensi berat)
+  'PadTandaTangan',   // popup TTD /sign (React.lazy, tanpa dependensi berat)
 ]);
 
 const SSR_INDEX = 'dist/server/index.js';
@@ -197,6 +222,24 @@ function assertSsrChunk() {
     problems.push(
       `Chunk SSR utama ${fmt(main.size)} melampaui anggaran ${fmt(BUDGET_SSR_MAIN_CHUNK)}.`
     );
+  }
+
+  // ── Asersi E — hanya chunk malas yang diizinkan boleh ada di build server ──
+  const namaChunk = f => (f.match(/^(.*)-[A-Za-z0-9_-]{8}\.js$/)?.[1] ?? f);
+  const liar = files.slice(1).map(x => namaChunk(x.f)).filter(n => !SSR_CHUNK_MALAS_DIIZINKAN.has(n));
+  const hilang = [...SSR_CHUNK_MALAS_DIIZINKAN].filter(n => !files.slice(1).some(x => namaChunk(x.f) === n));
+  console.log(`\n[E] Chunk malas di build server — ${files.length - 1} (diizinkan: ${[...SSR_CHUNK_MALAS_DIIZINKAN].join(', ')})`);
+  if (liar.length > 0) {
+    problems.push(
+      `Chunk malas TAK DIIZINKAN di build server: ${liar.join(', ')}\n` +
+      `      Impor khusus-browser (admin, peta, grafik, dnd-kit, ...) tetap terbundel ke Worker\n` +
+      `      walau tak pernah dijalankan di sana. Jaga impornya dengan\n` +
+      `      \`import.meta.env.SSR ? MODUL_KOSONG : import(...)\` (src/app/lib/clientOnly.tsx).\n` +
+      `      JANGAN sekadar menambahkannya ke SSR_CHUNK_MALAS_DIIZINKAN.`
+    );
+  }
+  if (hilang.length > 0) {
+    notes.push(`Chunk malas server tidak ada lagi: ${hilang.join(', ')} — hapus dari SSR_CHUNK_MALAS_DIIZINKAN (ratchet).`);
   }
 }
 

@@ -1,6 +1,31 @@
 import { useEffect, useState, type ComponentType } from 'react';
 
 /**
+ * Pengganti `import()` di build SERVER. Pola WAJIB untuk setiap impor dinamis yang
+ * hanya pernah dimuat di browser (route admin, peta, grafik, dnd-kit, dst.):
+ *
+ *   () => import.meta.env.SSR ? MODUL_KOSONG : import('../../components/admin/X')
+ *
+ * KENAPA. clientOnly() saja hanya menjauhkan modul dari jalur EAGER — `import()`
+ * yang tertulis tetap dibaca build server, jadi halaman admin beserta recharts,
+ * leaflet, lodash, react-grid-layout, dnd-kit, d3, papaparse tetap ikut
+ * terbundel ke Worker walau tak pernah dijalankan di sana: ±2,9 MB dari 5,9 MB,
+ * dan CPU startup lokal 143 ms → 105 ms setelah dibuang (terukur 2026-09-27).
+ * Vite mengganti `import.meta.env.SSR` dengan literal `true` di build server,
+ * sehingga Rollup membuang cabang `import()` BESERTA seluruh graf dependensinya.
+ * Di klien nilainya `false` → build klien identik (terukur: 145 berkas, sama byte).
+ * Dijaga Asersi E di scripts/check-bundle-budget.mjs.
+ *
+ * Resolve ke komponen KOSONG, bukan promise yang tak pernah selesai: bila komponen
+ * lazy suatu saat tak sengaja dirender saat SSR, hasilnya kosong — bukan stream
+ * respons yang menggantung. Bertipe `never` supaya tidak mengotori inferensi tipe
+ * props di cabang klien (yang memang satu-satunya cabang yang pernah dipakai di
+ * browser).
+ */
+// @__PURE__: di build klien konstanta ini tak pernah dipakai → ikut dibuang.
+export const MODUL_KOSONG = /* @__PURE__ */ Promise.resolve({ default: () => null }) as Promise<never>;
+
+/**
  * Bungkus komponen route agar HANYA dimuat di browser, tidak pernah masuk graf
  * evaluasi SSR.
  *
