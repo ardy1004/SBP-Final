@@ -1,11 +1,29 @@
 import { bacaJson } from '../../lib/api';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, lazy, Suspense } from 'react';
 import { useParams, Link } from 'react-router';
 import { IDENTITAS, normalisasiJenisIdentitas } from '../../../functions/_lib/identitas.js';
+import { SLOT_W, SLOT_H, letakMeterai, letakTtd } from '../../../functions/_lib/tataLetakTtd.js';
+import type { HasilTtd } from './sign/PadTandaTangan';
 import {
   CheckCircle, AlertTriangle, Clock, RotateCcw,
-  FileText, Shield, ExternalLink, Loader2,
+  FileText, Shield, ExternalLink, Loader2, PenLine,
 } from 'lucide-react';
+
+// Popup gambar TTD dimuat MALAS dan hanya dirender setelah pemilik mengetuk slot
+// (tidak pernah saat SSR). Chunk gagal dimuat — mis. tab lama setelah deploy
+// baru — tidak boleh menjatuhkan halaman: tampilkan ajakan muat ulang.
+function GagalMuatPad() {
+  return (
+    <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center gap-4 px-6 text-center">
+      <p className="text-sm text-[#374151]">Kotak tanda tangan gagal dimuat. Periksa koneksi, lalu muat ulang halaman.</p>
+      <button type="button" onClick={() => window.location.reload()} className="px-6 py-3 rounded-xl font-semibold text-white bg-[#1565C0]">
+        Muat ulang
+      </button>
+    </div>
+  );
+}
+const muatPad = () => import('./sign/PadTandaTangan');
+const PadTandaTangan = lazy(() => muatPad().catch(() => ({ default: GagalMuatPad })));
 
 const TTD_ARDY_URL  = 'https://images.salambumi.xyz/materai/gsd-removebg-preview%20-%20Copy.png';
 const MATERAI_URL   = 'https://images.salambumi.xyz/materai/hg.png';
@@ -247,18 +265,57 @@ function Stepper() {
 // ──────────────────────────────────────────────────────────────
 // Document renderer
 // ──────────────────────────────────────────────────────────────
+// Slot TTD Pihak Kedua — rasio & posisi meterai/TTD dari functions/_lib/tataLetakTtd.js,
+// rumus yang SAMA dengan pdf.js, jadi yang dilihat pemilik = yang tercetak.
+const persen = (v: number, total: number) => `${(v / total) * 100}%`;
+const METERAI = letakMeterai();
+
+function SlotTtdPemilik({ ttd, onBuka }: { ttd: HasilTtd | null; onBuka: () => void }) {
+  const t = ttd ? letakTtd(ttd.w, ttd.h) : null;
+  return (
+    <button
+      type="button"
+      onClick={onBuka}
+      aria-label={ttd ? 'Ganti tanda tangan' : 'Tanda tangan di sini'}
+      className="relative block w-full"
+      style={{ aspectRatio: `${SLOT_W} / ${SLOT_H}` }}
+    >
+      <img
+        src={MATERAI_URL}
+        alt="Materai"
+        className="absolute top-0 h-full w-auto pointer-events-none select-none"
+        style={{ left: persen(METERAI.x, SLOT_W), opacity: 0.9 }}
+        suppressHydrationWarning
+      />
+      {ttd && t ? (
+        <img
+          src={ttd.dataUrl}
+          alt="Tanda tangan Anda"
+          className="absolute pointer-events-none select-none"
+          style={{
+            left: persen(t.x, SLOT_W), top: persen(SLOT_H - t.y - t.h, SLOT_H),
+            width: persen(t.w, SLOT_W), height: persen(t.h, SLOT_H),
+          }}
+        />
+      ) : (
+        <span className="absolute inset-0 flex items-center justify-center">
+          <span className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#1565C0] text-white text-sm font-sans font-semibold shadow-md">
+            <PenLine size={16} /> Tanda tangan di sini
+          </span>
+        </span>
+      )}
+    </button>
+  );
+}
+
 interface PerjanjianDocumentProps {
   data: AgreementData;
   today: string;
-  canvasRef: React.RefObject<HTMLCanvasElement | null>;
-  hasSigned: boolean;
-  onStart: (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => void;
-  onMove:  (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => void;
-  onEnd:   () => void;
-  onClear: () => void;
+  ttd: HasilTtd | null;
+  onBukaPad: () => void;
 }
 
-function PerjanjianDocument({ data, today, canvasRef, hasSigned, onStart, onMove, onEnd, onClear }: PerjanjianDocumentProps) {
+function PerjanjianDocument({ data, today, ttd, onBukaPad }: PerjanjianDocumentProps) {
   const { owner, properti, pasal } = data;
 
   // Label kewenangan, alamat, jenis transaksi, dan harga datang JADI dari server
@@ -343,62 +400,35 @@ function PerjanjianDocument({ data, today, canvasRef, hasSigned, onStart, onMove
           <p className="text-xs text-[#64748B]">Pihak Pertama,</p>
           <p className="text-xs text-[#64748B]">CV Salam Bumi Property</p>
         </div>
-        {/* Pihak Kedua label + Ulangi — selalu tampil */}
+        {/* Pihak Kedua label + Ganti — tombol hanya bila TTD sudah ada */}
         <div className="relative text-center">
           <p className="text-xs text-[#64748B]">Pihak Kedua,</p>
-          <button
-            onClick={onClear}
-            type="button"
-            className="absolute right-0 top-0 flex items-center gap-1 text-xs text-[#94A3B8] hover:text-[#EF4444] transition-colors"
-          >
-            <RotateCcw size={10} /> Ulangi
-          </button>
+          {ttd && (
+            <button
+              onClick={onBukaPad}
+              type="button"
+              className="absolute right-0 top-0 flex items-center gap-1 text-xs text-[#94A3B8] hover:text-[#1565C0] transition-colors"
+            >
+              <RotateCcw size={10} /> Ganti
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Baris 2: Area gambar TTD — satu kanvas untuk mobile & desktop */}
-      <div className="relative" style={{ height: 220 }}>
-        {/* TTD Ardy — desktop only, setengah kiri */}
-        <div
-          className="hidden md:flex absolute inset-y-0 left-0 items-center justify-center"
-          style={{ width: '50%' }}
-        >
+      {/* Baris 2: Slot TTD — rasio 232,5:90 = slot PDF. Pemilik menggambar di popup,
+          bukan di sini (dulu kanvas 1400×440 → goresan 0,47 pt & gepeng di HP). */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* TTD Ardy — desktop only */}
+        <div className="hidden md:flex items-center justify-center" style={{ aspectRatio: `${SLOT_W} / ${SLOT_H}` }}>
           <img
             src={TTD_ARDY_URL}
             alt="TTD Ardy Salam"
-            className="max-h-24 max-w-full object-contain"
+            className="max-h-full max-w-full object-contain"
             onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
             suppressHydrationWarning
           />
         </div>
-        {/* Materai — tengah layar di mobile, kiri-tengah Pihak Kedua di desktop */}
-        <img
-          src={MATERAI_URL}
-          alt="Materai"
-          className="absolute pointer-events-none select-none left-[40%] md:left-[63%]"
-          style={{
-            height: 125, width: 'auto',
-            top: '50%',
-            transform: 'translate(-50%, -50%)',
-            opacity: 0.9,
-          }}
-          suppressHydrationWarning
-        />
-        {/* Kanvas — satu ref, bekerja akurat di mobile & desktop via getBoundingClientRect */}
-        <canvas
-          ref={canvasRef}
-          width={1400}
-          height={440}
-          className="absolute inset-0 w-full h-full touch-none cursor-crosshair"
-          style={{ zIndex: 5 }}
-          onMouseDown={onStart}
-          onMouseMove={onMove}
-          onMouseUp={onEnd}
-          onMouseLeave={onEnd}
-          onTouchStart={onStart}
-          onTouchMove={onMove}
-          onTouchEnd={onEnd}
-        />
+        <SlotTtdPemilik ttd={ttd} onBuka={onBukaPad} />
       </div>
 
       {/* Baris 3: Garis + nama + jabatan */}
@@ -416,8 +446,8 @@ function PerjanjianDocument({ data, today, canvasRef, hasSigned, onStart, onMove
       </div>
 
       {/* Status TTD — rata tengah di bawah */}
-      <p className={`text-center text-xs mt-2 transition-colors ${hasSigned ? 'text-[#10B981]' : 'text-[#94A3B8]'}`}>
-        {hasSigned ? '✓ TTD direkam' : 'Silahkan menggambar TTD'}
+      <p className={`text-center text-xs mt-2 transition-colors ${ttd ? 'text-[#10B981]' : 'text-[#94A3B8]'}`}>
+        {ttd ? '✓ TTD direkam' : 'Ketuk kotak Pihak Kedua untuk menandatangani'}
       </p>
     </div>
   );
@@ -428,15 +458,26 @@ function PerjanjianDocument({ data, today, canvasRef, hasSigned, onStart, onMove
 // ──────────────────────────────────────────────────────────────
 export default function SignPage() {
   const { token } = useParams<{ token: string }>();
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [state, setState] = useState<PageState>({ kind: 'loading' });
-  const isDrawingRef = useRef(false);
-  const [hasSigned, setHasSigned] = useState(false);
+  const [ttd, setTtd] = useState<HasilTtd | null>(null);
+  const [padTerbuka, setPadTerbuka] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const lastPos = useRef<{ x: number; y: number } | null>(null);
   const today = formatTanggalId();
+  const hasSigned = ttd !== null;
+
+  const bukaPad = useCallback(() => setPadTerbuka(true), []);
+  const tutupPad = useCallback(() => setPadTerbuka(false), []);
+  const simpanTtd = useCallback((h: HasilTtd) => { setTtd(h); setPadTerbuka(false); }, []);
+
+  // Prefetch chunk popup setelah dokumen tampil, supaya ketukan pertama instan.
+  // Gagal = diam: chunk dimuat lagi saat benar-benar dibuka.
+  useEffect(() => {
+    if (state.kind !== 'valid') return;
+    const t = setTimeout(() => { muatPad().catch(() => {}); }, 1500);
+    return () => clearTimeout(t);
+  }, [state.kind]);
 
   // Fetch agreement on mount
   useEffect(() => {
@@ -465,69 +506,15 @@ export default function SignPage() {
       .catch(() => setState({ kind: 'not_found' }));
   }, [token]);
 
-  // Canvas helpers — must scale mouse coords to canvas buffer size
-  const getPos = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    if ('touches' in e) {
-      return {
-        x: (e.touches[0].clientX - rect.left) * scaleX,
-        y: (e.touches[0].clientY - rect.top) * scaleY,
-      };
-    }
-    return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
-    };
-  }, []);
-
-  const startDraw = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    isDrawingRef.current = true;
-    lastPos.current = getPos(e);
-  }, [getPos]);
-
-  const draw = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    if (!isDrawingRef.current) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx || !lastPos.current) return;
-    const pos = getPos(e);
-    ctx.beginPath();
-    ctx.moveTo(lastPos.current.x, lastPos.current.y);
-    ctx.lineTo(pos.x, pos.y);
-    ctx.strokeStyle = '#0F172A';
-    ctx.lineWidth = 2.8;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-    lastPos.current = pos;
-    setHasSigned(true);
-  }, [getPos]);
-
-  const endDraw = useCallback(() => { isDrawingRef.current = false; lastPos.current = null; }, []);
-
-  const clearCanvas = useCallback(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    setHasSigned(false);
-  }, []);
-
   const handleSubmit = useCallback(async () => {
     if (state.kind !== 'valid') return;
-    const canvas = canvasRef.current;
-    if (!canvas || !hasSigned || !agreed) return;
+    if (!ttd || !agreed) return;
 
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const dataUrl = canvas.toDataURL('image/png');
+      // PNG sudah dirender di popup pada ukuran akhirnya (tataLetakTtd.js).
+      const dataUrl = ttd.dataUrl;
       const res = await fetch(`/api/sign/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -560,7 +547,7 @@ export default function SignPage() {
     } finally {
       setSubmitting(false);
     }
-  }, [state, token, hasSigned, agreed]);
+  }, [state, token, ttd, agreed]);
 
   // ── State routing ─────────────────────────────────────────
   if (state.kind === 'loading')               return <LoadingView />;
@@ -614,12 +601,8 @@ export default function SignPage() {
             <PerjanjianDocument
               data={data}
               today={today}
-              canvasRef={canvasRef}
-              hasSigned={hasSigned}
-              onStart={startDraw}
-              onMove={draw}
-              onEnd={endDraw}
-              onClear={clearCanvas}
+              ttd={ttd}
+              onBukaPad={bukaPad}
             />
           </div>
         </div>
@@ -651,7 +634,7 @@ export default function SignPage() {
         {/* Disabled hints */}
         {!hasSigned && (
           <p className="text-center text-xs text-[#94A3B8]">
-            Silahkan menggambar TTD di dokumen untuk mengaktifkan tombol kirim
+            Tanda tangani dokumen di kotak Pihak Kedua untuk mengaktifkan tombol kirim
           </p>
         )}
         {hasSigned && !agreed && (
@@ -684,6 +667,16 @@ export default function SignPage() {
           Data Anda dilindungi sesuai UU PDP RI · Tanda tangan dienkripsi dan disimpan dengan aman
         </p>
       </div>
+
+      {padTerbuka && (
+        <Suspense fallback={
+          <div className="fixed inset-0 z-[100] bg-white flex items-center justify-center">
+            <Loader2 size={32} className="text-[#1565C0] animate-spin" />
+          </div>
+        }>
+          <PadTandaTangan nama={data.owner.nama_ktp} onSimpan={simpanTtd} onTutup={tutupPad} />
+        </Suspense>
+      )}
     </div>
   );
 }

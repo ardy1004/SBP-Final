@@ -5,6 +5,7 @@
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { IDENTITAS, normalisasiJenisIdentitas } from './identitas.js';
 import { labelBertindak, susunAlamatPemilik, jenisTransaksi } from './isiPerjanjian.js';
+import { SLOT_W, SLOT_H, letakMeterai, letakTtd } from './tataLetakTtd.js';
 
 const TTD_ARDY_URL = 'https://images.salambumi.xyz/materai/gsd-removebg-preview%20-%20Copy.png';
 const MATERAI_URL  = 'https://images.salambumi.xyz/materai/hg.png';
@@ -261,19 +262,23 @@ export async function generateAgreementPDF({ agr, nikPlain, signedAt, auditIp, a
   drawRawText('Agent Properti', col1X, LINE_Y1 - 26, { sz: 8, col: C.gray });
 
   // Right column - Pihak Kedua (materai + owner TTD)
+  // Posisi dari functions/_lib/tataLetakTtd.js — rumus yang SAMA dengan pratinjau
+  // di /sign: meterai di kiri kolom, TTD menyilang tepi kanannya (separuh-separuh).
   drawRawText('Pihak Kedua,', col2X, SIG_TOP, { sz: 9, col: C.gray });
+  if (Math.abs(colW - SLOT_W) > 0.01 || IMG_H !== SLOT_H) {
+    console.warn(`[pdf] slot TTD ${colW}x${IMG_H} != tataLetakTtd ${SLOT_W}x${SLOT_H} — pratinjau /sign tidak lagi identik dengan PDF`);
+  }
+  const rasioMeterai = imgMaterai ? imgMaterai.width / imgMaterai.height : undefined;
   if (imgMaterai) {
-    // Preserve aspect ratio at full slot height; materai drawn first (under owner TTD)
-    const mH = IMG_H;
-    const mW = mH * (imgMaterai.width / imgMaterai.height);
+    const m = letakMeterai(rasioMeterai);
     page.drawImage(imgMaterai, {
-      x: col2X + (colW - mW) / 2, y: IMG_Y,
-      width: mW, height: mH, opacity: 0.9,
+      x: col2X + m.x, y: IMG_Y + m.y,
+      width: m.w, height: m.h, opacity: 0.9,
     });
   }
   if (imgOwner) {
-    const d = imgOwner.scaleToFit(colW, IMG_H);
-    page.drawImage(imgOwner, { x: col2X + (colW - d.width) / 2, y: IMG_Y, width: d.width, height: d.height });
+    const t = letakTtd(imgOwner.width, imgOwner.height, rasioMeterai);
+    page.drawImage(imgOwner, { x: col2X + t.x, y: IMG_Y + t.y, width: t.w, height: t.h });
   }
   if (!imgMaterai && !imgOwner) {
     drawRawText('[TTD Pemilik]', col2X + 10, IMG_Y + IMG_H / 2, { sz: 8, col: C.gray });
