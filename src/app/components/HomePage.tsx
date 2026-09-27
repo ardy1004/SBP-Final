@@ -1,7 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { useNavigate, Link } from 'react-router';
 import { DualCTASection, CoverageAreaSection, HomeFAQSection, ConsultationCTASection, type CoverageArea } from './HomeSections';
-import ContactAdminSheet from './ContactAdminSheet';
+import { MODUL_KOSONG } from '../lib/clientOnly';
+// Sheet kontak dimuat saat PERTAMA kali dibuka — ia memang `return null` sampai
+// dibuka, jadi ±16 KB kodenya percuma di chunk SSR. WAJIB dirender di balik
+// `sheetPernahDibuka` (tak pernah true saat SSR). Lihat MODUL_KOSONG.
+const ContactAdminSheet = lazy(() => import.meta.env.SSR ? MODUL_KOSONG : import('./ContactAdminSheet'));
 import { Search, ChevronDown, ChevronLeft, ChevronRight, Star, ArrowRight, Shield, CheckCircle, Scale, Handshake, TrendingUp, Clock, BarChart2, AlertCircle, RefreshCw } from 'lucide-react';
 import useEmblaCarousel from 'embla-carousel-react';
 import {
@@ -564,6 +568,16 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
   const [blogPosts, setBlogPosts] = useState<ApiBlogPost[]>(ssrBlogPosts ?? []);
   const [blogLoading, setBlogLoading] = useState(!hasSSR);
   const [showHomeSheet, setShowHomeSheet] = useState(false);
+  // Sekali dibuka tetap terpasang (animasi tutup & isian form tetap terjaga).
+  const [sheetPernahDibuka, setSheetPernahDibuka] = useState(false);
+  if (showHomeSheet && !sheetPernahDibuka) setSheetPernahDibuka(true);
+  // Prefetch chunk sheet saat senggang supaya pembukaan pertama instan.
+  // Penjaga SSR wajib: tanpa itu chunk sheet kembali ke build server (Asersi E).
+  useEffect(() => {
+    if (import.meta.env.SSR) return;
+    const t = setTimeout(() => { import('./ContactAdminSheet').catch(() => {}); }, 3000);
+    return () => clearTimeout(t);
+  }, []);
 
   const fetchProperties = () => {
     setLoading(true);
@@ -925,7 +939,11 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
       <HomeFAQSection />
 
       {/* Consultation Sheet — tanpa konteks properti */}
-      <ContactAdminSheet isOpen={showHomeSheet} onClose={() => setShowHomeSheet(false)} />
+      {sheetPernahDibuka && (
+        <Suspense fallback={null}>
+          <ContactAdminSheet isOpen={showHomeSheet} onClose={() => setShowHomeSheet(false)} />
+        </Suspense>
+      )}
     </>
   );
 }

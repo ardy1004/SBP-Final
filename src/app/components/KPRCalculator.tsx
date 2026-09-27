@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { formatRupiahFull } from '../data/mockData';
+import { formatRupiahFull } from '../../lib/format';
 
 interface Props {
   defaultHarga?: number;

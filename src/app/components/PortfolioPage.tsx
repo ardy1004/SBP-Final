@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { redirect } from 'react-router';
-import { PORTFOLIO_ITEMS, formatRupiah } from '../data/mockData';
+import { PORTFOLIO_ITEMS } from '../data/mockData';
+import { formatRupiah } from '../../lib/format';
 
 // Portofolio masih memakai data mock (belum ada transaksi nyata terkurasi) dan
 // sudah disembunyikan dari navigasi. Redirect akses langsung ke beranda sampai

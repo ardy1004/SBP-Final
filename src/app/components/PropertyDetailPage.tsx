@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ComponentType } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense, type ComponentType } from 'react';
 import { useParams, Link } from 'react-router';
 import { MapPin, Eye, Calendar, Share2, Heart, BedDouble, Bath, Maximize2, ChevronLeft, ChevronRight, X, MessageCircle, Star, TrendingUp, Clock, BarChart2, Home, Search, Check, AlertCircle } from 'lucide-react';
 import useEmblaCarousel from 'embla-carousel-react';
@@ -37,7 +37,11 @@ function KPRCalculatorClient({ defaultHarga }: { defaultHarga: number }) {
 }
 import PropertyCard from './PropertyCard';
 import { Skeleton } from './ui/skeleton';
-import ContactAdminSheet from './ContactAdminSheet';
+import { MODUL_KOSONG } from '../lib/clientOnly';
+// Sheet kontak dimuat saat PERTAMA kali dibuka — ia memang `return null` sampai
+// dibuka, jadi ±16 KB kodenya percuma di chunk SSR. WAJIB dirender di balik
+// `sheetPernahDibuka` (tak pernah true saat SSR). Lihat MODUL_KOSONG.
+const ContactAdminSheet = lazy(() => import.meta.env.SSR ? MODUL_KOSONG : import('./ContactAdminSheet'));
 import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnstile';
 
 // Jenis properti yang menghasilkan income sewa — analisis investasi relevan di sini
@@ -454,6 +458,16 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
   const formRef = useRef<HTMLDivElement>(null);
   const [showStickyBar, setShowStickyBar] = useState(true);
   const [showSheet, setShowSheet] = useState(false);
+  // Sekali dibuka tetap terpasang (animasi tutup & isian form tetap terjaga).
+  const [sheetPernahDibuka, setSheetPernahDibuka] = useState(false);
+  if (showSheet && !sheetPernahDibuka) setSheetPernahDibuka(true);
+  // Prefetch chunk sheet saat senggang supaya pembukaan pertama instan.
+  // Penjaga SSR wajib: tanpa itu chunk sheet kembali ke build server (Asersi E).
+  useEffect(() => {
+    if (import.meta.env.SSR) return;
+    const t = setTimeout(() => { import('./ContactAdminSheet').catch(() => {}); }, 3000);
+    return () => clearTimeout(t);
+  }, []);
   const stickyRef = useRef<HTMLDivElement>(null);
 
   // Guard: kode_listing yang sudah di-fire agar tidak double-fire di StrictMode / SPA nav
@@ -972,11 +986,15 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
       )}
 
       {/* Contact Admin — Bottom Sheet (mobile) */}
-      <ContactAdminSheet
-        property={property}
-        isOpen={showSheet}
-        onClose={() => setShowSheet(false)}
-      />
+      {sheetPernahDibuka && (
+        <Suspense fallback={null}>
+          <ContactAdminSheet
+            property={property}
+            isOpen={showSheet}
+            onClose={() => setShowSheet(false)}
+          />
+        </Suspense>
+      )}
 
       {/* Lightbox */}
       {lightbox && (

@@ -72,6 +72,12 @@ import { join } from 'node:path';
 //             proksi kasar (lihat catatan di atas) — menaikkannya di sini sah
 //             karena metrik yang benar-benar berbahaya tidak bergerak.
 // ─────────────────────────────────────────────────────────────────────────────
+// 2026-09-27  559.779 B (100,0%) → 495.816 B (88,5%) setelah pemangkasan. Anggaran
+//             SENGAJA tidak diturunkan (plan disetujui user): ruang ±64 KB adalah
+//             tujuannya, setara filosofi awal "+11% headroom nyata". Minify SSR
+//             SENGAJA tidak dipakai: [B] turun ke ±300 KB tapi CPU startup tidak
+//             berubah (103 vs 105 ms, terukur) — hanya mengganti penggaris, dan
+//             stack trace SSR jadi teracak.
 const BUDGET_SSR_MAIN_CHUNK = 560_000;    // 503.003 +11% — headroom nyata, bukan tepi jurang
 // Naik 6.050.000 → 6.150.000 pada 2026-08-12, disetujui user. Sebabnya perbaikan
 // Titip Jual (autosave draft, endpoint prospek, telemetri 403/422, status
@@ -101,7 +107,11 @@ const BUDGET_SSR_MAIN_CHUNK = 560_000;    // 503.003 +11% — headroom nyata, bu
 //             17 halaman admin + recharts/leaflet/lodash/react-grid-layout/dnd-kit/
 //             d3/papaparse tak lagi ikut ke Worker. CPU startup lokal (wrangler
 //             check startup, median 3×) 143 → 105 ms. Angka ini = terukur + ±10%.
-const BUDGET_FUNCTIONS_RAW  = 3_300_000;
+// 2026-09-27  RATCHET lagi 3.300.000 → 3.050.000 (Tahap 2): mockData dibersihkan,
+//             Skeleton tanpa cn() (impor eager 8 → 6), /sign client-only,
+//             ContactAdminSheet lazy, /api/titip-jual lama → tombstone 410.
+//             Terukur 2.768.436 B; chunk SSR 559.779 → 495.816 B (88,5%).
+const BUDGET_FUNCTIONS_RAW  = 3_050_000;
 const BUDGET_FUNCTIONS_GZIP = 8_000_000;  // jauh di bawah batas 10 MB; alarm jaring pengaman saja
 
 /**
@@ -121,9 +131,9 @@ const SSR_IMPORT_ALLOWLIST = new Set([
   'react-router',
   'react',
   'lucide-react',
-  'clsx',
-  'tailwind-merge',
   'embla-carousel-react',   // publik (HomePage, PropertyDetailPage) — sah
+  // 2026-09-27: clsx & tailwind-merge KELUAR — satu-satunya pemakainya di SSR
+  // adalah cn() di ui/skeleton.tsx, kini tanpa cn(). Jangan tambahkan kembali.
 ]);
 
 /**
@@ -142,7 +152,7 @@ const SSR_IMPORT_ALLOWLIST = new Set([
  */
 const SSR_CHUNK_MALAS_DIIZINKAN = new Set([
   'StepDataDiri',     // Titip Jual Tahap 2 (React.lazy, tanpa dependensi berat)
-  'PadTandaTangan',   // popup TTD /sign (React.lazy, tanpa dependensi berat)
+  // PadTandaTangan keluar 2026-09-27: /sign kini client-only (routes/sign.tsx).
 ]);
 
 const SSR_INDEX = 'dist/server/index.js';

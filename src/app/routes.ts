@@ -19,7 +19,7 @@ export default [
     route("notaris", "./components/NotarisPage.tsx"),
     route("privacy", "./components/PrivacyPage.tsx"),
     route("titip-jual/*", "./components/TitipJualPage.tsx"),
-    route("sign/:token", "./components/SignPage.tsx"),
+    route("sign/:token", "./routes/sign.tsx"),   // client-only — SSR hanya pernah merender "Memuat…"
   ]),
 
   // Admin — CSR saja (tidak perlu SSR).

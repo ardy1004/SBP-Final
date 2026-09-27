@@ -732,6 +732,8 @@ export async function deleteBlogPost(id: number) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RE-EXPORT formatRupiah agar komponen tidak perlu import dari dua tempat
+// RE-EXPORT formatRupiah agar komponen tidak perlu import dari dua tempat.
+// ⚠️ Sumbernya ./format, BUKAN data/mockData: re-export dari mockData dulu
+// menyeret 13,8 KB data tiruan ke chunk SSR & ke setiap halaman browser.
 // ─────────────────────────────────────────────────────────────────────────────
-export { formatRupiah, formatRupiahFull } from '../app/data/mockData';
+export { formatRupiah, formatRupiahFull } from './format';
