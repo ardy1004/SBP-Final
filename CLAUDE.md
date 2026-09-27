@@ -18,6 +18,7 @@
 ## Rules Wajib
 - Semua backend = Cloudflare Pages Functions di `/functions/` (BUKAN Node.js server terpisah)
 - Auth: JWT cookie (`sbp_session`, httpOnly+Secure+SameSite=Strict), semua `/api/admin/*` dilindungi `functions/api/admin/_middleware.js`
+  - 🔥 **SETIAP JWT WAJIB ber-`scope`, dan `verifyJWT(token, secret, scopeWajib)` WAJIB diberi scope** (`functions/api/_shared/jwt.js` melempar bila tidak). Sesi admin (`'admin'`) dan tiket publik (`'chat'`, `'titipjual-foto'`, `'titipjual-lanjut'`) ditandatangani `JWT_SECRET` yang SAMA — tanda tangan sah BUKAN bukti jenis token. Sampai 2026-09-27 middleware admin tidak memeriksa scope: tiket foto yang bisa diminta siapa pun tanpa login diterima sebagai sesi admin dan membuka NIK terdekripsi seluruh pemilik (terbuka ±2 bulan, tanpa log request untuk memastikan ada/tidaknya eksploitasi). Middleware kini mewajibkan scope `'admin'` + `sub` integer + baris `admins` masih ada. Menambah jenis tiket baru = scope baru, jangan pernah memakai ulang scope lain.
 - Helper response: `functions/api/_shared/response.js` → `jsonOk(data)` / `jsonError(msg, status)`
 - Build: `npm run build` (WAJIB 0 error sebelum commit)
 - Dev API: `wrangler pages dev dist/client --port=8790` — `npm run dev` (Vite :5173) TIDAK menjalankan `/api/*` maupun D1
