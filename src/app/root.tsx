@@ -37,10 +37,30 @@ const TRACKING_FALLBACK: TrackingConfig = {
   facebook_domain_verification: null,
 };
 
+// Halaman yang TIDAK BOLEH memuat Meta Pixel / GA4 sama sekali. Keduanya
+// mengirim URL LENGKAP halaman ke pihak ketiga (Pixel: parameter `dl`, GA4:
+// `page_location` — terbaca siapa pun yang punya akses laporan GA4):
+// - /sign/<token>: token itu membuka NIK/SIM terdekripsi dan bisa dipakai
+//   menandatangani atas nama pemilik. Sampai 2026-09-27 setiap link tanda
+//   tangan yang dibuka ikut terkirim ke Meta dan Google.
+// - /admin: "Pencocokan Situs Web Otomatis" Meta merekam email login admin.
+// - /titip-jual?lanjut=<tiket>: link lanjutan Tahap 2 yang dikirim admin
+//   memuat tiket_lanjut di URL.
+// Aman terhadap cache edge: ketiga prefiks ada di NEVER_CACHE_PREFIXES
+// (functions/_lib/edgeCache.js), jadi SSR-nya selalu per request.
+function tanpaPelacak(url: URL): boolean {
+  const p = url.pathname;
+  return p === '/sign' || p.startsWith('/sign/')
+    || p === '/admin' || p.startsWith('/admin/')
+    || (p.startsWith('/titip-jual') && url.searchParams.has('lanjut'));
+}
+
 // SSR loader — query DB langsung (tanpa HTTP round-trip ke /api/tracking-config)
 // Graceful fallback: tabel belum ada (sebelum migration) atau env tidak tersedia → TRACKING_FALLBACK
-export async function loader({ context }: LoaderFunctionArgs): Promise<TrackingConfig> {
+export async function loader({ context, request }: LoaderFunctionArgs): Promise<TrackingConfig> {
   try {
+    if (tanpaPelacak(new URL(request.url))) return TRACKING_FALLBACK;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const env = (context as any)?.cloudflare?.env;
     if (!env?.DB) return TRACKING_FALLBACK;

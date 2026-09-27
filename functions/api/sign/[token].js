@@ -162,9 +162,15 @@ export async function onRequestGet(context) {
     return jsonOk({ status: 'belum_dikonfigurasi' });
   }
 
-  // Increment link_opened_count (best-effort, tidak blokir response)
-  env.DB.prepare('UPDATE agreements SET link_opened_count = link_opened_count + 1 WHERE sign_token = ?')
-    .bind(token).run().catch(() => {});
+  // Increment link_opened_count (best-effort, tidak blokir response).
+  // ⚠️ WAJIB lewat waitUntil. Dulu promise-nya dibiarkan menggantung tanpa
+  // di-await — Workers membunuh pekerjaan yang tertinggal begitu respons
+  // terkirim, sehingga hanya 1 dari 19 perjanjian signed yang tercatat pernah
+  // dibuka (padahal mustahil ditandatangani tanpa dibuka).
+  context.waitUntil(
+    env.DB.prepare('UPDATE agreements SET link_opened_count = link_opened_count + 1 WHERE sign_token = ?')
+      .bind(token).run().catch(err => console.error('[sign GET] link_opened_count gagal:', err?.message))
+  );
 
   // Dekripsi NIK untuk ditampilkan di dokumen (by-design: owner menandatangani dokumen sendiri)
   let nik_owner = null;
@@ -292,6 +298,28 @@ export async function onRequestPost(context) {
     return jsonError('Data tanda tangan bukan file PNG yang valid', 422);
   }
 
+  // ─── [0] Dekripsi nomor identitas SEBELUM apa pun ditulis ─────────────────
+  // Dokumen hukum TIDAK BOLEH ditandatangani tanpa nomor identitas pihak kedua.
+  // Dulu kegagalan dekripsi (mis. NIK_ENC_KEY dirotasi — kunci tak berversi)
+  // diteruskan diam-diam sebagai '(terenkripsi)', sehingga PDF dan hash audit
+  // resmi lahir tanpa NIK. Sekarang ditolak dan tercatat untuk admin.
+  let nikPlain = null;
+  if (agr.nik_encrypted && env.NIK_ENC_KEY) {
+    try {
+      nikPlain = await decryptNIK(agr.nik_encrypted, env.NIK_ENC_KEY);
+    } catch (err) {
+      console.error('[sign POST] Dekripsi nomor identitas gagal:', err.message);
+    }
+  }
+  if (!nikPlain) {
+    context.waitUntil(logServerError(env, {
+      message: '[sign POST] Nomor identitas tidak bisa didekripsi — penandatanganan ditolak (500)',
+      url: request.url,
+      context: { kode_perjanjian: agr.kode_perjanjian, ada_ciphertext: Boolean(agr.nik_encrypted), ada_kunci: Boolean(env.NIK_ENC_KEY) },
+    }));
+    return jsonError('Dokumen belum bisa ditandatangani karena kendala teknis. Tim SBP sudah menerima laporannya dan akan menghubungi Anda.', 500);
+  }
+
   // ─── [1] Upload signature ke R2 ───────────────────────────────────────────
   const r2Key = `signatures/${agr.kode_perjanjian}-${crypto.randomUUID()}.png`;
   let signature_image_url;
@@ -305,16 +333,6 @@ export async function onRequestPost(context) {
     context.waitUntil(logServerError(env, { message: `[sign POST] Upload R2 gagal: ${err.message}`, stack: err.stack, url: request.url, context: { kode_perjanjian: agr.kode_perjanjian } }));
     // Jika R2 gagal, JANGAN set token_used — tolak request
     return jsonError('Gagal menyimpan tanda tangan. Silakan coba lagi.', 500);
-  }
-
-  // ─── [2] Dekripsi NIK untuk hash dokumen ─────────────────────────────────
-  let nikPlain = '(terenkripsi)';
-  if (agr.nik_encrypted && env.NIK_ENC_KEY) {
-    try {
-      nikPlain = await decryptNIK(agr.nik_encrypted, env.NIK_ENC_KEY);
-    } catch (err) {
-      console.error('[sign POST] Dekripsi NIK untuk hash gagal:', err.message);
-    }
   }
 
   // ─── [3] Hitung audit hash dokumen ───────────────────────────────────────
