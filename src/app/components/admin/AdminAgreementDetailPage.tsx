@@ -34,6 +34,8 @@ interface AgreementDetail {
   perlu_versi_perbaikan: boolean;
   /** menunggu_ttd tapi link tanda tangannya sudah lewat masa berlaku (72 jam). */
   link_kedaluwarsa: boolean;
+  /** 5 akses nomor identitas SEBELUMNYA (migrasi 0056) — akses saat ini dicatat sesudah respons. */
+  akses_terakhir?: Array<{ aksi: 'lihat' | 'ubah'; created_at: string; oleh: string }>;
   owner: {
     id: number;
     nama_pemilik: string;
@@ -605,6 +607,20 @@ export default function AdminAgreementDetailPage() {
           </dl>
         )}
         {!editingOwner && <DataAhliWaris raw={data.owner.data_ahli_waris} />}
+        {!editingOwner && data.owner.nik && (
+          // Kebijakan Privasi pasal 4: akses nomor identitas tercatat. Setiap
+          // pembukaan halaman ini (yang menampilkan nomor) ikut tercatat.
+          <div className="mt-4 text-[11px] text-[#94A3B8]">
+            <span className="font-semibold text-[#64748B]">Akses nomor identitas sebelumnya: </span>
+            {data.akses_terakhir?.length
+              ? data.akses_terakhir.map((x, i) => (
+                  // created_at SQLite = UTC tanpa zona ("YYYY-MM-DD HH:MM:SS") —
+                  // tanpa 'Z' peramban membacanya sebagai waktu lokal (meleset 7 jam).
+                  <span key={i}>{i > 0 ? ' · ' : ''}{x.aksi === 'ubah' ? 'diubah' : 'dilihat'} {x.oleh}, {formatDateTime(`${x.created_at.replace(' ', 'T')}Z`)}</span>
+                ))
+              : 'belum ada (pencatatan dimulai 27 Sep 2026)'}
+          </div>
+        )}
       </div>
 
       {/* ─── Property Card ───────────────────────────────────────── */}

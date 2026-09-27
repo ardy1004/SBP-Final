@@ -126,6 +126,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const pixelScript = pageViewPixels.length > 0 ? [
     `!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[]}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');`,
     `window._sbpTracking=${JSON.stringify({ pixels: tracking?.pixels ?? [], ga4_measurement_id: ga4Id })};`,
+    // Opt-out cookie (CookieBanner "Tolak"): consent 'revoke' SEBELUM init →
+    // Meta menahan seluruh event. Dulu "Tolak" tidak berefek apa pun, padahal
+    // Kebijakan Privasi menjanjikannya. try/catch: storage bisa diblokir.
+    `try{if(localStorage.getItem('sbp_cookie_consent')==='rejected')fbq('consent','revoke')}catch(e){}`,
     ...pageViewPixels.map(p => `fbq('init','${p.pixel_id}');`),
     `fbq('track','PageView');`,
   ].join('\n') : null;
@@ -133,8 +137,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // gtag stub langsung tersedia (event ter-queue di dataLayer), tapi script
   // gtag.js/gtm.js baru dimuat setelah interaksi pertama (atau fallback 4s).
   // Ini memangkas ~200KB JS pihak ketiga dari critical path (Lighthouse LCP/TBT).
+  // `ga-disable-<ID>` (mekanisme opt-out resmi gtag) dipasang SEBELUM config
+  // bila pengunjung menolak cookie — lihat CookieBanner.
   const gtagScript = ga4Id
-    ? `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}window.gtag=gtag;gtag('js',new Date());gtag('config','${ga4Id}');`
+    ? `try{if(localStorage.getItem('sbp_cookie_consent')==='rejected')window['ga-disable-${ga4Id}']=true}catch(e){}window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}window.gtag=gtag;gtag('js',new Date());gtag('config','${ga4Id}');`
     : null;
 
   const gtmHeadScript = gtmId

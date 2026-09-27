@@ -40,7 +40,7 @@ export default function PrivacyPage() {
               },
               {
                 title: '5. Retensi Data',
-                content: 'Data lead/inquiry: disimpan 24 bulan, kemudian dianonimkan atau dihapus. Data kontrak/perjanjian: disimpan selama kewajiban hukum berlaku (minimal 5 tahun). Data KTP/identitas: disimpan selama diperlukan untuk keperluan hukum dan kepatuhan. Setelah periode retensi berakhir, data dihapus secara permanen.',
+                content: 'Data lead/inquiry: disimpan 24 bulan, kemudian dianonimkan. Pengajuan titip jual yang tidak dilanjutkan hingga perjanjian: dihapus beserta fotonya setelah 24 bulan. Data kontrak/perjanjian: disimpan selama kewajiban hukum berlaku (minimal 5 tahun). Data KTP/identitas: disimpan selama diperlukan untuk keperluan hukum dan kepatuhan. Setelah periode retensi berakhir, data dihapus secara permanen.',
               },
               {
                 title: '6. Hak Subjek Data (Sesuai UU PDP)',
@@ -48,11 +48,11 @@ export default function PrivacyPage() {
               },
               {
                 title: '7. Kebijakan Cookie',
-                content: 'Website kami menggunakan cookie untuk analitik (Google Analytics 4) dan meningkatkan pengalaman pengguna. Anda dapat mengontrol preferensi cookie melalui banner consent yang muncul saat pertama kali mengunjungi website. GA4 hanya diaktifkan setelah Anda memberikan persetujuan.',
+                content: 'Website kami menggunakan cookie analitik (Google Analytics 4) dan cookie pengukuran iklan (Meta Pixel). Keduanya aktif secara bawaan saat Anda mengunjungi website. Anda dapat menolaknya melalui tombol "Tolak" pada banner cookie: pilihan tersebut disimpan di perangkat Anda dan menghentikan pengiriman data GA4 dan Meta Pixel dari peramban Anda sejak saat itu. Halaman tanda tangan perjanjian dan panel admin tidak memuat kedua layanan tersebut sama sekali.',
               },
               {
                 title: '8. Berbagi Data dengan Pihak Ketiga',
-                content: 'Kami tidak menjual data pribadi Anda. Data dapat dibagikan kepada notaris/PPAT rekanan (hanya data yang diperlukan untuk proses hukum) dan penyedia layanan teknis yang terikat perjanjian kerahasiaan.\n\nUntuk mengukur hasil iklan kami, sebagian data dikirim ke platform periklanan (Meta/Facebook): penanda teknis dari cookie iklan dan perangkat Anda, serta nomor WhatsApp dalam bentuk teracak satu arah (hash SHA-256) yang tidak dapat dikembalikan ke nomor aslinya. Pengiriman ini hanya untuk mencocokkan konversi dengan iklan kami — kami tidak mengirimkan nama, alamat, maupun isi pesan Anda, dan tidak membagikan data Anda kepada pemasar pihak ketiga lain.',
+                content: 'Kami tidak menjual data pribadi Anda. Data dapat dibagikan kepada notaris/PPAT rekanan (hanya data yang diperlukan untuk proses hukum) dan penyedia layanan teknis yang terikat perjanjian kerahasiaan.\n\nUntuk mengukur hasil iklan kami, sebagian data dikirim ke platform periklanan (Meta/Facebook): penanda teknis dari cookie iklan dan perangkat Anda, serta nomor WhatsApp dalam bentuk teracak satu arah (hash SHA-256) — nomor asli tidak dikirim, dan hash ini hanya dipakai platform untuk mencocokkan konversi. Pengiriman ini hanya untuk mencocokkan konversi dengan iklan kami — kami tidak mengirimkan nama, alamat, maupun isi pesan Anda, dan tidak membagikan data Anda kepada pemasar pihak ketiga lain.',
               },
               {
                 title: '9. Kontak Data Protection',

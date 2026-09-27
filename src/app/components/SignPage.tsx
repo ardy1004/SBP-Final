@@ -70,7 +70,7 @@ type PageState =
   | { kind: 'belum_dikonfigurasi' }
   | { kind: 'sudah_ditandatangani'; slug_properti: string | null; kode_perjanjian: string }
   | { kind: 'valid'; data: AgreementData }
-  | { kind: 'success'; property_url: string; kode_perjanjian: string; token: string; pdf_tersedia: boolean };
+  | { kind: 'success'; property_url: string; kode_perjanjian: string; token: string; pdf_tersedia: boolean; properti_tayang: boolean };
 
 // ──────────────────────────────────────────────────────────────
 // Helpers
@@ -188,7 +188,7 @@ function SuccessView({ data }: { data: Extract<PageState, { kind: 'success' }> }
       <div className="text-center max-w-md">
         <div className="text-6xl mb-6">🚀</div>
         <h1 className="font-display text-2xl font-bold text-[#0F172A] mb-3">
-          Selamat, properti Anda telah tayang!
+          {data.properti_tayang ? 'Selamat, properti Anda telah tayang!' : 'Terima kasih, perjanjian telah ditandatangani!'}
         </h1>
         <p className="text-[#64748B] mb-2">
           Tanda tangan elektronik Anda telah berhasil direkam.
@@ -201,12 +201,13 @@ function SuccessView({ data }: { data: Extract<PageState, { kind: 'success' }> }
           Data Anda dilindungi sesuai UU PDP RI
         </div>
         <div className="flex flex-col gap-3">
-          <Link
+          {/* Tautan listing hanya bila memang tayang — dulu selalu tampil walau listingnya diarsipkan. */}
+          {data.properti_tayang && <Link
             to={data.property_url}
             className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-white bg-[#1565C0] hover:bg-[#1976D2] transition-colors"
           >
             Lihat Properti Saya <ExternalLink size={16} />
-          </Link>
+          </Link>}
           {data.pdf_tersedia && (
             <a
               href={`/api/sign/${data.token}/pdf`}
@@ -551,6 +552,8 @@ export default function SignPage() {
         kode_perjanjian: d.kode_perjanjian,
         token: token!,
         pdf_tersedia: d.pdf_tersedia === true,
+        // Server lama tidak mengirim field ini → anggap tayang (perilaku lama).
+        properti_tayang: d.properti_tayang !== false,
       });
     } catch (err: any) {
       setSubmitError(err.message || 'Terjadi kesalahan. Silakan coba lagi.');

@@ -25,6 +25,17 @@ function isValidWA(raw) {
   return /^628[0-9]{8,12}$/.test(normalizeWA(raw));
 }
 
+/**
+ * Catat akses nomor identitas (best-effort, lewat waitUntil). Gagal mencatat
+ * tidak boleh menggagalkan permintaan admin — tapi WAJIB terlihat di log.
+ */
+function catatAksesIdentitas(env, adminId, agreementId, aksi) {
+  if (!Number.isInteger(adminId)) return Promise.resolve();
+  return env.DB.prepare('INSERT INTO log_akses_identitas (admin_id, agreement_id, aksi) VALUES (?, ?, ?)')
+    .bind(adminId, agreementId, aksi).run()
+    .catch(err => console.error('[admin agreement] catat akses identitas gagal:', err?.message));
+}
+
 async function fetchAgreementById(db, id) {
   return db.prepare(`
     SELECT
@@ -88,7 +99,18 @@ export async function onRequestGet(context) {
     catch (err) { console.error('[admin agreement GET] Dekripsi NIK gagal:', err.message); }
   }
 
+  // Jejak akses nomor identitas (migrasi 0056) — dicatat HANYA bila nomornya
+  // benar-benar terdekripsi dan dikirim. Riwayat dibaca SEBELUM akses ini
+  // tercatat, jadi daftarnya = akses-akses sebelumnya.
+  const akses_terakhir = await env.DB.prepare(`
+    SELECT l.aksi, l.created_at, COALESCE(ad.nama, ad.email, 'admin #' || l.admin_id) AS oleh
+      FROM log_akses_identitas l LEFT JOIN admins ad ON ad.id = l.admin_id
+     WHERE l.agreement_id = ? ORDER BY l.id DESC LIMIT 5
+  `).bind(id).all().then(r => r.results ?? [], () => []);
+  if (nik) context.waitUntil(catatAksesIdentitas(env, context.data?.admin?.sub, id, 'lihat'));
+
   return jsonOk({
+    akses_terakhir,
     id: agr.id,
     kode_perjanjian: agr.kode_perjanjian,
     status: agr.status,
@@ -182,7 +204,7 @@ export async function onRequestPatch(context) {
   let agr;
   try {
     agr = await env.DB.prepare(
-      `SELECT a.id, a.status, a.owner_id, a.property_id, o.jenis_identitas
+      `SELECT a.id, a.status, a.owner_id, a.property_id, o.jenis_identitas, o.nik_encrypted
          FROM agreements a LEFT JOIN owners o ON o.id = a.owner_id WHERE a.id = ?`
     ).bind(id).first();
   } catch (err) {
@@ -272,6 +294,14 @@ export async function onRequestPatch(context) {
 
   if (Object.keys(errors).length > 0) return jsonError('Validasi gagal', 422, errors);
 
+  // UI admin selalu mengirim ulang nomor yang sudah terisi. Nomor yang SAMA
+  // dengan yang tersimpan bukan perubahan: jangan dienkripsi ulang dan jangan
+  // dicatat sebagai 'ubah' di log akses.
+  if (nikRaw && agr.nik_encrypted && env.NIK_ENC_KEY) {
+    const lama = await decryptNIK(agr.nik_encrypted, env.NIK_ENC_KEY).catch(() => null);
+    if (lama === nikRaw) nikRaw = null;
+  }
+
   // ─── Encrypt NIK jika diubah ──────────────────────────────────────
   if (nikRaw) {
     if (!env.NIK_ENC_KEY) return jsonError('NIK_ENC_KEY tidak terkonfigurasi', 503);
@@ -301,6 +331,7 @@ export async function onRequestPatch(context) {
     console.error('[admin patch] UPDATE error:', err.message);
     return jsonError('Gagal menyimpan perubahan', 500);
   }
+  if (nikRaw) context.waitUntil(catatAksesIdentitas(env, context.data?.admin?.sub, id, 'ubah'));
 
   // Return refreshed data
   const updated = await fetchAgreementById(env.DB, id);

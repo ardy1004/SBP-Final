@@ -11,6 +11,7 @@ import { hapusAsetVideo } from '../../../_lib/videoStorage.js';
 import { logServerError } from '../../../_lib/logError.js';
 import { adaJadwalTertunda } from '../../../_lib/schedulerProviders.js';
 import { sqlTanggalWibMinus } from '../../../_lib/waktu.js';
+import { collectPropertyR2Keys, deleteR2Keys } from '../../../_lib/r2Cleanup.js';
 
 // Batas D1 = 100 bound parameter per query, dan DELETE di bawah memakai
 // `IN (?, ?, ...)` sebanyak jumlah baris. Nilai 200 yang lama membuat cron GAGAL
@@ -196,6 +197,55 @@ async function bersihkanTabel(env) {
     console.error('[purge-trash] retensi titip_jual_tiket_log', err.message);
   }
 
+  // ─── Retensi 24 bulan (Kebijakan Privasi pasal 5) ────────────────────────
+  // Janji "data lead disimpan 24 bulan, kemudian dianonimkan atau dihapus" dulu
+  // tidak punya mekanisme apa pun. Kriteria SENGAJA sempit — ini menghapus
+  // data nyata tiap malam; lebih baik terlalu sedikit daripada salah hapus:
+  //  · leads > 24 bulan → dianonimkan (nama/WA/asal/pesan/catatan dikosongkan);
+  //    baris & statistiknya (tipe, status, sumber, properti) tetap ada.
+  //  · draft Tahap 1 Titip Jual yang TIDAK PERNAH berlanjut > 24 bulan
+  //    (submit_id ada, masih draft, tanpa perjanjian apa pun) → dihapus beserta
+  //    foto R2 & owner-nya. Owner dihapus DULU (FK ON DELETE SET NULL — lihat
+  //    CLAUDE.md), baru properti. Maks 50 per malam.
+  // Perjanjian & data kontrak TIDAK disentuh (retensi hukum ≥ 5 tahun).
+  let leadsDianonimkan = 0;
+  let draftDihapus = 0;
+  try {
+    const r = await env.DB.prepare(`
+      UPDATE leads SET nama = NULL, no_wa = NULL, asal_daerah = NULL, pesan = NULL, notes = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+       WHERE created_at < datetime('now', '-24 months')
+         AND (nama IS NOT NULL OR no_wa IS NOT NULL OR pesan IS NOT NULL OR notes IS NOT NULL)
+    `).run();
+    leadsDianonimkan = r?.meta?.changes ?? 0;
+  } catch (err) {
+    console.error('[purge-trash] anonimkan leads 24 bulan', err.message);
+  }
+  try {
+    const kandidat = await env.DB.prepare(`
+      SELECT p.id FROM properties p
+       WHERE p.submit_id IS NOT NULL
+         AND p.status_publish = 'draft'
+         AND p.created_at < datetime('now', '-24 months')
+         AND NOT EXISTS (SELECT 1 FROM agreements a WHERE a.property_id = p.id)
+       LIMIT 50
+    `).all();
+    const ids = (kandidat.results ?? []).map(r => r.id);
+    if (ids.length) {
+      const keys = await collectPropertyR2Keys(env.DB, ids);
+      const ph = ids.map(() => '?').join(',');
+      await env.DB.batch([
+        env.DB.prepare(`DELETE FROM owners WHERE property_id IN (${ph})`).bind(...ids),
+        env.DB.prepare(`DELETE FROM properties WHERE id IN (${ph})`).bind(...ids),
+      ]);
+      // R2 SESUDAH D1: kalau D1 gagal, foto tetap utuh untuk listing yang tetap ada.
+      if (env.MEDIA && keys.length) await deleteR2Keys(env.MEDIA, keys);
+      draftDihapus = ids.length;
+    }
+  } catch (err) {
+    console.error('[purge-trash] hapus draft Tahap 1 > 24 bulan', err.message);
+  }
+
   // Retensi titip_jual_foto_log (migrasi 0054) — penghitung unggahan per tiket
   // foto; tiketnya berumur 1 jam, jadi 1 hari sudah jauh berlebih.
   let fotoLog = 0;
@@ -217,6 +267,8 @@ async function bersihkanTabel(env) {
     foto_diperiksa: fotoDiperiksa,
     tiket_log_dihapus: tiketLog,
     foto_log_dihapus: fotoLog,
+    leads_dianonimkan: leadsDianonimkan,
+    draft_24_bulan_dihapus: draftDihapus,
   };
 }
 

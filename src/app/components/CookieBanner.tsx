@@ -61,11 +61,24 @@ export default function CookieBanner() {
     };
   }, [show]);
 
-  const accept = () => {
+  // ⚠️ Pilihan WAJIB berefek. Dulu "Tolak" hanya menyembunyikan banner —
+  // tidak disimpan (banner muncul lagi tiap halaman) dan Pixel/GA4 tetap
+  // berjalan, padahal Kebijakan Privasi pasal 7 menjanjikan sebaliknya. Kini
+  // pilihan disimpan dan langsung diterapkan; kunjungan berikutnya diterapkan
+  // skrip inline di root.tsx SEBELUM Pixel/GA4 menyala.
+  const pilih = (nilai: 'accepted' | 'rejected') => {
     try {
-      localStorage.setItem(KUNCI, 'accepted');
+      localStorage.setItem(KUNCI, nilai);
     } catch {
       /* best-effort: banner tetap ditutup untuk sesi ini */
+    }
+    try {
+      const w = window as unknown as { fbq?: (...a: unknown[]) => void; _sbpTracking?: { ga4_measurement_id?: string | null } } & Record<string, unknown>;
+      w.fbq?.('consent', nilai === 'accepted' ? 'grant' : 'revoke');
+      const ga = w._sbpTracking?.ga4_measurement_id;
+      if (ga) w[`ga-disable-${ga}`] = nilai === 'rejected';
+    } catch {
+      /* pelacak belum/tidak dimuat — tidak ada yang perlu dimatikan */
     }
     setShow(false);
   };
@@ -98,13 +111,13 @@ export default function CookieBanner() {
         </div>
         <div className="flex gap-2 flex-shrink-0">
           <button
-            onClick={() => setShow(false)}
+            onClick={() => pilih('rejected')}
             className="px-4 py-2 rounded-lg text-sm text-white/60 hover:text-white border border-white/20 transition-colors"
           >
             Tolak
           </button>
           <button
-            onClick={accept}
+            onClick={() => pilih('accepted')}
             className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
             style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
           >

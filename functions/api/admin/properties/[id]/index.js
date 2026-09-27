@@ -220,6 +220,11 @@ export async function onRequestPatch(context) {
       // sekali, tidak bisa buat row baru hanya dengan Owner 2 tanpa Owner 1.
       if (!existingOwner && !nextPhone1 && nextPhone2) {
         errors.owner_phone = 'Isi No. Telp/WA Owner 1 terlebih dahulu sebelum Owner 2';
+      } else if (existingOwner && phone1Set && !nextPhone1) {
+        // Mengosongkan WA 1 owner yang sudah ada melanggar NOT NULL. Dulu
+        // tertangkap SESUDAH UPDATE properti ter-commit → 500 dengan data
+        // setengah tersimpan. Ditolak di sini, sebelum tulisan DB apa pun.
+        errors.owner_phone = 'No. WA owner 1 tidak boleh dikosongkan — ganti dengan nomor lain bila perlu';
       } else {
         ownerPhoneUpdate = { phone1Set, phone1: nextPhone1, phone2Set, phone2: nextPhone2 };
       }

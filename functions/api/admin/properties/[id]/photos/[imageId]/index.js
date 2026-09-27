@@ -20,6 +20,7 @@ const R2_PREFIXES = ['property-photos/', 'signatures/', 'agreements/'];
 // 6 level: [imageId] → photos → [id] → properties → admin → api → functions/
 // (bandingkan `_shared` di atas yang cuma 5, karena letaknya di functions/api/).
 import { PHOTO_LABELS } from '../../../../../../_lib/viralframe.js';
+import { stmtNormalisasiCover } from '../../../../../../_lib/fotoUtama.js';
 
 const LABEL_SAH = new Set(PHOTO_LABELS);
 
@@ -77,26 +78,22 @@ export async function onRequestDelete(context) {
   if (!photo) return jsonError('Foto tidak ditemukan untuk properti ini', 404);
 
   try {
-    // Hapus baris DB
-    await env.DB.prepare('DELETE FROM property_images WHERE id = ?').bind(imageId).run();
+    // Hapus baris + normalisasi foto utama dalam SATU batch (atomik). Dulu tiga
+    // langkah terpisah dengan logika cover tulisan tangan: gagal di tengah =
+    // listing tanpa foto utama. Aturan tunggalnya ada di _lib/fotoUtama.js.
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM property_images WHERE id = ?').bind(imageId),
+      stmtNormalisasiCover(env.DB, propertyId),
+    ]);
 
-    // Hapus dari R2 jika url_webp adalah R2 key
+    // Hapus dari R2 SESUDAH D1 — kalau D1 gagal, foto tetap utuh. Aman dari
+    // efek samping: UNIQUE(url_webp) (migrasi 0054) menjamin tidak ada baris
+    // lain yang masih memakai objek ini.
     const key = photo.url_webp ?? '';
     if (R2_PREFIXES.some(p => key.startsWith(p))) {
       await env.MEDIA.delete(key).catch(err =>
         console.warn('[admin photo DELETE] R2 delete gagal:', err.message)
       );
-    }
-
-    // Jika foto yang dihapus adalah cover, set foto lain sebagai cover otomatis
-    if (photo.is_cover) {
-      const nextPhoto = await env.DB.prepare(
-        'SELECT id FROM property_images WHERE property_id = ? ORDER BY urutan ASC, id ASC LIMIT 1'
-      ).bind(propertyId).first();
-
-      if (nextPhoto) {
-        await env.DB.prepare('UPDATE property_images SET is_cover = 1 WHERE id = ?').bind(nextPhoto.id).run();
-      }
     }
 
     const remaining = await env.DB.prepare(

@@ -451,6 +451,11 @@ export async function onRequestPost(context) {
     // Non-fatal: agreement sudah signed, log saja
     console.error('[sign POST] Auto-publish properti gagal:', err.message);
   }
+  // Status tayang SESUNGGUHNYA — dulu pesan sukses selalu "telah dipublikasikan",
+  // termasuk untuk listing yang diarsipkan admin (UPDATE di atas hanya menyentuh
+  // draft) atau saat UPDATE-nya gagal.
+  const properti_tayang = await env.DB.prepare('SELECT status_publish FROM properties WHERE id = ?')
+    .bind(agr.property_id).first().then(r => r?.status_publish === 'published', () => false);
 
   // ─── [7] Generate PDF arsip (non-fatal: gagal = pdf_url null, sign tetap sukses) ──
   let pdf_tersedia = false;
@@ -494,7 +499,10 @@ export async function onRequestPost(context) {
     signed_at: signedAt,
     audit_hash_dokumen,
     pdf_tersedia,
-    pesan: 'Tanda tangan berhasil. Properti Anda telah dipublikasikan di platform SBP.',
+    properti_tayang,
+    pesan: properti_tayang
+      ? 'Tanda tangan berhasil. Properti Anda telah dipublikasikan di platform SBP.'
+      : 'Tanda tangan berhasil. Tim SBP akan menayangkan properti Anda setelah pemeriksaan akhir.',
   });
 }
 
