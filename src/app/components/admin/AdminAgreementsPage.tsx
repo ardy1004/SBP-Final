@@ -17,6 +17,10 @@ interface Agreement {
   kecamatan: string;
   kabupaten: string;
   harga: number;
+  /** Diisi bila perjanjian signed ini sudah punya versi perbaikan (migrasi 0053). */
+  digantikan_oleh: number | null;
+  /** Signed sebelum perbaikan isi kontrak 27 Sep 2026 dan isinya memang keliru. */
+  perlu_versi_perbaikan: boolean;
 }
 
 const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; dot: string }> = {
@@ -157,6 +161,12 @@ export default function AdminAgreementsPage() {
                           <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: sc.dot }} />
                           {sc.label}
                         </span>
+                        {agr.perlu_versi_perbaikan && (
+                          <div className="mt-1 text-[11px] font-semibold text-amber-700 whitespace-nowrap">Perlu versi perbaikan</div>
+                        )}
+                        {agr.digantikan_oleh && (
+                          <div className="mt-1 text-[11px] text-[#94A3B8] whitespace-nowrap">Digantikan</div>
+                        )}
                       </td>
                       <td className="p-3 text-center">
                         <button

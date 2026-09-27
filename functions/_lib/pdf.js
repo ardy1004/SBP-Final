@@ -4,6 +4,7 @@
 
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { IDENTITAS, normalisasiJenisIdentitas } from './identitas.js';
+import { labelBertindak, susunAlamatPemilik, jenisTransaksi } from './isiPerjanjian.js';
 
 const TTD_ARDY_URL = 'https://images.salambumi.xyz/materai/gsd-removebg-preview%20-%20Copy.png';
 const MATERAI_URL  = 'https://images.salambumi.xyz/materai/hg.png';
@@ -172,7 +173,7 @@ export async function generateAgreementPDF({ agr, nikPlain, signedAt, auditIp, a
   const jenisListingLabel = agr.jenis_listing === 'exclusive'
     ? `Exclusive${agr.durasi_kontrak ? ` — ${agr.durasi_kontrak} Bulan` : ''}`
     : 'Open (Tidak Terbatas)';
-  const jenisTxLabel = agr.jenis_transaksi === 'sewa' ? 'Sewa Menyewa' : 'Jual Beli';
+  const jenisTxLabel = jenisTransaksi(agr.tujuan).label;
 
   drawCenter('PERJANJIAN JASA PEMASARAN — SALAM BUMI PROPERTY', { f: fB, sz: 13 });
   gap(2);
@@ -201,14 +202,13 @@ export async function generateAgreementPDF({ agr, nikPlain, signedAt, auditIp, a
   ]) { drawRawText(s, col1X, y1, { sz: 8, col: C.gray }); y1 -= 8 * 1.6; }
 
   // Right — Pihak Kedua
-  const bertindak = agr.bertindak_sebagai === 'ahli_waris' ? 'Ahli Waris'
-    : agr.bertindak_sebagai === 'kuasa' ? 'Pemegang Kuasa' : 'Pemilik Langsung';
-  const alamatOwner = [
-    agr.alamat_ktp,
-    agr.rt_rw ? `RT/RW ${agr.rt_rw}` : null,
-    agr.owner_kelurahan,
-    agr.owner_kecamatan,
-  ].filter(Boolean).join(', ');
+  // Label & alamat dari isiPerjanjian.js — dulu dipetakan di sini dan
+  // `suami_istri`/`lainnya` jatuh ke "Pemilik Langsung" (6 PDF signed keliru).
+  const bertindak = labelBertindak(agr.bertindak_sebagai);
+  const alamatOwner = susunAlamatPemilik({
+    alamat_ktp: agr.alamat_ktp, rt_rw: agr.rt_rw,
+    kelurahan: agr.owner_kelurahan, kecamatan: agr.owner_kecamatan,
+  });
 
   drawRawText('PIHAK KEDUA — PEMILIK', col2X, y2, { f: fB, sz: 8, col: C.gray }); y2 -= 8 * 1.6;
   drawRawText(agr.nama_ktp, col2X, y2, { f: fB, sz: 9 }); y2 -= 9 * 1.6;

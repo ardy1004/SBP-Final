@@ -5,6 +5,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { decryptNIK, encryptNIK } from '../../../../_lib/crypto.js';
 import { normalisasiJenisIdentitas, validasiNomorIdentitas } from '../../../../_lib/identitas.js';
+import { perluVersiPerbaikan } from '../../../../_lib/isiPerjanjian.js';
 
 function sanitize(val, max = 500) {
   if (typeof val !== 'string') return '';
@@ -30,6 +31,10 @@ async function fetchAgreementById(db, id) {
       a.jenis_transaksi, a.jenis_listing, a.durasi_kontrak, a.fee_persen,
       a.status, a.sign_token, a.token_expires_at, a.token_used,
       a.signed_at, a.pdf_url, a.link_opened_count, a.created_at, a.updated_at,
+      a.digantikan_oleh,
+      (SELECT kode_perjanjian FROM agreements x WHERE x.id = a.digantikan_oleh) AS digantikan_kode,
+      (SELECT id FROM agreements x WHERE x.digantikan_oleh = a.id) AS menggantikan_id,
+      (SELECT kode_perjanjian FROM agreements x WHERE x.digantikan_oleh = a.id) AS menggantikan_kode,
       o.id           AS o_id,
       o.nama_pemilik, o.nik_encrypted, o.nama_ktp, o.alamat_ktp,
       o.rt_rw,
@@ -97,6 +102,15 @@ export async function onRequestGet(context) {
     pdf_url: agr.pdf_url,
     link_opened_count: agr.link_opened_count,
     created_at: agr.created_at,
+    // Versi perbaikan (migrasi 0053) — lihat versi-perbaikan.js
+    digantikan_oleh: agr.digantikan_oleh ?? null,
+    digantikan_kode: agr.digantikan_kode ?? null,
+    menggantikan_id: agr.menggantikan_id ?? null,
+    menggantikan_kode: agr.menggantikan_kode ?? null,
+    perlu_versi_perbaikan: perluVersiPerbaikan({
+      status: agr.status, digantikan_oleh: agr.digantikan_oleh, signed_at: agr.signed_at,
+      bertindak_sebagai: agr.bertindak_sebagai, tujuan: agr.tujuan,
+    }),
     owner: {
       id: agr.o_id,
       nama_pemilik: agr.nama_pemilik,

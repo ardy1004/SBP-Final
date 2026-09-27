@@ -4,6 +4,7 @@
 // Auth: _middleware.js (admin only)
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+import { perluVersiPerbaikan } from '../../../_lib/isiPerjanjian.js';
 
 const VALID_STATUSES = new Set(['draft', 'opsi_dikonfigurasi', 'menunggu_ttd', 'signed', 'expired']);
 
@@ -22,7 +23,10 @@ export async function onRequestGet(context) {
       a.fee_persen,
       a.created_at,
       a.signed_at,
+      a.digantikan_oleh,
       o.nama_pemilik,
+      o.bertindak_sebagai,
+      p.tujuan,
       p.jenis_properti,
       p.kecamatan,
       p.kabupaten,
@@ -46,10 +50,11 @@ export async function onRequestGet(context) {
       ? await stmt.bind(...bindings).all()
       : await stmt.all();
 
-    return jsonOk({
-      agreements: result.results ?? [],
-      total: (result.results ?? []).length,
-    });
+    const agreements = (result.results ?? []).map(a => ({
+      ...a,
+      perlu_versi_perbaikan: perluVersiPerbaikan(a),
+    }));
+    return jsonOk({ agreements, total: agreements.length });
   } catch (err) {
     console.error('[admin agreements list]', err.message);
     return jsonError('Gagal mengambil data', 500);

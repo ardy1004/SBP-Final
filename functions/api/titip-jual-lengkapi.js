@@ -10,6 +10,7 @@ import { jsonOk, jsonError, handleOptions } from './_shared/response.js';
 import { verifyJWT } from './_shared/jwt.js';
 import { encryptNIK } from '../_lib/crypto.js';
 import { normalisasiJenisIdentitas, validasiNomorIdentitas, IDENTITAS } from '../_lib/identitas.js';
+import { BERTINDAK_VALID } from '../_lib/isiPerjanjian.js';
 import { nextKodeSeq, fmtSeq, isUniqueErr } from '../_lib/kodeSeq.js';
 import { logServerError } from '../_lib/logError.js';
 import { sendCapiEvent, extractMetaIdentity } from '../_lib/metaCapi.js';
@@ -179,7 +180,6 @@ export async function onRequestPost(context) {
   if (!kelurahan_owner) errors.kelurahan = 'Kelurahan wajib diisi';
   if (!kecamatan_owner) errors.kecamatan = 'Kecamatan wajib diisi';
 
-  const BERTINDAK_VALID = ['pemilik_sertifikat', 'suami_istri', 'ahli_waris', 'lainnya'];
   if (!BERTINDAK_VALID.includes(bertindak)) {
     errors.bertindak_sebagai = 'bertindak_sebagai harus: ' + BERTINDAK_VALID.join(', ');
   }

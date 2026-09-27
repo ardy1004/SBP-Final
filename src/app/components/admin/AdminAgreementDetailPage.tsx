@@ -2,6 +2,7 @@ import { bacaJson } from '../../../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { IDENTITAS, normalisasiJenisIdentitas } from '../../../../functions/_lib/identitas.js';
+import { labelBertindak, jenisTransaksi } from '../../../../functions/_lib/isiPerjanjian.js';
 import {
   ArrowLeft, Edit2, Check, X, AlertCircle, Copy, MessageCircle,
   FileText, ExternalLink, User, Home, Image as ImageIcon, CheckCircle,
@@ -25,6 +26,12 @@ interface AgreementDetail {
   pdf_url: string | null;
   link_opened_count: number;
   created_at: string;
+  /** Versi perbaikan (migrasi 0053) — lihat functions/api/admin/agreements/[id]/versi-perbaikan.js */
+  digantikan_oleh: number | null;
+  digantikan_kode: string | null;
+  menggantikan_id: number | null;
+  menggantikan_kode: string | null;
+  perlu_versi_perbaikan: boolean;
   owner: {
     id: number;
     nama_pemilik: string;
@@ -80,13 +87,6 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string }>
   expired:            { label: 'Expired',       bg: '#FEE2E2', text: '#991B1B' },
 };
 
-const BERTINDAK_LABELS: Record<string, string> = {
-  pemilik_sertifikat: 'Pemilik Sah (sesuai sertifikat)',
-  suami_istri:        'Pasangan (suami/istri)',
-  ahli_waris:         'Ahli Waris',
-  lainnya:            'Lainnya',
-};
-
 function propertyUrl(p: { jenis_properti: string; provinsi: string; kabupaten: string; kecamatan: string | null; tujuan: string | null; slug: string }): string {
   const jenis = p.jenis_properti.toLowerCase();
   const prov  = p.provinsi.toLowerCase().replace(/\s+/g, '-');
@@ -95,11 +95,6 @@ function propertyUrl(p: { jenis_properti: string; provinsi: string; kabupaten: s
   const base  = p.tujuan === 'disewa' ? '/disewa' : '/dijual';
   return `${base}/${jenis}/${prov}/${kab}/${kec}/${p.slug}`;
 }
-
-const TRANSAKSI_LABELS: Record<string, string> = {
-  jual: 'Jual/Beli',
-  sewa: 'Sewa Menyewa',
-};
 
 function formatRupiah(n: number | null) {
   if (!n) return '—';
@@ -370,6 +365,28 @@ export default function AdminAgreementDetailPage() {
     }
   };
 
+  // ─── Versi perbaikan (dokumen signed yang tercetak keliru) ───────
+  const [membuatVersi, setMembuatVersi] = useState(false);
+  const [versiError, setVersiError] = useState<string | null>(null);
+  const handleVersiPerbaikan = async () => {
+    if (!window.confirm('Buat perjanjian pengganti? Perjanjian ini TETAP sah sebagai arsip; pemilik perlu menandatangani versi baru.')) return;
+    setMembuatVersi(true);
+    setVersiError(null);
+    try {
+      const res = await fetch(`/api/admin/agreements/${id}/versi-perbaikan`, { method: 'POST', credentials: 'include' });
+      const json = await bacaJson<{ agreement_id: number }>(res);
+      // 409 "sudah punya versi perbaikan" membawa id penggantinya di details —
+      // langsung buka yang itu, bukan menampilkan galat.
+      const tujuan = json.data?.agreement_id ?? (Number(json.details?.agreement_id) || undefined);
+      if (tujuan) navigate(`/admin/agreements/${tujuan}`);
+      else setVersiError(json.error ?? 'Gagal membuat versi perbaikan');
+    } catch {
+      setVersiError('Gagal menghubungi server');
+    } finally {
+      setMembuatVersi(false);
+    }
+  };
+
   // ─── Copy link ───────────────────────────────────────────────────
   const handleCopy = () => {
     if (!signToken) return;
@@ -435,6 +452,40 @@ export default function AdminAgreementDetailPage() {
           </p>
         </div>
       </div>
+
+      {/* ─── Versi perbaikan ─────────────────────────────────────── */}
+      {data.perlu_versi_perbaikan && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 space-y-2">
+          <p className="text-sm font-semibold text-amber-900">Isi dokumen ini tercetak keliru</p>
+          <p className="text-xs text-amber-900/80 leading-relaxed">
+            Perjanjian ini ditandatangani sebelum perbaikan 27 Sep 2026. PDF-nya mencetak kewenangan
+            pemilik sebagai "Pemilik Langsung" dan/atau salah menulis harga & fee untuk listing sewa.
+            Dokumen yang sudah ditandatangani tidak diubah — buat versi perbaikan, lalu kirim link
+            tanda tangan barunya ke pemilik. Perjanjian ini tetap tersimpan sebagai arsip sah.
+          </p>
+          {versiError && <p className="text-xs text-red-700">{versiError}</p>}
+          <button onClick={handleVersiPerbaikan} disabled={membuatVersi}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50">
+            {membuatVersi ? 'Membuat…' : 'Buat versi perbaikan'}
+          </button>
+        </div>
+      )}
+      {data.digantikan_oleh && (
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 text-xs text-[#475569]">
+          Perjanjian ini sudah <strong>digantikan</strong> oleh{' '}
+          <button onClick={() => navigate(`/admin/agreements/${data.digantikan_oleh}`)} className="font-semibold text-[#1565C0] hover:underline">
+            {data.digantikan_kode ?? `#${data.digantikan_oleh}`}
+          </button>. Dokumen ini tetap tersimpan sebagai arsip.
+        </div>
+      )}
+      {data.menggantikan_id && (
+        <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-xs text-[#1E3A8A]">
+          Versi perbaikan dari{' '}
+          <button onClick={() => navigate(`/admin/agreements/${data.menggantikan_id}`)} className="font-semibold text-[#1565C0] hover:underline">
+            {data.menggantikan_kode ?? `#${data.menggantikan_id}`}
+          </button>.
+        </div>
+      )}
 
       {/* ─── Owner Card ──────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
@@ -512,7 +563,7 @@ export default function AdminAgreementDetailPage() {
             {(data.owner.kelurahan || data.owner.kecamatan) && (
               <InfoRow label="Kelurahan/Kec." value={[data.owner.kelurahan, data.owner.kecamatan].filter(Boolean).join(', ')} />
             )}
-            <InfoRow label="Bertindak Sebagai" value={BERTINDAK_LABELS[data.owner.bertindak_sebagai ?? ''] ?? data.owner.bertindak_sebagai} />
+            <InfoRow label="Bertindak Sebagai" value={labelBertindak(data.owner.bertindak_sebagai)} />
             <InfoRow label="WhatsApp" value={
               <a href={`https://wa.me/${data.owner.no_wa_1}`} target="_blank" rel="noopener noreferrer"
                 className="text-[#10B981] hover:underline">
@@ -677,7 +728,9 @@ export default function AdminAgreementDetailPage() {
                 Jenis Transaksi (otomatis)
               </label>
               <div className="px-3 py-2 bg-[#F8FAFC] border border-gray-200 rounded-xl text-sm text-[#475569] font-medium">
-                {TRANSAKSI_LABELS[data.jenis_transaksi] ?? data.jenis_transaksi}
+                {/* Dari tujuan properti — sama dengan yang tercetak di kontrak
+                    (kolom jenis_transaksi mencatat 'jual' untuk dijual_disewa). */}
+                {jenisTransaksi(data.properti.tujuan).label}
               </div>
             </div>
 

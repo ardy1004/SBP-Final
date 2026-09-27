@@ -35,6 +35,9 @@ interface AgreementData {
     bertindak_sebagai: string;
     /** 'ktp' | 'sim' — tak ada pada respons server lama → dianggap 'ktp'. */
     jenis_identitas?: string;
+    /** Teks jadi dari server — SAMA dengan yang tercetak di PDF (functions/_lib/isiPerjanjian.js). */
+    bertindak_label: string;
+    alamat_lengkap: string;
   };
   properti: {
     title: string;
@@ -42,6 +45,8 @@ interface AgreementData {
     jenis_properti: string;
     tujuan: string;
     harga: number | null;
+    /** Kalimat harga Pasal 1 (jual / sewa per tahun / keduanya + nego/nett). */
+    harga_penawaran: string;
     provinsi: string | null;
     kabupaten: string | null;
     kecamatan: string | null;
@@ -49,6 +54,7 @@ interface AgreementData {
     legalitas: string | null;
   };
   jenis_transaksi: string;
+  jenis_transaksi_label: string;
   jenis_listing: string;
   durasi_kontrak: number | null;
   fee_persen: number;
@@ -67,13 +73,6 @@ type PageState =
 // ──────────────────────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────────────────────
-function formatRupiah(n: number | null | undefined): string {
-  if (!n) return '-';
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency', currency: 'IDR', maximumFractionDigits: 0,
-  }).format(n);
-}
-
 function formatTanggalId(date: Date = new Date()): string {
   return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
 }
@@ -85,20 +84,9 @@ function buildPropertyUrl(pd: AgreementData['properti']): string {
   return `/${prefix}/${parts.join('/')}/${pd.slug}`;
 }
 
-function labelBertindak(b: string): string {
-  if (b === 'ahli_waris') return 'Ahli Waris';
-  if (b === 'kuasa') return 'Pemegang Kuasa';
-  return 'Pemilik Langsung';
-}
-
 function labelListingDurasi(jenis: string, durasi: number | null): string {
   if (jenis === 'exclusive') return `Exclusive${durasi ? ` — ${durasi} Bulan` : ''}`;
   return 'Open (Tidak Terbatas)';
-}
-
-function labelJenisTransaksi(jt: string): string {
-  if (jt === 'sewa') return 'Sewa Menyewa';
-  return 'Jual Beli';
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -270,12 +258,11 @@ interface PerjanjianDocumentProps {
 function PerjanjianDocument({ data, today, canvasRef, hasSigned, onStart, onMove, onEnd, onClear }: PerjanjianDocumentProps) {
   const { owner, properti, pasal } = data;
 
-  const alamatOwner = [
-    owner.alamat_ktp,
-    owner.rt_rw ? `RT/RW ${owner.rt_rw}` : null,
-    owner.kelurahan,
-    owner.kecamatan,
-  ].filter(Boolean).join(', ');
+  // Label kewenangan, alamat, jenis transaksi, dan harga datang JADI dari server
+  // (functions/_lib/isiPerjanjian.js) supaya halaman ini identik dengan PDF.
+  // Dulu keduanya menyusun sendiri-sendiri, dan 'suami_istri'/'lainnya'
+  // tertulis "Pemilik Langsung" di kedua tempat.
+  const alamatOwner = owner.alamat_lengkap;
 
   return (
     <div className="font-serif text-sm text-[#1a1a1a] leading-relaxed space-y-4">
@@ -286,7 +273,7 @@ function PerjanjianDocument({ data, today, canvasRef, hasSigned, onStart, onMove
         </p>
         <p className="text-xs text-[#64748B]">
           Jenis: {labelListingDurasi(data.jenis_listing, data.durasi_kontrak)}&nbsp;·&nbsp;
-          Jenis Perjanjian: {labelJenisTransaksi(data.jenis_transaksi)}&nbsp;·&nbsp;
+          Jenis Perjanjian: {data.jenis_transaksi_label}&nbsp;·&nbsp;
           Nomor: {data.kode_perjanjian}
         </p>
         <p className="text-xs text-[#64748B]" suppressHydrationWarning>Tanggal: {today}</p>
@@ -308,7 +295,7 @@ function PerjanjianDocument({ data, today, canvasRef, hasSigned, onStart, onMove
           <p className="text-xs text-[#374151]">{IDENTITAS[normalisasiJenisIdentitas(owner.jenis_identitas)].label}: {owner.nik ?? 'Tidak tersedia'}</p>
           <p className="text-xs text-[#374151]">Alamat {IDENTITAS[normalisasiJenisIdentitas(owner.jenis_identitas)].kartu}: {alamatOwner || '-'}</p>
           <p className="text-xs text-[#374151]">
-            Bertindak sebagai: {labelBertindak(owner.bertindak_sebagai)}
+            Bertindak sebagai: {owner.bertindak_label}
           </p>
         </div>
       </div>
@@ -605,7 +592,7 @@ export default function SignPage() {
             <FileText size={20} className="text-[#1565C0]" />
             <div>
               <div className="font-semibold text-[#0F172A] text-sm">Dokumen Perjanjian (Read-Only)</div>
-              <div className="text-xs text-[#64748B]">Nomor: {data.kode_perjanjian} · Fee: {data.fee_persen}% · Harga: {formatRupiah(data.properti.harga)}</div>
+              <div className="text-xs text-[#64748B]">Nomor: {data.kode_perjanjian} · Fee: {data.fee_persen}% · {data.properti.harga_penawaran}</div>
             </div>
           </div>
           {/* Scrollable document area */}

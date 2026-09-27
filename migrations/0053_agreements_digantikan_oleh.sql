@@ -1,0 +1,20 @@
+-- Perjanjian pengganti untuk dokumen yang SUDAH ditandatangani tapi tercetak keliru.
+--
+-- Audit 2026-09-27: 8 perjanjian signed memuat isi yang salah — 6 menyatakan
+-- pemilik bertindak sebagai "Pemilik Langsung" padahal ia suami/istri pemilik
+-- sertifikat atau pihak lain, 2 listing sewa tercetak "Harga negosiasi", dan 1
+-- listing dijual & disewakan hanya mengatur fee jual beli. Sumbernya sudah
+-- diperbaiki (functions/_lib/isiPerjanjian.js), tapi dokumen yang sudah
+-- ditandatangani TIDAK BOLEH diubah.
+--
+-- Solusinya membuat perjanjian BARU (draft → dikonfigurasi admin → ditandatangani
+-- ulang pemilik) lewat POST /api/admin/agreements/:id/versi-perbaikan, lalu
+-- menandai yang lama dengan kolom ini. Yang lama SENGAJA tetap berstatus 'signed':
+-- penjaga hapus-properti (menolak properti ber-perjanjian signed), PDF arsip, dan
+-- listing yang sudah tayang tidak terganggu sama sekali.
+--
+-- NULL = belum/tidak digantikan. Nilainya = agreements.id pengganti.
+-- Tanpa klausa REFERENCES: SQLite tidak mengizinkan ALTER yang menambah FK
+-- ber-aksi, dan pengganti tidak pernah dihapus terpisah dari yang lama
+-- (keduanya ikut ON DELETE CASCADE lewat property_id/owner_id).
+ALTER TABLE agreements ADD COLUMN digantikan_oleh INTEGER;

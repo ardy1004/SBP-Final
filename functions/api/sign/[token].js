@@ -8,6 +8,7 @@
 import { jsonOk, jsonError, handleOptions } from '../_shared/response.js';
 import { decryptNIK } from '../../_lib/crypto.js';
 import { IDENTITAS, normalisasiJenisIdentitas } from '../../_lib/identitas.js';
+import { labelBertindak, susunAlamatPemilik, jenisTransaksi, teksHargaPenawaran } from '../../_lib/isiPerjanjian.js';
 import { generateAgreementPDF } from '../../_lib/pdf.js';
 import { logServerError } from '../../_lib/logError.js';
 
@@ -20,7 +21,7 @@ async function getAgreementByToken(db, token) {
       a.status, a.sign_token, a.token_expires_at, a.token_used,
       a.link_opened_count,
       p.title, p.slug, p.jenis_properti, p.tujuan,
-      p.harga, p.luas_tanah, p.luas_bangunan,
+      p.harga, p.harga_sewa_tahun, p.nego, p.nett, p.luas_tanah, p.luas_bangunan,
       p.jumlah_kamar_tidur, p.jumlah_kamar_mandi,
       p.provinsi, p.kabupaten, p.kecamatan, p.kelurahan, p.alamat,
       p.legalitas, p.deskripsi,
@@ -39,6 +40,8 @@ async function hashDokumen(agr, nikPlain, signedAt) {
   // Label mengikuti jenis identitas. Untuk KTP teks ini IDENTIK byte-per-byte
   // dengan sebelum fitur SIM ("NIK", "KTP"). Hash ini tidak pernah dihitung ulang
   // di mana pun (hanya disimpan + dicetak di PDF), jadi mengubah label SIM aman.
+  // Isi hash mengikuti teks yang BENAR-BENAR tercetak (label kewenangan, alamat
+  // tanpa duplikat, jenis transaksi & harga dari tujuan) — lihat isiPerjanjian.js.
   const id = IDENTITAS[normalisasiJenisIdentitas(agr.jenis_identitas)];
   const doc = [
     `PERJANJIAN PEMASARAN PROPERTI`,
@@ -46,52 +49,68 @@ async function hashDokumen(agr, nikPlain, signedAt) {
     `Tanggal TTD: ${signedAt}`,
     `Pihak Pertama: CV Salam Bumi Property`,
     `Pihak Kedua: ${agr.nama_ktp} (${id.label}: ${nikPlain})`,
-    `Alamat ${id.kartu}: ${agr.alamat_ktp}, ${agr.owner_kelurahan}, ${agr.owner_kecamatan}`,
-    `Bertindak sebagai: ${agr.bertindak_sebagai}`,
+    `Alamat ${id.kartu}: ${alamatPemilik(agr)}`,
+    `Bertindak sebagai: ${labelBertindak(agr.bertindak_sebagai)}`,
     `Properti: ${agr.title} | ${agr.kode_perjanjian}`,
-    `Jenis Transaksi: ${agr.jenis_transaksi}`,
+    `Jenis Transaksi: ${jenisTransaksi(agr.tujuan).label}`,
     `Jenis Listing: ${agr.jenis_listing}`,
     `Durasi Kontrak: ${agr.durasi_kontrak ?? '-'} bulan`,
     `Fee Pemasaran: ${agr.fee_persen}%`,
-    `Harga: ${agr.harga}`,
+    teksHargaPenawaran(agr),
   ].join('\n');
 
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(doc));
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Alamat pemilik sebagaimana tercetak — dipakai halaman, hash, dan PDF.
+function alamatPemilik(agr) {
+  return susunAlamatPemilik({
+    alamat_ktp: agr.alamat_ktp, rt_rw: agr.rt_rw,
+    kelurahan: agr.owner_kelurahan, kecamatan: agr.owner_kecamatan,
+  }) || '-';
+}
+
 // ─── Pasal-pasal perjanjian (spec 12.6) ──────────────────────────────────────
+// Jenis transaksi & harga dibaca dari `tujuan` properti (isiPerjanjian.js).
+// Untuk listing `dijual`, teks pasal 2–8 IDENTIK dengan versi sebelumnya; yang
+// berubah hanya keterangan harga di Pasal 1 (kini sesuai pilihan nego/nett).
 function buildPasalPasal(agr) {
   const isExclusive    = agr.jenis_listing === 'exclusive';
   const jenisListing   = isExclusive ? 'Exclusive Listing' : 'Open Listing';
-  const durasiLabel    = agr.durasi_kontrak ? `${agr.durasi_kontrak} bulan` : 'tidak terbatas';
-  const jenisTxLabel   = agr.jenis_transaksi === 'sewa' ? 'Sewa Menyewa' : 'Jual Beli';
+  const tx             = jenisTransaksi(agr.tujuan);
   const alamatProperti = [agr.alamat, agr.kelurahan, agr.kecamatan, agr.kabupaten, agr.provinsi].filter(Boolean).join(', ');
-  const hargaFmt       = agr.harga
-    ? new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(agr.harga)
-    : 'Harga negosiasi';
-  const kotaProperti   = agr.kabupaten || agr.kecamatan || 'setempat';
+
+  // Waktu pembayaran fee per jenis transaksi. Kalimat Jual Beli tidak berubah.
+  const bayarJual = 'paling lambat 3 (tiga) hari kerja setelah penandatanganan Akta Jual Beli (AJB), atau setelah pembayaran uang muka minimal 30% dari harga kesepakatan apabila pembayaran dilakukan secara tunai bertahap';
+  const bayarSewa = 'paling lambat 3 (tiga) hari kerja setelah Pihak Kedua menerima pembayaran sewa pertama dari penyewa';
+  const nilaiSewa = 'Untuk transaksi Sewa Menyewa, nilai transaksi adalah total nilai sewa untuk masa sewa yang disepakati dengan penyewa.';
+  const kalimatBayar = tx.kode === 'sewa'
+    ? `${nilaiSewa} Fee dibayarkan ${bayarSewa}.`
+    : tx.kode === 'jual_sewa'
+      ? `${nilaiSewa} Untuk transaksi Jual Beli, fee dibayarkan ${bayarJual}; untuk transaksi Sewa Menyewa, fee dibayarkan ${bayarSewa}.`
+      : `Fee dibayarkan ${bayarJual}.`;
 
   // Pasal 5 base — Pihak Kedua; huruf (d) hanya untuk Exclusive
-  const p5Base = 'Pihak Pertama berkewajiban: (a) memasarkan properti secara profesional dan aktif; (b) menjaga kerahasiaan data Pihak Kedua; (c) melaporkan perkembangan pemasaran secara berkala. Pihak Kedua berkewajiban: (a) memberikan informasi properti yang benar dan lengkap; (b) menyediakan akses untuk survei dan pemotretan; (c) memberitahukan kepada Pihak Pertama apabila properti telah terjual atau ditarik dari pemasaran.';
+  const p5Base = `Pihak Pertama berkewajiban: (a) memasarkan properti secara profesional dan aktif; (b) menjaga kerahasiaan data Pihak Kedua; (c) melaporkan perkembangan pemasaran secara berkala. Pihak Kedua berkewajiban: (a) memberikan informasi properti yang benar dan lengkap; (b) menyediakan akses untuk survei dan pemotretan; (c) memberitahukan kepada Pihak Pertama apabila properti telah ${tx.hasil} atau ditarik dari pemasaran.`;
 
   return [
     {
       pasal: 1,
       judul: 'OBJEK PERJANJIAN',
-      isi: `Pihak Pertama diberikan hak pemasaran ${jenisListing} atas properti: ${agr.jenis_properti ?? 'Properti'}, berlokasi di ${alamatProperti || `${agr.kecamatan}, ${agr.kabupaten}`}. Legalitas: ${agr.legalitas ?? 'belum diverifikasi'}. Harga penawaran: ${hargaFmt} (dapat dinegosiasikan).`,
+      isi: `Pihak Pertama diberikan hak pemasaran ${jenisListing} atas properti: ${agr.jenis_properti ?? 'Properti'}, berlokasi di ${alamatProperti || `${agr.kecamatan}, ${agr.kabupaten}`}. Legalitas: ${agr.legalitas ?? 'belum diverifikasi'}. ${teksHargaPenawaran(agr)}.`,
     },
     {
       pasal: 2,
       judul: 'JENIS LISTING & MASA KONTRAK',
       isi: isExclusive
         ? `Perjanjian ini bersifat Exclusive Listing dengan jangka waktu ${agr.durasi_kontrak} bulan terhitung sejak tanggal penandatanganan. Selama jangka waktu tersebut, Pihak Kedua memberikan hak pemasaran secara eksklusif kepada Pihak Pertama dan tidak menunjuk agen lain maupun memasarkan sendiri di luar koordinasi dengan Pihak Pertama.`
-        : `Perjanjian ini bersifat Open Listing. Pihak Kedua berhak menunjuk agen pemasaran lain dan/atau memasarkan sendiri properti tersebut. Perjanjian berlaku sejak ditandatangani sampai properti terjual atau sampai diakhiri oleh salah satu Pihak sesuai Pasal 6.`,
+        : `Perjanjian ini bersifat Open Listing. Pihak Kedua berhak menunjuk agen pemasaran lain dan/atau memasarkan sendiri properti tersebut. Perjanjian berlaku sejak ditandatangani sampai properti ${tx.hasil} atau sampai diakhiri oleh salah satu Pihak sesuai Pasal 6.`,
     },
     {
       pasal: 3,
       judul: 'FEE PEMASARAN',
-      isi: `Pihak Kedua menyetujui fee pemasaran sebesar ${agr.fee_persen}% dari nilai transaksi ${jenisTxLabel}. Fee menjadi hak Pihak Pertama apabila transaksi terjadi dengan pembeli yang diperkenalkan, diperantarai, atau diperoleh melalui upaya pemasaran Pihak Pertama. Fee dibayarkan paling lambat 3 (tiga) hari kerja setelah penandatanganan Akta Jual Beli (AJB), atau setelah pembayaran uang muka minimal 30% dari harga kesepakatan apabila pembayaran dilakukan secara tunai bertahap.`,
+      isi: `Pihak Kedua menyetujui fee pemasaran sebesar ${agr.fee_persen}% dari nilai transaksi ${tx.label}. Fee menjadi hak Pihak Pertama apabila transaksi terjadi dengan ${tx.pihak} yang diperkenalkan, diperantarai, atau diperoleh melalui upaya pemasaran Pihak Pertama. ${kalimatBayar}`,
     },
     {
       pasal: 4,
@@ -110,7 +129,7 @@ function buildPasalPasal(agr) {
     {
       pasal: 6,
       judul: 'PENARIKAN PROPERTI & PENGAKHIRAN',
-      isi: `Salah satu Pihak dapat mengakhiri perjanjian ini dengan pemberitahuan tertulis kepada Pihak lain sekurang-kurangnya 14 (empat belas) hari sebelumnya. Apabila Pihak Kedua menarik properti dari pemasaran atau mengakhiri perjanjian setelah Pihak Pertama mengeluarkan biaya pemasaran yang nyata (antara lain biaya iklan, pemotretan, atau survei), Pihak Kedua mengganti biaya yang telah dikeluarkan tersebut secara wajar dan dapat dibuktikan. Apabila dalam jangka waktu 60 (enam puluh) hari setelah perjanjian berakhir properti terjual kepada pembeli yang sebelumnya telah diperkenalkan atau diperantarai oleh Pihak Pertama, Pihak Pertama tetap berhak atas fee pemasaran sebagaimana diatur dalam Pasal 3.`,
+      isi: `Salah satu Pihak dapat mengakhiri perjanjian ini dengan pemberitahuan tertulis kepada Pihak lain sekurang-kurangnya 14 (empat belas) hari sebelumnya. Apabila Pihak Kedua menarik properti dari pemasaran atau mengakhiri perjanjian setelah Pihak Pertama mengeluarkan biaya pemasaran yang nyata (antara lain biaya iklan, pemotretan, atau survei), Pihak Kedua mengganti biaya yang telah dikeluarkan tersebut secara wajar dan dapat dibuktikan. Apabila dalam jangka waktu 60 (enam puluh) hari setelah perjanjian berakhir properti ${tx.hasil} kepada ${tx.pihak} yang sebelumnya telah diperkenalkan atau diperantarai oleh Pihak Pertama, Pihak Pertama tetap berhak atas fee pemasaran sebagaimana diatur dalam Pasal 3.`,
     },
     {
       pasal: 7,
@@ -198,6 +217,10 @@ export async function onRequestGet(context) {
       kecamatan: agr.owner_kecamatan,
       bertindak_sebagai: agr.bertindak_sebagai,
       jenis_identitas: normalisasiJenisIdentitas(agr.jenis_identitas),
+      // Teks jadi — SAMA PERSIS dengan yang tercetak di PDF (isiPerjanjian.js).
+      // Halaman tidak lagi menyusun label/alamat sendiri.
+      bertindak_label: labelBertindak(agr.bertindak_sebagai),
+      alamat_lengkap: alamatPemilik(agr),
     },
     // Data properti
     properti: {
@@ -206,6 +229,7 @@ export async function onRequestGet(context) {
       jenis_properti: agr.jenis_properti,
       tujuan: agr.tujuan,
       harga: agr.harga,
+      harga_penawaran: teksHargaPenawaran(agr),
       luas_tanah: agr.luas_tanah,
       luas_bangunan: agr.luas_bangunan,
       jumlah_kamar_tidur: agr.jumlah_kamar_tidur,
@@ -216,8 +240,10 @@ export async function onRequestGet(context) {
       kelurahan: agr.kelurahan,
       legalitas: agr.legalitas,
     },
-    // Syarat perjanjian
-    jenis_transaksi: agr.jenis_transaksi,
+    // Syarat perjanjian — jenis transaksi dari tujuan properti, bukan kolom
+    // agreements.jenis_transaksi (lihat jenisTransaksi() di isiPerjanjian.js).
+    jenis_transaksi: jenisTransaksi(agr.tujuan).kode,
+    jenis_transaksi_label: jenisTransaksi(agr.tujuan).label,
     jenis_listing: agr.jenis_listing,
     durasi_kontrak: agr.durasi_kontrak,
     fee_persen: agr.fee_persen,
