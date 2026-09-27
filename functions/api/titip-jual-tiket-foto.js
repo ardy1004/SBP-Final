@@ -31,21 +31,30 @@
 
 import { jsonOk, handleOptions } from './_shared/response.js';
 import { signJWT } from './_shared/jwt.js';
+import { hashIp } from '../_lib/remIp.js';
 
 const TIKET_FOTO_DETIK = 3600;
 
-// Volume wajar: satu tiket per pengunjung yang membuka /titip-jual. Cap ini
-// jauh di atas trafik organik tapi menutup skenario flood ke tabel penghitung.
-const MAX_PER_MINUTE = 20;
+// ⚠️ REM PER-IP (2026-09-27), menggantikan rem GLOBAL 20/menit. Rem global itu
+// adalah tuas DoS: satu orang yang meminta tiket tiap 3 detik membuat SEMUA
+// penjual lain mendapat tiket null, sehingga setiap unggahan foto 403 dan tak
+// seorang pun bisa mengirim Titip Jual. Batas per-IP longgar (CGNAT seluler —
+// lihat remIp.js); plafon global tinggi hanya jaring pengaman terhadap banjir
+// dari banyak IP.
+const MAX_PER_IP_PER_MENIT = 10;
+const MAX_GLOBAL_PER_MENIT = 120;
 
-async function tiketTerakhirSemenit(db) {
+async function hitungSemenit(db, ipHash) {
   try {
-    const row = await db
-      .prepare(`SELECT COUNT(*) AS cnt FROM titip_jual_tiket_log WHERE created_at > datetime('now', '-60 seconds')`)
-      .first();
-    return row?.cnt ?? 0;
+    const row = await db.prepare(`
+      SELECT COUNT(*) AS global,
+             SUM(CASE WHEN ip_hash = ? THEN 1 ELSE 0 END) AS ip
+        FROM titip_jual_tiket_log
+       WHERE jenis = 'tiket' AND created_at > datetime('now', '-60 seconds')
+    `).bind(ipHash).first();
+    return { global: row?.global ?? 0, ip: row?.ip ?? 0 };
   } catch {
-    return 0; // fail-open: lebih baik kehilangan rem daripada menahan pengisi form asli
+    return { global: 0, ip: 0 }; // fail-open: lebih baik kehilangan rem daripada menahan pengisi form asli
   }
 }
 
@@ -53,21 +62,25 @@ async function terbitkanTiketFoto(env) {
   if (!env.JWT_SECRET) return null;
   const now = Math.floor(Date.now() / 1000);
   try {
-    return await signJWT({ scope: 'titipjual-foto', iat: now, exp: now + TIKET_FOTO_DETIK }, env.JWT_SECRET);
+    // `sid` = identitas sesi unggah. titip-jual-foto.js membatasi jumlah
+    // unggahan per sid — dulu satu tiket boleh mengunggah tanpa batas selama 1 jam.
+    return await signJWT({ scope: 'titipjual-foto', sid: crypto.randomUUID(), iat: now, exp: now + TIKET_FOTO_DETIK }, env.JWT_SECRET);
   } catch {
     return null;
   }
 }
 
 export async function onRequestPost(context) {
-  const { env } = context;
+  const { env, request } = context;
+  const ipHash = await hashIp(env, request);
 
-  if (env.DB && (await tiketTerakhirSemenit(env.DB)) >= MAX_PER_MINUTE) {
-    // 200, bukan 429 — dipanggil fire-and-forget saat StepProperti mount, klien
-    // tidak menampilkan error apa pun untuk kegagalan ini. Tanpa tiket, unggah
-    // foto akan ditolak titip-jual-foto.js dengan pesan yang sudah ada ("sesi
-    // unggah tidak sah, muat ulang halaman") — bukan kegagalan senyap baru.
-    return jsonOk({ tiket_foto: null, throttled: true });
+  if (env.DB) {
+    const n = await hitungSemenit(env.DB, ipHash);
+    if (n.global >= MAX_GLOBAL_PER_MENIT || (ipHash && n.ip >= MAX_PER_IP_PER_MENIT)) {
+      // 200, bukan 429 — klien memperlakukan tiket null sebagai "minta lagi
+      // nanti" (TitipJualPage meminta ulang sebelum mengunggah & saat 403).
+      return jsonOk({ tiket_foto: null, throttled: true });
+    }
   }
 
   const tiket_foto = await terbitkanTiketFoto(env);
@@ -75,7 +88,7 @@ export async function onRequestPost(context) {
     // Best-effort — gagal mencatat tidak boleh menggagalkan penerbitan tiket
     // yang sudah ditandatangani.
     context.waitUntil(
-      env.DB.prepare('INSERT INTO titip_jual_tiket_log DEFAULT VALUES').run()
+      env.DB.prepare(`INSERT INTO titip_jual_tiket_log (ip_hash, jenis) VALUES (?, 'tiket')`).bind(ipHash).run()
         .catch(err => console.error('[titip-jual-tiket-foto] catat rem gagal:', err.message))
     );
   }

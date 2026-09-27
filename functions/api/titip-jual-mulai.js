@@ -160,18 +160,14 @@ export async function onRequestPost(context) {
     return jsonError('Body JSON tidak valid', 400);
   }
 
-  // ─── Anti-bot: verifikasi Turnstile sebelum proses berat (2 INSERT + upload R2) ──
-  const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? null;
-  const captcha = await verifyTurnstile(body.cf_turnstile_token, env.TURNSTILE_SECRET, ip, new URL(request.url).hostname);
-  if (!captcha.ok) {
-    context.waitUntil(logServerError(env, {
-      message: `[titip-jual-mulai] Ditolak Turnstile (403): ${captcha.error ?? 'tanpa-alasan'}`,
-      url: request.url,
-      userAgent: request.headers.get('User-Agent') ?? undefined,
-      context: { kind: 'turnstile-403', reason: captcha.error ?? null, ada_token: Boolean(body.cf_turnstile_token) },
-    }));
-    return jsonError('Verifikasi anti-bot gagal. Silakan muat ulang halaman dan coba lagi.', 403);
-  }
+  // ⚠️ URUTAN: validasi murni → idempotensi → Turnstile → tulis DB.
+  // Token Turnstile SEKALI PAKAI. Dulu diverifikasi paling awal, sehingga:
+  // (a) galat 422 (mis. harga lupa diisi) menghanguskan token — kiriman kedua
+  //     pasti 403 dan pengguna harus menekan Kirim tiga kali;
+  // (b) percobaan ulang setelah koneksi putus (data sebenarnya sudah tersimpan)
+  //     ditolak 403 sebelum sempat dikenali sebagai duplikat.
+  // Validasi murni tidak menyentuh DB, dan cek idempotensi hanya cocok dengan
+  // submit_id (UUID acak rahasia milik klien) — keduanya aman sebelum captcha.
 
   const errors = {};
 
@@ -232,7 +228,10 @@ export async function onRequestPost(context) {
   // Dua bentuk diterima: `photo_keys` (baru, sudah diunggah lewat endpoint
   // foto terpisah) dan `photos` base64 (lama). Lihat penjelasan panjang di
   // titip-jual.js — jangan hapus jalur lama tanpa bukti nol pemakaian.
-  const photo_keys = Array.isArray(body.photo_keys) ? body.photo_keys : [];
+  // Duplikat dibuang: foto yang sama dipilih dua kali menghasilkan key yang sama
+  // (klien meng-cache key per dataUrl) — 3 listing produksi sempat memuat satu
+  // objek R2 dua-tiga kali, dan menghapus salah satunya merusak yang lain.
+  const photo_keys = Array.isArray(body.photo_keys) ? [...new Set(body.photo_keys)] : [];
   const pakaiKey = photo_keys.length > 0;
 
   if (pakaiKey) {
@@ -271,6 +270,18 @@ export async function onRequestPost(context) {
     }
   }
 
+  // Angka fisik tidak boleh negatif (dulu `parseInt(x) || null` meloloskan -120).
+  for (const k of ['luas_tanah', 'luas_bangunan', 'jumlah_kamar_tidur', 'jumlah_kamar_mandi', 'lebar_depan', 'lantai', 'lebar_jalan_m']) {
+    const v = Number(body[k]);
+    if (body[k] != null && body[k] !== '' && Number.isFinite(v) && v < 0) errors[k] = 'Tidak boleh bernilai negatif';
+  }
+  // Listing dijual wajib berharga. Dulu harga yang tidak dikirim tersimpan 0 dan
+  // tampil "Hubungi kami" — atau "Harga negosiasi" di kontrak.
+  if (tujuan !== 'disewa' && hrg.ok && !(Number(hrg.harga) > 0)) errors.harga = 'Harga wajib diisi';
+  // `details` disimpan apa adanya sebagai JSON — batasi supaya tidak jadi
+  // gudang data sembarang (isi form normal < 1 KB).
+  if (body.details != null && JSON.stringify(body.details).length > 5000) errors.details = 'Data detail terlalu besar';
+
   if (Object.keys(errors).length > 0) {
     // Hanya NAMA field yang dicatat, TIDAK PERNAH nilainya — error_logs tidak
     // terenkripsi dan isian di sini memuat nomor WA.
@@ -302,6 +313,41 @@ export async function onRequestPost(context) {
         context: { kind: 'idempoten-200', tahap: 'pra-insert', kode_listing: lama.kode_listing, property_id: lama.property_id },
       }));
       return jsonOk(lama, 200);
+    }
+  }
+
+  // ─── Anti-bot: Turnstile — SESUDAH validasi & idempotensi (lihat catatan
+  // urutan di atas), SEBELUM proses berat (fetch Maps, 2 INSERT, catat foto). ──
+  const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? null;
+  const captcha = await verifyTurnstile(body.cf_turnstile_token, env.TURNSTILE_SECRET, ip, new URL(request.url).hostname);
+  if (!captcha.ok) {
+    context.waitUntil(logServerError(env, {
+      message: `[titip-jual-mulai] Ditolak Turnstile (403): ${captcha.error ?? 'tanpa-alasan'}`,
+      url: request.url,
+      userAgent: request.headers.get('User-Agent') ?? undefined,
+      context: { kind: 'turnstile-403', reason: captcha.error ?? null, ada_token: Boolean(body.cf_turnstile_token) },
+    }));
+    return jsonError('Verifikasi anti-bot gagal. Silakan muat ulang halaman dan coba lagi.', 403);
+  }
+
+  // ─── photo_keys milik listing lain? ───────────────────────────────────────
+  // Key foto listing yang sudah tayang terbaca publik di HTML (/api/media?key=…).
+  // Tanpa cek ini, kiriman spam yang merujuk key listing lain lalu dihapus admin
+  // ikut MENGHAPUS objek R2-nya (r2Cleanup mengumpulkan key dari property_images)
+  // — foto listing asli rusak. Migrasi 0054 menambah UNIQUE(url_webp) sebagai
+  // jaminan terakhir; cek di sini memberi galat yang jelas sebelum listing lahir.
+  if (pakaiKey) {
+    const ph = photo_keys.map(() => '?').join(',');   // ≤ 20 → aman dari batas 100 parameter D1
+    const dipakai = await env.DB.prepare(`SELECT 1 FROM property_images WHERE url_webp IN (${ph}) LIMIT 1`)
+      .bind(...photo_keys).first();
+    if (dipakai) {
+      context.waitUntil(logServerError(env, {
+        message: '[titip-jual-mulai] photo_keys merujuk foto yang sudah dipakai listing lain (422)',
+        url: request.url,
+        userAgent: request.headers.get('User-Agent') ?? undefined,
+        context: { kind: 'foto-dipakai-422', jumlah_key: photo_keys.length },
+      }));
+      return jsonError('Validasi gagal', 422, { photos: 'Sebagian foto tidak valid. Muat ulang halaman lalu pilih ulang foto Anda.' });
     }
   }
 
@@ -431,14 +477,6 @@ export async function onRequestPost(context) {
       }
     }
     property_id = propResult.meta?.last_row_id;
-
-    // Baris owners RINGAN — sama seperti pola PATCH admin (properti tanpa
-    // owner). nik_encrypted/nama_ktp/alamat_ktp/dll tetap NULL; Tahap 2 mengisinya.
-    const ownerResult = await env.DB.prepare(`
-      INSERT INTO owners (no_wa_1, no_wa_2, property_id)
-      VALUES (?, ?, ?)
-    `).bind(no_wa_1, no_wa_2, property_id).run();
-    owner_id = ownerResult.meta?.last_row_id;
   } catch (err) {
     console.error('[titip-jual-mulai] INSERT error:', err.message);
     // Dua submit dengan submit_id sama berbalapan — yang kalah kena UNIQUE.
@@ -457,6 +495,34 @@ export async function onRequestPost(context) {
       }
     }
     context.waitUntil(logServerError(env, { message: `[titip-jual-mulai] INSERT error: ${err.message}`, stack: err.stack, url: request.url }));
+    return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
+  }
+
+  // Baris owners RINGAN — sama seperti pola PATCH admin (properti tanpa
+  // owner). nik_encrypted/nama_ktp/alamat_ktp/dll tetap NULL; Tahap 2 mengisinya.
+  //
+  // ⚠️ Try TERSENDIRI + kompensasi. Dulu INSERT ini berbagi catch dengan INSERT
+  // properti di atas: bila owner gagal, catch itu mencari submit_id, MENEMUKAN
+  // properti yang baru saja dibuat request ini sendiri, lalu membalas 200
+  // "duplikat" dengan owner_id null — layar bilang sukses, padahal nomor WA
+  // hilang, foto tak tercatat, dan tiket Tahap 2 pasti ditolak. Sekarang
+  // properti yatim itu dihapus dan klien menerima 500 yang bisa diulang bersih.
+  try {
+    const ownerResult = await env.DB.prepare(`
+      INSERT INTO owners (no_wa_1, no_wa_2, property_id)
+      VALUES (?, ?, ?)
+    `).bind(no_wa_1, no_wa_2, property_id).run();
+    owner_id = ownerResult.meta?.last_row_id;
+  } catch (err) {
+    console.error('[titip-jual-mulai] INSERT owner gagal:', err.message);
+    const hapus = await env.DB.prepare('DELETE FROM properties WHERE id = ?').bind(property_id).run()
+      .then(() => 'properti dihapus', e => `properti GAGAL dihapus: ${e?.message}`);
+    context.waitUntil(logServerError(env, {
+      message: `[titip-jual-mulai] INSERT owner gagal (500) — ${hapus}: ${err.message}`,
+      stack: err.stack,
+      url: request.url,
+      context: { kind: 'owner-500', property_id, kode_listing },
+    }));
     return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
   }
 

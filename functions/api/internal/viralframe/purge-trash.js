@@ -131,12 +131,30 @@ async function bersihkanTabel(env) {
   // ⚠️ AMBANG UMUR 24 JAM WAJIB. Tanpa itu cron ini bisa menghapus foto yang
   // pengunggahnya masih mengisi Step 2 — kegagalan yang jauh lebih buruk daripada
   // sampah yang dibersihkannya. Jangan diperketat "supaya lebih hemat".
+  //
+  // ⚠️ BERKURSOR (2026-09-27). Dulu `list({limit: 300})` TANPA kursor: setiap
+  // malam memeriksa 300 key yang SAMA (urutan leksikografis terendah) dari ~2.600
+  // objek, jadi yatim di luar 300 itu tidak pernah terhapus — dan tersaji publik
+  // lewat /api/media dengan cache 1 tahun. Kini tiap malam melanjutkan dari
+  // kursor terakhir (disimpan di `settings.purge_foto_cursor`) dan kembali ke
+  // awal saat daftar habis: seluruh bucket tersapu tiap ~3 malam.
   let fotoYatim = 0;
+  let fotoDiperiksa = 0;
   try {
     if (env.MEDIA) {
       const batasMs = Date.now() - 24 * 60 * 60 * 1000;
-      const daftar = await env.MEDIA.list({ prefix: 'property-photos/', limit: 300 });
-      const kandidat = (daftar.objects ?? []).filter(o => o.uploaded && o.uploaded.getTime() < batasMs);
+      const kursorLama = await env.DB.prepare(`SELECT value FROM settings WHERE key = 'purge_foto_cursor'`).first()
+        .then(r => r?.value || undefined, () => undefined);
+      let daftar;
+      try {
+        daftar = await env.MEDIA.list({ prefix: 'property-photos/', limit: 1000, cursor: kursorLama });
+      } catch {
+        // Kursor basi/tidak sah → mulai lagi dari awal, jangan macet selamanya.
+        daftar = await env.MEDIA.list({ prefix: 'property-photos/', limit: 1000 });
+      }
+      const objek = daftar.objects ?? [];
+      fotoDiperiksa = objek.length;
+      const kandidat = objek.filter(o => o.uploaded && o.uploaded.getTime() < batasMs);
 
       // ⚠️ D1 hanya menerima 100 bound parameter per query — dipecah 90.
       for (let i = 0; i < kandidat.length; i += 90) {
@@ -146,12 +164,20 @@ async function bersihkanTabel(env) {
           `SELECT url_webp FROM property_images WHERE url_webp IN (${ph})`
         ).bind(...chunk.map(o => o.key)).all();
         const dipakai = new Set((r.results ?? []).map(x => x.url_webp));
-        for (const o of chunk) {
-          if (dipakai.has(o.key)) continue;
-          await env.MEDIA.delete(o.key);
-          fotoYatim++;
+        const yatim = chunk.filter(o => !dipakai.has(o.key)).map(o => o.key);
+        // Satu panggilan hapus per chunk (R2 menerima array ≤ 1000 key) — hemat
+        // subrequest dibanding satu delete per objek.
+        if (yatim.length) {
+          await env.MEDIA.delete(yatim);
+          fotoYatim += yatim.length;
         }
       }
+
+      const kursorBaru = daftar.truncated ? daftar.cursor : null;
+      await env.DB.prepare(
+        `INSERT INTO settings (key, value) VALUES ('purge_foto_cursor', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+      ).bind(kursorBaru).run();
     }
   } catch (err) {
     console.error('[purge-trash] foto titip-jual yatim', err.message);
@@ -170,13 +196,27 @@ async function bersihkanTabel(env) {
     console.error('[purge-trash] retensi titip_jual_tiket_log', err.message);
   }
 
+  // Retensi titip_jual_foto_log (migrasi 0054) — penghitung unggahan per tiket
+  // foto; tiketnya berumur 1 jam, jadi 1 hari sudah jauh berlebih.
+  let fotoLog = 0;
+  try {
+    const r = await env.DB.prepare(
+      `DELETE FROM titip_jual_foto_log WHERE created_at < datetime('now', '-1 day')`
+    ).run();
+    fotoLog = r?.meta?.changes ?? 0;
+  } catch (err) {
+    console.error('[purge-trash] retensi titip_jual_foto_log', err.message);
+  }
+
   return {
     jadwal_yatim_dihapus: jadwalYatim,
     error_logs_dihapus: errorLogs,
     view_daily_dihapus: viewDaily,
     caption_dihapus: caption,
     foto_yatim_dihapus: fotoYatim,
+    foto_diperiksa: fotoDiperiksa,
     tiket_log_dihapus: tiketLog,
+    foto_log_dihapus: fotoLog,
   };
 }
 

@@ -166,7 +166,9 @@ export async function onRequestPost(context) {
 
   let data_ahli_waris = null;
   if (body.data_ahli_waris && typeof body.data_ahli_waris === 'object') {
+    // Bentuk objek dulu disimpan tanpa batas (form normal < 150 B).
     data_ahli_waris = JSON.stringify(body.data_ahli_waris);
+    if (data_ahli_waris.length > 2000) errors.data_ahli_waris = 'Data ahli waris terlalu besar';
   } else if (typeof body.data_ahli_waris === 'string' && body.data_ahli_waris.trim()) {
     data_ahli_waris = body.data_ahli_waris.trim().slice(0, 2000);
   }
@@ -212,14 +214,41 @@ export async function onRequestPost(context) {
     return jsonError('Gagal memproses data. Silakan coba lagi.', 500);
   }
 
-  // ─── UPDATE owners (finalisasi KYC) ───────────────────────────────────────
-  // Guard `AND nik_encrypted IS NULL` menahan race dua tab menuntaskan Tahap 2
-  // bersamaan — SELECT di atas sudah lolos, tapi tab lain bisa menang UPDATE
-  // duluan di antara SELECT dan UPDATE ini. changes===0 berarti itu terjadi;
-  // jatuhkan ke jalur idempoten, jangan dianggap error.
-  let updateResult;
+  const propRow = await env.DB.prepare('SELECT tujuan, kode_listing FROM properties WHERE id = ?').bind(property_id).first();
+  if (!propRow) {
+    // Mustahil dalam kondisi normal (owner/properti sudah dicek di atas), tapi
+    // owners.property_id pakai ON DELETE SET NULL — jaga-jaga bila properti
+    // dihapus admin di antara SELECT tadi dan sekarang.
+    context.waitUntil(logServerError(env, { message: '[titip-jual-lengkapi] Properti tidak ditemukan (404)', url: request.url, context: { kind: 'property-404', property_id } }));
+    return jsonError('Data properti tidak ditemukan. Admin kami akan menghubungi Anda via WhatsApp.', 404);
+  }
+
+  const date8 = today8();
+  let agrSeqN;
   try {
-    updateResult = await env.DB.prepare(`
+    agrSeqN = await nextKodeSeq(env.DB, 'agreements', 'kode_perjanjian', `SBP-AGR-${date8}-`);
+  } catch (err) {
+    console.error('[titip-jual-lengkapi] Gagal generate kode:', err.message);
+    context.waitUntil(logServerError(env, { message: `[titip-jual-lengkapi] Gagal generate kode: ${err.message}`, stack: err.stack, url: request.url }));
+    return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
+  }
+  let kode_perjanjian = `SBP-AGR-${date8}-${fmtSeq(agrSeqN)}`;
+
+  // ─── KYC + perjanjian dalam SATU transaksi (DB.batch) ─────────────────────
+  // ⚠️ Dulu dua langkah terpisah: UPDATE owners (NIK) lalu INSERT agreements.
+  // Kegagalan apa pun di antaranya (galat D1, bentrok kode, Worker dibunuh)
+  // meninggalkan owner ber-NIK TANPA perjanjian — dan setiap percobaan ulang
+  // membentur jalur "inkonsisten" 500 SELAMANYA, tanpa satu pun jalan perbaikan.
+  // Dalam batch, keduanya jadi atau tidak sama sekali.
+  //
+  // - UPDATE dijaga `nik_encrypted IS NULL`: dua tab/ketukan paralel diserialkan
+  //   D1; yang kalah melihat 0 baris berubah → jalur idempoten di bawah, yang
+  //   kini PASTI menemukan perjanjian milik pemenang (dulu bisa belum ada →
+  //   galat palsu "coba lagi" padahal data tersimpan).
+  // - INSERT hanya terjadi bila owner kini memegang ciphertext milik REQUEST INI
+  //   (IV acak → ciphertext unik), jadi yang kalah tidak ikut menyisipkan.
+  const jalankan = kode => env.DB.batch([
+    env.DB.prepare(`
       UPDATE owners SET
         nama_pemilik = ?, nik_encrypted = ?, nama_ktp = ?, alamat_ktp = ?, rt_rw = ?,
         kelurahan = ?, kecamatan = ?, bertindak_sebagai = ?, data_ahli_waris = ?,
@@ -229,14 +258,34 @@ export async function onRequestPost(context) {
       nama_ktp, nik_encrypted, nama_ktp, alamat_ktp, rt_rw,
       kelurahan_owner, kecamatan_owner, bertindak, data_ahli_waris,
       jenis_identitas, owner_id
-    ).run();
-  } catch (err) {
-    console.error('[titip-jual-lengkapi] UPDATE owners gagal:', err.message);
-    context.waitUntil(logServerError(env, { message: `[titip-jual-lengkapi] UPDATE owners gagal: ${err.message}`, stack: err.stack, url: request.url }));
-    return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
+    ),
+    env.DB.prepare(`
+      INSERT INTO agreements
+        (kode_perjanjian, property_id, owner_id,
+         jenis_transaksi, jenis_listing, fee_persen,
+         status, created_at, updated_at)
+      SELECT ?, ?, ?, ?, 'open', 3.0, 'draft', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+       WHERE EXISTS (SELECT 1 FROM owners WHERE id = ? AND nik_encrypted = ?)
+    `).bind(kode, property_id, owner_id, jenisTransaksi(propRow.tujuan), owner_id, nik_encrypted),
+  ]);
+
+  let hasilBatch;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      hasilBatch = await jalankan(kode_perjanjian);
+      break;
+    } catch (err) {
+      if (isUniqueErr(err) && attempt < 3) {
+        kode_perjanjian = `SBP-AGR-${date8}-${fmtSeq(agrSeqN + attempt + 1)}`;
+        continue;
+      }
+      console.error('[titip-jual-lengkapi] Batch KYC+perjanjian gagal:', err.message);
+      context.waitUntil(logServerError(env, { message: `[titip-jual-lengkapi] Batch KYC+perjanjian gagal (500): ${err.message}`, stack: err.stack, url: request.url }));
+      return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
+    }
   }
 
-  if ((updateResult.meta?.changes ?? 0) === 0) {
+  if ((hasilBatch[0]?.meta?.changes ?? 0) === 0) {
     const hasil = await ambilAgreementSelesai(env.DB, property_id);
     if (hasil) {
       context.waitUntil(logServerError(env, {
@@ -253,54 +302,7 @@ export async function onRequestPost(context) {
     }));
     return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
   }
-
-  const propRow = await env.DB.prepare('SELECT tujuan, kode_listing FROM properties WHERE id = ?').bind(property_id).first();
-  if (!propRow) {
-    // Mustahil dalam kondisi normal (FK owners→properties), tapi owners.property_id
-    // pakai ON DELETE SET NULL — jaga-jaga bila baris ini yatim di antara SELECT tadi.
-    console.error('[titip-jual-lengkapi] Properti tidak ditemukan setelah UPDATE owners, property_id=', property_id);
-    context.waitUntil(logServerError(env, { message: '[titip-jual-lengkapi] Properti tidak ditemukan setelah UPDATE owners (500)', url: request.url, context: { kind: 'property-500', property_id } }));
-    return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
-  }
-
-  // ─── INSERT agreements ─────────────────────────────────────────────────────
-  const date8 = today8();
-  let agrSeqN;
-  try {
-    agrSeqN = await nextKodeSeq(env.DB, 'agreements', 'kode_perjanjian', `SBP-AGR-${date8}-`);
-  } catch (err) {
-    console.error('[titip-jual-lengkapi] Gagal generate kode:', err.message);
-    context.waitUntil(logServerError(env, { message: `[titip-jual-lengkapi] Gagal generate kode: ${err.message}`, stack: err.stack, url: request.url }));
-    return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
-  }
-  let kode_perjanjian = `SBP-AGR-${date8}-${fmtSeq(agrSeqN)}`;
-
-  let agreement_id;
-  try {
-    const insertAgreement = () => env.DB.prepare(`
-      INSERT INTO agreements
-        (kode_perjanjian, property_id, owner_id,
-         jenis_transaksi, jenis_listing, fee_persen,
-         status, created_at, updated_at)
-      VALUES (?,?,?,  ?,'open',3.0,  'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-    `).bind(kode_perjanjian, property_id, owner_id, jenisTransaksi(propRow.tujuan)).run();
-
-    let agrResult;
-    for (let attempt = 0; ; attempt++) {
-      try {
-        agrResult = await insertAgreement();
-        break;
-      } catch (err) {
-        if (!isUniqueErr(err) || attempt >= 3) throw err;
-        kode_perjanjian = `SBP-AGR-${date8}-${fmtSeq(agrSeqN + attempt + 1)}`;
-      }
-    }
-    agreement_id = agrResult.meta?.last_row_id;
-  } catch (err) {
-    console.error('[titip-jual-lengkapi] INSERT agreement gagal:', err.message);
-    context.waitUntil(logServerError(env, { message: `[titip-jual-lengkapi] INSERT agreement gagal: ${err.message}`, stack: err.stack, url: request.url }));
-    return jsonError('Gagal menyimpan data. Silakan coba lagi.', 500);
-  }
+  const agreement_id = hasilBatch[1]?.meta?.last_row_id;
 
   // ─── Meta CAPI: CompleteRegistration (KYC penjual tuntas) ─────────────────
   // Event yang sama dengan titip-jual.js (jalur lama sekali-submit) — sengaja
