@@ -30,6 +30,7 @@ import { normalisasiHarga } from '../_lib/hargaTanah.js';
 import { logServerError } from '../_lib/logError.js';
 import { sendCapiEvent, extractMetaIdentity } from '../_lib/metaCapi.js';
 import { stmtNormalisasiCover } from '../_lib/fotoUtama.js';
+import { hashIp } from '../_lib/remIp.js';
 
 const TIKET_LANJUT_DETIK = 7 * 24 * 3600; // 7 hari — cukup untuk mengisi Tahap 2 tanpa terburu-buru
 
@@ -319,7 +320,45 @@ export async function onRequestPost(context) {
   // ─── Anti-bot: Turnstile — SESUDAH validasi & idempotensi (lihat catatan
   // urutan di atas), SEBELUM proses berat (fetch Maps, 2 INSERT, catat foto). ──
   const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? null;
-  const captcha = await verifyTurnstile(body.cf_turnstile_token, env.TURNSTILE_SECRET, ip, new URL(request.url).hostname);
+
+  // ─── Jalur CADANGAN tanpa Turnstile (migrasi 0055) ────────────────────────
+  // Hanya bila klien menandainya (widget gagal/macet ≥ 20 dtk) DAN tidak ada
+  // token sama sekali — token yang ada selalu diverifikasi normal. Kuota ketat
+  // per-IP + plafon global; kiriman ditandai untuk admin dan TIDAK dilaporkan
+  // ke Meta (lihat komentar migrasi 0055).
+  const tanpaCaptcha = body.tanpa_captcha === true && !body.cf_turnstile_token;
+  if (tanpaCaptcha) {
+    const ipHash = await hashIp(env, request);
+    const kuota = await env.DB.prepare(`
+      SELECT COUNT(*) AS global,
+             SUM(CASE WHEN ip_hash = ? THEN 1 ELSE 0 END) AS ip
+        FROM titip_jual_tiket_log
+       WHERE jenis = 'tanpa_captcha' AND created_at > datetime('now', '-1 day')
+    `).bind(ipHash).first().catch(() => null);
+    // Fail-CLOSED di sini (beda dari rem tiket): tanpa hitungan yang bisa
+    // dipercaya, jalur tanpa captcha tidak boleh terbuka.
+    if (!kuota || !ipHash || (kuota.ip ?? 0) >= 2 || (kuota.global ?? 0) >= 20) {
+      context.waitUntil(logServerError(env, {
+        message: '[titip-jual-mulai] Jalur tanpa-captcha ditolak — kuota habis/tak terbaca (429)',
+        url: request.url,
+        userAgent: request.headers.get('User-Agent') ?? undefined,
+        context: { kind: 'tanpa-captcha-429', ip: kuota?.ip ?? null, global: kuota?.global ?? null },
+      }));
+      return jsonError('Batas pengiriman tanpa verifikasi sudah tercapai. Coba lagi nanti, atau hubungi admin SBP via WhatsApp 0813-9127-8889.', 429);
+    }
+    await env.DB.prepare(`INSERT INTO titip_jual_tiket_log (ip_hash, jenis) VALUES (?, 'tanpa_captcha')`).bind(ipHash).run()
+      .catch(err => console.error('[titip-jual-mulai] catat kuota tanpa-captcha gagal:', err.message));
+    context.waitUntil(logServerError(env, {
+      message: '[titip-jual-mulai] Kiriman DITERIMA tanpa Turnstile (jalur cadangan) — ditandai untuk ditinjau admin',
+      url: request.url,
+      userAgent: request.headers.get('User-Agent') ?? undefined,
+      context: { kind: 'tanpa-captcha-diterima' },
+    }));
+  }
+
+  const captcha = tanpaCaptcha
+    ? { ok: true }
+    : await verifyTurnstile(body.cf_turnstile_token, env.TURNSTILE_SECRET, ip, new URL(request.url).hostname);
   if (!captcha.ok) {
     context.waitUntil(logServerError(env, {
       message: `[titip-jual-mulai] Ditolak Turnstile (403): ${captcha.error ?? 'tanpa-alasan'}`,
@@ -437,7 +476,7 @@ export async function onRequestPost(context) {
          gmaps_link, latitude, longitude, lebar_jalan_m,
          income_per_bulan, pengeluaran_per_bulan, harga_sewa_kamar_bulan,
          details, furnished,
-         meta_title, meta_description, submit_id,
+         meta_title, meta_description, submit_id, tanpa_captcha,
          status_publish, created_at, updated_at)
       VALUES
         (?,?,?,?,?,?,?,?,?,
@@ -450,7 +489,7 @@ export async function onRequestPost(context) {
          ?,?,?,?,
          ?,?,?,
          ?,?,
-         ?,?,?,
+         ?,?,?,?,
          'draft',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     `).bind(
       kode_listing, titleFinal, slug, jenis_properti, tujuan, hrg.harga, hrg.harga_per_m2, hrg.harga_mode, harga_sewa_tahun,
@@ -463,7 +502,7 @@ export async function onRequestPost(context) {
       gmaps_link, geo.latitude, geo.longitude, lebar_jalan_m,
       income_per_bulan, pengeluaran_per_bulan, harga_sewa_kamar_bulan,
       details, furnished,
-      meta.meta_title, meta.meta_description, submit_id
+      meta.meta_title, meta.meta_description, submit_id, tanpaCaptcha ? 1 : 0
     ).run();
 
     let propResult;
@@ -604,8 +643,11 @@ export async function onRequestPost(context) {
   // titip-jual-prospek.js: kontak sudah diserahkan tapi form belum tuntas
   // (KYC menyusul di Tahap 2). HANYA di jalur 201 ini — jalur idempoten 200 di
   // atas TIDAK boleh menembakkan event (percobaan ulang bukan konversi kedua).
-  const leadEventId = `lead_${property_id}_${Date.now()}`;
-  context.waitUntil((async () => {
+  // Kiriman jalur cadangan tanpa captcha (migrasi 0055) TIDAK dilaporkan ke
+  // Meta — bisa saja bot, dan optimasi iklan tidak boleh belajar darinya.
+  // event_id ikut dikosongkan supaya Pixel browser juga diam.
+  const leadEventId = tanpaCaptcha ? null : `lead_${property_id}_${Date.now()}`;
+  if (leadEventId) context.waitUntil((async () => {
     try {
       const pixelRes = await env.DB
         .prepare("SELECT pixel_id, capi_access_token, events_enabled FROM pixel_configs WHERE is_active = 1 AND capi_access_token IS NOT NULL AND capi_access_token != ''")
@@ -643,7 +685,7 @@ export async function onRequestPost(context) {
           : `${photos_failed} dari ${totalFoto} foto gagal diproses.`)
       : null,
     status: 'draft',
-    event_id: leadEventId,
+    event_id: leadEventId ?? undefined,
     pesan: 'Properti Anda sudah tercatat. Tim SBP bisa menghubungi Anda via WhatsApp.',
   }, 201);
 }

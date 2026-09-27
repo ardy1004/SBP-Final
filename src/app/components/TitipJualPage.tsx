@@ -29,7 +29,10 @@ import { adaIsi, inputCls, FieldErr, type Stage2Result } from './titipjual/bersa
 // Tahap 2 dimuat malas — tidak pernah dirender saat SSR (lihat komentar di
 // titipjual/StepDataDiri.tsx). JANGAN render tanpa guard dataDiriSudahDipasang.
 const StepDataDiri = lazy(() => import('./titipjual/StepDataDiri'));
-import { bacaDraft, simpanDraft, hapusDraft, submitIdMasihSah, bacaPayloadTiket, tiketMasihBerlaku } from '../../lib/titipJualDraft';
+import {
+  bacaDraft, simpanDraft, hapusDraft, submitIdMasihSah, bacaPayloadTiket, tiketMasihBerlaku,
+  simpanTiketFoto, ambilTiketFoto, idAcak,
+} from '../../lib/titipJualDraft';
 import { laporKendalaForm } from '../../lib/laporKendala';
 
 export const meta = () => pageMeta({
@@ -99,12 +102,22 @@ function convertToWebP(file: File): Promise<string> {
       const ctx = canvas.getContext('2d');
       if (!ctx) { reject(new Error('Canvas tidak tersedia')); return; }
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(blob => {
-        if (!blob) { reject(new Error('Konversi WebP gagal')); return; }
+      const selesai = (blob: Blob | null) => {
+        // Lepas memori kanvas segera (1920px RGBA ≈ 15 MB) — di HP murah,
+        // kanvas yang menumpuk membuat WebView crash dan SEMUA foto hilang.
+        canvas.width = 0; canvas.height = 0;
+        if (!blob) { reject(new Error('Konversi foto gagal')); return; }
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result as string);
         reader.onerror = () => reject(new Error('FileReader error'));
         reader.readAsDataURL(blob);
+      };
+      canvas.toBlob(blob => {
+        // ⚠️ Safari/WKWebView (iPhone) TIDAK punya encoder WebP: toBlob diam-diam
+        // mengembalikan PNG (5–10× lebih besar, 9 foto di produksi). Ulangi
+        // sebagai JPEG — didukung semua peramban dan tetap kecil.
+        if (blob && blob.type !== 'image/webp') { canvas.toBlob(selesai, 'image/jpeg', 0.85); return; }
+        selesai(blob);
       }, 'image/webp', 0.85);
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Gagal membaca gambar')); };
@@ -165,7 +178,7 @@ function ukuranBase64(dataUrl: string): number {
  * menghanguskan token yang dibutuhkan submit akhir beberapa detik kemudian.
  * titip-jual-foto.js sendiri TIDAK berubah — scope tiket (`titipjual-foto`) sama persis.
  */
-async function unggahSatuFoto(dataUrl: string, tiket: string | undefined): Promise<string> {
+async function unggahSatuFoto(dataUrl: string, tiket: string | null): Promise<string> {
   const res = await fetch('/api/titip-jual-foto', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -173,9 +186,31 @@ async function unggahSatuFoto(dataUrl: string, tiket: string | undefined): Promi
   });
   const json = await bacaJson<{ key: string }>(res);
   if (!res.ok || !json.data?.key) {
-    throw new Error(json.error ?? `Foto gagal diunggah (HTTP ${res.status})`);
+    // Status ikut dibawa: 403 = tiket basi (minta baru & ulangi), 422 = foto
+    // ini sendiri ditolak (tak ada gunanya diulang), lainnya = jaringan/server.
+    throw Object.assign(new Error(json.error ?? `Foto gagal diunggah (HTTP ${res.status})`), { status: res.status });
   }
   return json.data.key;
+}
+
+/**
+ * Jalankan `fn` atas `items` dengan paling banyak `n` sekaligus. Dipakai
+ * konversi foto: dulu 20 foto kamera didekode BERSAMAAN (±48 MB per foto) →
+ * WebView HP murah crash, atau iOS mencapai batas memori kanvas sehingga
+ * getContext() null dan user diberi tahu "format tidak didukung" secara keliru.
+ */
+async function petakTerbatas<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Promise<PromiseSettledResult<R>[]> {
+  const hasil: PromiseSettledResult<R>[] = new Array(items.length);
+  let i = 0;
+  const pekerja = async () => {
+    while (i < items.length) {
+      const k = i++;
+      try { hasil[k] = { status: 'fulfilled', value: await fn(items[k]) }; }
+      catch (reason) { hasil[k] = { status: 'rejected', reason }; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, pekerja));
+  return hasil;
 }
 
 /**
@@ -186,7 +221,7 @@ async function unggahSatuFoto(dataUrl: string, tiket: string | undefined): Promi
  * informasi daripada baris `leads`). Tanpa Turnstile (token sekali pakai, lihat
  * unggahSatuFoto), gagal-diam (tiket adalah pendukung, bukan jalur utama).
  */
-async function mintaTiketFoto(): Promise<void> {
+async function mintaTiketFoto(): Promise<string | null> {
   try {
     const res = await fetch('/api/titip-jual-tiket-foto', {
       method: 'POST',
@@ -194,19 +229,59 @@ async function mintaTiketFoto(): Promise<void> {
       body: JSON.stringify({}),
     });
     const json = await bacaJson<{ tiket_foto: string | null }>(res);
-    if (json.data?.tiket_foto) simpanDraft({ tiketFoto: json.data.tiket_foto });
+    if (json.data?.tiket_foto) { simpanTiketFoto(json.data.tiket_foto); return json.data.tiket_foto; }
   } catch {
     /* diam: tiket foto adalah pendukung, kegagalannya tidak boleh menghentikan pengisian form */
   }
+  return null;
+}
+
+/**
+ * Tiket foto yang MASIH berlaku ≥ 5 menit, diminta ulang bila perlu.
+ * Dulu tiket hanya diminta SEKALI saat halaman dibuka: form yang diisi lebih
+ * dari 1 jam, permintaan pertama yang gagal di jaringan buruk, atau rem yang
+ * sedang menahan = setiap unggahan 403 selamanya, dengan pesan "periksa
+ * koneksi" yang menyesatkan dan jalan keluar (muat ulang) yang menghapus foto.
+ */
+async function pastikanTiketFoto(): Promise<string | null> {
+  const t = ambilTiketFoto();
+  if (t && tiketMasihBerlaku(t, 300)) return t;
+  return mintaTiketFoto();
 }
 
 /**
  * Kunci error StepProperti menurut URUTAN TAMPILNYA di layar.
  */
 const URUTAN_FIELD_PROPERTI = [
-  'no_wa', 'harga', 'harga_sewa_tahun', 'jenis', 'lokasi', 'gmaps_link', 'legalitas',
+  'no_wa', 'no_wa_2', 'harga', 'harga_sewa_tahun', 'jenis', 'luas', 'lokasi', 'gmaps_link', 'legalitas',
   'photos', 'consent', 'turnstile',
 ];
+
+/**
+ * Kunci galat 422 dari server → kunci yang PUNYA tempat tampil di form ini.
+ * Dulu `jenis_properti`/`tujuan`/`kecamatan_prop` dll. dipasang apa adanya ke
+ * state errors, padahal form memakai kunci lain (`jenis`, `lokasi`) — galatnya
+ * tidak terlihat di mana pun, user hanya membaca "periksa kembali isian".
+ * Kunci yang tetap tak dikenal dikembalikan terpisah untuk ditampilkan di kotak
+ * galat umum, supaya tidak ada pesan server yang hilang.
+ */
+const PETA_GALAT_SERVER: Record<string, string> = {
+  jenis_properti: 'jenis', tujuan: 'jenis', title: 'jenis',
+  provinsi: 'lokasi', kabupaten: 'lokasi', kecamatan_prop: 'lokasi', kelurahan_prop: 'lokasi',
+  luas_tanah: 'luas', luas_bangunan: 'luas', jumlah_kamar_tidur: 'luas', jumlah_kamar_mandi: 'luas',
+  lebar_depan: 'luas', lantai: 'luas', lebar_jalan_m: 'gmaps_link',
+};
+function petakGalatServer(details: Record<string, string>): { errs: Record<string, string>; sisa: string[] } {
+  const errs: Record<string, string> = {};
+  const sisa: string[] = [];
+  const dikenal = new Set(URUTAN_FIELD_PROPERTI);
+  for (const [k, v] of Object.entries(details)) {
+    const tujuanKunci = PETA_GALAT_SERVER[k] ?? k;
+    if (dikenal.has(tujuanKunci)) errs[tujuanKunci] = errs[tujuanKunci] ? `${errs[tujuanKunci]} · ${v}` : v;
+    else sisa.push(v);
+  }
+  return { errs, sisa };
+}
 
 /**
  * Gulir ke field bermasalah pertama. Memakai id DOM, bukan ref per-field:
@@ -219,6 +294,9 @@ function fokuskanErrorPertama(errs: Record<string, string>, urutan: string[] = U
   document.getElementById(`f-${kunci}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
+
+/** Angka fisik (luas, kamar, lantai) tidak pernah negatif — buang tanda minus saat diketik. */
+const tanpaMinus = (v: string) => v.replace(/-/g, '');
 
 const toggleBtnCls = (active: boolean) =>
   `flex-1 py-2 rounded-xl text-xs font-medium border transition-all ${active ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'border-gray-200 text-gray-600 hover:border-[#1565C0]'}`;
@@ -280,8 +358,9 @@ let seqFoto = 0;
 const idFotoBaru = () => `f${++seqFoto}`;
 
 function StepProperti({ onSuccess }: StepPropertiProps) {
-  // Tiket foto — diminta begitu komponen ini mount (lihat mintaTiketFoto()).
-  useEffect(() => { void mintaTiketFoto(); }, []);
+  // Tiket foto — disiapkan begitu komponen ini mount, dan DIPERIKSA ULANG
+  // sebelum unggah (pastikanTiketFoto) supaya tiket basi diganti otomatis.
+  useEffect(() => { void pastikanTiketFoto(); }, []);
 
   // Guard hydration untuk genDisplayKode() — lihat komentar di atas fungsinya.
   const [siapTampilKode, setSiapTampilKode] = useState(false);
@@ -369,6 +448,16 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
   const [turnstileStatus, setTurnstileStatus] = useState<TurnstileStatus>('memuat');
   const turnstileRef = useRef<TurnstileHandle>(null);
   const [loading, setLoading] = useState(false);
+  // Salinan `loading` yang terbaca SINKRON oleh handler foto (state bisa basi
+  // di closure). true selama unggah+kirim: daftar foto dikunci.
+  const sedangKirimRef = useRef(false);
+  // Token Turnstile dibaca dari ref SAAT payload dikirim, bukan saat Kirim
+  // ditekan: unggah 20 foto bisa lebih lama dari umur token (±300 dtk), dan
+  // widget memperbaruinya sendiri lewat onVerify selama itu.
+  const turnstileTokenRef = useRef('');
+  // Jalur cadangan bila widget Turnstile macet (lihat efek di bawah).
+  const [bolehTanpaCaptcha, setBolehTanpaCaptcha] = useState(false);
+  const tanpaCaptchaRef = useRef(false);
   const [uploadPct, setUploadPct] = useState(0);
   // dataUrl → key R2. Dipakai supaya percobaan ulang submit tidak mengunggah
   // ulang foto yang sudah berhasil. Sengaja `useRef`: isinya tidak memengaruhi
@@ -401,19 +490,32 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
     const s = (d?.s2 ?? {}) as Partial<typeof snapshot>;
     const str = (v: unknown, set: (x: string) => void) => { if (typeof v === 'string' && v) set(v); };
     const num = (v: unknown, set: (x: number | null) => void) => { if (typeof v === 'number') set(v); };
+    // Pilihan ber-daftar WAJIB divalidasi: draft = input tak tepercaya dari
+    // build mana pun. Nilai di luar daftar dulu dipulihkan mentah — tombol
+    // pilihan tak satu pun menyala, tapi nilainya tetap terkirim ke server.
+    const opsi = (v: unknown, daftar: readonly string[], set: (x: string) => void) => {
+      if (typeof v === 'string' && daftar.includes(v)) set(v);
+    };
 
     str(s.noWa, setNoWa); str(s.noWa2, setNoWa2);
     num(s.provId, setProvId); num(s.kabId, setKabId); num(s.kecId, setKecId); num(s.kelId, setKelId);
     str(s.provinsi, setProvinsi); str(s.kabupaten, setKabupaten); str(s.kecProp, setKecProp); str(s.kelProp, setKelProp);
-    str(s.judul, setJudul); str(s.jenis, setJenis); str(s.tujuan, setTujuan);
-    str(s.harga, setHarga); str(s.hargaSewa, setHargaSewa); str(s.hargaMode, setHargaMode);
+    str(s.judul, setJudul);
+    opsi(s.jenis, JENIS_OPTIONS.map(o => o.value), setJenis);
+    opsi(s.tujuan, ['dijual', 'disewa', 'dijual_disewa'], setTujuan);
+    str(s.harga, setHarga); str(s.hargaSewa, setHargaSewa);
+    opsi(s.hargaMode, [HARGA_MODE_TOTAL, HARGA_MODE_PER_M2], setHargaMode);
     str(s.alamat, setAlamat); str(s.lt, setLt); str(s.lb, setLb); str(s.kt, setKt); str(s.km, setKm);
     str(s.lebar_depan, setLebarDepan); str(s.lantai, setLantai); str(s.lebar_jalan, setLebarJalan);
-    str(s.legalitas, setLegalitas); str(s.bankAgunan, setBankAgunan); str(s.outstanding, setOutstanding);
-    str(s.lingkungan, setLingkungan); str(s.gmaps, setGmaps);
+    opsi(s.legalitas, LEGALITAS_OPTIONS, setLegalitas);
+    str(s.bankAgunan, setBankAgunan); str(s.outstanding, setOutstanding);
+    opsi(s.lingkungan, LINGKUNGAN_OPTIONS.map(o => o.value), setLingkungan);
+    str(s.gmaps, setGmaps);
     str(s.infoTambahan, setInfoTambahan); str(s.alasanJual, setAlasanJual);
-    str(s.jenisKost, setJenisKost); str(s.jenisHotel, setJenisHotel); str(s.noUnit, setNoUnit);
-    str(s.kelengkapan, setKelengkapan);
+    opsi(s.jenisKost, JENIS_KOST_OPTS, setJenisKost);
+    opsi(s.jenisHotel, JENIS_HOTEL_OPTS, setJenisHotel);
+    str(s.noUnit, setNoUnit);
+    opsi(s.kelengkapan, FURNISHED_OPTS.map(o => o.value), setKelengkapan);
     str(s.incomePerBulan, setIncomePerBulan); str(s.pengeluaranPerBulan, setPengeluaranPerBulan);
     str(s.sewaKamarBulan, setSewaBulan);
     if (s.kondisi === 'nego' || s.kondisi === 'nett') setKondisi(s.kondisi);
@@ -445,27 +547,39 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
     return () => clearTimeout(t);
   }, [snapshotJson, adaIsiSnapshot, jumlahFoto]);
 
-  // Load all provinces
+  // Load all provinces. Gagal = pesan + tombol "Coba lagi" (dulu diam: dropdown
+  // kosong tanpa penjelasan, padahal lokasi WAJIB — form mustahil dikirim).
+  const [locGagal, setLocGagal] = useState(false);
+  const [locPercobaan, setLocPercobaan] = useState(0);
   useEffect(() => {
     setLocLoading(true);
+    setLocGagal(false);
     getLocations().then(res => {
       if (res.success && res.data) setProvList(res.data.items);
-    }).catch(() => {}).finally(() => setLocLoading(false));
-  }, []);
+      else setLocGagal(true);
+    }).catch(() => setLocGagal(true)).finally(() => setLocLoading(false));
+  }, [locPercobaan]);
 
-  // Load kabupaten saat provinsi dipilih
+  // ⚠️ Efek cascade di bawah HANYA mengosongkan DAFTAR pilihan saat induknya
+  // kosong — TIDAK mengosongkan nama (kabupaten/kecProp/kelProp) maupun kelId.
+  // Dulu mengosongkan keduanya: efek-efek ini berjalan SETELAH efek pemulihan
+  // draft pada mount pertama dengan id awal null, sehingga nama yang baru
+  // dipulihkan terhapus lagi. Dropdown tetap tampak terisi (id selamat), tapi
+  // kiriman gagal "Provinsi, Kabupaten/Kota, dan Kecamatan wajib dipilih" dan
+  // autosave menulis nama kosong itu kembali ke draft. Pengosongan nama anak
+  // saat induk BERUBAH sudah dilakukan handler onChange di bawah.
   useEffect(() => {
-    if (!provId) { setKabList([]); setKecList([]); setKelList([]); setKabupaten(''); setKecProp(''); setKelProp(''); setKelId(null); return; }
+    if (!provId) { setKabList([]); setKecList([]); setKelList([]); return; }
     getLocations(provId).then(res => { if (res.success && res.data) setKabList(res.data.items); });
   }, [provId]);
 
   useEffect(() => {
-    if (!kabId) { setKecList([]); setKelList([]); setKecProp(''); setKelProp(''); setKelId(null); return; }
+    if (!kabId) { setKecList([]); setKelList([]); return; }
     getLocations(kabId).then(res => { if (res.success && res.data) setKecList(res.data.items); });
   }, [kabId]);
 
   useEffect(() => {
-    if (!kecId) { setKelList([]); setKelProp(''); setKelId(null); return; }
+    if (!kecId) { setKelList([]); return; }
     getLocations(kecId).then(res => { if (res.success && res.data) setKelList(res.data.items); });
   }, [kecId]);
 
@@ -497,6 +611,9 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
 
   // Photo handlers — dipakai input file (klik) DAN drop zone (seret file).
   const tambahFoto = async (files: FileList | File[]) => {
+    // Selama unggah berjalan, daftar foto DIKUNCI: loop unggah memakai daftar
+    // saat Kirim ditekan — foto yang ditambah di tengahnya dulu hilang diam-diam.
+    if (sedangKirimRef.current) return;
     const list = Array.from(files);
     const toAdd: File[] = [];
     let photoErr = '';
@@ -513,33 +630,52 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
       else clearErr('photos');
       return;
     }
-    const settled = await Promise.allSettled(toAdd.map(convertToWebP));
+    const settled = await petakTerbatas(toAdd, 2, convertToWebP);
     const okPreviews: string[] = [];
     const failedNames: string[] = [];
     settled.forEach((result, i) => {
       if (result.status === 'fulfilled') okPreviews.push(result.value);
       else failedNames.push(toAdd[i].name);
     });
+    // Foto yang SAMA (hasil konversi identik) dilewati. Dulu dua kartu merujuk
+    // satu objek R2 — menghapus salah satunya di admin merusak yang lain.
+    // Penyaringan sungguhan terjadi di updater (murni, aman dipanggil ulang
+    // StrictMode); hitungan untuk pesan memakai daftar saat ini.
     if (okPreviews.length) {
-      // slice(0, 20) di SINI, bukan hanya cek di atas: `photos.length` di atas
-      // bisa basi bila dua batch dikonversi bersamaan (klik lalu langsung drop),
-      // dan keduanya sama-sama lolos cek → lebih dari 20 foto.
-      setPhotos(p => [...p, ...okPreviews.map(preview => ({ id: idFotoBaru(), preview }))].slice(0, 20));
+      const idBaru = okPreviews.map(() => idFotoBaru());
+      setPhotos(p => {
+        const sudah = new Set(p.map(f => f.preview));
+        const baru: FotoLokal[] = [];
+        okPreviews.forEach((preview, i) => {
+          if (sudah.has(preview)) return;
+          sudah.add(preview);
+          baru.push({ id: idBaru[i], preview });
+        });
+        // slice(0, 20) di SINI, bukan hanya cek di atas: `photos.length` di atas
+        // bisa basi bila dua batch dikonversi bersamaan (klik lalu langsung drop),
+        // dan keduanya sama-sama lolos cek → lebih dari 20 foto.
+        return [...p, ...baru].slice(0, 20);
+      });
     }
     const convertErr = failedNames.length
       ? `${failedNames.join(', ')}: format foto ini tidak didukung browser Anda — coba screenshot foto lalu upload ulang, atau export sebagai JPG dari galeri HP.`
       : '';
-    const combinedErr = [photoErr, convertErr].filter(Boolean).join(' ');
+    const sudahAda = new Set(photos.map(f => f.preview));
+    const kembar = okPreviews.filter((p, i) => sudahAda.has(p) || okPreviews.indexOf(p) !== i).length;
+    const kembarErr = kembar ? `${kembar} foto yang sama sudah dipilih — dilewati.` : '';
+    const combinedErr = [photoErr, convertErr, kembarErr].filter(Boolean).join(' ');
     if (combinedErr) setErrors(p => ({ ...p, photos: combinedErr }));
     else clearErr('photos');
   };
 
   const removePhoto = (id: string) => {
+    if (sedangKirimRef.current) return;   // lihat komentar di tambahFoto
     setPhotos(p => p.filter(f => f.id !== id));
   };
 
   // Foto pertama = foto utama (backend: is_cover = index 0, dijaga _lib/fotoUtama.js).
   const jadikanUtama = (id: string) => {
+    if (sedangKirimRef.current) return;
     setPhotos(p => {
       const i = p.findIndex(f => f.id === id);
       if (i <= 0) return p;
@@ -575,6 +711,15 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
     return () => { alive = false; };
   }, [adaFoto, GridSortable]);
 
+  // Tawarkan jalur cadangan bila widget Turnstile GAGAL, atau masih "memuat"
+  // 20 detik tanpa token. Hilang lagi begitu token didapat.
+  useEffect(() => {
+    if (turnstileToken) { setBolehTanpaCaptcha(false); return; }
+    if (turnstileStatus === 'gagal') { setBolehTanpaCaptcha(true); return; }
+    const t = setTimeout(() => setBolehTanpaCaptcha(true), 20000);
+    return () => clearTimeout(t);
+  }, [turnstileStatus, turnstileToken]);
+
   // Mode per-m² hanya sah untuk tanah dijual; jenis lain dipaksa total oleh
   // modeHargaValid() di backend, tapi UI-nya juga tidak boleh menawarkannya.
   const modePerM2 = SHOW_HARGA_PER_M2.has(jenis) && hargaMode === HARGA_MODE_PER_M2 && tujuan !== 'disewa';
@@ -592,6 +737,17 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
     if (SHOW_FURNISHED.has(jenis) && kelengkapan) d.kelengkapan = kelengkapan;
     if (jenis === 'apartment' && noUnit) d.no_unit = noUnit;
     return Object.keys(d).length > 0 ? d : undefined;
+  };
+
+  // Token Turnstile SEKALI PAKAI. Server kini memvalidasi isian SEBELUM captcha,
+  // jadi 422 validasi TIDAK menghabiskannya — token tetap dipakai untuk kiriman
+  // berikutnya. Tapi 422 foto (dicek sesudah captcha), 5xx, dan koneksi putus
+  // bisa sudah menghabiskannya → widget diperbarui supaya kiriman ulang tidak
+  // mentok 403 ("tekan Kirim tiga kali").
+  const perbaruiToken = () => {
+    turnstileTokenRef.current = '';
+    setTurnstileToken('');
+    turnstileRef.current?.reset();
   };
 
   const handleSubmit = async () => {
@@ -627,7 +783,7 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
     // Token anti-bot: backend FAIL-CLOSED, jadi submit tanpa token pasti ditolak
     // 403 setelah user menunggu seluruh foto terunggah. Hentikan di sini, dengan
     // pesan yang menyebut tombol "Verifikasi ulang" — bukan "muat ulang halaman".
-    if (!turnstileToken) {
+    if (!turnstileTokenRef.current && !tanpaCaptchaRef.current) {
       e.turnstile = turnstileStatus === 'gagal'
         ? 'Verifikasi anti-bot gagal dimuat. Klik "Verifikasi ulang" di bawah — bila tetap gagal, matikan penghemat data/pemblokir iklan lalu coba lagi.'
         : 'Verifikasi anti-bot belum selesai. Tunggu beberapa detik hingga bertanda ✓, lalu tekan Kirim lagi.';
@@ -655,9 +811,25 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
     }
 
     setLoading(true);
+    sedangKirimRef.current = true;
     setApiError(null);
     setUploadPct(0);
+    // ⚠️ SELURUH proses kirim di dalam try/finally: galat tak terduga apa pun
+    // (dulu: crypto.randomUUID tidak ada di WebView lama) tidak boleh
+    // meninggalkan tombol macet di "Menyimpan…" dan daftar foto terkunci.
+    try {
+      await kirimProperti();
+    } catch (err) {
+      laporKendalaForm('titip-jual', 'galat-tak-terduga', { pesan: String((err as Error)?.message ?? err).slice(0, 120) });
+      setApiError('Terjadi kendala tak terduga. Isian Anda tetap aman — tekan Kirim sekali lagi.');
+    } finally {
+      sedangKirimRef.current = false;
+      setLoading(false);
+      setUploadPct(0);
+    }
+  };
 
+  const kirimProperti = async () => {
     // Dipertahankan di draft supaya percobaan ulang memakai id yang sama —
     // tanpa itu idempotensinya tidak ada artinya.
     //
@@ -669,7 +841,7 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
     // layar tetap menampilkan "berhasil". Terjadi 8 Sep 2026 dan butuh audit
     // penuh untuk ketahuan, karena tidak ada satu pun error yang tercatat.
     const sah = submitIdMasihSah(bacaDraft());
-    const submitId = sah ?? crypto.randomUUID();
+    const submitId = sah ?? idAcak();
     // `submitIdTs` hanya disetel saat id BARU dibuat — memperbaruinya di tiap
     // submit akan mengembalikan bug yang sama lewat pintu belakang.
     simpanDraft(sah ? { submitId } : { submitId, submitIdTs: Date.now() });
@@ -678,15 +850,21 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
     // Hasilnya di-cache per dataUrl, jadi percobaan ulang setelah kegagalan
     // hanya mengunggah foto yang memang belum berhasil — bukan mengulang
     // semuanya dari nol dan meninggalkan salinan yatim di R2.
-    const tiketFoto = bacaDraft()?.tiketFoto;
     const photoKeys: string[] = [];
+    const perluUnggah = photoPreviews.some(p => !keyFotoRef.current.has(p));
+    let tiketFoto = perluUnggah ? await pastikanTiketFoto() : null;
+    if (perluUnggah && !tiketFoto) {
+      setApiError('Layanan unggah foto sedang sibuk. Tunggu sekitar 1 menit lalu tekan Kirim lagi — isian dan foto Anda tetap aman.');
+      return;
+    }
+    let tiketSudahDiperbarui = false;
     for (let i = 0; i < photoPreviews.length; i++) {
       const dataUrl = photoPreviews[i];
       const tersimpan = keyFotoRef.current.get(dataUrl);
       if (tersimpan) { photoKeys.push(tersimpan); continue; }
 
       setUploadPct(Math.round((i / photoPreviews.length) * 90));
-      let gagal: unknown = null;
+      let gagal: (Error & { status?: number }) | null = null;
       for (let coba = 0; coba < 2; coba++) {
         try {
           const key = await unggahSatuFoto(dataUrl, tiketFoto);
@@ -694,13 +872,27 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
           photoKeys.push(key);
           gagal = null;
           break;
-        } catch (err) { gagal = err; }
+        } catch (err) {
+          gagal = err as Error & { status?: number };
+          // 403 = tiket basi/ditolak → minta tiket baru SEKALI lalu ulangi foto
+          // ini. Dulu 403 berarti jalan buntu permanen sampai halaman dimuat
+          // ulang — yang justru menghapus semua foto yang sudah dipilih.
+          if (gagal.status === 403 && !tiketSudahDiperbarui) {
+            tiketSudahDiperbarui = true;
+            const baru = await mintaTiketFoto();
+            if (baru) { tiketFoto = baru; coba--; continue; }
+          }
+          // Foto ini sendiri ditolak / batas sesi tercapai — mengulang percuma.
+          if (gagal.status === 422 || gagal.status === 429) break;
+        }
       }
       if (gagal) {
-        setLoading(false);
-        setUploadPct(0);
         setApiError(
-          `Foto ke-${i + 1} gagal diunggah. Isian Anda TIDAK hilang — periksa koneksi lalu tekan "Kirim" lagi; foto yang sudah berhasil tidak akan diunggah ulang.`,
+          gagal.status === 422
+            ? `Foto ke-${i + 1} ditolak: ${gagal.message}. Hapus foto itu lalu tekan "Kirim" lagi.`
+            : gagal.status === 429 || gagal.status === 403
+              ? `${gagal.status === 429 ? gagal.message : 'Sesi unggah foto belum bisa diperbarui.'} Tunggu sebentar lalu tekan "Kirim" lagi — isian dan foto Anda tetap aman.`
+              : `Foto ke-${i + 1} gagal diunggah. Isian Anda TIDAK hilang — periksa koneksi lalu tekan "Kirim" lagi; foto yang sudah berhasil tidak akan diunggah ulang.`,
         );
         return;
       }
@@ -754,7 +946,13 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
         // jalur itu di server.
         photo_keys:        photoKeys,
         gmaps_link:        gmaps || undefined,
-        cf_turnstile_token: turnstileToken || undefined,
+        // Dibaca dari ref SAAT INI (lihat turnstileTokenRef), bukan nilai saat
+        // Kirim ditekan — unggah foto bisa lebih lama dari umur token.
+        cf_turnstile_token: turnstileTokenRef.current || undefined,
+        // Jalur cadangan saat widget Turnstile macet — server menerimanya
+        // dengan kuota per-IP ketat, tanpa event Lead, dan menandainya untuk
+        // ditinjau admin. Diabaikan server bila token di atas ada.
+        tanpa_captcha:     (tanpaCaptchaRef.current && !turnstileTokenRef.current) || undefined,
         // Kunci idempotensi: SAMA sepanjang sesi form ini, termasuk saat
         // mencoba ulang setelah gagal. Tanpa ini, submit yang datanya sudah
         // tersimpan tapi response-nya tidak sampai akan melahirkan listing
@@ -780,20 +978,28 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
 
       if (!res.ok) {
         if (res.status === 422 && json.details) {
-          setErrors(json.details);
-          setApiError('Mohon periksa kembali isian form Anda.');
-          fokuskanErrorPertama(json.details);
+          const { errs, sisa } = petakGalatServer(json.details);
+          setErrors(errs);
+          setApiError(sisa.length
+            ? `Mohon periksa kembali isian form Anda: ${sisa.join(' · ')}`
+            : 'Mohon periksa kembali isian form Anda.');
+          fokuskanErrorPertama(errs);
+          if (json.details.photos) {
+            perbaruiToken();
+            // Key foto ditolak server → buang cache-nya supaya foto diunggah ulang.
+            keyFotoRef.current.clear();
+          }
         } else if (res.status === 403) {
           // Token anti-bot ditolak (paling sering: kedaluwarsa karena form ini
           // panjang — masa berlaku token hanya ±5 menit). Terbitkan token baru
           // otomatis dan minta user menekan Kirim sekali lagi. JANGAN menyuruh
           // muat ulang halaman: isian memang kini terselamatkan autosave, tapi
           // foto tetap hilang dan itu pekerjaan berat di HP.
-          setTurnstileToken('');
-          turnstileRef.current?.reset();
+          perbaruiToken();
           setApiError('Verifikasi anti-bot kedaluwarsa. Kami sudah memperbaruinya — tunggu tanda ✓ hijau di bawah, lalu tekan Kirim sekali lagi. Isian Anda tetap aman.');
           fokuskanErrorPertama({ turnstile: 'x' });
         } else {
+          if (res.status >= 500) perbaruiToken();
           setApiError(json.error ?? 'Terjadi kesalahan. Silakan coba lagi.');
         }
         return;
@@ -827,6 +1033,7 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
         foto_terunggah: photoKeys.length,
         foto_total: photoPreviews.length,
       });
+      perbaruiToken();
       setApiError('Koneksi ke server terputus saat mengirim. Tekan Kirim sekali lagi — bila data Anda ternyata sudah masuk, sistem mengenalinya dan tidak akan membuat listing ganda.');
     } finally {
       setLoading(false);
@@ -855,16 +1062,19 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
             <label className="block text-xs font-semibold text-[#64748B] mb-1">No. WA Aktif 1 *</label>
             <div className="flex">
               <span className="px-3 py-3 bg-gray-100 border border-r-0 border-gray-200 rounded-l-xl text-sm text-gray-500">+62</span>
+              {/* type=tel + inputMode: HP menampilkan papan angka, bukan keyboard huruf. */}
               <input value={noWa} onChange={e => { setNoWa(e.target.value); clearErr('no_wa'); }}
+                type="tel" inputMode="numeric" autoComplete="tel-national"
                 placeholder="81391278889" className={`${inputCls(errors.no_wa)} rounded-l-none`} />
             </div>
             <FieldErr msg={errors.no_wa} />
           </div>
-          <div>
+          <div id="f-no_wa_2">
             <label className="block text-xs font-semibold text-[#64748B] mb-1">No. WA Aktif 2 <span className="font-normal text-gray-400">(Opsional)</span></label>
             <div className="flex">
               <span className="px-3 py-3 bg-gray-100 border border-r-0 border-gray-200 rounded-l-xl text-sm text-gray-500">+62</span>
               <input value={noWa2} onChange={e => { setNoWa2(e.target.value); clearErr('no_wa_2'); }}
+                type="tel" inputMode="numeric" autoComplete="off"
                 placeholder="Opsional" className={`${inputCls(errors.no_wa_2)} rounded-l-none`} />
             </div>
             <FieldErr msg={errors.no_wa_2} />
@@ -995,43 +1205,46 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
 
         {/* Dimensi kondisional */}
         {jenis && (
+          <div id="f-luas">
           <div className="grid grid-cols-2 gap-3">
             {SHOW_LUAS_TANAH.has(jenis) && (
               <div>
                 <label className="block text-xs font-semibold text-[#64748B] mb-1">Luas Tanah (m²)</label>
-                <input type="number" value={lt} onChange={e => { setLt(e.target.value); clearErr('harga'); }} placeholder="m²" className={inputCls()} />
+                <input type="number" value={lt} onChange={e => { setLt(tanpaMinus(e.target.value)); clearErr('harga'); clearErr('luas'); }} min="0" inputMode="decimal" placeholder="m²" className={inputCls()} />
               </div>
             )}
             {SHOW_LUAS_BANGUNAN.has(jenis) && (
               <div>
                 <label className="block text-xs font-semibold text-[#64748B] mb-1">Luas Bangunan (m²)</label>
-                <input type="number" value={lb} onChange={e => setLb(e.target.value)} placeholder="m²" className={inputCls()} />
+                <input type="number" value={lb} onChange={e => { setLb(tanpaMinus(e.target.value)); clearErr('luas'); }} min="0" inputMode="decimal" placeholder="m²" className={inputCls()} />
               </div>
             )}
             {SHOW_LEBAR_DEPAN.has(jenis) && (
               <div>
                 <label className="block text-xs font-semibold text-[#64748B] mb-1">Lebar Depan (m)</label>
-                <input type="number" value={lebar_depan} onChange={e => setLebarDepan(e.target.value)} placeholder="m" className={inputCls()} />
+                <input type="number" value={lebar_depan} onChange={e => { setLebarDepan(tanpaMinus(e.target.value)); clearErr('luas'); }} min="0" inputMode="decimal" placeholder="m" className={inputCls()} />
               </div>
             )}
             {SHOW_LANTAI.has(jenis) && (
               <div>
                 <label className="block text-xs font-semibold text-[#64748B] mb-1">Jumlah Lantai</label>
-                <input type="number" value={lantai} onChange={e => setLantai(e.target.value)} placeholder="1" className={inputCls()} />
+                <input type="number" value={lantai} onChange={e => { setLantai(tanpaMinus(e.target.value)); clearErr('luas'); }} min="0" inputMode="numeric" placeholder="1" className={inputCls()} />
               </div>
             )}
             {SHOW_KT_KM.has(jenis) && (
               <>
                 <div>
                   <label className="block text-xs font-semibold text-[#64748B] mb-1">Kamar Tidur</label>
-                  <input type="number" value={kt} onChange={e => setKt(e.target.value)} placeholder="KT" className={inputCls()} />
+                  <input type="number" value={kt} onChange={e => { setKt(tanpaMinus(e.target.value)); clearErr('luas'); }} min="0" inputMode="numeric" placeholder="KT" className={inputCls()} />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-[#64748B] mb-1">Kamar Mandi</label>
-                  <input type="number" value={km} onChange={e => setKm(e.target.value)} placeholder="KM" className={inputCls()} />
+                  <input type="number" value={km} onChange={e => { setKm(tanpaMinus(e.target.value)); clearErr('luas'); }} min="0" inputMode="numeric" placeholder="KM" className={inputCls()} />
                 </div>
               </>
             )}
+          </div>
+          <FieldErr msg={errors.luas} />
           </div>
         )}
 
@@ -1063,6 +1276,15 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
           <label className="block text-xs font-semibold text-[#64748B] mb-2">Lokasi Properti *</label>
           {locLoading ? (
             <div className="h-10 bg-gray-100 animate-pulse rounded-xl" />
+          ) : locGagal && provList.length === 0 ? (
+            <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+              <AlertCircle size={16} className="text-amber-600 flex-shrink-0" />
+              <p className="text-xs text-amber-800 flex-1">Daftar lokasi gagal dimuat — periksa koneksi Anda.</p>
+              <button type="button" onClick={() => setLocPercobaan(n => n + 1)}
+                className="text-xs font-semibold text-[#1565C0] hover:underline flex-shrink-0">
+                Coba lagi
+              </button>
+            </div>
           ) : (
             <div className="space-y-2">
               <select onChange={handleProvChange} value={provId ?? ''} className={selectCls(errors.lokasi)}>
@@ -1114,7 +1336,7 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
         {/* Lebar Jalan */}
         <div>
           <label className="block text-xs font-semibold text-[#64748B] mb-1">Lebar Jalan di Depan (m) <span className="font-normal text-gray-400">(Opsional)</span></label>
-          <input type="number" value={lebar_jalan} onChange={e => setLebarJalan(e.target.value)}
+          <input type="number" value={lebar_jalan} onChange={e => setLebarJalan(tanpaMinus(e.target.value))} min="0" inputMode="decimal"
             placeholder="Mis: 6" className={inputCls()} />
         </div>
 
@@ -1173,7 +1395,8 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
             onDrop={e => { e.preventDefault(); setDragOverFoto(false); void tambahFoto(e.dataTransfer.files); }}
             onDragOver={e => { e.preventDefault(); setDragOverFoto(true); }}
             onDragLeave={() => setDragOverFoto(false)}
-            className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${
+            aria-disabled={loading}
+            className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${loading ? 'pointer-events-none opacity-60' : ''} ${
               errors.photos ? 'border-red-400 bg-red-50'
               : dragOverFoto ? 'border-[#1565C0] bg-blue-50'
               : 'border-gray-200 hover:border-[#1565C0]'}`}>
@@ -1203,8 +1426,12 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
               Tahan &amp; geser foto untuk mengatur urutan, atau ketuk ★ untuk menjadikannya foto utama.
             </p>
           )}
+          {/* Dikunci selama unggah (sedangKirimRef menjaga handler; kelas ini
+              memberi tahu mata): foto yang dihapus/diurutkan/ditambah di tengah
+              unggahan dulu diabaikan diam-diam. */}
+          <div aria-busy={loading} className={loading ? 'pointer-events-none opacity-60' : undefined}>
           {photos.length > 0 && (GridSortable ? (
-            <GridSortable photos={photos} onUrutkan={setPhotos} onHapus={removePhoto} onJadikanUtama={jadikanUtama} />
+            <GridSortable photos={photos} onUrutkan={urutan => { if (!sedangKirimRef.current) setPhotos(urutan); }} onHapus={removePhoto} onJadikanUtama={jadikanUtama} />
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-3">
               {photos.map((f, i) => (
@@ -1213,6 +1440,7 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
               ))}
             </div>
           ))}
+          </div>
         </div>
 
         {/* Info Tambahan */}
@@ -1245,8 +1473,8 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
         <div id="f-turnstile" className="mt-1">
           <Turnstile
             ref={turnstileRef}
-            onVerify={t => { setTurnstileToken(t); clearErr('turnstile'); }}
-            onExpire={() => setTurnstileToken('')}
+            onVerify={t => { turnstileTokenRef.current = t; setTurnstileToken(t); clearErr('turnstile'); }}
+            onExpire={() => { turnstileTokenRef.current = ''; setTurnstileToken(''); }}
             onStatusChange={setTurnstileStatus}
           />
           <div className="flex items-center gap-2 mt-1.5">
@@ -1269,6 +1497,23 @@ function StepProperti({ onSuccess }: StepPropertiProps) {
             )}
           </div>
           <FieldErr msg={errors.turnstile} />
+          {bolehTanpaCaptcha && !turnstileToken && (
+            // Jalur cadangan: widget yang tak kunjung selesai (terukur di produksi:
+            // satu penjual mencoba ±1 jam, 22 Sep 2026) = lead paling bernilai
+            // yang hilang. Kiriman ini hanya membuat DRAFT yang selalu ditinjau
+            // admin, dibatasi kuota per-IP di server, dan tidak dilaporkan ke Meta.
+            <div className="mt-2 p-3 rounded-xl border border-amber-200 bg-amber-50">
+              <p className="text-xs text-amber-900">
+                Verifikasi tidak kunjung selesai? Anda tetap bisa mengirim — data Anda akan
+                diperiksa manual oleh tim kami sebelum ditayangkan.
+              </p>
+              <button type="button" disabled={loading}
+                onClick={() => { tanpaCaptchaRef.current = true; clearErr('turnstile'); void handleSubmit(); }}
+                className="mt-2 text-xs font-semibold text-[#1565C0] hover:underline disabled:opacity-50">
+                Kirim tanpa verifikasi →
+              </button>
+            </div>
+          )}
         </div>
 
         {/* API Error */}
@@ -1382,6 +1627,7 @@ export default function TitipJualPage() {
   // render menghasilkan hydration mismatch.
   const [adaDraftPulih, setAdaDraftPulih] = useState(false);
   const [linkLanjutBasi, setLinkLanjutBasi] = useState(false);
+  const [sesiTahap2Basi, setSesiTahap2Basi] = useState<string | null>(null);
 
   // Prefetch chunk Tahap 2 saat peramban senggang, supaya perpindahan dari
   // Tahap 1 tetap instan walau komponennya dimuat malas. Gagal = diam: chunk
@@ -1413,11 +1659,22 @@ export default function TitipJualPage() {
     }
 
     const d = bacaDraft();
-    // Hanya bila ada ISIAN yang benar-benar dipulihkan. Draft juga menampung
-    // data teknis — `tiketFoto` ditulis untuk SETIAP pengunjung saat halaman
-    // dibuka — jadi `d !== null` saja membuat banner menyala untuk orang yang
-    // belum mengetik apa pun.
-    setAdaDraftPulih(!!d && (!!d.s1 || !!d.s2 || (d.jumlahFoto ?? 0) > 0 || !!d.tiketLanjut));
+    // Hanya bila ada ISIAN yang benar-benar dipulihkan. `!!d.s2` saja tidak
+    // cukup: draft dari build sebelum 788caa1 menyimpan s2 berisi NILAI BAWAAN
+    // saja (tujuan/hargaMode/kondisi/statusLeg), dan karena tiap kunjungan dulu
+    // memperbarui `ts`, draft tercemar itu tak pernah kedaluwarsa — banner
+    // "isian dipulihkan" palsu selamanya. Isinya kini diperiksa ulang dengan
+    // aturan yang sama dengan autosave, dan draft tanpa isian nyata dihapus.
+    const s2 = (d?.s2 ?? null) as Record<string, unknown> | null;
+    const s1 = (d?.s1 ?? null) as Record<string, unknown> | null;
+    const isiNyata = !!d && (
+      (!!s2 && adaIsi({ ...s2, tujuan: '', hargaMode: '', kondisi: '', statusLeg: '' }))
+      || (!!s1 && adaIsi({ ...s1, jenisIdentitas: '' }))
+      || (d.jumlahFoto ?? 0) > 0
+      || !!d.tiketLanjut
+    );
+    if (d && !isiNyata) hapusDraft();
+    setAdaDraftPulih(isiNyata);
 
     // Pulihkan langsung ke Data Diri bila Tahap 1 sudah pernah sukses tapi
     // user reload/tutup-tab sebelum sempat menyelesaikan Tahap 2. Tanpa ini,
@@ -1426,7 +1683,13 @@ export default function TitipJualPage() {
     // dipanggil begitu Tahap 2 benar-benar tuntas (StepDataDiri.handleSubmit),
     // jadi draft yang masih memuat tiketLanjut di sini berarti Tahap 2 memang
     // belum diselesaikan.
-    if (d?.tiketLanjut && d?.kodeListingTahap1) {
+    if (d?.tiketLanjut && d?.kodeListingTahap1 && !tiketMasihBerlaku(d.tiketLanjut)) {
+      // Tiket Tahap 2 berumur 7 hari. Dulu tetap diarahkan ke form Data Diri:
+      // pemilik mengetik KYC lengkap termasuk NIK, lalu SELALU mendapat "sesi
+      // kedaluwarsa" — di setiap kunjungan. Kini dibuang dengan penjelasan.
+      setSesiTahap2Basi(d.kodeListingTahap1);
+      simpanDraft({ tiketLanjut: undefined, kodeListingTahap1: undefined });
+    } else if (d?.tiketLanjut && d?.kodeListingTahap1) {
       setStage1({ kode_listing: d.kodeListingTahap1, tiket_lanjut: d.tiketLanjut });
       setLayar('datadiri');
     }
@@ -1469,12 +1732,28 @@ export default function TitipJualPage() {
             </p>
           </div>
         )}
-        {tampilkanStepper && adaDraftPulih && (
+        {sesiTahap2Basi && (
+          <div className="flex items-start gap-2 mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+            <AlertCircle size={16} className="text-amber-700 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-[#0F172A] flex-1">
+              Sesi melengkapi data diri untuk properti <strong>{sesiTahap2Basi}</strong> sudah lewat 7 hari.
+              Data properti Anda tetap tersimpan — tim SBP akan menghubungi Anda via WhatsApp, atau hubungi{' '}
+              <strong>0813-9127-8889</strong> untuk meminta link lanjutan. Tidak perlu mengisi ulang formulir.
+            </p>
+          </div>
+        )}
+        {tampilkanStepper && adaDraftPulih && !sesiTahap2Basi && (
           <div className="flex items-start gap-2 mb-4 p-3 bg-[#E3F2FD] border border-[#90CAF9] rounded-xl">
             <Check size={16} className="text-[#1565C0] flex-shrink-0 mt-0.5" />
             <p className="text-xs text-[#0F172A] flex-1">
-              Isian Anda sebelumnya sudah dipulihkan. Demi keamanan, <strong>nomor identitas</strong> dan{' '}
-              <strong>foto</strong> tidak ikut tersimpan — keduanya perlu diisi ulang.
+              {layar === 'datadiri' ? (
+                // Tahap 1 sudah terkirim — fotonya SUDAH di server. Dulu banner
+                // ini tetap menyuruh "foto perlu diisi ulang".
+                <>Isian Anda sebelumnya sudah dipulihkan. Demi keamanan, <strong>nomor identitas</strong> tidak ikut tersimpan — mohon diisi ulang.</>
+              ) : (
+                <>Isian Anda sebelumnya sudah dipulihkan. Demi keamanan, <strong>nomor identitas</strong> dan{' '}
+                <strong>foto</strong> tidak ikut tersimpan — keduanya perlu diisi ulang.</>
+              )}
             </p>
             <button onClick={mulaiBaru} className="text-xs font-semibold text-[#1565C0] hover:underline flex-shrink-0">
               Mulai baru

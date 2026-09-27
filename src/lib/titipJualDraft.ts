@@ -111,33 +111,91 @@ export interface TitipJualDraft {
  * memanggilnya dari useEffect, bukan saat render: hasil yang berbeda antara
  * server dan client = hydration mismatch (lihat aturan di CLAUDE.md).
  */
+/**
+ * Cermin draft DI MEMORI (hidup selama tab terbuka).
+ *
+ * ⚠️ KENAPA ADA (audit 2026-09-27). `tiketLanjut` — satu-satunya kunci menuju
+ * Tahap 2 — dulu HANYA hidup di localStorage. Di peramban yang memblokir site
+ * data (in-app browser Meta, Safari private; tercatat di produksi 5 Sep 2026)
+ * setItem melempar, sehingga Tahap 2 langsung "sesi kedaluwarsa" walau tiketnya
+ * baru saja diterima. Cermin ini menjamin draft tetap terbaca dalam sesi yang
+ * sama; localStorage hanya menambahkan kemampuan bertahan setelah tab ditutup.
+ */
+let cermin: TitipJualDraft | null = null;
+
+function baca(raw: string | null): TitipJualDraft | null {
+  if (!raw) return null;
+  const d = JSON.parse(raw) as TitipJualDraft;
+  return d && d.v === 1 && typeof d.ts === 'number' ? d : null;
+}
+
 export function bacaDraft(): TitipJualDraft | null {
   if (typeof window === 'undefined') return null;
+  let d: TitipJualDraft | null = null;
   try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return null;
-    const d = JSON.parse(raw) as TitipJualDraft;
-    if (!d || d.v !== 1 || typeof d.ts !== 'number') return null;
-    if (Date.now() - d.ts > MAKS_UMUR_MS) { hapusDraft(); return null; }
-    // Buang NIK yang mungkin tertulis oleh build lama — draft adalah input
-    // tidak tepercaya, bentuknya bisa berasal dari versi mana pun.
-    if (d.s1 && 'nik' in d.s1) delete d.s1.nik;
-    return d;
+    d = baca(localStorage.getItem(KEY));
   } catch {
-    return null;
+    /* storage diblokir — pakai cermin memori di bawah */
+  }
+  if (!d && cermin) d = { ...cermin };
+  if (!d) return null;
+  if (Date.now() - d.ts > MAKS_UMUR_MS) { hapusDraft(); return null; }
+  // Buang NIK yang mungkin tertulis oleh build lama — draft adalah input
+  // tidak tepercaya, bentuknya bisa berasal dari versi mana pun.
+  if (d.s1 && 'nik' in d.s1) delete d.s1.nik;
+  return d;
+}
+
+/** Gabung sebagian isi ke draft yang sudah ada. localStorage best-effort; cermin memori selalu. */
+export function simpanDraft(patch: Partial<Omit<TitipJualDraft, 'v' | 'ts'>>): void {
+  if (typeof window === 'undefined') return;
+  const lama = bacaDraft();
+  const baru: TitipJualDraft = { ...lama, ...patch, v: 1, ts: Date.now() };
+  if (baru.s1 && 'nik' in baru.s1) delete baru.s1.nik;
+  // `tiketFoto` tidak lagi disimpan di draft (lihat simpanTiketFoto) — buang
+  // sisa dari build lama supaya tidak ikut abadi.
+  delete baru.tiketFoto;
+  cermin = baru;
+  try {
+    localStorage.setItem(KEY, JSON.stringify(baru));
+  } catch {
+    /* kuota penuh atau Safari private mode — cermin memori tetap memegangnya */
   }
 }
 
-/** Gabung sebagian isi ke draft yang sudah ada. Gagal-diam (kuota penuh / mode privat). */
-export function simpanDraft(patch: Partial<Omit<TitipJualDraft, 'v' | 'ts'>>): void {
-  if (typeof window === 'undefined') return;
+// ─── Tiket unggah foto ──────────────────────────────────────────────────────
+// ⚠️ SENGAJA TIDAK di draft. Dulu `simpanDraft({tiketFoto})` dijalankan SETIAP
+// kali halaman dibuka, sehingga `ts` draft selalu diperbarui dan batas 14 hari
+// tidak pernah tercapai — draft tercemar (mis. dari build sebelum perbaikan
+// banner) menampilkan banner "isian dipulihkan" palsu selamanya. Tiket foto
+// berumur 1 jam dan per tab: memori + sessionStorage sudah tepat.
+const KEY_TIKET_FOTO = 'sbp_titipjual_tiket_foto';
+let tiketFotoMemori: string | null = null;
+
+export function simpanTiketFoto(t: string): void {
+  tiketFotoMemori = t;
+  try { sessionStorage.setItem(KEY_TIKET_FOTO, t); } catch { /* memori tetap memegangnya */ }
+}
+
+export function ambilTiketFoto(): string | null {
+  if (tiketFotoMemori) return tiketFotoMemori;
+  try { return sessionStorage.getItem(KEY_TIKET_FOTO); } catch { return null; }
+}
+
+/**
+ * ID acak yang TIDAK PERNAH melempar. `crypto.randomUUID()` tidak ada di WebView
+ * lama (iOS < 15.4, in-app browser Android lama) — dulu dipanggil di luar try
+ * setelah setLoading(true), sehingga tombol macet di "Menyimpan…" selamanya.
+ */
+export function idAcak(): string {
   try {
-    const lama = bacaDraft();
-    const baru: TitipJualDraft = { ...lama, ...patch, v: 1, ts: Date.now() };
-    if (baru.s1 && 'nik' in baru.s1) delete baru.s1.nik;
-    localStorage.setItem(KEY, JSON.stringify(baru));
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  } catch { /* lanjut ke cadangan */ }
+  try {
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    return Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
   } catch {
-    /* kuota penuh atau Safari private mode — autosave memang best-effort */
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
   }
 }
 
@@ -165,5 +223,6 @@ export function tiketMasihBerlaku(tiket: string | null | undefined, sisaDetik = 
 
 export function hapusDraft(): void {
   if (typeof window === 'undefined') return;
+  cermin = null;
   try { localStorage.removeItem(KEY); } catch { /* noop */ }
 }

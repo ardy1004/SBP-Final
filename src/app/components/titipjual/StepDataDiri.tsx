@@ -8,7 +8,8 @@
 // pada render pertama. Dipisah 2026-09-27 ketika chunk SSR utama melewati
 // anggaran check:bundle; ~20 KB kode yang hanya dipakai setelah Tahap 1 kini
 // tidak ikut dievaluasi setiap request SSR.
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { BERTINDAK_VALID } from '../../../../functions/_lib/isiPerjanjian.js';
 import { Link } from 'react-router';
 import { Check, ChevronRight, AlertCircle } from 'lucide-react';
 import { bacaJson } from '../../../lib/api';
@@ -76,17 +77,37 @@ export default function StepDataDiri({ kodeListing, photosBelumLengkap, onNanti,
   // client — membacanya saat render = hydration mismatch (aturan CLAUDE.md).
   useEffect(() => {
     const d = bacaDraft();
-    // jenisIdentitas dari localStorage = input TIDAK tepercaya (bisa dari build
-    // mana pun / diubah tangan) — normalisasi, jangan spread mentah.
-    if (d?.s1) setForm(p => ({
-      ...p, ...(d.s1 as Partial<DataDiriState>), nik: '',
-      jenisIdentitas: normalisasiJenisIdentitas((d.s1 as Record<string, unknown>).jenisIdentitas),
-    }));
+    if (!d?.s1) return;
+    // Draft = input TIDAK tepercaya (build mana pun / diubah tangan). Dulu
+    // di-spread mentah; kini hanya kunci yang dikenal, dengan TIPE yang benar,
+    // dan pilihan ber-daftar divalidasi. `nik` tidak pernah dipulihkan.
+    const s = d.s1 as Record<string, unknown>;
+    setForm(p => {
+      const baru = { ...p };
+      for (const k of Object.keys(p) as (keyof DataDiriState)[]) {
+        if (k === 'nik' || k === 'jenisIdentitas' || k === 'bertindak_sebagai') continue;
+        const v = s[k];
+        if (typeof p[k] === 'string' && typeof v === 'string') (baru[k] as string) = v.slice(0, 200);
+        if (typeof p[k] === 'boolean' && typeof v === 'boolean') (baru[k] as boolean) = v;
+      }
+      baru.jenisIdentitas = normalisasiJenisIdentitas(s.jenisIdentitas);
+      if (typeof s.bertindak_sebagai === 'string' && BERTINDAK_VALID.includes(s.bertindak_sebagai)) {
+        baru.bertindak_sebagai = s.bertindak_sebagai;
+      }
+      return baru;
+    });
   }, []);
+
+  // Setelah Tahap 2 sukses, autosave WAJIB berhenti: komponen ini tetap
+  // terpasang di layar "selesai", dan timer 800 ms yang sedang berjalan dulu
+  // menulis ulang nama & alamat KTP ke draft SESUDAH hapusDraft() — memicu
+  // banner palsu di kunjungan berikutnya dan menyimpan data pribadi tanpa guna.
+  const selesaiRef = useRef(false);
 
   // Autosave (debounce 800 ms).
   useEffect(() => {
     const t = setTimeout(() => {
+      if (selesaiRef.current) return;
       const { nik: _nik, ...tanpaNik } = form;
       // jenisIdentitas SELALU terisi (default 'ktp'), jadi jangan ikut dihitung
       // "ada isian": kalau ikut, autosave jalan di kunjungan pertama dan pengunjung
@@ -159,8 +180,17 @@ export default function StepDataDiri({ kodeListing, photosBelumLengkap, onNanti,
       if (!res.ok) {
         if (res.status === 422 && json.details) {
           setErrors(json.details);
-          setApiError('Mohon periksa kembali isian Data Diri Anda.');
+          // Galat tanpa kolom di layar (mis. data_ahli_waris) tetap ditampilkan.
+          const tanpaKolom = Object.entries(json.details)
+            .filter(([k]) => !(k in form) && k !== 'alamat_ktp' && k !== 'nik')
+            .map(([, v]) => v);
+          setApiError(tanpaKolom.length
+            ? `Mohon periksa kembali isian Data Diri Anda: ${tanpaKolom.join(' · ')}`
+            : 'Mohon periksa kembali isian Data Diri Anda.');
         } else if (res.status === 403) {
+          // Tiket ditolak → buang dari draft, supaya kunjungan berikutnya tidak
+          // lagi diarahkan ke form yang pasti gagal.
+          simpanDraft({ tiketLanjut: undefined, kodeListingTahap1: undefined });
           setTiketKedaluwarsa(true);
         } else {
           setApiError(json.error ?? 'Terjadi kesalahan. Silakan coba lagi.');
@@ -179,6 +209,7 @@ export default function StepDataDiri({ kodeListing, photosBelumLengkap, onNanti,
       }
 
       // Sudah tersimpan di server — draft lokal tidak lagi diperlukan.
+      selesaiRef.current = true;
       hapusDraft();
       onSuccess(json.data!);
     } catch {

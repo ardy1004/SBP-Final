@@ -125,7 +125,7 @@ export async function onRequestGet(context) {
       p.status_publish, p.status_sold,
       p.badge_premium, p.badge_featured, p.badge_hot, p.properti_pilihan,
       p.viralframe_dismissed_at,
-      p.created_at, p.updated_at, p.published_at,
+      p.created_at, p.updated_at, p.published_at, p.tanpa_captcha,
       (SELECT url_webp FROM property_images
          WHERE property_id = p.id ORDER BY is_cover DESC, urutan ASC LIMIT 1) AS cover_url,
       (SELECT COUNT(*) FROM property_images WHERE property_id = p.id) AS jumlah_foto,

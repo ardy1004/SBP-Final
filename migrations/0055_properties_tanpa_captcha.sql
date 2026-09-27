@@ -1,0 +1,15 @@
+-- Penanda listing Titip Jual yang masuk lewat JALUR CADANGAN tanpa Turnstile.
+--
+-- Latar: widget Turnstile bisa macet di sebagian HP/jaringan — terukur di
+-- produksi, satu penjual Android mencoba ±1 jam (22 Sep 2026, 7 kali tertahan)
+-- dan tidak pernah berhasil. Penjual adalah lead paling bernilai, dan Tahap 1
+-- hanya membuat DRAFT yang tidak pernah tayang tanpa ditinjau admin.
+--
+-- Karena itu titip-jual-mulai.js menerima kiriman tanpa token captcha HANYA
+-- bila klien menandainya `tanpa_captcha` (widget gagal/macet ≥ 20 dtk), dengan
+-- kuota per-IP 2/24 jam dan plafon global 20/24 jam (titip_jual_tiket_log
+-- jenis='tanpa_captcha', migrasi 0054). Kiriman seperti itu:
+--   - TIDAK dilaporkan ke Meta (Lead / CompleteRegistration) — optimasi iklan
+--     tidak boleh belajar dari kiriman yang mungkin bot;
+--   - ditandai kolom ini supaya admin melihat lencana "Tanpa verifikasi".
+ALTER TABLE properties ADD COLUMN tanpa_captcha INTEGER NOT NULL DEFAULT 0;

@@ -76,6 +76,8 @@ interface AgreementDetail {
     status_legalitas: string | null;
     deskripsi: string | null;
     status_publish: string;
+    /** Masuk lewat jalur cadangan tanpa Turnstile (migrasi 0055). */
+    tanpa_captcha?: boolean;
   };
   foto: Array<{ id: number; url_webp: string; alt_text: string | null; urutan: number; is_cover: 0 | 1 }>;
 }
@@ -608,6 +610,12 @@ export default function AdminAgreementDetailPage() {
       {/* ─── Property Card ───────────────────────────────────────── */}
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
         <CardHeader icon={Home} title="Data Properti" color="#10B981" />
+        {data.properti.tanpa_captcha && (
+          <p className="mb-3 text-xs font-semibold text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+            Pengajuan ini masuk lewat jalur cadangan TANPA verifikasi anti-bot (widget Turnstile pemilik macet).
+            Pastikan pengirimnya nyata — hubungi via WA — sebelum mengirim link tanda tangan.
+          </p>
+        )}
 
         {/* Data properti diedit di SATU tempat — halaman Properti — yang sudah
             menangani harga per-m² tanah (normalisasiHarga) dan meta SEO. Edit

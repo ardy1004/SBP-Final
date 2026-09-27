@@ -13,7 +13,7 @@ export async function onRequestGet(context) {
   try {
     const res = await env.DB.prepare(`
       SELECT p.id AS property_id, p.kode_listing, p.title, p.jenis_properti, p.tujuan,
-             p.kecamatan, p.kabupaten, p.status_publish, p.created_at,
+             p.kecamatan, p.kabupaten, p.status_publish, p.created_at, p.tanpa_captcha,
              o.id AS owner_id, o.no_wa_1, o.no_wa_2,
              (SELECT COUNT(*) FROM property_images pi WHERE pi.property_id = p.id) AS jumlah_foto
         FROM properties p

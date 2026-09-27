@@ -214,7 +214,7 @@ export async function onRequestPost(context) {
     return jsonError('Gagal memproses data. Silakan coba lagi.', 500);
   }
 
-  const propRow = await env.DB.prepare('SELECT tujuan, kode_listing FROM properties WHERE id = ?').bind(property_id).first();
+  const propRow = await env.DB.prepare('SELECT tujuan, kode_listing, tanpa_captcha FROM properties WHERE id = ?').bind(property_id).first();
   if (!propRow) {
     // Mustahil dalam kondisi normal (owner/properti sudah dicek di atas), tapi
     // owners.property_id pakai ON DELETE SET NULL — jaga-jaga bila properti
@@ -308,8 +308,10 @@ export async function onRequestPost(context) {
   // Event yang sama dengan titip-jual.js (jalur lama sekali-submit) — sengaja
   // `CompleteRegistration`, TANPA `value`, HANYA di jalur sukses ini (bukan di
   // dua jalur idempoten di atas, supaya browser tidak menembak Pixel dua kali).
-  const regEventId = `reg_${agreement_id}_${Date.now()}`;
-  context.waitUntil((async () => {
+  // Listing dari jalur cadangan tanpa captcha (migrasi 0055) tidak dilaporkan
+  // ke Meta — sama seperti Lead-nya di Tahap 1.
+  const regEventId = propRow.tanpa_captcha ? null : `reg_${agreement_id}_${Date.now()}`;
+  if (regEventId) context.waitUntil((async () => {
     try {
       const pixelRes = await env.DB
         .prepare("SELECT pixel_id, capi_access_token, events_enabled FROM pixel_configs WHERE is_active = 1 AND capi_access_token IS NOT NULL AND capi_access_token != ''")
@@ -340,7 +342,7 @@ export async function onRequestPost(context) {
     property_id,
     owner_id,
     agreement_id,
-    event_id: regEventId,
+    event_id: regEventId ?? undefined,
     status: 'draft',
     pesan: 'Data diri berhasil disimpan. Perjanjian Anda sedang diproses tim SBP.',
   }, 200);

@@ -52,7 +52,7 @@ async function fetchAgreementById(db, id) {
       p.legalitas, p.status_legalitas,
       p.deskripsi, p.info_tambahan,
       p.gmaps_link, p.lebar_jalan_m, p.details,
-      p.status_publish
+      p.status_publish, p.tanpa_captcha
     FROM agreements a
     JOIN owners     o ON o.id = a.owner_id
     JOIN properties p ON p.id = a.property_id
@@ -157,6 +157,7 @@ export async function onRequestGet(context) {
       lebar_jalan_m: agr.lebar_jalan_m,
       details: agr.details,
       status_publish: agr.status_publish,
+      tanpa_captcha: agr.tanpa_captcha === 1,
     },
     foto: photosRes.results ?? [],
   });

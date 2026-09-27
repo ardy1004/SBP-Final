@@ -26,6 +26,8 @@ interface PropertyRow {
   created_at: string;
   /** Asal listing — definisi di functions/_lib/titipJualAdmin.js (SQL_DARI_TITIP_JUAL). */
   sumber?: 'titip_jual' | 'admin';
+  /** 1 = Titip Jual lewat jalur cadangan tanpa Turnstile (migrasi 0055). */
+  tanpa_captcha?: number;
 }
 
 const JENIS_COLORS: Record<string, string> = {
@@ -638,6 +640,12 @@ export default function AdminListingPage() {
                             {p.sumber === 'titip_jual' && (
                               <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold" style={{ fontSize: '10px' }}>
                                 Titip Jual
+                              </span>
+                            )}
+                            {p.tanpa_captcha === 1 && (
+                              <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold" style={{ fontSize: '10px' }}
+                                title="Masuk lewat jalur cadangan tanpa verifikasi anti-bot">
+                                Tanpa verifikasi
                               </span>
                             )}
                           </div>

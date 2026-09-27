@@ -20,7 +20,8 @@
 /** Kendala yang layak dilaporkan. Menambah nilai baru berarti menambah volume — timbang dulu. */
 export type KodeKendala =
   | 'turnstile-menahan'   // token belum/gagal terbit, submit dihentikan di klien
-  | 'jaringan-putus';     // request terkirim lalu koneksi mati sebelum respons
+  | 'jaringan-putus'      // request terkirim lalu koneksi mati sebelum respons
+  | 'galat-tak-terduga';  // pengecualian yang lolos dari alur kirim (dulu = tombol macet)
 
 export function laporKendalaForm(
   form: string,

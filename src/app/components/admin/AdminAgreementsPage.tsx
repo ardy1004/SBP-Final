@@ -38,6 +38,8 @@ interface Tertunda {
   no_wa_1: string | null;
   no_wa_2: string | null;
   jumlah_foto: number;
+  /** 1 = masuk lewat jalur cadangan tanpa Turnstile (migrasi 0055) — tinjau lebih teliti. */
+  tanpa_captcha: number;
 }
 
 interface Ringkasan {
@@ -323,7 +325,15 @@ function TabTertunda() {
           <div key={t.property_id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-2">
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div className="min-w-0">
-                <div className="font-semibold text-sm text-[#0F172A]">{t.kode_listing}{t.title ? ` · ${t.title}` : ''}</div>
+                <div className="font-semibold text-sm text-[#0F172A]">
+                  {t.kode_listing}{t.title ? ` · ${t.title}` : ''}
+                  {t.tanpa_captcha === 1 && (
+                    <span className="ml-2 align-middle px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-semibold"
+                      title="Dikirim lewat jalur cadangan tanpa verifikasi anti-bot — pastikan pengirimnya nyata sebelum ditindaklanjuti">
+                      Tanpa verifikasi
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs text-[#64748B] capitalize">
                   {t.jenis_properti} · {t.tujuan.replace('_', ' & ')} · {[t.kecamatan, t.kabupaten].filter(Boolean).join(', ') || 'lokasi belum diisi'}
                   {' '}· {t.jumlah_foto} foto · masuk {formatDate(t.created_at)}
