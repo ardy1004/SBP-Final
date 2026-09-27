@@ -33,7 +33,22 @@ async function hmacKey(secret, usage) {
   );
 }
 
+// ⚠️ SETIAP token WAJIB ber-`scope`, dan SETIAP verifikasi WAJIB menyebut scope
+// yang diharapkan. Semua token proyek ini — sesi admin DAN tiket publik
+// (`chat`, `titipjual-foto`, `titipjual-lanjut`) — ditandatangani dengan
+// JWT_SECRET yang SAMA, jadi tanda tangan sah saja tidak membuktikan apa pun
+// tentang JENIS token.
+//
+// Sampai 2026-09-27 middleware admin hanya memeriksa tanda tangan: tiket unggah
+// foto yang bisa diminta siapa pun tanpa login (POST /api/titip-jual-tiket-foto)
+// diterima sebagai sesi admin, dan membuka NIK terdekripsi seluruh pemilik.
+// Terbuka sejak 26 Jul (chat_pass), tanpa captcha sejak 8 Sep. Karena itu kedua
+// fungsi di bawah MENOLAK dipanggil tanpa scope — lupa memeriksanya sekarang
+// menjadi error saat itu juga, bukan celah senyap.
 export async function signJWT(payload, secret) {
+  if (typeof payload?.scope !== 'string' || !payload.scope) {
+    throw new Error('signJWT: payload wajib punya `scope` (lihat komentar di jwt.js)');
+  }
   const header  = toB64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const body    = toB64Url(JSON.stringify(payload));
   const data    = `${header}.${body}`;
@@ -43,7 +58,17 @@ export async function signJWT(payload, secret) {
   return `${data}.${sigB64}`;
 }
 
-export async function verifyJWT(token, secret) {
+/**
+ * @param {string} token
+ * @param {string} secret
+ * @param {string} scopeWajib  scope yang HARUS dimiliki token ('admin', 'chat', …).
+ *   Wajib diisi — token sah ber-scope lain dikembalikan null.
+ * @returns {Promise<object|null>} payload, atau null bila tidak sah/kedaluwarsa/scope beda
+ */
+export async function verifyJWT(token, secret, scopeWajib) {
+  if (typeof scopeWajib !== 'string' || !scopeWajib) {
+    throw new Error('verifyJWT: scopeWajib wajib diisi (lihat komentar di jwt.js)');
+  }
   if (!token || typeof token !== 'string') return null;
   const parts = token.split('.');
   if (parts.length !== 3) return null;
@@ -61,6 +86,7 @@ export async function verifyJWT(token, secret) {
     if (!valid) return null;
     const payload = JSON.parse(fromB64Url(body));
     if (payload.exp && Math.floor(Date.now() / 1000) > payload.exp) return null;
+    if (payload.scope !== scopeWajib) return null;
     return payload;
   } catch {
     return null;
@@ -70,6 +96,7 @@ export async function verifyJWT(token, secret) {
 export function makePayload(admin) {
   const now = Math.floor(Date.now() / 1000);
   return {
+    scope: 'admin',
     sub:   admin.id,
     email: admin.email,
     nama:  admin.nama,

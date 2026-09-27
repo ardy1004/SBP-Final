@@ -208,8 +208,7 @@ export async function onRequestPost(context) {
       return jsonError('Verifikasi anti-bot gagal. Silakan muat ulang halaman dan coba lagi.', 403);
     }
   } else {
-    const tiket = await verifyJWT(body.chat_pass, env.JWT_SECRET);
-    const tiketSah = tiket?.scope === 'chat';
+    const tiketSah = Boolean(await verifyJWT(body.chat_pass, env.JWT_SECRET, 'chat'));
 
     if (!tiketSah) {
       // Belum punya tiket → wajib CAPTCHA, apa pun isi riwayat yang dikirim.

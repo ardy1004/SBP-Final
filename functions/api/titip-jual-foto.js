@@ -55,8 +55,8 @@ export async function onRequestPost(context) {
     // turnstile.js agar dev lokal tetap jalan; di produksi secret ini selalu ada.
     console.warn('[titip-jual-foto] JWT_SECRET kosong — verifikasi tiket dilewati');
   } else {
-    const tiket = await verifyJWT(body.tiket, env.JWT_SECRET);
-    if (tiket?.scope !== 'titipjual-foto') {
+    const tiket = await verifyJWT(body.tiket, env.JWT_SECRET, 'titipjual-foto');
+    if (!tiket) {
       context.waitUntil(logServerError(env, {
         message: '[titip-jual-foto] Tiket tidak sah (403)',
         url: request.url,

@@ -107,8 +107,8 @@ export async function onRequestPost(context) {
     return jsonError(PESAN_TIKET_GAGAL, 403);
   }
 
-  const tiket = await verifyJWT(body.tiket_lanjut, env.JWT_SECRET);
-  if (tiket?.scope !== 'titipjual-lanjut' || !Number.isInteger(tiket.property_id) || !Number.isInteger(tiket.owner_id)) {
+  const tiket = await verifyJWT(body.tiket_lanjut, env.JWT_SECRET, 'titipjual-lanjut');
+  if (!tiket || !Number.isInteger(tiket.property_id) || !Number.isInteger(tiket.owner_id)) {
     context.waitUntil(logServerError(env, {
       message: '[titip-jual-lengkapi] Tiket tidak sah (403)',
       url: request.url,
