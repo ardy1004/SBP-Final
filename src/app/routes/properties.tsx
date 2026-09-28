@@ -10,7 +10,7 @@ import { parseLandmarkSlug, peringkatDekatLandmark, LANDMARK_RADIUS_KM } from ".
 import { isInertParam } from "../../../functions/_lib/queryParams.js";
 import { buildPropertyUrl } from "../../../functions/_lib/propertyUrl.js";
 import { cfImg } from "../../lib/img";
-import { urlHalaman, type PaginationInfo } from "../../lib/pagination";
+import { urlHalaman, UKURAN_HALAMAN, type PaginationInfo } from "../../lib/pagination";
 
 // Route module SSR untuk /properties DAN programmatic SEO /:slug
 // (mis. /rumah-dijual-jogja, /kost-dijual-sleman).
@@ -19,7 +19,7 @@ import { urlHalaman, type PaginationInfo } from "../../lib/pagination";
 // kosong dengan meta generik. Loader ini query D1 langsung (pola home.tsx)
 // sehingga konten listing + meta dinamis ada di HTML awal.
 
-const SSR_LIMIT = 20; // = state `limit` awal PropertiesPage — hasil identik dgn fetch client
+const SSR_LIMIT = UKURAN_HALAMAN; // = state `limit` awal PropertiesPage — hasil identik dgn fetch client
 
 const ORIGIN = 'https://salambumi.xyz';
 
@@ -254,6 +254,9 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
     if (kelurahan) { conditions.push('LOWER(p.kelurahan) = LOWER(?)'); bindings.push(kelurahan); }
 
     const where = conditions.join(' AND ');
+    // ⚠️ ORDER BY di bawah WAJIB identik dengan ORDER_MAP.terbaru di
+    // functions/api/properties/index.js: setelah filter diubah, halaman 1 datang dari
+    // API itu dan halaman 2 dst. dari loader ini. `p.id DESC` = pemecah seri.
     const sqlData = `
       SELECT
         p.id, p.kode_listing, p.title, p.slug,
@@ -278,7 +281,7 @@ export async function loader({ context, params, request }: LoaderFunctionArgs) {
          )) AS images_raw
       FROM properties p
       WHERE ${where}
-      ORDER BY p.properti_pilihan DESC, p.badge_premium DESC, p.badge_featured DESC, p.badge_hot DESC, p.published_at DESC
+      ORDER BY p.properti_pilihan DESC, p.badge_premium DESC, p.badge_featured DESC, p.badge_hot DESC, p.published_at DESC, p.id DESC
       LIMIT ? OFFSET ?
     `;
     const [dataRes, countRes] = await Promise.all([
@@ -418,7 +421,7 @@ async function loadLandmarkPage(env: { DB: D1Database }, parsed: LandmarkParsed,
       FROM properties p
       WHERE p.status_publish = 'published' AND p.jenis_properti = ?
         AND p.kecamatan IS NOT NULL AND p.kecamatan != ''
-      ORDER BY p.properti_pilihan DESC, p.badge_premium DESC, p.badge_featured DESC, p.badge_hot DESC, p.published_at DESC
+      ORDER BY p.properti_pilihan DESC, p.badge_premium DESC, p.badge_featured DESC, p.badge_hot DESC, p.published_at DESC, p.id DESC
     `).bind(parsed.jenis).all();
 
     const rows = (dataRes.results ?? []) as Record<string, unknown>[];

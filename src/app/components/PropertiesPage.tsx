@@ -9,9 +9,9 @@ import {
   type NormalizedProperty, type ApiLocation, type PropertiesParams,
   formatRupiah,
 } from '../../lib/api';
-import { PROPERTY_TYPES, getPropertyTypeLabel } from '../../lib/propertyTypes';
+import { PROPERTY_TYPES, PROPERTY_TYPE_VALUES, getPropertyTypeLabel } from '../../lib/propertyTypes';
 import { cfImg } from '../../lib/img';
-import { urlHalaman, deretHalaman, type PaginationInfo } from '../../lib/pagination';
+import { urlHalaman, deretHalaman, UKURAN_HALAMAN, basePathFilter, type PaginationInfo } from '../../lib/pagination';
 import { parseSmartQuery, type LocationIndex, type FlatLoc, type SmartFilters } from './smartSearchParser';
 import { trackEvent } from '../../lib/tracking';
 import { TAMPILKAN_PETA_PUBLIK } from '../../lib/fiturPublik';
@@ -117,7 +117,11 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
   const [tujuan, setTujuan] = useState(ssrData?.filters.tujuan || searchParams.get('tujuan') || 'semua');
   const [selectedJenis, setSelectedJenis] = useState<string[]>(() => {
     if (ssrData?.filters.jenis) return ssrData.filters.jenis.split(',');
-    return searchParams.get('jenis') ? [searchParams.get('jenis')!] : [];
+    // Jalur CSR (URL ber-param yang tidak dipahami loader, mis. ?sort=): `jenis`
+    // bisa berisi BEBERAPA nilai berkoma, sama seperti loader & API. Dulu dibaca
+    // sebagai satu nilai → daftar sudah kost+tanah tapi semua checkbox kosong.
+    return (searchParams.get('jenis') ?? '')
+      .split(',').map(j => j.trim()).filter(j => (PROPERTY_TYPE_VALUES as readonly string[]).includes(j));
   });
   // Harga sebagai SATU sumber kebenaran (min/max). Dropdown range menulis ke sini juga.
   const [hargaMin, setHargaMin] = useState(0);
@@ -137,7 +141,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
     const s = searchParams.get('sort');
     return SORT_OPTIONS.some(o => o.value === s) ? s! : 'terbaru';
   });
-  const [limit, setLimit] = useState(20);
+  const [limit, setLimit] = useState(UKURAN_HALAMAN);
 
   // ── Smart search bar state ──────────────────────────────────────────────
   const [query, setQuery] = useState('');
@@ -165,6 +169,10 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
   const [loading, setLoading] = useState(!ssrData);
   const [error, setError] = useState<string | null>(null);
   const skipFirstFetchRef = useRef(Boolean(ssrData));
+  // true begitu daftar yang tampil BUKAN lagi data loader apa adanya (fetch klien
+  // sudah berjalan karena filter/urutan/limit berubah). Sejak itu nav paginasi
+  // dari loader basi — lihat `navPaginasi` di bawah.
+  const [daftarKlien, setDaftarKlien] = useState(false);
 
   // ── Load provinces on mount ───────────────────────────────────────────────
   useEffect(() => {
@@ -234,6 +242,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
   const fetchProperties = useCallback(() => {
     setLoading(true);
     setError(null);
+    setDaftarKlien(true);
 
     const params: PropertiesParams = {
       sort: sort as PropertiesParams['sort'],
@@ -326,12 +335,12 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
   // ── Filter handlers ───────────────────────────────────────────────────────
   const toggleJenis = (v: string) => {
     setSelectedJenis(prev => prev.includes(v) ? prev.filter(j => j !== v) : [...prev, v]);
-    setLimit(20);
+    setLimit(UKURAN_HALAMAN);
   };
 
   const handleProvChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const id = parseInt(e.target.value, 10) || null;
-    setProvId(id); setKabupaten(''); setKabupatenId(null); setKecamatan(''); setLimit(20);
+    setProvId(id); setKabupaten(''); setKabupatenId(null); setKecamatan(''); setLimit(UKURAN_HALAMAN);
   };
 
   const handleKabChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -340,7 +349,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
     setKabupaten(nama);
     setKabupatenId(found?.id ?? null);
     setKecamatan('');
-    setLimit(20);
+    setLimit(UKURAN_HALAMAN);
   };
 
   const resetFilters = () => {
@@ -354,7 +363,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
     setKt(0); setKm(0); setLantai(0); setLtMin(0); setLbMin(0);
     setQKeyword(''); setQuery('');
     setSort('terbaru');
-    setLimit(20);
+    setLimit(UKURAN_HALAMAN);
   };
 
   // ── Smart search: apply hasil parser ke STATE FILTER EXISTING (reuse) ──────
@@ -372,7 +381,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
     if (f.kabupaten != null) setKabupaten(f.kabupaten);
     if (f.kabupatenId !== undefined) setKabupatenId(f.kabupatenId ?? null);
     if (f.kecamatan != null) setKecamatan(f.kecamatan);
-    setLimit(20);
+    setLimit(UKURAN_HALAMAN);
   };
 
   const runSmartSearch = (raw: string) => {
@@ -448,7 +457,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
       setKabupaten(loc.nama); setKabupatenId(loc.id);
       setKecamatan('');
     }
-    setLimit(20); setShowSuggest(false); setQuery('');
+    setLimit(UKURAN_HALAMAN); setShowSuggest(false); setQuery('');
   };
 
   // ── Chips aktif (derive dari state — SATU sumber, removable individual) ────
@@ -460,18 +469,43 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
   };
 
   const activeChips = [
-    tujuan !== 'semua' ? { label: tujuan === 'dijual' ? 'Dijual' : 'Disewa', clear: () => { setTujuan('semua'); setLimit(20); } } : null,
+    tujuan !== 'semua' ? { label: tujuan === 'dijual' ? 'Dijual' : 'Disewa', clear: () => { setTujuan('semua'); setLimit(UKURAN_HALAMAN); } } : null,
     ...selectedJenis.map(j => ({ label: `Jenis: ${getPropertyTypeLabel(j)}`, clear: () => toggleJenis(j) })),
-    (hargaMin > 0 || hargaMax > 0) ? { label: hargaChipLabel(), clear: () => { setHargaMin(0); setHargaMax(0); setLimit(20); } } : null,
-    kabupaten ? { label: `Lokasi: ${kabupaten}`, clear: () => { setKabupaten(''); setKabupatenId(null); setKecamatan(''); setLimit(20); } } : null,
-    kecamatan ? { label: `Kec: ${kecamatan}`, clear: () => { setKecamatan(''); setLimit(20); } } : null,
-    kt > 0 ? { label: `Kamar Tidur: ${kt}+`, clear: () => { setKt(0); setLimit(20); } } : null,
-    km > 0 ? { label: `Kamar Mandi: ${km}+`, clear: () => { setKm(0); setLimit(20); } } : null,
-    lantai > 0 ? { label: `Lantai: ${lantai}+`, clear: () => { setLantai(0); setLimit(20); } } : null,
-    ltMin > 0 ? { label: `LT: ${ltMin}m²+`, clear: () => { setLtMin(0); setLimit(20); } } : null,
-    lbMin > 0 ? { label: `LB: ${lbMin}m²+`, clear: () => { setLbMin(0); setLimit(20); } } : null,
-    qKeyword.trim() ? { label: `Kata kunci: "${qKeyword.trim()}"`, clear: () => { setQKeyword(''); setQuery(''); setLimit(20); } } : null,
+    (hargaMin > 0 || hargaMax > 0) ? { label: hargaChipLabel(), clear: () => { setHargaMin(0); setHargaMax(0); setLimit(UKURAN_HALAMAN); } } : null,
+    kabupaten ? { label: `Lokasi: ${kabupaten}`, clear: () => { setKabupaten(''); setKabupatenId(null); setKecamatan(''); setLimit(UKURAN_HALAMAN); } } : null,
+    kecamatan ? { label: `Kec: ${kecamatan}`, clear: () => { setKecamatan(''); setLimit(UKURAN_HALAMAN); } } : null,
+    kt > 0 ? { label: `Kamar Tidur: ${kt}+`, clear: () => { setKt(0); setLimit(UKURAN_HALAMAN); } } : null,
+    km > 0 ? { label: `Kamar Mandi: ${km}+`, clear: () => { setKm(0); setLimit(UKURAN_HALAMAN); } } : null,
+    lantai > 0 ? { label: `Lantai: ${lantai}+`, clear: () => { setLantai(0); setLimit(UKURAN_HALAMAN); } } : null,
+    ltMin > 0 ? { label: `LT: ${ltMin}m²+`, clear: () => { setLtMin(0); setLimit(UKURAN_HALAMAN); } } : null,
+    lbMin > 0 ? { label: `LB: ${lbMin}m²+`, clear: () => { setLbMin(0); setLimit(UKURAN_HALAMAN); } } : null,
+    qKeyword.trim() ? { label: `Kata kunci: "${qKeyword.trim()}"`, clear: () => { setQKeyword(''); setQuery(''); setLimit(UKURAN_HALAMAN); } } : null,
   ].filter(Boolean) as { label: string; clear: () => void }[];
+
+  // ── Nav paginasi yang JUJUR terhadap daftar yang sedang tampil ─────────────
+  // Filter sidebar hanya mengubah state + fetch klien (URL sengaja tidak ditulis:
+  // mengubah riwayat browser tiap klik bisa memicu page view tambahan GA4/Pixel).
+  // Prop `pagination` dari loader menggambarkan URL AWAL, jadi setelah filter
+  // diubah ia basi: dulu tetap "29 halaman" + tautan tanpa filter, dan klik
+  // "2" mendarat di halaman tak berfilter dengan checkbox kosong (2026-09-28).
+  //   · daftar masih data loader → pakai `pagination` apa adanya (identik SSR,
+  //     aman hidrasi, tautan SEO tetap).
+  //   · daftar hasil fetch klien → susun ulang dari filter aktif; tautannya
+  //     mendarat di URL berfilter yang dirender server dengan benar.
+  //   · filter yang TIDAK dipahami loader (harga, spek, kata kunci, urutan),
+  //     "Muat Lebih Banyak" sudah dipakai, atau fetch belum selesai → tanpa nav;
+  //     halaman server mustahil mewakili daftar itu.
+  const filterKlienAktif = hargaMin > 0 || hargaMax > 0 || kt > 0 || km > 0 || lantai > 0
+    || ltMin > 0 || lbMin > 0 || qKeyword.trim() !== '' || sort !== 'terbaru';
+  const navPaginasi: PaginationInfo | null = !daftarKlien
+    ? (pagination ?? null)
+    : (filterKlienAktif || limit > UKURAN_HALAMAN || loading)
+      ? null
+      : {
+          page: 1,
+          totalPages: Math.max(1, Math.ceil(totalCount / UKURAN_HALAMAN)),
+          basePath: basePathFilter({ tujuan, jenis: selectedJenis, kabupaten, kecamatan }),
+        };
 
   const selectClass = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0] appearance-none bg-white";
 
@@ -491,7 +525,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
           {[['semua', 'Semua'], ['dijual', 'Dijual'], ['disewa', 'Disewa']].map(([v, l]) => (
             <button
               key={v}
-              onClick={() => { setTujuan(v); setLimit(20); }}
+              onClick={() => { setTujuan(v); setLimit(UKURAN_HALAMAN); }}
               className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-all ${
                 tujuan === v ? 'bg-[#1565C0] text-white border-[#1565C0]' : 'border-gray-200 text-gray-600 hover:border-[#1565C0]'
               }`}
@@ -528,7 +562,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
         <div className="relative">
           <select
             value={(() => { const i = HARGA_RANGES.findIndex(r => r.min === hargaMin && r.max === hargaMax); return i >= 0 ? i : 0; })()}
-            onChange={e => { const r = HARGA_RANGES[Number(e.target.value)]; setHargaMin(r.min); setHargaMax(r.max); setLimit(20); }}
+            onChange={e => { const r = HARGA_RANGES[Number(e.target.value)]; setHargaMin(r.min); setHargaMax(r.max); setLimit(UKURAN_HALAMAN); }}
             className={selectClass} aria-label="Rentang harga">
             {HARGA_RANGES.map((r, i) => <option key={i} value={i}>{r.label}</option>)}
           </select>
@@ -564,7 +598,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
             <div className="relative">
               <select
                 value={kecamatan}
-                onChange={e => { setKecamatan(e.target.value); setLimit(20); }}
+                onChange={e => { setKecamatan(e.target.value); setLimit(UKURAN_HALAMAN); }}
                 className={selectClass}
                 aria-label="Kecamatan"
               >
@@ -682,7 +716,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
                     <div className="py-1.5 border-t border-gray-50">
                       <div className="px-4 py-1 text-[10px] font-bold uppercase tracking-wide text-gray-400">Jenis Properti</div>
                       {suggest.jenis.map(j => (
-                        <button key={`jen-${j.value}`} onMouseDown={e => { e.preventDefault(); setSelectedJenis([j.value]); setLimit(20); setShowSuggest(false); setQuery(''); }}
+                        <button key={`jen-${j.value}`} onMouseDown={e => { e.preventDefault(); setSelectedJenis([j.value]); setLimit(UKURAN_HALAMAN); setShowSuggest(false); setQuery(''); }}
                           className="w-full flex items-center gap-2 px-4 py-2 text-left text-sm hover:bg-[#F0F7FF]">
                           <Building2 size={14} className="text-[#1565C0]" /> {j.label}
                         </button>
@@ -741,7 +775,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
                 <div className="relative">
                   <select
                     value={sort}
-                    onChange={e => { setSort(e.target.value); setLimit(20); }}
+                    onChange={e => { setSort(e.target.value); setLimit(UKURAN_HALAMAN); }}
                     aria-label="Urutkan properti"
                     className="border border-gray-200 rounded-xl px-3 py-2 text-sm appearance-none bg-white pr-8 focus:outline-none focus:ring-2 focus:ring-[#1565C0]"
                   >
@@ -843,12 +877,14 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
                 Disembunyikan di halaman paginasi ke-2 dst: fetch client tidak
                 membawa `page`, jadi menekannya di ?page=3 akan menarik item dari
                 awal daftar dan menggantikan yang sedang dilihat. Di halaman itu
-                navigasi diserahkan ke nav paginasi di bawah. */}
+                navigasi diserahkan ke nav paginasi di bawah — KECUALI daftarnya
+                sudah hasil fetch klien (`daftarKlien`): daftar itu memang dimulai
+                dari item 1, dan tanpa tombol ini pengunjung tertahan di 20 hasil. */}
             {viewMode !== 'map' && !error && properties.length > 0 && properties.length < totalCount
-              && (!pagination || pagination.page === 1) && (
+              && (!pagination || pagination.page === 1 || daftarKlien) && (
               <div className="flex justify-center mt-8">
                 <button
-                  onClick={() => setLimit(prev => prev + 20)}
+                  onClick={() => setLimit(prev => prev + UKURAN_HALAMAN)}
                   disabled={loading}
                   className="px-6 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
                   style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
@@ -865,13 +901,13 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
                 detail properti pernah tampil di hasil pencarian — 514 listing
                 tidak punya satu pun jalur tautan yang bisa dirayapi.
                 Blok ini yang membukanya. Jangan diganti jadi tombol. */}
-            {viewMode !== 'map' && !error && pagination && pagination.totalPages > 1 && (
+            {viewMode !== 'map' && !error && navPaginasi && navPaginasi.totalPages > 1 && (
               <nav className="flex justify-center mt-8" aria-label="Navigasi halaman">
                 <ul className="flex flex-wrap items-center justify-center gap-1.5">
-                  {pagination.page > 1 && (
+                  {navPaginasi.page > 1 && (
                     <li>
                       <a
-                        href={urlHalaman(pagination.basePath, pagination.page - 1)}
+                        href={urlHalaman(navPaginasi.basePath, navPaginasi.page - 1)}
                         rel="prev"
                         aria-label="Halaman sebelumnya"
                         className="flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-[#0F172A] hover:border-[#1565C0] transition-colors"
@@ -881,10 +917,10 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
                     </li>
                   )}
 
-                  {deretHalaman(pagination.page, pagination.totalPages).map((n, i) =>
+                  {deretHalaman(navPaginasi.page, navPaginasi.totalPages).map((n, i) =>
                     n === null ? (
                       <li key={`gap-${i}`} className="px-2 text-sm text-gray-400 select-none" aria-hidden="true">…</li>
-                    ) : n === pagination.page ? (
+                    ) : n === navPaginasi.page ? (
                       <li key={n}>
                         <span
                           aria-current="page"
@@ -897,7 +933,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
                     ) : (
                       <li key={n}>
                         <a
-                          href={urlHalaman(pagination.basePath, n)}
+                          href={urlHalaman(navPaginasi.basePath, n)}
                           aria-label={`Halaman ${n}`}
                           className="flex min-w-9 justify-center px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-[#0F172A] hover:border-[#1565C0] transition-colors"
                         >
@@ -907,10 +943,10 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
                     ),
                   )}
 
-                  {pagination.page < pagination.totalPages && (
+                  {navPaginasi.page < navPaginasi.totalPages && (
                     <li>
                       <a
-                        href={urlHalaman(pagination.basePath, pagination.page + 1)}
+                        href={urlHalaman(navPaginasi.basePath, navPaginasi.page + 1)}
                         rel="next"
                         aria-label="Halaman berikutnya"
                         className="flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-[#0F172A] hover:border-[#1565C0] transition-colors"

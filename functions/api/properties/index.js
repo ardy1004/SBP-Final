@@ -4,8 +4,13 @@ const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 500;
 
 // Whitelist ORDER BY — tidak boleh dari input user langsung (SQL injection guard)
+//
+// ⚠️ `terbaru` WAJIB identik dengan ORDER BY loader src/app/routes/properties.tsx
+// (daftar utama + landmark): halaman 1 setelah filter diubah datang dari endpoint
+// ini, halaman 2 dst. dari loader. `p.id DESC` = pemecah seri — tanpanya listing
+// dengan kunci urut sama bisa berpindah/dobel di antara LIMIT/OFFSET (2026-09-28).
 const ORDER_MAP = {
-  terbaru:  'p.properti_pilihan DESC, p.badge_premium DESC, p.badge_featured DESC, p.badge_hot DESC, p.published_at DESC',
+  terbaru:  'p.properti_pilihan DESC, p.badge_premium DESC, p.badge_featured DESC, p.badge_hot DESC, p.published_at DESC, p.id DESC',
   termurah: 'p.harga ASC, p.published_at DESC',
   termahal: 'p.harga DESC, p.published_at DESC',
   luas:     'p.luas_tanah DESC, p.published_at DESC',

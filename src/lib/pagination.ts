@@ -6,6 +6,39 @@
 // impor melingkar. Satu sumber juga memastikan href yang DIRENDER di nav tidak
 // pernah berbeda dari URL yang DINYATAKAN kanonik di <head>.
 
+import { PROPERTY_TYPE_VALUES } from './propertyTypes';
+
+/**
+ * Jumlah listing per halaman — SAMA untuk loader SSR (LIMIT/OFFSET) dan fetch
+ * klien (`limit` awal & kelipatan "Muat Lebih Banyak"). Nav paginasi yang disusun
+ * di klien (basePathFilter) menghitung jumlah halaman dari angka ini; kalau
+ * berbeda dari server, tautan "halaman N" menunjuk irisan yang lain.
+ */
+export const UKURAN_HALAMAN = 20;
+
+/**
+ * Path dasar (tanpa `page`) untuk daftar yang disaring filter KLIEN saat ini.
+ *
+ * Dipakai nav paginasi setelah pengunjung mengubah filter tanpa memuat ulang
+ * halaman: nav dari loader masih menggambarkan URL awal, jadi tautannya harus
+ * disusun ulang dari filter yang sedang aktif. Urutan kunci = SUPPORTED_PARAMS
+ * loader; `jenis` diurutkan menurut PROPERTY_TYPES supaya satu kombinasi = satu
+ * URL (klik Tanah→Kost dan Kost→Tanah menghasilkan tautan yang sama).
+ *
+ * `provinsi` SENGAJA tidak ikut: fetch klien tidak pernah memfilter provinsi,
+ * jadi tautan harus menggambarkan daftar yang sedang dilihat pengunjung.
+ */
+export function basePathFilter(f: { tujuan: string; jenis: string[]; kabupaten: string; kecamatan: string }): string {
+  const qs = new URLSearchParams();
+  if (f.tujuan && f.tujuan !== 'semua') qs.set('tujuan', f.tujuan);
+  const jenis = PROPERTY_TYPE_VALUES.filter(v => f.jenis.includes(v));
+  if (jenis.length) qs.set('jenis', jenis.join(','));
+  if (f.kabupaten) qs.set('kabupaten', f.kabupaten);
+  if (f.kecamatan) qs.set('kecamatan', f.kecamatan);
+  const s = qs.toString();
+  return s ? `/properties?${s}` : '/properties';
+}
+
 export interface PaginationInfo {
   /** Halaman aktif, mulai dari 1. */
   page: number;
