@@ -18,7 +18,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { getSetting, setSetting, TIMEOUT_POST_MS } from '../../../_lib/schedulerProviders.js';
 import { resolveScheduler, resolveAkunTarget, getModeAkun } from '../../../_lib/agentAccounts.js';
-import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai, getPresetUtama, ulangiPlatformGagal } from '../../../_lib/jadwalOtomatis.js';
+import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai, ulangiPlatformGagal } from '../../../_lib/jadwalOtomatis.js';
 import { tanggalWib } from '../../../_lib/waktu.js';
 import { logServerError } from '../../../_lib/logError.js';
 
@@ -105,7 +105,10 @@ export async function onRequestPost({ request, env }) {
   }
 
   const { utama } = await getModeAkun(env);
-  const [jendela, preset] = await Promise.all([getJendela(env), getPresetUtama(env)]);
+  // Preset TIDAK lagi diambil sekali untuk semua agent: sejak jadwal manual
+  // per agent (2026-11-05) tiap akun punya presetnya sendiri (atau null =
+  // mode jendela), dan satu-satunya sumbernya kuotaAkun() di bawah.
+  const jendela = await getJendela(env);
   const laporan = [];
   // Klaim slot dibagi PER AKUN TUJUAN, bukan per agent: di mode terpusat
   // beberapa agent bermuara ke akun yang sama, dan saat dry-run tidak ada baris
@@ -134,12 +137,13 @@ export async function onRequestPost({ request, env }) {
     if (Object.keys(akun.channels).length === 0) { hasilAgent.alasan = 'belum ada channel sosmed'; laporan.push(hasilAgent); continue; }
 
     const { targetId } = await resolveAkunTarget(env, ag.id);
-    const { kuota, hari } = await kuotaAkun(env, targetId, utama);
+    const { kuota, hari, preset, mode } = await kuotaAkun(env, targetId, utama);
     const terpakai = await slotTerpakaiHariIni(env, targetId);
     if (!klaimPerAkun.has(targetId)) klaimPerAkun.set(targetId, await slotDipakai(env, targetId));
     const dipakai = klaimPerAkun.get(targetId);
     hasilAgent.kuota = kuota;
     hasilAgent.hari_nyata = hari;
+    hasilAgent.mode_jadwal = mode;
     hasilAgent.sudah_terjadwal = terpakai;
 
     // Kekurangan, BUKAN kuota penuh — inilah yang membuat cron idempoten:
@@ -180,7 +184,7 @@ export async function onRequestPost({ request, env }) {
       // antre di belakang tidak pernah diproses, tanpa jejak (audit 2026-08-29).
       try {
         const r = await jadwalkanVideo(env, {
-          video: videos[i], akun, targetId, akunUtamaId: utama, kuota, jendela, preset, dipakai, dryRun: dry,
+          video: videos[i], akun, targetId, kuota, jendela, preset, dipakai, dryRun: dry,
         });
         if (!r.ok) { hasilAgent.gagal++; hasilAgent.detail.push({ video_id: videos[i].id, alasan: r.alasan }); continue; }
         if (dry) { hasilAgent.detail.push({ video_id: videos[i].id, jendela: r.jendela, waktu: r.waktu }); hasilAgent.terjadwal++; continue; }
@@ -212,7 +216,7 @@ export async function onRequestPost({ request, env }) {
     if (!anggaranHabis()) {
       try {
         const ulang = await ulangiPlatformGagal(env, {
-          akun, targetId, akunUtamaId: utama, kuota, jendela, preset, dipakai, dryRun: dry,
+          akun, targetId, kuota, jendela, preset, dipakai, dryRun: dry,
         });
         if (ulang.diulang > 0 || ulang.dilewati > 0) hasilAgent.ulangi = ulang;
       } catch (err) {

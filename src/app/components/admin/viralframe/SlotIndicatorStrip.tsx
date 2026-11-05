@@ -38,7 +38,9 @@ export default function SlotIndicatorStrip({ characterId, refreshKey }: { charac
               KUOTA_MAKS tetap — tampilkan angkanya, bukan klaim "penuh". */}
           {data.akun_utama
             ? `Akun utama · kuota ${data.kuota}/hari`
-            : `${data.hari_nyata ?? 0} hari nyata · kuota ${data.kuota}/hari`}
+            : data.mode_jadwal === 'manual'
+              ? `Jadwal manual · kuota ${data.kuota}/hari`
+              : `${data.hari_nyata ?? 0} hari nyata · kuota ${data.kuota}/hari`}
         </div>
       </div>
 

@@ -1,0 +1,21 @@
+-- Jadwal posting MANUAL per agent (Konten Agent, 2026-11-05).
+--
+-- Sampai sekarang hanya agent utama yang bisa 5 video/hari: kuotanya = jumlah
+-- jam di kartu "Jam Posting Agent Utama" (setting viralframe_preset_utama).
+-- Agent lain mentok di 3 oleh DUA penjaga sekaligus — KUOTA_MAKS = 3 dan jumlah
+-- jendela primetime (Pagi/Siang/Malam) — jadi menaikkan konstanta saja tidak
+-- menambah apa pun.
+--
+-- Kolom ini memberi tiap agent pilihan memakai mesin preset yang sama dengan
+-- agent utama: N jam tetap + drift harian, kuota = jumlah jam.
+--   NULL                                   = mode Otomatis (ramp 1→2→3 + jendela), perilaku lama
+--   '{"slots":["06:30",...],"intervalMenit":5}' = mode Manual
+-- Satu kolom (bukan mode + jam terpisah) supaya keadaan "Manual tanpa jam"
+-- mustahil ada.
+--
+-- Aditif murni: baris yang sudah ada otomatis NULL = tidak ada agent yang
+-- berubah perilaku sampai admin menyimpan jadwal manual. Kode yang membacanya
+-- (getJadwalManual di functions/_lib/jadwalOtomatis.js) juga jatuh ke mode
+-- otomatis bila kolom ini belum ada, jadi urutan deploy-vs-migrasi tidak
+-- mematikan penjadwal.
+ALTER TABLE viralframe_agent_accounts ADD COLUMN jadwal_manual TEXT;

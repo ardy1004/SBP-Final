@@ -11,7 +11,7 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { resolveScheduler, resolveAkunTarget, getModeAkun } from '../../../../_lib/agentAccounts.js';
-import { jadwalkanVideo, ulangiPlatformVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai, getPresetUtama } from '../../../../_lib/jadwalOtomatis.js';
+import { jadwalkanVideo, ulangiPlatformVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai } from '../../../../_lib/jadwalOtomatis.js';
 import { adaJadwalTertunda } from '../../../../_lib/schedulerProviders.js';
 
 const PLATFORM_SAH = ['facebook', 'instagram', 'threads', 'tiktok', 'youtube'];
@@ -78,12 +78,13 @@ export async function onRequestPost(context) {
   // agent bermuara ke satu akun, dan menghitung per agent membuat akun itu
   // diam-diam melewati batas hariannya.
   const { utama } = await getModeAkun(env);
-  const [{ kuota }, terpakai, jendela, dipakai, preset] = await Promise.all([
+  // `preset` WAJIB dari kuotaAkun untuk akun yang sama — null = mode jendela,
+  // selain itu preset agent utama atau jadwal manual agent itu.
+  const [{ kuota, preset }, terpakai, jendela, dipakai] = await Promise.all([
     kuotaAkun(env, targetId, utama),
     slotTerpakaiHariIni(env, targetId),
     getJendela(env),
     slotDipakai(env, targetId),
-    getPresetUtama(env),
   ]);
   // Mode ULANGI tidak menagih kuota harian: ia memulihkan kiriman yang slotnya
   // SUDAH terpakai, bukan menambah konten baru. Menagihnya berarti pemulihan
@@ -91,7 +92,7 @@ export async function onRequestPost(context) {
   // itulah yang paling mungkin menyisakan kegagalan.
   if (mintaUlang) {
     const hasil = await ulangiPlatformVideo(env, {
-      video: { ...video, caption }, akun, targetId, akunUtamaId: utama, kuota, jendela, preset, platforms,
+      video: { ...video, caption }, akun, targetId, kuota, jendela, preset, platforms,
     });
     if (!hasil.ok) return jsonError(`Gagal mengulang: ${hasil.alasan}`, 422);
     return jsonOk({
@@ -109,11 +110,10 @@ export async function onRequestPost(context) {
   }
 
   // Slot ditentukan oleh jendela mana yang MASIH KOSONG (dipakai), bukan oleh
-  // posisi ke-`terpakai` — lihat catatan di slotTersedia(). akunUtamaId+preset
-  // dipakai jadwalkanVideo untuk memilih mode preset (khusus akun utama) vs
-  // mode jendela (agent lain).
+  // posisi ke-`terpakai` — lihat catatan di slotTersedia(). `preset` dari
+  // kuotaAkun memilih mode preset (agent utama / jadwal manual) vs mode jendela.
   const hasil = await jadwalkanVideo(env, {
-    video: { ...video, caption }, akun, targetId, akunUtamaId: utama, kuota, jendela, preset, dipakai,
+    video: { ...video, caption }, akun, targetId, kuota, jendela, preset, dipakai,
   });
   if (!hasil.ok) return jsonError(`Gagal menjadwalkan: ${hasil.alasan}`, 422);
 

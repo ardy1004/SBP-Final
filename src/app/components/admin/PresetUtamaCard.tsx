@@ -2,44 +2,34 @@
 //
 // Mekanisme lama (sebelum migrasi 0041, "0 20 * * *"-era): N jam tetap +
 // drift linear (+intervalMenit tiap hari, siklus otomatis) — bukan jendela
-// rentang + menit ber-seed seperti JamPrimetimeCard (yang berlaku 6 agent
-// lain). Dikembalikan atas permintaan user, sekarang editable dari sini
-// alih-alih konstanta di kode. Default: 06:00/09:00/12:00/17:00/19:00,
-// interval 5 menit — identik formula lama.
+// rentang + menit ber-seed seperti JamPrimetimeCard. Dikembalikan atas
+// permintaan user, sekarang editable dari sini alih-alih konstanta di kode.
+// Default: 06:00/09:00/12:00/17:00/19:00, interval 5 menit — identik formula lama.
 //
-// "Jumlah posting per hari" = jumlah baris jam di bawah, tidak ada field
-// terpisah — tambah/hapus baris untuk mengubah jumlahnya. Geseran antar
-// platform (0-19 menit) tetap berlaku di atas jam-jam ini, tidak diedit di
-// sini (lihat functions/_lib/jadwalOtomatis.js — TANGGA_PLATFORM).
+// "Jumlah posting per hari" = jumlah baris jam, tidak ada field terpisah.
+// Sejak 2026-11-05 agent lain juga bisa memakai mekanisme yang sama lewat
+// "Jadwal manual" di kartu Akun Agent — editornya satu komponen
+// (viralframe/EditorJamPosting.tsx) dan aturan simpannya satu fungsi
+// (validasiPresetJam di functions/_lib/jadwalOtomatis.js).
 
 import { useState, useEffect } from 'react';
-import { Timer, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Timer, ChevronDown, ChevronRight } from 'lucide-react';
 import { getSchedulerConfig, saveSchedulerConfig, type PresetUtama } from '../../../lib/api';
+import EditorJamPosting from './viralframe/EditorJamPosting';
 
 const PRESET_DEFAULT: PresetUtama = { slots: ['06:00', '09:00', '12:00', '17:00', '19:00'], intervalMenit: 5 };
 const CIUT_KEY = 'sbp_preset_utama_ciut';
 
-export default function PresetUtamaCard() {
+export default function PresetUtamaCard({ onTersimpan }: { onTersimpan?: () => void } = {}) {
   const [ciut, setCiut] = useState(true);
   const [preset, setPreset] = useState<PresetUtama>(PRESET_DEFAULT);
-  // Teks mentah input interval — TERPISAH dari preset.intervalMenit. Kalau
-  // input dibind langsung ke angka, mengosongkan field untuk mengetik ulang
-  // (mis. ganti "5" jadi "15") membuat React membalikkan DOM ke nilai lama
-  // di tengah pengetikan (parseInt('')=NaN -> state tidak berubah -> React
-  // memaksa value kembali) sehingga keystroke berikutnya menempel di angka
-  // lama ("51" bukan "15"). String bebas di sini, dikunci ke angka valid
-  // terakhir hanya saat blur.
-  const [intervalText, setIntervalText] = useState(String(PRESET_DEFAULT.intervalMenit));
   const [menyimpan, setMenyimpan] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; teks: string } | null>(null);
 
   useEffect(() => {
     try { setCiut(localStorage.getItem(CIUT_KEY) !== '0'); } catch { /* noop */ }
     getSchedulerConfig().then(r => {
-      if (r.success && r.data?.preset_utama?.slots?.length) {
-        setPreset(r.data.preset_utama);
-        setIntervalText(String(r.data.preset_utama.intervalMenit));
-      }
+      if (r.success && r.data?.preset_utama?.slots?.length) setPreset(r.data.preset_utama);
     });
   }, []);
 
@@ -51,27 +41,14 @@ export default function PresetUtamaCard() {
     });
   };
 
-  const ubahJam = (i: number, v: string) =>
-    setPreset(p => ({ ...p, slots: p.slots.map((s, idx) => (idx === i ? v : s)) }));
-  const hapus = (i: number) => setPreset(p => ({ ...p, slots: p.slots.filter((_, idx) => idx !== i) }));
-  const tambah = () => setPreset(p => ({ ...p, slots: [...p.slots, '12:00'] }));
-  const ubahIntervalText = (v: string) => {
-    setIntervalText(v);
-    const n = parseInt(v, 10);
-    if (Number.isInteger(n) && n >= 0 && n <= 1440) setPreset(p => ({ ...p, intervalMenit: n }));
-  };
-  // Saat blur, kunci tampilan ke nilai valid terakhir yang tersimpan di
-  // preset — membersihkan input yang ditinggal dalam keadaan kosong/tak valid.
-  const kunciInterval = () => setIntervalText(String(preset.intervalMenit));
-
   const simpan = async () => {
     setMenyimpan(true); setMsg(null);
     const r = await saveSchedulerConfig({ preset_utama: preset });
     setMenyimpan(false);
     if (r.success && r.data?.preset_utama) {
       setPreset(r.data.preset_utama);
-      setIntervalText(String(r.data.preset_utama.intervalMenit));
-      setMsg({ ok: true, teks: 'Jam posting agent utama tersimpan.' });
+      setMsg({ ok: true, teks: 'Jam posting agent utama tersimpan. Berlaku mulai penjadwalan berikutnya.' });
+      onTersimpan?.();
     } else {
       setMsg({ ok: false, teks: r.error ?? 'Gagal menyimpan' });
     }
@@ -95,32 +72,10 @@ export default function PresetUtamaCard() {
             Ini jam PERSIS (bukan rentang seperti Jam Tayang Primetime), khusus untuk akun agent utama.
             Tiap hari, seluruh jam di bawah bergeser bersama sejumlah "interval" menit — supaya jamnya tidak
             identik persis tiap hari — lalu otomatis reset dan mulai lagi setelah beberapa hari.
-            Jumlah baris jam = jumlah posting per hari. Geseran antar-platform (agar 5 akun tidak tayang
-            di detik yang sama) tetap berlaku di atas jam-jam ini.
+            Agent lain bisa memakai cara yang sama lewat <strong>Jadwal manual</strong> di kartu Akun Agent.
           </p>
 
-          <div className="space-y-1.5">
-            {preset.slots.map((jam, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <input type="time" value={jam} onChange={e => ubahJam(i, e.target.value)}
-                  className="border border-gray-200 rounded-lg px-2 py-1 text-xs" />
-                {preset.slots.length > 1 && (
-                  <button onClick={() => hapus(i)} className="text-[#94A3B8] hover:text-red-500"><Trash2 size={13} /></button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {preset.slots.length < 10 && (
-            <button onClick={tambah} className="text-[11px] font-semibold text-[#7C3AED] hover:underline">+ Tambah jam</button>
-          )}
-
-          <div className="flex items-center gap-2 pt-1">
-            <label className="text-xs text-[#334155]">Interval kenaikan per hari</label>
-            <input type="number" min={0} max={1440} value={intervalText} onChange={e => ubahIntervalText(e.target.value)}
-              onBlur={kunciInterval} className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-xs" />
-            <span className="text-xs text-[#64748B]">menit</span>
-          </div>
+          <EditorJamPosting preset={preset} onChange={setPreset} />
 
           {msg && <p className={`text-[11px] ${msg.ok ? 'text-emerald-600' : 'text-red-600'}`}>{msg.teks}</p>}
 

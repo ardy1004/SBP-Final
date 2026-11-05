@@ -16,7 +16,8 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { setSetting } from '../../../_lib/schedulerProviders.js';
-import { minPanjangJendela, getJendela, getPresetUtama } from '../../../_lib/jadwalOtomatis.js';
+import { minPanjangJendela, getJendela, getPresetUtama, validasiPresetJam } from '../../../_lib/jadwalOtomatis.js';
+import { PLATFORMS } from '../../../_lib/agentAccounts.js';
 
 const JAM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const keMenit = (j) => Number(j.slice(0, 2)) * 60 + Number(j.slice(3));
@@ -67,21 +68,15 @@ async function simpanJendela(env, j) {
 }
 
 async function simpanPresetUtama(env, p) {
-  if (!p || !Array.isArray(p.slots) || p.slots.length === 0 || p.slots.length > 10) {
-    return jsonError('Butuh 1–10 jam posting', 422);
-  }
-  for (const jam of p.slots) {
-    if (!JAM_RE.test(jam)) return jsonError('Format jam harus HH:MM', 422);
-  }
-  if (!Number.isInteger(p.intervalMenit) || p.intervalMenit < 0 || p.intervalMenit > 1440) {
-    return jsonError('Interval harus angka 0–1440 menit', 422);
-  }
-  // Dedupe + urutkan — dua slot dengan jam identik cuma menghasilkan baris
-  // jadwal kembar tanpa manfaat, bukan kesalahan fatal, jadi disaring diam-diam.
-  const slots = [...new Set(p.slots)].sort((a, b) => keMenit(a) - keMenit(b));
+  // Aturan SATU SUMBER dengan jadwal manual per agent (validasiPresetJam):
+  // format, 1–10 jam, interval, plus jam paling awal/akhir & jarak antar jam
+  // (2026-11-05). Hanya jalur SIMPAN yang diperketat — nilai lama yang sudah
+  // tersimpan tetap dipakai getPresetUtama apa adanya.
+  const v = validasiPresetJam(p, PLATFORMS.length);
+  if (!v.ok) return jsonError(v.pesan, 422);
 
   try {
-    const bersih = { slots, intervalMenit: p.intervalMenit };
+    const bersih = v.preset;
     await setSetting(env, 'viralframe_preset_utama', JSON.stringify(bersih));
     return jsonOk({ preset_utama: bersih });
   } catch (err) {

@@ -550,6 +550,10 @@ export interface JendelaJam { nama: string; mulai: string; akhir: string }
 /** Preset akun utama (2026-08-15): N jam posting tetap + drift linear per hari
  *  — mekanisme lama, editable, menggantikan jendela+seed KHUSUS akun utama. */
 export interface PresetUtama { slots: string[]; intervalMenit: number }
+/** Mode jadwal sebuah akun (2026-11-05): 'utama' = kartu Jam Posting Agent
+ *  Utama; 'manual' = jam tetap milik agent itu (jadwal_manual, migrasi 0057);
+ *  'otomatis' = ramp 1→2→3 + jendela primetime. */
+export type ModeJadwal = 'utama' | 'manual' | 'otomatis';
 export interface SchedulerConfig {
   jendela: JendelaJam[];
   min_panjang_menit?: number;
@@ -611,10 +615,16 @@ export interface AgentAccount {
   mulai_aktif: string | null;
   auto_terakhir: string | null;
   auto_hasil: { terjadwal: number; gagal: number; alasan: string | null } | null;
-  /** Kuota harian efektif: agent utama 3, lainnya naik menurut hari nyata. */
+  /** Kuota harian efektif: agent utama & mode manual = jumlah jam, mode
+   *  otomatis naik menurut hari nyata (1→2→3). */
   kuota: number;
   hari: number | null;
   utama: boolean;
+  mode_jadwal: ModeJadwal;
+  /** Jam manual tersimpan — hanya terisi saat mode_jadwal === 'manual'. */
+  jadwal_manual: PresetUtama | null;
+  /** Kuota bila agent ini memakai mode Otomatis (ramp). null untuk agent utama. */
+  kuota_otomatis: number | null;
 }
 
 export interface AgentAccountInput {
@@ -628,6 +638,8 @@ export interface AgentAccountInput {
   buffer_api_key?: string;
   zernio_api_key?: string;
   channels?: AgentChannels;
+  /** Objek = mode Manual (kuota = jumlah jam); null = kembali ke Otomatis. */
+  jadwal_manual?: PresetUtama | null;
 }
 
 /** 'terpusat' = semua agent memakai akun agent utama (storage + scheduler);
@@ -666,6 +678,7 @@ export interface StatusSlotAkun {
   kuota: number;
   hari_nyata: number | null;
   akun_utama: boolean;
+  mode_jadwal?: ModeJadwal;
   terisi: number;
   sisa: number;
   platform: string[];

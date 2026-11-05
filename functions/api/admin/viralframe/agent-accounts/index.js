@@ -9,7 +9,7 @@ import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { maskKey } from '../../../../_lib/aiProviders.js';
 import { parseSpesialis, parseChannels, getModeAkun } from '../../../../_lib/agentAccounts.js';
 import { setSetting, getSetting } from '../../../../_lib/schedulerProviders.js';
-import { kuotaAkun } from '../../../../_lib/jadwalOtomatis.js';
+import { kuotaAkun, kuotaRamp } from '../../../../_lib/jadwalOtomatis.js';
 
 export async function onRequestGet({ env }) {
   try {
@@ -49,7 +49,19 @@ export async function onRequestGet({ env }) {
       auto_terakhir: r.auto_terakhir ?? null,
       // Ringkasan cron terakhir. Data lama/rusak tidak boleh meledakkan UI.
       auto_hasil: (() => { try { return r.auto_hasil ? JSON.parse(r.auto_hasil) : null; } catch { return null; } })(),
-      ...(await kuotaAkun(env, r.character_id, utama)),
+      // Satu sumber dengan cron: mode & jam manual dibaca lewat kuotaAkun,
+      // bukan dari kolom mentah — JSON rusak tampil sebagai "otomatis", persis
+      // seperti yang benar-benar dijalankan mesin.
+      ...(await kuotaAkun(env, r.character_id, utama).then(k => ({
+        kuota: k.kuota,
+        hari: k.hari,
+        utama: k.utama,
+        mode_jadwal: k.mode,
+        jadwal_manual: k.mode === 'manual' ? k.preset : null,
+        // Kuota yang AKAN berlaku bila agent ini memakai mode Otomatis — untuk
+        // label pilihan di UI, supaya rumus ramp tidak ditulis ulang di browser.
+        kuota_otomatis: k.hari != null ? kuotaRamp(k.hari) : null,
+      }))),
     })));
 
     return jsonOk({

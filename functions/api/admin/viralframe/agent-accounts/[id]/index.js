@@ -6,7 +6,8 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../../_shared/response.js';
-import { PLATFORMS } from '../../../../../_lib/agentAccounts.js';
+import { PLATFORMS, getModeAkun } from '../../../../../_lib/agentAccounts.js';
+import { validasiPresetJam } from '../../../../../_lib/jadwalOtomatis.js';
 
 // Sama persis dengan VALID_JENIS di functions/api/properties/index.js,
 // _lib/searchProperties.js, api/chat.js dst — daftar ini memang didefinisikan
@@ -89,6 +90,29 @@ export async function onRequestPut({ env, request, params }) {
     nilai.push(Object.keys(bersih).length > 0 ? JSON.stringify(bersih) : null);
   }
 
+  // Jadwal manual (migrasi 0057): { slots, intervalMenit } = mode Manual
+  // (kuota = jumlah jam), null = kembali ke Otomatis (ramp 1→2→3 + jendela).
+  // Aturannya SAMA dengan jam posting agent utama (validasiPresetJam), karena
+  // keduanya dijalankan mesin yang sama.
+  if ('jadwal_manual' in body) {
+    if (body.jadwal_manual === null) {
+      kolom.push('jadwal_manual');
+      nilai.push(null);
+    } else {
+      // Agent utama punya satu sumber jam: setting viralframe_preset_utama.
+      // Menerima jadwal_manual di sini membuat dua tempat yang tampak mengatur
+      // hal yang sama, padahal kuotaAkun hanya membaca salah satunya.
+      const { utama } = await getModeAkun(env);
+      if (utama === characterId) {
+        return jsonError('Agent utama diatur di kartu "Jam Posting Agent Utama", bukan di sini.', 422);
+      }
+      const v = validasiPresetJam(body.jadwal_manual, PLATFORMS.length);
+      if (!v.ok) return jsonError(v.pesan, 422);
+      kolom.push('jadwal_manual');
+      nilai.push(JSON.stringify(v.preset));
+    }
+  }
+
   if (kolom.length === 0) return jsonError('Tidak ada field yang diupdate', 400);
 
   const setSql = kolom.map(k => `${k} = ?`).join(', ');
@@ -102,6 +126,12 @@ export async function onRequestPut({ env, request, params }) {
     ).bind(...nilai, characterId).run();
     return jsonOk({ updated: kolom });
   } catch (err) {
+    // Kolom jadwal_manual belum ada = migrasi 0057 belum diterapkan di DB ini.
+    // Pesan generik di bawah membuat admin mengira kredensialnya yang salah.
+    if (/jadwal_manual/.test(err.message ?? '')) {
+      console.error('[vf agent-accounts] PUT jadwal_manual', err.message);
+      return jsonError('Jadwal manual belum bisa disimpan: migrasi database 0057 belum diterapkan.', 500);
+    }
     console.error('[vf agent-accounts] PUT', err.message);
     return jsonError('Gagal menyimpan kredensial agent', 500);
   }

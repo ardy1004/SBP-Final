@@ -44,17 +44,131 @@ const MAKS_DRIFT_PRESET_MENIT = 120;
 // cuma dipakai menghitung posisi siklus.
 const ROTATION_ANCHOR_MS = Date.UTC(2026, 6, 1); // 2026-07-01
 
+// Bentuk minimal preset yang boleh DIPAKAI (jalur baca). Sengaja longgar —
+// sama persis dengan pemeriksaan getPresetUtama sejak 2026-08-15 — supaya
+// nilai yang sudah tersimpan di produksi tidak tiba-tiba ditolak. Aturan ketat
+// (jam paling awal/akhir, jarak antar jam) hanya berlaku saat MENYIMPAN, lewat
+// validasiPresetJam().
+function presetBerbentukSah(v) {
+  return Array.isArray(v?.slots) && v.slots.length > 0 && v.slots.every(s => JAM_RE.test(s))
+    && Number.isInteger(v.intervalMenit) && v.intervalMenit >= 0;
+}
+
 export async function getPresetUtama(env) {
   const raw = await getSetting(env, 'viralframe_preset_utama');
   if (!raw) return PRESET_UTAMA_DEFAULT;
   try {
     const v = JSON.parse(raw);
-    if (Array.isArray(v?.slots) && v.slots.length > 0 && v.slots.every(s => JAM_RE.test(s))
-        && Number.isInteger(v.intervalMenit) && v.intervalMenit >= 0) {
-      return { slots: v.slots, intervalMenit: v.intervalMenit };
-    }
+    if (presetBerbentukSah(v)) return { slots: v.slots, intervalMenit: v.intervalMenit };
   } catch { /* pakai default */ }
   return PRESET_UTAMA_DEFAULT;
+}
+
+// ── Jadwal MANUAL per agent (2026-11-05) ────────────────────────────────────
+// Agent selain utama boleh memakai mesin preset yang sama dengan agent utama
+// (N jam tetap + drift harian), alih-alih ramp 1→2→3 + jendela. Kuotanya =
+// jumlah jam. Disimpan di viralframe_agent_accounts.jadwal_manual (migrasi
+// 0057); NULL = mode otomatis.
+//
+// Kenapa memakai mesin preset, bukan menyisipkan >1 video per jendela: kunci
+// klaim slot adalah "<tanggal>|<slot_index>" dengan 1 jendela = 1 slot. Membagi
+// jendela mengubah makna slot_index — logika persis yang dulu melahirkan bug
+// tabrakan (lihat catatan di slotTersedia).
+//
+// ⚠️ Gagal membaca (mis. kolom belum ada karena kode ter-deploy sebelum
+// migrasi) = mode otomatis, BUKAN error. JSON yang ada tapi rusak dicatat ke
+// Error Logs supaya admin tidak melihat "Manual" di UI sementara mesin diam-diam
+// memakai ramp.
+export async function getJadwalManual(env, akunId) {
+  let raw;
+  try {
+    const row = await env.DB.prepare(
+      'SELECT jadwal_manual FROM viralframe_agent_accounts WHERE character_id = ?'
+    ).bind(akunId).first();
+    raw = row?.jadwal_manual ?? null;
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw);
+    if (presetBerbentukSah(v)) return { slots: v.slots, intervalMenit: v.intervalMenit };
+  } catch { /* dicatat di bawah */ }
+  await logServerError(env, {
+    source: 'server',
+    message: `[scheduler] jadwal_manual agent ${akunId} rusak saat dibaca — memakai mode otomatis (ramp + jendela)`,
+    url: '/api/admin/viralframe/agent-accounts',
+    context: { akun_id: akunId, tersimpan: String(raw).slice(0, 500) },
+  });
+  return null;
+}
+
+// ── Aturan SIMPAN preset jam (agent utama & jadwal manual) ──────────────────
+// Satu sumber untuk kedua jalur tulis (settings/scheduler-config.js dan
+// viralframe/agent-accounts/[id]). Tiga aturan baru 2026-11-05 menutup kelas
+// bug yang dulu sudah ditutup untuk JENDELA (jendelaMasukAkal) tapi belum untuk
+// preset:
+//   1. Jam ≥ JAM_PRESET_PALING_AWAL. Cron berjalan 01:00–04:30 WIB; jam yang
+//      sudah lewat saat cron jalan tidak pernah terisi hari itu dan semua
+//      videonya tumpah ke slot besok.
+//   2. Jam + drift maksimum + geseran platform terjauh < 24:00. isoWib()
+//      melakukan % 24 TANPA menaikkan tanggal, jadi 23:50 + drift jatuh ke
+//      00:xx pada TANGGAL YANG SAMA = ±24 jam di masa lalu (ditolak provider).
+//   3. Jarak antar jam ≥ JARAK_MIN_PRESET_MENIT. Lebih rapat dari tangga
+//      platform (19 menit) membuat dua video berbeda bisa mendarat di menit
+//      yang sama pada akun yang sama.
+export const JAM_PRESET_PALING_AWAL = '05:00';
+export const JARAK_MIN_PRESET_MENIT = 30;
+export const MAKS_JAM_PRESET = 10;
+
+// Drift terbesar yang pernah dicapai preset dengan interval ini — posisi siklus
+// terakhir (cycleDays − 1) × interval, selalu < MAKS_DRIFT_PRESET_MENIT.
+export function driftMaksPreset(intervalMenit) {
+  if (!(intervalMenit > 0)) return 0;
+  const cycleDays = Math.max(1, Math.ceil(MAKS_DRIFT_PRESET_MENIT / intervalMenit));
+  return (cycleDays - 1) * intervalMenit;
+}
+
+const keJam = (menit) => `${String(Math.floor(menit / 60)).padStart(2, '0')}:${String(menit % 60).padStart(2, '0')}`;
+
+/** Jam terakhir yang masih aman untuk interval & jumlah platform ini. */
+export function jamPresetPalingAkhir(intervalMenit, jumlahPlatform = TANGGA_PLATFORM.length) {
+  return keJam(1439 - driftMaksPreset(intervalMenit) - Math.max(...tanggaUntuk(jumlahPlatform)));
+}
+
+/**
+ * @returns {{ ok: true, preset: { slots: string[], intervalMenit: number } } | { ok: false, pesan: string }}
+ * Slot dikembalikan sudah di-dedupe & diurutkan.
+ */
+export function validasiPresetJam(p, jumlahPlatform = TANGGA_PLATFORM.length) {
+  if (!p || !Array.isArray(p.slots) || p.slots.length === 0 || p.slots.length > MAKS_JAM_PRESET) {
+    return { ok: false, pesan: `Butuh 1–${MAKS_JAM_PRESET} jam posting` };
+  }
+  for (const jam of p.slots) {
+    if (typeof jam !== 'string' || !JAM_RE.test(jam)) return { ok: false, pesan: 'Format jam harus HH:MM' };
+  }
+  if (!Number.isInteger(p.intervalMenit) || p.intervalMenit < 0 || p.intervalMenit > 1440) {
+    return { ok: false, pesan: 'Interval harus angka 0–1440 menit' };
+  }
+  // Dedupe + urutkan — dua slot dengan jam identik cuma menghasilkan baris
+  // jadwal kembar tanpa manfaat, bukan kesalahan fatal, jadi disaring diam-diam.
+  const slots = [...new Set(p.slots)].sort((a, b) => keMenit(a) - keMenit(b));
+
+  if (keMenit(slots[0]) < keMenit(JAM_PRESET_PALING_AWAL)) {
+    return { ok: false, pesan: `Jam ${slots[0]} terlalu pagi — jadwal dikirim ke Buffer/Zernio pukul 01:00–04:30, jadi jam posting paling awal ${JAM_PRESET_PALING_AWAL}` };
+  }
+  const akhir = jamPresetPalingAkhir(p.intervalMenit, jumlahPlatform);
+  const terakhir = slots[slots.length - 1];
+  if (keMenit(terakhir) > keMenit(akhir)) {
+    return { ok: false, pesan: `Jam ${terakhir} terlalu malam — dengan geser harian sampai ${driftMaksPreset(p.intervalMenit)} menit dan geser antar-platform, ia bisa lewat tengah malam. Jam terakhir paling lambat ${akhir} (atau perkecil interval)` };
+  }
+  for (let i = 1; i < slots.length; i++) {
+    const jarak = keMenit(slots[i]) - keMenit(slots[i - 1]);
+    if (jarak < JARAK_MIN_PRESET_MENIT) {
+      return { ok: false, pesan: `Jam ${slots[i - 1]} dan ${slots[i]} hanya berjarak ${jarak} menit — minimal ${JARAK_MIN_PRESET_MENIT} menit supaya dua video tidak tayang di menit yang sama` };
+    }
+  }
+  return { ok: true, preset: { slots, intervalMenit: p.intervalMenit } };
 }
 
 // Drift (menit) untuk SEMUA slot preset pada satu tanggal WIB. intervalMenit=0
@@ -276,16 +390,22 @@ export function kuotaRamp(hari) {
   return KUOTA_MAKS;
 }
 
-// Kuota akun untuk hari ini. Agent utama -> jumlah slot preset-nya (dinamis,
-// ikut berubah kalau user tambah/hapus baris jam di UI) — BUKAN lagi KUOTA_MAKS
-// tetap. Selebihnya naik bertahap menurut hari nyata (ramp, tidak disentuh).
+// Kuota akun untuk hari ini — dan SATU-SATUNYA tempat mode jadwal sebuah akun
+// diputuskan. `preset` yang dikembalikan di sini WAJIB yang diteruskan ke
+// slotTersedia/jadwalkanVideo/ulangi*: preset != null berarti mode preset.
+//   utama    : jumlah jam di kartu "Jam Posting Agent Utama" (viralframe_preset_utama)
+//   manual   : jumlah jam di jadwal_manual agent itu (migrasi 0057)
+//   otomatis : naik bertahap menurut hari nyata (ramp) + jendela, preset null
+// `hari` tetap dihitung untuk mode manual — dipakai UI untuk peringatan "akun
+// masih muda", bukan untuk kuotanya.
 export async function kuotaAkun(env, akunId, akunUtamaId) {
   if (akunUtamaId && akunId === akunUtamaId) {
     const preset = await getPresetUtama(env);
-    return { kuota: preset.slots.length, hari: null, utama: true };
+    return { kuota: preset.slots.length, hari: null, utama: true, mode: 'utama', preset };
   }
-  const hari = await hariPosting(env, akunId);
-  return { kuota: kuotaRamp(hari), hari, utama: false };
+  const [hari, manual] = await Promise.all([hariPosting(env, akunId), getJadwalManual(env, akunId)]);
+  if (manual) return { kuota: manual.slots.length, hari, utama: false, mode: 'manual', preset: manual };
+  return { kuota: kuotaRamp(hari), hari, utama: false, mode: 'otomatis', preset: null };
 }
 
 // Berapa slot yang SUDAH terisi sukses hari ini untuk akun ini. Dihitung dari
@@ -336,19 +456,21 @@ export async function slotDipakai(env, akunId, sekarang = Date.now()) {
 // sehingga indeksnya tak pernah naik; (2) sesudah satu jendela lewat, indeks
 // bergeser dan jendela kosong di tengah dilompati, jadi kuota 3 cuma terisi 2.
 //
-// `akunUtamaId`+`preset`: kalau `akunId === akunUtamaId`, dipakai mode PRESET
-// (N slot tetap + drift, lihat slotPresetHariIni) — bukan jendela+seed. Cabang
-// jendela di bawah TIDAK diubah sama sekali (disalin apa adanya) supaya 6
-// agent lain nol risiko regresi.
-export function slotTersedia({ akunId, akunUtamaId, kuota, platforms, jendela = JENDELA_DEFAULT, preset, sekarang = Date.now(), dipakai = new Set() }) {
+// `preset`: != null -> mode PRESET (N slot tetap + drift, lihat
+// slotPresetHariIni) — dipakai agent utama DAN agent ber-jadwal manual. null ->
+// mode jendela+seed (ramp). Nilainya WAJIB berasal dari kuotaAkun() untuk akun
+// yang sama; sejak 2026-11-05 mode tidak lagi ditebak dari `akunId ===
+// akunUtamaId`. Cabang jendela di bawah TIDAK diubah sama sekali (disalin apa
+// adanya) — dibuktikan uji paritas 65.576 kasus terhadap kode sebelumnya.
+export function slotTersedia({ akunId, kuota, platforms, jendela = JENDELA_DEFAULT, preset = null, sekarang = Date.now(), dipakai = new Set() }) {
   // Tanpa platform tidak ada jam yang bisa dihitung; Math.min(...[]) = Infinity
   // akan lolos filter waktu dan melaporkan slot yang sebenarnya tidak ada.
   if (!platforms?.length) return [];
-  const modePreset = akunUtamaId != null && akunId === akunUtamaId;
+  const modePreset = preset != null;
   for (let hariKe = 0; hariKe <= 1; hariKe++) {
     const tanggal = tanggalWib(new Date(sekarang), hariKe);
     const layak = modePreset
-      ? slotPresetHariIni(akunId, tanggal, preset ?? PRESET_UTAMA_DEFAULT, platforms)
+      ? slotPresetHariIni(akunId, tanggal, preset, platforms)
           .filter(s => !dipakai.has(`${tanggal}|${s.index + 1}`))
           .map(s => ({ jendela: { nama: s.nama, index: s.index }, tanggal, waktu: s.waktu }))
           .filter(s => Math.min(...Object.values(s.waktu).map(t => new Date(t).getTime())) > sekarang + MIN_LEAD_MS)
@@ -460,7 +582,7 @@ export function bolehDiulang(errorMessage) {
 const MAKS_PERCOBAAN = 2;
 const UMUR_MAKS_HARI = 14;
 
-export async function ulangiPlatformGagal(env, { akun, targetId, akunUtamaId, kuota, jendela, preset, dipakai, maksVideo = 2, dryRun = false }) {
+export async function ulangiPlatformGagal(env, { akun, targetId, kuota, jendela, preset, dipakai, maksVideo = 2, dryRun = false }) {
   let baris;
   try {
     const res = await env.DB.prepare(
@@ -508,7 +630,7 @@ export async function ulangiPlatformGagal(env, { akun, targetId, akunUtamaId, ku
     const daftar = [...platforms].filter(p => akun.channels?.[p]?.id);
     if (daftar.length === 0) { dilewati++; detail.push({ video_id: videoId, alasan: 'channel platform sudah tidak ada di akun' }); continue; }
 
-    const slot = slotTersedia({ akunId: targetId, akunUtamaId, kuota, platforms: daftar, jendela, preset, dipakai })[0];
+    const slot = slotTersedia({ akunId: targetId, kuota, platforms: daftar, jendela, preset, dipakai })[0];
     if (!slot) { detail.push({ video_id: videoId, alasan: 'tidak ada jendela kosong tersisa' }); break; }
     dipakai.add(`${slot.tanggal}|${slot.jendela.index + 1}`);
 
@@ -562,7 +684,7 @@ export async function ulangiPlatformGagal(env, { akun, targetId, akunUtamaId, ku
  * Penjaga anti-dobel tetap ada dan justru lebih tepat sasaran: platform yang
  * SUDAH punya baris 'scheduled' untuk video ini ditolak.
  */
-export async function ulangiPlatformVideo(env, { video, akun, targetId, akunUtamaId, kuota, jendela, preset, platforms }) {
+export async function ulangiPlatformVideo(env, { video, akun, targetId, kuota, jendela, preset, platforms }) {
   const diminta = [...new Set(platforms)].filter(p => akun.channels?.[p]?.id);
   if (diminta.length === 0) return { ok: false, alasan: 'platform yang diminta tidak punya channel di akun ini' };
 
@@ -577,7 +699,7 @@ export async function ulangiPlatformVideo(env, { video, akun, targetId, akunUtam
   }
 
   const dipakai = await slotDipakai(env, targetId);
-  const slot = slotTersedia({ akunId: targetId, akunUtamaId, kuota, platforms: daftar, jendela, preset, dipakai })[0];
+  const slot = slotTersedia({ akunId: targetId, kuota, platforms: daftar, jendela, preset, dipakai })[0];
   if (!slot) return { ok: false, alasan: 'tidak ada jendela kosong yang tersisa' };
 
   const channelsSubset = Object.fromEntries(daftar.map(p => [p, akun.channels[p]]));
@@ -600,12 +722,12 @@ export async function ulangiPlatformVideo(env, { video, akun, targetId, akunUtam
   };
 }
 
-export async function jadwalkanVideo(env, { video, akun, targetId, akunUtamaId, kuota, jendela, preset, dipakai, dryRun = false }) {
+export async function jadwalkanVideo(env, { video, akun, targetId, kuota, jendela, preset, dipakai, dryRun = false }) {
   const platforms = Object.keys(akun.channels ?? {});
   if (platforms.length === 0) return { ok: false, alasan: 'akun belum punya channel sosmed' };
 
   const klaim = dipakai ?? await slotDipakai(env, targetId);
-  const slot = slotTersedia({ akunId: targetId, akunUtamaId, kuota, platforms, jendela, preset, dipakai: klaim })[0];
+  const slot = slotTersedia({ akunId: targetId, kuota, platforms, jendela, preset, dipakai: klaim })[0];
   if (!slot) return { ok: false, alasan: 'tidak ada jendela kosong yang tersisa' };
   klaim.add(`${slot.tanggal}|${slot.jendela.index + 1}`);
 

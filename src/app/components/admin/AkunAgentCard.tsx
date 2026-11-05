@@ -15,9 +15,10 @@ import { Users, CheckCircle, XCircle, RefreshCw, Save, Play, Pause, ChevronDown,
 import {
   getAgentAccounts, saveAgentAccount, saveModeAkun, getSchedulerAccounts,
   type AgentAccount, type AgentAccountInput, type AgentChannels, type ModeAkun,
-  type SchedulerAccountsResult, type SchedulerPlatform,
+  type SchedulerAccountsResult, type SchedulerPlatform, type PresetUtama,
 } from '../../../lib/api';
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
+import EditorJamPosting, { jamAwalManual } from './viralframe/EditorJamPosting';
 
 interface Msg { type: 'success' | 'error'; text: string }
 
@@ -32,6 +33,8 @@ type FormState = {
   buffer_api_key: string; zernio_api_key: string;
   channels: AgentChannels;
   jam_auto: string; auto_aktif: boolean;
+  /** null = mode Otomatis (ramp + jendela); objek = mode Manual. */
+  jadwal_manual: PresetUtama | null;
 };
 
 function formDari(a: AgentAccount): FormState {
@@ -41,8 +44,11 @@ function formDari(a: AgentAccount): FormState {
     cloudinary_api_secret: '', buffer_api_key: '', zernio_api_key: '',
     channels: { ...a.channels },
     jam_auto: a.jam_auto, auto_aktif: a.auto_aktif,
+    jadwal_manual: a.jadwal_manual ? { slots: [...a.jadwal_manual.slots], intervalMenit: a.jadwal_manual.intervalMenit } : null,
   };
 }
+
+const samaJadwal = (a: PresetUtama | null, b: PresetUtama | null) => JSON.stringify(a) === JSON.stringify(b);
 
 const INPUT_CLS = 'w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-[#1565C0]/30';
 const LABEL_CLS = 'block text-xs font-semibold text-[#334155] mb-1';
@@ -56,7 +62,7 @@ function Lencana({ ok, teks }: { ok: boolean; teks: string }) {
   );
 }
 
-export default function AkunAgentCard() {
+export default function AkunAgentCard({ onTersimpan }: { onTersimpan?: () => void } = {}) {
   const [items, setItems] = useState<AgentAccount[] | null>(null);
   const [buka, setBuka] = useState<number | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
@@ -130,14 +136,38 @@ export default function AkunAgentCard() {
     if (form.cloudinary_api_secret.trim()) body.cloudinary_api_secret = form.cloudinary_api_secret.trim();
     if (form.buffer_api_key.trim()) body.buffer_api_key = form.buffer_api_key.trim();
     if (form.zernio_api_key.trim()) body.zernio_api_key = form.zernio_api_key.trim();
+    // Jadwal manual hanya dikirim kalau BERUBAH dari yang dimuat — menyimpan
+    // kredensial tidak boleh ikut menulis kolom jadwal (dan tidak boleh gagal
+    // karenanya), dan agent utama memang tidak punya jadwal manual.
+    const asal = items?.find(x => x.character_id === characterId);
+    const jadwalBerubah = !!asal && !asal.utama && !samaJadwal(asal.jadwal_manual, form.jadwal_manual);
+    if (jadwalBerubah) body.jadwal_manual = form.jadwal_manual;
 
     const r = await saveAgentAccount(characterId, body);
     setMenyimpan(false);
     if (r.success) {
-      setMsg({ type: 'success', text: 'Kredensial tersimpan.' });
+      setMsg({
+        type: 'success',
+        text: jadwalBerubah
+          ? `Tersimpan. Jadwal ${form.jadwal_manual ? `manual ${form.jadwal_manual.slots.length} video/hari` : 'otomatis'} berlaku mulai penjadwalan berikutnya — jadwal yang sudah terkirim tidak berubah.`
+          : 'Kredensial tersimpan.',
+      });
       setForm(f => f ? { ...f, cloudinary_api_secret: '', buffer_api_key: '', zernio_api_key: '' } : f);
       muat();
+      if (jadwalBerubah) onTersimpan?.();
     } else setMsg({ type: 'error', text: r.error ?? 'Gagal menyimpan' });
+  };
+
+  // Otomatis → Manual: mulai dari kuota yang sedang berlaku (bukan langsung 5),
+  // supaya berpindah mode tidak diam-diam melipatgandakan volume posting.
+  const pilihModeJadwal = (a: AgentAccount, manual: boolean) => {
+    setForm(f => {
+      if (!f) return f;
+      if (!manual) return { ...f, jadwal_manual: null };
+      if (f.jadwal_manual) return f;
+      const awal = a.jadwal_manual ?? { slots: jamAwalManual(a.kuota_otomatis ?? a.kuota, a.character_id), intervalMenit: 5 };
+      return { ...f, jadwal_manual: { slots: [...awal.slots], intervalMenit: awal.intervalMenit } };
+    });
   };
 
   const ambilAkun = async (characterId: number) => {
@@ -267,8 +297,9 @@ export default function AkunAgentCard() {
                   <span className="text-[10px] text-[#64748B] capitalize">{a.spesialis.join(', ')}</span>
                 )}
                 <span className="text-[10px] text-[#64748B]">
-                  {a.auto_aktif ? `auto ${a.jam_auto || '—'}` : 'auto mati'} · kuota {a.kuota}
-                  {!a.utama && a.hari != null && ` · ${a.hari} hari nyata`}
+                  {a.auto_aktif ? `auto ${a.jam_auto || '—'}` : 'auto mati'} · kuota {a.kuota}/hari
+                  {a.mode_jadwal === 'manual' && ' (manual)'}
+                  {a.mode_jadwal === 'otomatis' && a.hari != null && ` · ${a.hari} hari nyata`}
                 </span>
                 <span className="ml-auto text-[10px] text-[#94A3B8]">{a.video_aktif} video</span>
               </button>
@@ -391,6 +422,70 @@ export default function AkunAgentCard() {
                           {a.auto_hasil && ` · ${a.auto_hasil.terjadwal} terjadwal${a.auto_hasil.gagal ? `, ${a.auto_hasil.gagal} gagal` : ''}${a.auto_hasil.alasan ? ` (${a.auto_hasil.alasan})` : ''}`}
                         </span>
                       )}
+                    </div>
+
+                    {/* Jumlah video per hari (2026-11-05). Agent utama punya satu
+                        sumber — kartu "Jam Posting Agent Utama" — jadi di sini
+                        hanya ditampilkan, tidak diedit. */}
+                    <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+                      <div className="text-xs font-semibold text-[#334155]">Jumlah video per hari</div>
+                      {a.utama ? (
+                        <p className="text-[11px] text-[#64748B]">
+                          Agent utama — {a.kuota} video/hari, diatur di kartu <strong>Jam Posting Agent Utama</strong>.
+                        </p>
+                      ) : (() => {
+                        const manual = form.jadwal_manual != null;
+                        const kuotaBaru = manual ? form.jadwal_manual!.slots.length : (a.kuota_otomatis ?? a.kuota);
+                        const hariStok = kuotaBaru > 0 ? Math.floor(a.video_aktif / kuotaBaru) : null;
+                        return (
+                          <>
+                            <div className="flex flex-col gap-1.5">
+                              <label className="flex items-start gap-2 text-xs text-[#334155] cursor-pointer">
+                                <input type="radio" name={`jadwal-${a.character_id}`} checked={!manual} onChange={() => pilihModeJadwal(a, false)} className="mt-0.5" />
+                                <span>
+                                  <strong>Otomatis bertahap</strong> — 1 → 2 → 3 video/hari mengikuti umur akun
+                                  {a.kuota_otomatis != null && <> (untuk agent ini: <strong>{a.kuota_otomatis}/hari</strong>, {a.hari ?? 0} hari nyata posting)</>}.
+                                  Jam diundi di jendela primetime.
+                                </span>
+                              </label>
+                              <label className="flex items-start gap-2 text-xs text-[#334155] cursor-pointer">
+                                <input type="radio" name={`jadwal-${a.character_id}`} checked={manual} onChange={() => pilihModeJadwal(a, true)} className="mt-0.5" />
+                                <span><strong>Manual</strong> — atur sendiri jumlah video per hari dan jam postingnya (maks 10).</span>
+                              </label>
+                            </div>
+
+                            {manual && (
+                              <div className="ml-5 p-3 rounded-xl bg-white border border-gray-100">
+                                <EditorJamPosting preset={form.jadwal_manual!}
+                                  onChange={p => setForm(f => (f ? { ...f, jadwal_manual: p } : f))} />
+                              </div>
+                            )}
+
+                            <div className="space-y-1 text-[11px]">
+                              {hariStok != null && (
+                                <p className={hariStok < 7 ? 'text-amber-700' : 'text-[#64748B]'}>
+                                  Stok {a.video_aktif} video ≈ cukup <strong>{hariStok} hari</strong> pada {kuotaBaru} video/hari.
+                                </p>
+                              )}
+                              {manual && (a.hari ?? 0) < 30 && kuotaBaru > 2 && (
+                                <p className="text-amber-700">
+                                  ⚠️ Akun ini baru {a.hari ?? 0} hari posting. Mode otomatis sengaja pelan (1/hari di 30 hari pertama)
+                                  untuk memanaskan akun baru — lonjakan mendadak lebih mudah dicurigai platform sebagai spam.
+                                </p>
+                              )}
+                              {mode === 'terpusat' && (
+                                <p className="text-amber-700">
+                                  Mode akun sedang <strong>Terpusat</strong>: semua agent memakai akun &amp; kuota agent utama.
+                                  Pengaturan ini baru dipakai di mode <strong>Per agent</strong>.
+                                </p>
+                              )}
+                              {!samaJadwal(a.jadwal_manual, form.jadwal_manual) && (
+                                <p className="text-[#1565C0]">Belum tersimpan — tekan <strong>Simpan</strong>. Berlaku mulai penjadwalan berikutnya.</p>
+                              )}
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
 

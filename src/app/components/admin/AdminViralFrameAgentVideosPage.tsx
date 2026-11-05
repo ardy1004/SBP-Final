@@ -646,9 +646,11 @@ export default function AdminViralFrameAgentVideosPage() {
           (2026-08-12) supaya kredensial, saklar auto, jam kirim, dan jam tayang
           berkumpul di halaman tempat videonya dikelola. Default ciut. */}
       <div className="space-y-2">
-        <AkunAgentCard />
+        {/* onTersimpan: jadwal berubah → strip "SLOT HARI INI" dimuat ulang,
+            supaya jam rencana yang tampil langsung sesuai pengaturan baru. */}
+        <AkunAgentCard onTersimpan={() => setSlotRefreshTick(t => t + 1)} />
         <JamPrimetimeCard />
-        <PresetUtamaCard />
+        <PresetUtamaCard onTersimpan={() => setSlotRefreshTick(t => t + 1)} />
       </div>
 
       {aksiError && (
