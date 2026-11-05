@@ -4,6 +4,7 @@ import { Link } from 'react-router';
 import {
   Users, Loader2, Download, Trash2, Pencil, Check, X, Copy,
   Archive, RotateCcw, CheckCircle2, Circle, Send, BarChart3, GripVertical,
+  ArrowUpToLine, ArrowDownToLine, Undo2, Wand2, ChevronDown,
 } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, rectSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
@@ -16,31 +17,25 @@ import AkunAgentCard from './AkunAgentCard';
 import JamPrimetimeCard from './JamPrimetimeCard';
 import PresetUtamaCard from './PresetUtamaCard';
 import PanelUnggahAgent from './viralframe/PanelUnggahAgent';
+import {
+  type StatusProperti, pickStatusProperti,
+  keAtas, keBawah, kePosisi, posisiMaks,
+  selangSelingListing, unggulanKeAtas, soldKeBawah, hitungBeruntun,
+  susunMenurutId, urutanSama,
+} from './viralframe/urutanAntrean';
 
 // Penanda status properti — MURNI TEKS, dihitung dari flag properti yang sudah
 // ada di baris video. Ini BUKAN sisa fitur badge/logo video (overlay gambar ke
 // video, dihapus 2026-08-11 karena tiap overlay memaksa render ulang video
 // utuh — lihat src/app/lib/cloudinaryUrl.ts). Label di bawah nol biaya
 // Cloudinary: tidak ada transformasi, cuma tulisan di kartu & prefiks caption.
-type StatusProperti = 'sold' | 'premium' | 'featured' | 'hot' | 'pilihan';
-
+// Prioritas & pemilihnya ada di urutanAntrean.ts — dipakai juga oleh
+// "Susun otomatis → Unggulan ke atas", jadi satu sumber.
 const STATUS_LABEL: Record<StatusProperti, string> = {
   sold: 'SOLD', premium: 'Premium', featured: 'Featured', hot: 'Hot', pilihan: 'Pilihan',
 };
 
-// Kalau beberapa status berlaku sekaligus, hanya yang tertinggi yang tampil.
-const STATUS_PRIORITAS: StatusProperti[] = ['sold', 'premium', 'featured', 'hot', 'pilihan'];
-
-function pickStatusProperti(v: {
-  status_sold?: number | null; badge_premium?: number | null;
-  badge_featured?: number | null; badge_hot?: number | null; properti_pilihan?: number | null;
-}): StatusProperti | null {
-  const aktif: Record<StatusProperti, boolean> = {
-    sold: !!v.status_sold, premium: !!v.badge_premium, featured: !!v.badge_featured,
-    hot: !!v.badge_hot, pilihan: !!v.properti_pilihan,
-  };
-  return STATUS_PRIORITAS.find(t => aktif[t]) ?? null;
-}
+type JenisSusun = 'seling' | 'unggulan' | 'sold';
 
 interface CharacterOption {
   id: number;
@@ -203,6 +198,19 @@ export default function AdminViralFrameAgentVideosPage() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [scheduleTarget, setScheduleTarget] = useState<AgentVideo | null>(null);
   const [slotRefreshTick, setSlotRefreshTick] = useState(0);
+  // ── Atur urutan massal (2026-11-05) ──
+  // Titik awal Shift+klik: video terakhir yang dipilih/dibatalkan lewat klik.
+  const [anchorId, setAnchorId] = useState<number | null>(null);
+  // Urutan SEBELUM perpindahan terakhir yang sukses — untuk tombol Batalkan
+  // (satu tingkat). Dibuang setiap kali daftar dimuat ulang: setelah trash/
+  // upload/restore, urutan lama bukan lagi permutasi video aktif dan pasti
+  // ditolak reorder.js.
+  const [urutanSebelum, setUrutanSebelum] = useState<{ ids: number[]; label: string } | null>(null);
+  const [menyusun, setMenyusun] = useState(false);
+  const [posisiInput, setPosisiInput] = useState('');
+  const [editPosisiId, setEditPosisiId] = useState<number | null>(null);
+  const [editPosisiTeks, setEditPosisiTeks] = useState('');
+  const [menuSusunBuka, setMenuSusunBuka] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem(CARD_SIZE_STORAGE_KEY) as CardSize | null;
@@ -245,6 +253,8 @@ export default function AdminViralFrameAgentVideosPage() {
 
   const loadVideos = useCallback(async (characterId: number, viewMode: ViewMode) => {
     setLoadingVideos(true);
+    setUrutanSebelum(null);
+    setEditPosisiId(null);
     try {
       // limit=2000: halaman ini mengelola SELURUH antrean aktif satu karakter
       // sekaligus — drag & drop reorder butuh SEMUA video aktif ter-load,
@@ -278,7 +288,7 @@ export default function AdminViralFrameAgentVideosPage() {
   useEffect(() => { loadCharacters(); loadAnalytics(); }, [loadCharacters, loadAnalytics]);
   useEffect(() => {
     if (selectedCharId != null) {
-      setRatioFilter('semua'); setSelectedIds(new Set()); setContextMenu(null);
+      setRatioFilter('semua'); setSelectedIds(new Set()); setContextMenu(null); setAnchorId(null);
       loadVideos(selectedCharId, view);
     }
   }, [selectedCharId, view, loadVideos]);
@@ -306,34 +316,147 @@ export default function AdminViralFrameAgentVideosPage() {
   // karakter itu dalam urutan aslinya — endpoint reorder menolak (422) kalau
   // `ordered_ids` bukan permutasi PENUH video aktif, dan Sampah tidak punya
   // konsep antrean kirim sama sekali.
-  const dragEnabled = view === 'active' && ratioFilter === 'semua';
+  // `!menyusun`: jangan biarkan drag baru berangkat selagi PATCH urutan
+  // sebelumnya belum kembali — dua permutasi penuh yang berpacu membuat
+  // server menyimpan yang tiba terakhir, belum tentu yang dilihat admin.
+  const dragEnabled = view === 'active' && ratioFilter === 'semua' && !menyusun;
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-  const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!dragEnabled || selectedCharId == null || !over || active.id === over.id) return;
-    const oldIndex = filteredVideos.findIndex(v => v.id === active.id);
-    const newIndex = filteredVideos.findIndex(v => v.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-    const reordered = arrayMove(filteredVideos, oldIndex, newIndex);
-    setVideos(reordered);
+  // ── Satu-satunya jalur menyimpan urutan kirim ──
+  // Drag, Paling atas/bawah, Ke posisi, nomor #antrean, Susun otomatis, dan
+  // Batalkan SEMUANYA lewat sini. `idsBaru` WAJIB permutasi penuh `videos`
+  // (urutan GLOBAL, bukan subset filter rasio) — reorder.js menolak selain itu.
+  const terapkanUrutan = async (idsBaru: number[], label: string, simpanUndo = true): Promise<boolean> => {
+    if (selectedCharId == null || view !== 'active') return false;
+    const idsLama = videos.map(v => v.id);
+    if (urutanSama(idsLama, idsBaru)) return true;
+    setVideos(susunMenurutId(videos, idsBaru));
     setAksiError('');
+    setMenyusun(true);
     const ok = await kirimAksi('/api/admin/viralframe/agent-videos/reorder',
-      { method: 'PATCH', headers: JSON_HEADER, body: JSON.stringify({ character_id: selectedCharId, ordered_ids: reordered.map(v => v.id) }) },
-      'Ubah urutan kirim');
+      { method: 'PATCH', headers: JSON_HEADER, body: JSON.stringify({ character_id: selectedCharId, ordered_ids: idsBaru }) },
+      label);
+    setMenyusun(false);
     // Batalkan optimistic update kalau server menolak (mis. drift karena tab
-    // lain trash/restore/upload video yang sama saat drag berlangsung).
-    if (!ok) refreshAfterAction();
+    // lain trash/restore/upload video yang sama saat urutan sedang diubah).
+    if (!ok) { refreshAfterAction(); return false; }
+    setUrutanSebelum(simpanUndo ? { ids: idsLama, label } : null);
+    return true;
+  };
+
+  // Gulir ke video yang baru dipindah — tanpa ini "Paling atas" dari dasar
+  // antrean terlihat seperti kartunya lenyap.
+  const sorotVideo = (id: number) => {
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-video-id="${id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!dragEnabled || !over || active.id === over.id) return;
+    const ids = videos.map(v => v.id);
+    const oldIndex = ids.indexOf(Number(active.id));
+    const newIndex = ids.indexOf(Number(over.id));
+    if (oldIndex === -1 || newIndex === -1) return;
+    void terapkanUrutan(arrayMove(ids, oldIndex, newIndex), 'Ubah urutan kirim');
+  };
+
+  // Pindahkan SEMUA video terpilih sekaligus. Tetap jalan saat filter rasio
+  // aktif: hitungannya memakai urutan global `videos`, jadi video yang sedang
+  // tersembunyi ikut terjaga posisinya.
+  const pindahkanPilihan = async (tujuan: 'atas' | 'bawah' | number) => {
+    setContextMenu(null);
+    const ids = videos.map(v => v.id);
+    const pilih = new Set([...selectedIds].filter(id => globalOrderIndex.has(id)));
+    if (pilih.size === 0) return;
+    const baru = tujuan === 'atas' ? keAtas(ids, pilih)
+      : tujuan === 'bawah' ? keBawah(ids, pilih)
+      : kePosisi(ids, pilih, tujuan);
+    const label = tujuan === 'atas' ? `Pindah ${pilih.size} video ke paling atas`
+      : tujuan === 'bawah' ? `Pindah ${pilih.size} video ke paling bawah`
+      : `Pindah ${pilih.size} video ke posisi #${Math.min(Math.max(1, tujuan), posisiMaks(ids.length, pilih.size))}`;
+    const ok = await terapkanUrutan(baru, label);
+    if (ok) {
+      setPosisiInput('');
+      const pertama = baru.find(id => pilih.has(id));
+      if (pertama != null) sorotVideo(pertama);
+    }
+  };
+
+  const tanyaPosisi = () => {
+    const maks = posisiMaks(videos.length, selectedIds.size);
+    const t = window.prompt(`Pindahkan ${selectedIds.size} video ke nomor antrean berapa? (1–${maks})`);
+    const n = parseInt(t ?? '', 10);
+    if (Number.isInteger(n)) void pindahkanPilihan(n);
+    else setContextMenu(null);
+  };
+
+  // Klik nomor #antrean di kartu → ketik nomor baru → Enter.
+  const simpanPosisiSatu = async (id: number) => {
+    const n = parseInt(editPosisiTeks, 10);
+    setEditPosisiId(null);
+    if (!Number.isInteger(n)) return;
+    const ids = videos.map(v => v.id);
+    const tujuan = Math.min(Math.max(1, n), ids.length);
+    const ok = await terapkanUrutan(kePosisi(ids, new Set([id]), tujuan), `Pindah video ke posisi #${tujuan}`);
+    if (ok) sorotVideo(id);
+  };
+
+  const susunOtomatis = async (jenis: JenisSusun) => {
+    setMenuSusunBuka(false);
+    if (videos.length < 2) return;
+    const hasil = jenis === 'seling' ? selangSelingListing(videos)
+      : jenis === 'unggulan' ? unggulanKeAtas(videos)
+      : soldKeBawah(videos);
+    const idsBaru = hasil.map(v => v.id);
+    if (urutanSama(videos.map(v => v.id), idsBaru)) {
+      window.alert('Urutan antrean sudah sesuai — tidak ada yang perlu dipindah.');
+      return;
+    }
+    const berubah = hasil.filter((v, i) => v.id !== videos[i].id).length;
+    const ringkasan = jenis === 'seling'
+      ? `Video berurutan dari listing yang sama: ${hitungBeruntun(videos)} → ${hitungBeruntun(hasil)} pasang.`
+      : jenis === 'unggulan'
+        ? `${hasil.filter(v => { const s = pickStatusProperti(v); return s != null && s !== 'sold'; }).length} video unggulan (Premium › Featured › Hot › Pilihan) dipindah ke depan.`
+        : `${videos.filter(v => v.status_sold).length} video properti SOLD dipindah ke belakang.`;
+    const label = jenis === 'seling' ? 'Selang-seling listing' : jenis === 'unggulan' ? 'Unggulan ke atas' : 'SOLD ke bawah';
+    if (!window.confirm(`${label} — ${selectedCharacter?.nama ?? 'agent ini'}\n\n${ringkasan}\n${berubah} dari ${videos.length} video berubah posisi.\n\nTerapkan? (bisa dibatalkan sesudahnya)`)) return;
+    await terapkanUrutan(idsBaru, label);
+  };
+
+  const batalkanUrutan = async () => {
+    if (!urutanSebelum) return;
+    await terapkanUrutan(urutanSebelum.ids, `Batalkan "${urutanSebelum.label}"`, false);
   };
 
   // ── Seleksi multi ──
-  const toggleSelect = (id: number) => {
+  // Shift+klik memilih RENTANG dari klik terakhir sampai video ini, menurut
+  // urutan yang sedang tampil (ikut filter rasio). Rentang selalu MENAMBAH
+  // pilihan, tidak pernah membatalkan — sama seperti pengelola berkas.
+  const toggleSelect = (id: number, rentang = false) => {
+    if (rentang && anchorId != null && anchorId !== id) {
+      const urut = filteredVideos.map(v => v.id);
+      const a = urut.indexOf(anchorId);
+      const b = urut.indexOf(id);
+      if (a !== -1 && b !== -1) {
+        const [lo, hi] = a < b ? [a, b] : [b, a];
+        setSelectedIds(prev => {
+          const next = new Set(prev);
+          for (let i = lo; i <= hi; i++) next.add(urut[i]);
+          return next;
+        });
+        setAnchorId(id);
+        return;
+      }
+    }
     setSelectedIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+    setAnchorId(id);
   };
   const clearSelection = () => setSelectedIds(new Set());
 
@@ -357,6 +480,13 @@ export default function AdminViralFrameAgentVideosPage() {
     window.addEventListener('click', close);
     return () => window.removeEventListener('click', close);
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!menuSusunBuka) return;
+    const close = () => setMenuSusunBuka(false);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [menuSusunBuka]);
 
   const openContextMenu = (e: React.MouseEvent, videoId: number) => {
     e.preventDefault();
@@ -600,16 +730,46 @@ export default function AdminViralFrameAgentVideosPage() {
             ))}
           </div>
 
-          {/* Toolbar seleksi bulk */}
+          {/* Toolbar seleksi bulk + chip Batalkan — satu wadah sticky, supaya
+              keduanya tetap terlihat walau admin sedang di dasar antrean. */}
+          {(selectedIds.size > 0 || (urutanSebelum && view === 'active')) && (
+          <div className="sticky top-2 z-10 space-y-2">
           {selectedIds.size > 0 && (
-            <div className="flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-[#0F172A] text-white text-sm sticky top-2 z-10">
+            <div className="flex items-center gap-x-3 gap-y-2 flex-wrap px-4 py-2.5 rounded-2xl bg-[#0F172A] text-white text-sm">
               <span className="font-semibold">{selectedIds.size} video dipilih</span>
               <div className="flex-1" />
               {view === 'active' ? (
-                <button disabled={bulkBusy} onClick={() => bulkAction('trash', Array.from(selectedIds))}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 disabled:opacity-50">
-                  <Archive size={13} /> Pindahkan ke Sampah
-                </button>
+                <>
+                  <button disabled={menyusun} onClick={() => pindahkanPilihan('atas')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#1565C0] hover:bg-[#1976D2] disabled:opacity-50"
+                    title="Pindahkan semua video terpilih ke depan antrean (urutan di antara mereka tetap)">
+                    <ArrowUpToLine size={13} /> Paling atas
+                  </button>
+                  <button disabled={menyusun} onClick={() => pindahkanPilihan('bawah')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 disabled:opacity-50">
+                    <ArrowDownToLine size={13} /> Paling bawah
+                  </button>
+                  <form className="flex items-center gap-1.5"
+                    onSubmit={e => {
+                      e.preventDefault();
+                      const n = parseInt(posisiInput, 10);
+                      if (Number.isInteger(n)) void pindahkanPilihan(n);
+                    }}>
+                    <span className="text-xs text-white/70">Ke posisi</span>
+                    <input value={posisiInput} onChange={e => setPosisiInput(e.target.value.replace(/\D/g, ''))}
+                      inputMode="numeric" placeholder={`1–${posisiMaks(videos.length, selectedIds.size)}`}
+                      aria-label="Nomor antrean tujuan"
+                      className="w-20 px-2 py-1 rounded-lg text-xs text-[#0F172A] bg-white placeholder:text-[#94A3B8] outline-none focus:ring-2 focus:ring-[#4FC3F7]" />
+                    <button type="submit" disabled={menyusun || !posisiInput}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 disabled:opacity-40">
+                      Pindah
+                    </button>
+                  </form>
+                  <button disabled={bulkBusy} onClick={() => bulkAction('trash', Array.from(selectedIds))}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 disabled:opacity-50">
+                    <Archive size={13} /> Pindahkan ke Sampah
+                  </button>
+                </>
               ) : (
                 <>
                   <button disabled={bulkBusy} onClick={() => bulkAction('restore', Array.from(selectedIds))}
@@ -622,8 +782,23 @@ export default function AdminViralFrameAgentVideosPage() {
                   </button>
                 </>
               )}
-              <button onClick={clearSelection} className="text-xs text-white/70 hover:text-white">Batal</button>
+              <button onClick={clearSelection} className="text-xs text-white/70 hover:text-white">Batal pilih</button>
             </div>
+          )}
+          {urutanSebelum && view === 'active' && (
+            <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 shadow-sm">
+              <Check size={13} className="flex-shrink-0" />
+              <span className="flex-1 min-w-0 truncate">{urutanSebelum.label} — urutan tersimpan.</span>
+              <button onClick={batalkanUrutan} disabled={menyusun}
+                className="flex items-center gap-1 font-semibold hover:underline disabled:opacity-50 flex-shrink-0">
+                <Undo2 size={13} /> Batalkan
+              </button>
+              <button onClick={() => setUrutanSebelum(null)} className="text-emerald-600/70 hover:text-emerald-800 flex-shrink-0" title="Tutup">
+                <X size={13} />
+              </button>
+            </div>
+          )}
+          </div>
           )}
 
           {loadingVideos ? (
@@ -652,22 +827,55 @@ export default function AdminViralFrameAgentVideosPage() {
                   ))}
                 </div>
 
-                {/* Ukuran tampilan kartu */}
-                <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-full p-0.5">
-                  {(['kecil', 'sedang', 'besar'] as const).map(s => (
-                    <button key={s} onClick={() => changeCardSize(s)}
-                      className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
-                        cardSize === s ? 'bg-[#1565C0] text-white' : 'text-[#64748B] hover:bg-gray-50'
-                      }`}>
-                      {CARD_SIZE_LABEL[s]}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Susun otomatis — berlaku ke SELURUH antrean aktif agent ini
+                      (bukan cuma yang tampil di filter), dengan konfirmasi
+                      berisi ringkasan dan tombol Batalkan sesudahnya. */}
+                  {view === 'active' && videos.length > 1 && (
+                    <div className="relative">
+                      <button type="button" disabled={menyusun}
+                        onClick={e => { e.stopPropagation(); setMenuSusunBuka(b => !b); }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border border-gray-200 bg-white text-[#0F172A] hover:border-[#1565C0]/40 disabled:opacity-50">
+                        <Wand2 size={13} className="text-[#7C3AED]" /> Susun otomatis <ChevronDown size={12} />
+                      </button>
+                      {menuSusunBuka && (
+                        <div className="absolute right-0 mt-1 z-20 w-72 bg-white rounded-xl shadow-xl border border-gray-100 py-1"
+                          onClick={e => e.stopPropagation()}>
+                          {([
+                            { j: 'seling', judul: 'Selang-seling listing', ket: 'Video dari properti yang sama tidak terbit berturut-turut. Urutan sekarang dipertahankan sejauh mungkin.' },
+                            { j: 'unggulan', judul: 'Unggulan ke atas', ket: 'Premium › Featured › Hot › Pilihan dipindah ke depan antrean.' },
+                            { j: 'sold', judul: 'SOLD ke bawah', ket: 'Video properti yang sudah terjual dipindah ke belakang antrean.' },
+                          ] as const).map(o => (
+                            <button key={o.j} type="button" onClick={() => susunOtomatis(o.j)}
+                              className="w-full text-left px-3 py-2 hover:bg-gray-50">
+                              <div className="text-sm font-medium text-[#0F172A]">{o.judul}</div>
+                              <div className="text-[11px] text-[#64748B]">{o.ket}</div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Ukuran tampilan kartu */}
+                  <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-full p-0.5">
+                    {(['kecil', 'sedang', 'besar'] as const).map(s => (
+                      <button key={s} onClick={() => changeCardSize(s)}
+                        className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+                          cardSize === s ? 'bg-[#1565C0] text-white' : 'text-[#64748B] hover:bg-gray-50'
+                        }`}>
+                        {CARD_SIZE_LABEL[s]}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              {view === 'active' && ratioFilter !== 'semua' && (
-                <p className="text-[11px] text-amber-600 -mt-1.5">
-                  Set filter ke "Semua" untuk mengatur urutan kirim lewat drag & drop.
+              {view === 'active' && (
+                <p className="text-[11px] text-[#94A3B8] -mt-1.5">
+                  {ratioFilter !== 'semua'
+                    ? <span className="text-amber-600">Drag & drop hanya aktif di filter "Semua". Memindah lewat pilihan (Paling atas / Ke posisi) dan klik nomor #antrean tetap bisa — posisinya dihitung dari seluruh antrean.</span>
+                    : <>Tips: <strong>Shift + klik</strong> lingkaran pilih untuk memilih satu rentang sekaligus · klik <strong>nomor #antrean</strong> di kartu untuk memindah satu video langsung ke nomor tertentu.</>}
                 </p>
               )}
 
@@ -691,7 +899,7 @@ export default function AdminViralFrameAgentVideosPage() {
                 return (
                   <SortableItem key={v.id} id={v.id} disabled={!dragEnabled}>
                     {({ setNodeRef, style, attributes, listeners, isDragging }) => (
-                  <div ref={setNodeRef} style={style} onContextMenu={e2 => openContextMenu(e2, v.id)}
+                  <div ref={setNodeRef} style={style} data-video-id={v.id} onContextMenu={e2 => openContextMenu(e2, v.id)}
                     className={`border rounded-2xl overflow-hidden bg-white flex flex-col transition-colors ${selected ? 'border-[#1565C0] ring-2 ring-[#1565C0]/30' : 'border-gray-100'} ${isDragging ? 'opacity-60 shadow-lg relative z-10' : ''}`}>
                     <div className="relative">
                       {/* poster_url = .jpg yang sudah jadi di R2 (nol biaya).
@@ -702,9 +910,12 @@ export default function AdminViralFrameAgentVideosPage() {
                         poster={v.poster_url ?? (v.storage === 'r2' ? undefined : toImageThumbnailUrl(v.cloudinary_url))}
                         controls preload="none" className="w-full bg-black"
                         style={{ aspectRatio: v.width && v.height ? `${v.width} / ${v.height}` : '16 / 9', objectFit: 'contain' }} />
-                      <button onClick={() => toggleSelect(v.id)}
+                      <button onClick={e2 => toggleSelect(v.id, e2.shiftKey)}
+                        // Shift+klik di browser juga memblok teks di antara dua
+                        // titik klik — cegah supaya yang terpilih cuma videonya.
+                        onMouseDown={e2 => { if (e2.shiftKey) e2.preventDefault(); }}
                         className="absolute top-2 left-2 w-6 h-6 rounded-full bg-black/50 hover:bg-black/70 flex items-center justify-center text-white"
-                        title="Pilih video">
+                        title="Pilih video (Shift+klik = pilih rentang)">
                         {selected ? <CheckCircle2 size={16} className="text-[#4FC3F7]" /> : <Circle size={16} />}
                       </button>
                       {dragEnabled && (
@@ -714,11 +925,26 @@ export default function AdminViralFrameAgentVideosPage() {
                           <GripVertical size={14} />
                         </button>
                       )}
-                      {view === 'active' && (
-                        <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-semibold text-white bg-[#0F172A]/70">
+                      {view === 'active' && (editPosisiId === v.id ? (
+                        <input autoFocus value={editPosisiTeks} inputMode="numeric"
+                          aria-label="Nomor antrean baru"
+                          onChange={e2 => setEditPosisiTeks(e2.target.value.replace(/\D/g, ''))}
+                          onKeyDown={e2 => {
+                            if (e2.key === 'Enter') { e2.preventDefault(); void simpanPosisiSatu(v.id); }
+                            // stopPropagation: Escape global juga membatalkan
+                            // seluruh pilihan — di sini cukup tutup input.
+                            else if (e2.key === 'Escape') { e2.stopPropagation(); setEditPosisiId(null); }
+                          }}
+                          onBlur={() => setEditPosisiId(null)}
+                          className="absolute top-2 right-2 w-16 px-2 py-0.5 rounded-full text-[10px] font-semibold text-[#0F172A] bg-white border-2 border-[#1565C0] outline-none" />
+                      ) : (
+                        <button type="button" disabled={menyusun}
+                          onClick={() => { setEditPosisiId(v.id); setEditPosisiTeks(String(urutanBadge)); }}
+                          className="absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-semibold text-white bg-[#0F172A]/70 hover:bg-[#1565C0] disabled:opacity-60"
+                          title="Klik untuk memindah video ini ke nomor antrean lain">
                           #{urutanBadge}
-                        </span>
-                      )}
+                        </button>
+                      ))}
                       {purgeDays != null && (
                         <span className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-semibold text-white ${purgeDays <= 0 ? 'bg-[#94A3B8]' : 'bg-red-500'}`}>
                           {purgeDays <= 0 ? 'Menunggu pembersihan…' : `Terhapus otomatis ${purgeDays} hari lagi`}
@@ -863,10 +1089,25 @@ export default function AdminViralFrameAgentVideosPage() {
           style={{ left: contextMenu.x, top: contextMenu.y }} onClick={e => e.stopPropagation()}>
           <div className="px-3 py-1.5 text-[11px] text-[#94A3B8] border-b border-gray-50">{selectedIds.size} video dipilih</div>
           {view === 'active' ? (
-            <button onClick={() => bulkAction('trash', Array.from(selectedIds))}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#0F172A] hover:bg-gray-50 text-left">
-              <Archive size={14} /> Pindahkan ke Sampah
-            </button>
+            <>
+              <button disabled={menyusun} onClick={() => pindahkanPilihan('atas')}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#0F172A] hover:bg-gray-50 text-left disabled:opacity-50">
+                <ArrowUpToLine size={14} /> Pindahkan ke paling atas
+              </button>
+              <button disabled={menyusun} onClick={() => pindahkanPilihan('bawah')}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#0F172A] hover:bg-gray-50 text-left disabled:opacity-50">
+                <ArrowDownToLine size={14} /> Pindahkan ke paling bawah
+              </button>
+              <button disabled={menyusun} onClick={tanyaPosisi}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#0F172A] hover:bg-gray-50 text-left disabled:opacity-50">
+                <GripVertical size={14} /> Pindahkan ke posisi…
+              </button>
+              <div className="border-t border-gray-50 my-1" />
+              <button onClick={() => bulkAction('trash', Array.from(selectedIds))}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#0F172A] hover:bg-gray-50 text-left">
+                <Archive size={14} /> Pindahkan ke Sampah
+              </button>
+            </>
           ) : (
             <>
               <button onClick={() => bulkAction('restore', Array.from(selectedIds))}
