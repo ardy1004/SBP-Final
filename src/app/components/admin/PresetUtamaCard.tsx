@@ -20,7 +20,13 @@ import EditorJamPosting from './viralframe/EditorJamPosting';
 const PRESET_DEFAULT: PresetUtama = { slots: ['06:00', '09:00', '12:00', '17:00', '19:00'], intervalMenit: 5 };
 const CIUT_KEY = 'sbp_preset_utama_ciut';
 
-export default function PresetUtamaCard({ onTersimpan }: { onTersimpan?: () => void } = {}) {
+export default function PresetUtamaCard({ onTersimpan, muatUlang = 0 }: {
+  onTersimpan?: () => void;
+  /** Naik setiap kali jadwal diubah dari kartu LAIN — terutama "Susun jam semua
+   *  agent", yang juga menulis jam agent utama. Tanpa memuat ulang, kartu ini
+   *  menampilkan jam lama, dan menekan Simpan di sini menimpa susunan baru. */
+  muatUlang?: number;
+} = {}) {
   const [ciut, setCiut] = useState(true);
   const [preset, setPreset] = useState<PresetUtama>(PRESET_DEFAULT);
   const [menyimpan, setMenyimpan] = useState(false);
@@ -28,10 +34,12 @@ export default function PresetUtamaCard({ onTersimpan }: { onTersimpan?: () => v
 
   useEffect(() => {
     try { setCiut(localStorage.getItem(CIUT_KEY) !== '0'); } catch { /* noop */ }
+  }, []);
+  useEffect(() => {
     getSchedulerConfig().then(r => {
       if (r.success && r.data?.preset_utama?.slots?.length) setPreset(r.data.preset_utama);
     });
-  }, []);
+  }, [muatUlang]);
 
   const toggleCiut = () => {
     setCiut(c => {

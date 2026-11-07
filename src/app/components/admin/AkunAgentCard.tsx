@@ -19,6 +19,7 @@ import {
 } from '../../../lib/api';
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
 import EditorJamPosting, { jamAwalManual } from './viralframe/EditorJamPosting';
+import SusunJamPanel from './viralframe/SusunJamPanel';
 
 interface Msg { type: 'success' | 'error'; text: string }
 
@@ -62,7 +63,11 @@ function Lencana({ ok, teks }: { ok: boolean; teks: string }) {
   );
 }
 
-export default function AkunAgentCard({ onTersimpan }: { onTersimpan?: () => void } = {}) {
+export default function AkunAgentCard({ onTersimpan, muatUlang = 0 }: {
+  onTersimpan?: () => void;
+  /** Naik setiap kali jadwal diubah dari kartu LAIN (mis. Jam Posting Agent Utama). */
+  muatUlang?: number;
+} = {}) {
   const [items, setItems] = useState<AgentAccount[] | null>(null);
   const [buka, setBuka] = useState<number | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
@@ -110,6 +115,7 @@ export default function AkunAgentCard({ onTersimpan }: { onTersimpan?: () => voi
   };
 
   useEffect(() => { muat(); }, [muat]);
+  useEffect(() => { if (muatUlang > 0) muat(); }, [muatUlang, muat]);
 
   const bukaAgent = (a: AgentAccount) => {
     if (buka === a.character_id) { setBuka(null); setForm(null); return; }
@@ -274,6 +280,12 @@ export default function AkunAgentCard({ onTersimpan }: { onTersimpan?: () => voi
             : 'Tiap agent memakai akun & storage sendiri. Spesialis hanya label pengelompokan — semua agent bisa upload listing jenis apa pun.'}
         </p>
       </div>
+
+      {/* Susun jam semua agent sekaligus. Setelah diterapkan, form agent yang
+          sedang terbuka WAJIB ditutup: isinya masih jam lama, dan menekan
+          Simpan di sana akan menimpa susunan yang baru saja diterapkan. */}
+      <SusunJamPanel modeTerpusat={mode === 'terpusat'}
+        onTerapkan={() => { setBuka(null); setForm(null); muat(); onTersimpan?.(); }} />
 
       {msg && (
         <div className={`rounded-xl p-3 mb-3 text-sm ${msg.type === 'success' ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-700'}`}>

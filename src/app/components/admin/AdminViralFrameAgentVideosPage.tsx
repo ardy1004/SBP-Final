@@ -198,6 +198,12 @@ export default function AdminViralFrameAgentVideosPage() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [scheduleTarget, setScheduleTarget] = useState<AgentVideo | null>(null);
   const [slotRefreshTick, setSlotRefreshTick] = useState(0);
+  // Naik setiap kali jam posting diubah dari kartu mana pun (Akun Agent, Jam
+  // Posting Agent Utama, atau "Susun jam semua agent"). Kedua kartu memuat
+  // ulang datanya saat nilai ini berubah, supaya tidak ada kartu yang menahan
+  // jam lama lalu menimpanya lagi lewat tombol Simpan.
+  const [jadwalTick, setJadwalTick] = useState(0);
+  const jadwalBerubah = () => { setSlotRefreshTick(t => t + 1); setJadwalTick(t => t + 1); };
   // ── Atur urutan massal (2026-11-05) ──
   // Titik awal Shift+klik: video terakhir yang dipilih/dibatalkan lewat klik.
   const [anchorId, setAnchorId] = useState<number | null>(null);
@@ -648,9 +654,9 @@ export default function AdminViralFrameAgentVideosPage() {
       <div className="space-y-2">
         {/* onTersimpan: jadwal berubah → strip "SLOT HARI INI" dimuat ulang,
             supaya jam rencana yang tampil langsung sesuai pengaturan baru. */}
-        <AkunAgentCard onTersimpan={() => setSlotRefreshTick(t => t + 1)} />
+        <AkunAgentCard onTersimpan={jadwalBerubah} muatUlang={jadwalTick} />
         <JamPrimetimeCard />
-        <PresetUtamaCard onTersimpan={() => setSlotRefreshTick(t => t + 1)} />
+        <PresetUtamaCard onTersimpan={jadwalBerubah} muatUlang={jadwalTick} />
       </div>
 
       {aksiError && (

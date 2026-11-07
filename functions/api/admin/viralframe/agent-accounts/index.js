@@ -7,9 +7,10 @@
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { maskKey } from '../../../../_lib/aiProviders.js';
-import { parseSpesialis, parseChannels, getModeAkun } from '../../../../_lib/agentAccounts.js';
+import { parseSpesialis, parseChannels, getModeAkun, PLATFORMS } from '../../../../_lib/agentAccounts.js';
 import { setSetting, getSetting } from '../../../../_lib/schedulerProviders.js';
-import { kuotaAkun, kuotaRamp } from '../../../../_lib/jadwalOtomatis.js';
+import { kuotaAkun, kuotaRamp, PRESET_UTAMA_DEFAULT } from '../../../../_lib/jadwalOtomatis.js';
+import { susunJamSemuaAgent } from '../../../../_lib/susunJam.js';
 
 export async function onRequestGet({ env }) {
   try {
@@ -122,6 +123,83 @@ export async function onRequestPatch({ env, request }) {
   } catch (err) {
     console.error('[vf agent-accounts] PATCH mode', err.message);
     return jsonError('Gagal menyimpan mode akun', 500);
+  }
+}
+
+// POST /api/admin/viralframe/agent-accounts — aksi massal atas semua agent.
+//   { aksi: 'susun_jam', variasi?: number, terapkan?: boolean }
+// "Susun jam semua agent" (2026-11-07): menyusun ulang jam tayang agent utama
+// + semua agent mode Manual supaya tidak ada dua akun tayang di menit yang sama
+// (aturannya di functions/_lib/susunJam.js). terapkan:false = pratinjau saja.
+// Ditumpangkan di endpoint koleksi, bukan file baru — pola yang sama dengan
+// PATCH di atas (anggaran bundle Functions).
+//
+// ⚠️ Jam TIDAK PERNAH diterima dari klien. Saat diterapkan, susunan dihitung
+// ulang di server dari data saat itu dengan `variasi` yang sama — karena
+// fungsinya deterministik, hasilnya identik dengan pratinjau selama data agent
+// tidak berubah di antaranya.
+export async function onRequestPost({ env, request }) {
+  let body;
+  try { body = await request.json(); } catch { return jsonError('Body JSON tidak valid', 400); }
+  if (body?.aksi !== 'susun_jam') return jsonError('Aksi tidak dikenal', 400);
+
+  const variasi = Number.isInteger(body.variasi) && body.variasi >= 0 && body.variasi < 1e6 ? body.variasi : 0;
+  const terapkan = body.terapkan === true;
+
+  try {
+    const { mode, utama } = await getModeAkun(env);
+    if (mode === 'terpusat') {
+      return jsonError('Susun jam hanya berlaku di mode Per agent — di mode Terpusat semua agent memakai akun dan jam agent utama.', 422);
+    }
+
+    const res = await env.DB.prepare('SELECT id, nama FROM viralframe_characters ORDER BY id').all();
+    const peserta = [];
+    const tidakIkut = [];
+    // Interval SATU untuk semua peserta (lihat susunJam.js): diambil dari agent
+    // utama, karena itulah preset yang paling lama dipakai & dipilih user.
+    let intervalMenit = null;
+    for (const r of res.results ?? []) {
+      // kuotaAkun = sumber yang sama dengan cron & tombol Jadwalkan, jadi
+      // "siapa yang manual" di sini mustahil berbeda dari yang dijalankan mesin.
+      const k = await kuotaAkun(env, r.id, utama);
+      if (k.mode === 'otomatis') { tidakIkut.push({ id: r.id, nama: r.nama, alasan: 'mode Otomatis — jam diundi di jendela primetime' }); continue; }
+      if (k.mode === 'utama') intervalMenit = k.preset.intervalMenit;
+      peserta.push({ id: r.id, nama: r.nama, jumlah: k.preset.slots.length, utama: k.mode === 'utama', slotsLama: k.preset.slots });
+    }
+    // Tanpa agent utama di daftar peserta: pakai interval bawaan preset (5).
+    intervalMenit ??= PRESET_UTAMA_DEFAULT.intervalMenit;
+
+    const hasil = susunJamSemuaAgent({ peserta, intervalMenit, jumlahPlatform: PLATFORMS.length, variasi });
+    if (!hasil.ok) return jsonError(hasil.pesan, 422);
+
+    const info = new Map(peserta.map(p => [p.id, p]));
+    const rencana = hasil.rencana.map(r => ({ ...r, utama: info.get(r.id).utama, slots_lama: info.get(r.id).slotsLama }));
+
+    if (terapkan) {
+      // Satu batch = satu transaksi: semua agent pindah ke susunan baru
+      // bersamaan, atau tidak sama sekali. Setengah jalan berarti sebagian
+      // akun masih memakai jam lama yang bertabrakan dengan susunan baru.
+      const stmts = rencana.map(r => {
+        const nilai = JSON.stringify({ slots: r.slots, intervalMenit });
+        return r.utama
+          ? env.DB.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').bind('viralframe_preset_utama', nilai)
+          : env.DB.prepare("UPDATE viralframe_agent_accounts SET jadwal_manual = ?, updated_at = datetime('now') WHERE character_id = ?").bind(nilai, r.id);
+      });
+      await env.DB.batch(stmts);
+    }
+
+    return jsonOk({
+      diterapkan: terapkan,
+      variasi,
+      interval_menit: intervalMenit,
+      jarak_menit: hasil.jarakMenit,
+      gelombang: hasil.gelombang,
+      rencana,
+      tidak_ikut: tidakIkut,
+    });
+  } catch (err) {
+    console.error('[vf agent-accounts] POST susun_jam', err.message);
+    return jsonError('Gagal menyusun jam agent', 500);
   }
 }
 
