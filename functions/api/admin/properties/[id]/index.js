@@ -137,20 +137,27 @@ export async function onRequestPatch(context) {
     else pairs.push({ col: 'tujuan', val: v });
   }
 
-  // 🔥 `harga` = 0 SAH untuk properti sewa murni — kolom itu harga JUAL, dan
-  // titip-jual.js memang sengaja mengisinya 0 untuk tujuan `disewa`. Sampai
-  // 10 Sep 2026 validasi ini menolak 0 tanpa syarat, sehingga properti sewa
-  // MUSTAHIL disimpan dari Admin: form mengirim harga 0 (nilai yang bahkan tidak
-  // punya input karena `showHarga` false), lalu ditolak 422 berulang-ulang.
-  // Ketahuan pada listing sewa PERTAMA yang masuk lewat Titip Jual.
+  // Di sini HANYA bentuk angkanya yang diperiksa. Aturan "harga jual harus
+  // positif" sengaja dinilai SESUDAH normalisasiHarga() (lihat blok harga di
+  // bawah), pada total hasil hitungan — bukan pada angka mentah dari body.
+  //
+  // 🔥 Dua kali aturan itu salah tempat, dua kali form admin mati 422:
+  // · 10 Sep 2026 — properti SEWA. `harga` = 0 sah untuk sewa murni (kolom itu
+  //   harga JUAL, titip-jual.js sengaja mengisinya 0), tapi validasi menolak 0
+  //   tanpa syarat. Kini dikecualikan lewat `tujuanEfektif`.
+  // · 11 Nov 2026 — TANAH mode per-m². Form hanya menampilkan input per-m²,
+  //   jadi `harga` total tetap 0 dari nilai awal, dan aturan ini menolaknya
+  //   SEBELUM normalisasi sempat menghitung per-m² × luas. Setiap properti
+  //   tanah per-m² yang dibuat baru mustahil disimpan, dan tiap percobaan
+  //   meninggalkan draft kosong (POST sudah membuat baris sebelum PATCH ini
+  //   ditolak) — 3 draft hantu, 1085–1087.
   const tujuanEfektif = (() => {
     const p = pairs.find(x => x.col === 'tujuan');
     return p ? p.val : exists.tujuan;
   })();
   if (body.harga !== undefined && body.harga !== null) {
     const v = parseInt(String(body.harga), 10);
-    const nolBoleh = tujuanEfektif === 'disewa';
-    if (!Number.isInteger(v) || v < 0 || (v === 0 && !nolBoleh)) {
+    if (!Number.isInteger(v) || v < 0) {
       errors.harga = 'Harga harus angka positif';
     } else pairs.push({ col: 'harga', val: v });
   }
@@ -278,11 +285,14 @@ export async function onRequestPatch(context) {
   // PATCH bersifat partial, jadi nilai yang tidak dikirim WAJIB diambil dari
   // baris lama lebih dulu — tanpa itu, mengubah luas_tanah saja akan menghitung
   // ulang dengan harga undefined dan mengosongkan harga_per_m2.
-  const hargaPair = pairs.find(p => p.col === 'harga');
-  const luasPair  = pairs.find(p => p.col === 'luas_tanah');
-  const jenisPair = pairs.find(p => p.col === 'jenis_properti');
+  const hargaPair  = pairs.find(p => p.col === 'harga');
+  const luasPair   = pairs.find(p => p.col === 'luas_tanah');
+  const jenisPair  = pairs.find(p => p.col === 'jenis_properti');
+  // `tujuan` ikut memicu: aturan harga-positif bergantung padanya, jadi PATCH
+  // parsial yang hanya mengubah tujuan sewa → jual tetap harus diperiksa.
+  const tujuanPair = pairs.find(p => p.col === 'tujuan');
 
-  if (hargaPair || luasPair || jenisPair || body.harga_mode !== undefined || body.harga_per_m2 !== undefined) {
+  if (hargaPair || luasPair || jenisPair || tujuanPair || body.harga_mode !== undefined || body.harga_per_m2 !== undefined) {
     const hasil = normalisasiHarga({
       jenis_properti: jenisPair ? jenisPair.val : exists.jenis_properti,
       luas_tanah:     luasPair  ? luasPair.val  : exists.luas_tanah,
@@ -295,6 +305,11 @@ export async function onRequestPatch(context) {
       // Menolak jauh lebih baik daripada menyimpan angka per-m² ke kolom total —
       // persis kesalahan yang membuat 39 listing tanah tampil ~1000x lebih murah.
       errors.harga = hasil.error;
+    } else if (hasil.harga <= 0 && tujuanEfektif !== 'disewa') {
+      // Dinilai pada TOTAL hasil normalisasi: di mode per-m² itu per-m² × luas,
+      // bukan angka 0 dari input total yang tidak pernah ditampilkan form.
+      // `??=` supaya pesan bentuk-angka dari pengecekan awal tidak tertimpa.
+      errors.harga ??= 'Harga harus angka positif';
     } else {
       if (hargaPair) hargaPair.val = hasil.harga;
       else pairs.push({ col: 'harga', val: hasil.harga });
