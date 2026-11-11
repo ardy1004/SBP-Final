@@ -12,7 +12,7 @@ import {
   labelJenisHotel,
 } from '../../../lib/propertyFields';
 import PropertyPhotosCard from './PropertyPhotosCard';
-import { getLocations, type ApiLocation, bacaJson } from '../../../lib/api';
+import { getLocations, type ApiLocation, type ApiResponse, bacaJson } from '../../../lib/api';
 // Reuse logic generate meta SEO yang sama dengan endpoint CREATE (jangan duplikasi).
 import { generateMetaSeo } from '../../../../functions/_lib/metaSeo.js';
 import { hargaTampil } from '../../../../functions/_lib/hargaTampil.js';
@@ -189,6 +189,18 @@ function isLingkunganFromTitipJual(d: PropertyDetail): boolean {
   return typeof v === 'string' && v in LINGKUNGAN_DETAILS_MAP;
 }
 
+// Pesan galat dari amplop API, TERMASUK rincian per-field (`details`). Tanpa
+// rincian, setiap 422 tampil sebagai "Validasi gagal" saja — admin tidak tahu
+// field mana yang ditolak. 11 Nov 2026: tiga kali simpan gagal tanpa petunjuk,
+// padahal alasannya (harga) sudah dikirim backend di `details` sejak awal.
+function pesanGalat(json: ApiResponse<unknown>, status: number): string {
+  const utama = json.error ?? `HTTP ${status}`;
+  const rincian = json.details
+    ? Object.values(json.details).map(String).filter(Boolean).join('; ')
+    : '';
+  return rincian ? `${utama}: ${rincian}` : utama;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function AdminPropertyDetailPage() {
@@ -209,6 +221,11 @@ export default function AdminPropertyDetailPage() {
   const [saving, setSaving]           = useState(false);
   const [saveMsg, setSaveMsg]         = useState('');
   const [saveError, setSaveError]     = useState('');
+  // Baris yang sudah dibuat POST pada sesi "Buat Properti" ini. Simpan dua
+  // langkah (POST minimal → PATCH lengkap) berarti PATCH yang ditolak validasi
+  // meninggalkan baris yang SUDAH ada; dulu tiap klik ulang menjalankan POST
+  // lagi → satu draft kosong baru per percobaan (1085–1087, 11 Nov 2026).
+  const [draftBaru, setDraftBaru]     = useState<{ id: number; kode_listing: string } | null>(null);
   // Tahap 8c — muncul setelah simpan bila harga baru < harga_lama.
   const [promoTurunHarga, setPromoTurunHarga] = useState(false);
   const [geoCoords, setGeoCoords]     = useState<{ latitude: number | null; longitude: number | null } | null>(null);
@@ -333,6 +350,7 @@ export default function AdminPropertyDetailPage() {
         badge_premium: 0, badge_featured: 0, badge_hot: 0,
         properti_pilihan: 0, verified: 0, status_sold: 0,
       });
+      setDraftBaru(null); // form kosong baru = belum ada baris yang dibuat
       setLoading(false);
       return;
     }
@@ -468,16 +486,21 @@ export default function AdminPropertyDetailPage() {
   // dulu field-field ini dibuang diam-diam sehingga tampak "kosong" setelah simpan).
   const buildPatchBody = (): Record<string, unknown> => {
     const detailsVal = Object.keys(detailsMap).length > 0 ? detailsMap : null;
+    // Ekspresi yang sama dengan `modePerM2` di render (yang dideklarasikan
+    // sesudah early-return, jadi tidak bisa dipakai dari sini).
+    const pakaiPerM2 = form.jenis_properti === 'tanah' && form.harga_mode === 'per_m2';
     return {
       title: form.title ?? '',
       jenis_properti: form.jenis_properti,
       tujuan: form.tujuan,
-      // ⚠️ `harga` (harga JUAL) hanya dikirim bila form memang merendernya —
-      // untuk tujuan `disewa`, input-nya disembunyikan (`showHarga` false) dan
-      // nilainya 0. Mengirim angka yang tidak pernah bisa disentuh user adalah
-      // data hantu, dan itulah yang membuat SETIAP simpan properti sewa ditolak
-      // 422 oleh validator "harga harus positif" (10 Sep 2026).
-      ...(form.tujuan === 'disewa' ? {} : { harga: form.harga }),
+      // ⚠️ `harga` (harga JUAL total) hanya dikirim bila form memang merender
+      // input-nya. Mengirim angka yang tidak pernah bisa disentuh user adalah
+      // data hantu, dan dua kali itu membuat simpan ditolak 422 oleh validator
+      // "harga harus positif":
+      // · tujuan `disewa` — `showHarga` false, nilainya 0 (10 Sep 2026)
+      // · tanah mode per-m² — yang dirender input per-m², total tetap 0 dari
+      //   nilai awal (11 Nov 2026). Backend menghitung total = per-m² × luas.
+      ...(form.tujuan === 'disewa' || pakaiPerM2 ? {} : { harga: form.harga }),
       // Backend yang mengalikan per-m2 x luas_tanah (satu tempat, dipakai create
       // maupun update) supaya klien tidak bisa mengirim total yang tidak konsisten.
       harga_mode: form.harga_mode ?? 'total',
@@ -536,7 +559,7 @@ export default function AdminPropertyDetailPage() {
       body: JSON.stringify(buildPatchBody()),
     });
     const json = await bacaJson(res);
-    if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+    if (!res.ok) throw new Error(pesanGalat(json, res.status));
     return json;
   };
 
@@ -546,28 +569,47 @@ export default function AdminPropertyDetailPage() {
     setSaveError('');
     try {
       if (isNew) {
-        const detailsVal = Object.keys(detailsMap).length > 0 ? detailsMap : null;
-        const res = await fetch('/api/admin/properties', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            title: form.title ?? '',
-            jenis_properti: form.jenis_properti,
-            tujuan: form.tujuan,
-            harga: form.harga ?? 0,
-            kecamatan: form.kecamatan ?? '',
-            kabupaten: form.kabupaten ?? '',
-            provinsi: form.provinsi ?? 'DI Yogyakarta',
-            details: detailsVal,
-          }),
-        });
-        const json = await bacaJson(res);
-        if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+        // POST hanya SEKALI per sesi form — lihat komentar `draftBaru`.
+        let draft = draftBaru;
+        if (!draft) {
+          const detailsVal = Object.keys(detailsMap).length > 0 ? detailsMap : null;
+          const res = await fetch('/api/admin/properties', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              title: form.title ?? '',
+              jenis_properti: form.jenis_properti,
+              tujuan: form.tujuan,
+              harga: form.harga ?? 0,
+              kecamatan: form.kecamatan ?? '',
+              kabupaten: form.kabupaten ?? '',
+              provinsi: form.provinsi ?? 'DI Yogyakarta',
+              details: detailsVal,
+            }),
+          });
+          const json = await bacaJson(res);
+          if (!res.ok) throw new Error(pesanGalat(json, res.status));
+          draft = { id: json.data.id, kode_listing: json.data.kode_listing };
+          setDraftBaru(draft);
+        }
         // POST create hanya menyimpan field dasar — kirim SEMUA field form yang
         // lain via PATCH ke id baru agar tidak ada isian yang hilang, baru pindah.
-        await patchProperty(json.data.id);
-        navigate(`/admin/listing/${json.data.id}`);
+        // Field dasar ikut terkirim di PATCH, jadi koreksi setelah percobaan
+        // gagal (judul, jenis, lokasi) tetap tersimpan walau POST tidak diulang.
+        try {
+          await patchProperty(draft.id);
+        } catch (err: unknown) {
+          // JANGAN pindah halaman di sini: memuat ulang dari server menghapus
+          // isian form yang belum tersimpan. Biarkan admin memperbaiki di tempat.
+          // Titik penutup dibuang: pesan backend sudah bertitik → "valid.." ganda.
+          const alasan = (err instanceof Error ? err.message : 'Gagal menyimpan').replace(/[.\s]+$/, '');
+          throw new Error(
+            `Draft ${draft.kode_listing} sudah dibuat, tapi isian lain belum tersimpan — ${alasan}. ` +
+            'Perbaiki lalu klik Simpan lagi (tidak akan membuat properti baru).'
+          );
+        }
+        navigate(`/admin/listing/${draft.id}`);
         return;
       }
       const json = await patchProperty(id!);
@@ -1173,7 +1215,7 @@ export default function AdminPropertyDetailPage() {
             style={{ background: 'linear-gradient(135deg, #1565C0 0%, #29B6F6 100%)' }}
           >
             <Save size={15} />
-            {saving ? 'Menyimpan…' : isNew ? 'Buat Properti' : 'Simpan Perubahan'}
+            {saving ? 'Menyimpan…' : isNew ? (draftBaru ? 'Simpan Draft' : 'Buat Properti') : 'Simpan Perubahan'}
           </button>
           {saveMsg   && <span className="text-sm text-emerald-600 font-medium">{saveMsg}</span>}
           {saveError && <span className="text-sm text-red-600">{saveError}</span>}
