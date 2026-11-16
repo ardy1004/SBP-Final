@@ -1,0 +1,21 @@
+-- Asal video yang dipindah antar agent (Konten Agent, 2026-11-17).
+--
+-- Video bisa dipindah dari antrean satu agent ke agent lain (aksi 'transfer'
+-- di functions/api/admin/viralframe/agent-videos/bulk.js) untuk meratakan stok.
+-- Tapi video dirender dengan foto agent PRODUSENNYA sebagai referensi talent,
+-- jadi wajah & suara di video ikut terbawa. Tanpa catatan asal, setelah
+-- dipindah tidak ada yang tahu bahwa video di antrean Hana sebenarnya
+-- menampilkan Monica.
+--
+--   NULL = video masih di agent produsennya (semua baris lama)
+--   id   = character_id agent PERTAMA yang memproduksinya. Pemindahan berantai
+--          (A→B→C) tetap mencatat A; kembali ke A mengosongkannya lagi.
+--
+-- Tanpa FOREIGN KEY: karakter yang dihapus sudah meng-CASCADE videonya sendiri
+-- (migrasi 0018), dan tampilan cukup memakai LEFT JOIN — asal yang sudah
+-- terhapus tampil tanpa nama, bukan error.
+--
+-- Aditif murni. ⚠️ WAJIB diterapkan --remote SEBELUM deploy kode yang
+-- membacanya: SELECT_COLS di agent-videos/index.js merujuk kolom ini, jadi
+-- urutan terbalik membuat seluruh daftar Konten Agent balas 500.
+ALTER TABLE viralframe_agent_videos ADD COLUMN asal_character_id INTEGER;

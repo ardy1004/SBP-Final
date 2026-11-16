@@ -4,7 +4,7 @@ import { Link } from 'react-router';
 import {
   Users, Loader2, Download, Trash2, Pencil, Check, X, Copy,
   Archive, RotateCcw, CheckCircle2, Circle, Send, BarChart3, GripVertical,
-  ArrowUpToLine, ArrowDownToLine, Undo2, Wand2, ChevronDown,
+  ArrowUpToLine, ArrowDownToLine, Undo2, Wand2, ChevronDown, ArrowRightLeft,
 } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, rectSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
@@ -17,6 +17,7 @@ import AkunAgentCard from './AkunAgentCard';
 import JamPrimetimeCard from './JamPrimetimeCard';
 import PresetUtamaCard from './PresetUtamaCard';
 import PanelUnggahAgent from './viralframe/PanelUnggahAgent';
+import TransferAgentModal from './viralframe/TransferAgentModal';
 import {
   type StatusProperti, pickStatusProperti,
   keAtas, keBawah, kePosisi, posisiMaks,
@@ -89,8 +90,13 @@ interface AgentVideo {
   created_at: string;
   character_nama: string;
   character_foto_url: string;
+  /** Agent produsen pertama bila video pernah dipindah antar agent (migrasi
+   *  0058) — talent di videonya adalah agent ini. null = belum pernah dipindah. */
+  asal_character_id: number | null;
+  asal_nama: string | null;
   kode_listing: string;
   property_title: string;
+  jenis_properti: string;
   status_sold: number | null;
   badge_premium: number | null;
   badge_featured: number | null;
@@ -197,6 +203,10 @@ export default function AdminViralFrameAgentVideosPage() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [scheduleTarget, setScheduleTarget] = useState<AgentVideo | null>(null);
+  // Video yang sedang dipindah ke agent lain — SALINAN saat modal dibuka, bukan
+  // turunan selectedIds, supaya Escape global (membatalkan pilihan) tidak
+  // mengubah isi modal yang sedang terbuka.
+  const [transferVideos, setTransferVideos] = useState<AgentVideo[] | null>(null);
   const [slotRefreshTick, setSlotRefreshTick] = useState(0);
   // Naik setiap kali jam posting diubah dari kartu mana pun (Akun Agent, Jam
   // Posting Agent Utama, atau "Susun jam semua agent"). Kedua kartu memuat
@@ -560,6 +570,26 @@ export default function AdminViralFrameAgentVideosPage() {
     refreshAfterAction();
   };
 
+  // ── Pindahkan ke agent lain ──
+  // Aturan (video berriwayat scheduler dilewati, ujung antrean tujuan, catatan
+  // asal) seluruhnya di server — lihat aksi 'transfer' di agent-videos/bulk.js.
+  const bukaTransfer = (ids: number[]) => {
+    const pilih = new Set(ids);
+    const daftar = videos.filter(v => pilih.has(v.id));
+    setContextMenu(null);
+    if (daftar.length === 0) return;
+    setAksiError('');
+    setTransferVideos(daftar);
+  };
+  const selesaiTransfer = () => {
+    setTransferVideos(null);
+    clearSelection();
+    // refreshAfterAction memuat ulang daftar video (sekaligus membuang
+    // urutanSebelum — urutan lama bukan lagi permutasi penuh video aktif) DAN
+    // angka stok di sidebar agent.
+    refreshAfterAction();
+  };
+
   // ── Aksi per-item (klik cepat tanpa perlu select dulu) ──
   const trashOne = async (id: number) => {
     setAksiError('');
@@ -773,6 +803,11 @@ export default function AdminViralFrameAgentVideosPage() {
                       Pindah
                     </button>
                   </form>
+                  <button disabled={bulkBusy || menyusun} onClick={() => bukaTransfer(Array.from(selectedIds))}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 disabled:opacity-50"
+                    title="Pindahkan video terpilih ke antrean agent lain">
+                    <ArrowRightLeft size={13} /> Pindahkan ke agent…
+                  </button>
                   <button disabled={bulkBusy} onClick={() => bulkAction('trash', Array.from(selectedIds))}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 disabled:opacity-50">
                     <Archive size={13} /> Pindahkan ke Sampah
@@ -972,6 +1007,12 @@ export default function AdminViralFrameAgentVideosPage() {
                                 {STATUS_LABEL[statusProperti]}
                               </span>
                             )}
+                            {v.asal_character_id != null && (
+                              <span className="px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-semibold"
+                                title={`Dipindah dari antrean ${v.asal_nama ?? 'agent yang sudah dihapus'} — talent di video ini adalah ${v.asal_nama ?? 'agent tersebut'}, bukan ${v.character_nama}.`}>
+                                dari {v.asal_nama ?? 'agent terhapus'}
+                              </span>
+                            )}
                             {v.bytes && <><span>·</span><span>{(v.bytes / 1024 / 1024).toFixed(1)}MB</span></>}
                             <span>·</span>
                             <span>{new Date(v.created_at).toLocaleDateString('id-ID')}</span>
@@ -1111,6 +1152,10 @@ export default function AdminViralFrameAgentVideosPage() {
                 <GripVertical size={14} /> Pindahkan ke posisi…
               </button>
               <div className="border-t border-gray-50 my-1" />
+              <button disabled={menyusun} onClick={() => bukaTransfer(Array.from(selectedIds))}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#0F172A] hover:bg-gray-50 text-left disabled:opacity-50">
+                <ArrowRightLeft size={14} /> Pindahkan ke agent lain…
+              </button>
               <button onClick={() => bulkAction('trash', Array.from(selectedIds))}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#0F172A] hover:bg-gray-50 text-left">
                 <Archive size={14} /> Pindahkan ke Sampah
@@ -1129,6 +1174,12 @@ export default function AdminViralFrameAgentVideosPage() {
             </>
           )}
         </div>
+      )}
+
+      {transferVideos && selectedCharacter && (
+        <TransferAgentModal videos={transferVideos}
+          asal={{ id: selectedCharacter.id, nama: selectedCharacter.nama }}
+          onClose={() => setTransferVideos(null)} onSelesai={selesaiTransfer} />
       )}
 
       {scheduleTarget && (

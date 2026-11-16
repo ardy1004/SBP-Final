@@ -1,7 +1,8 @@
 // POST /api/admin/viralframe/agent-videos/bulk — aksi massal untuk banyak video sekaligus
-//   Body JSON: { ids: number[], action: 'trash' | 'restore' | 'delete' }
+//   Body JSON: { ids: number[], action: 'trash' | 'restore' | 'delete' | 'transfer', character_id? }
 //   trash/restore -> toggle trashed_at (Sampah, reversible)
 //   delete        -> hapus permanen (Cloudinary + D1), dipakai dari dalam halaman Sampah
+//   transfer      -> pindahkan ke antrean agent lain (`character_id` = tujuan), lihat transfer()
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
@@ -9,8 +10,95 @@ import { hapusAsetVideo } from '../../../../_lib/videoStorage.js';
 import { logServerError } from '../../../../_lib/logError.js';
 import { adaJadwalTertunda } from '../../../../_lib/schedulerProviders.js';
 
-const VALID_ACTIONS = ['trash', 'restore', 'delete'];
+const VALID_ACTIONS = ['trash', 'restore', 'delete', 'transfer'];
 const MAX_IDS = 100;
+
+// "Belum pernah masuk scheduler" = tidak punya SATU PUN baris di
+// viralframe_scheduled_posts, status apa pun — termasuk yang semua platformnya
+// gagal. Dipakai dua kali (klasifikasi & WHERE UPDATE) supaya pemeriksaan dan
+// penulisan memakai definisi yang sama persis. Sengaja tanpa alias tabel: frasa
+// ini disisipkan ke SELECT maupun UPDATE yang sama-sama menyebut nama tabel penuh.
+//
+// Kenapa seketat itu — dua jebakan nyata di jadwalOtomatis.js kalau video
+// berriwayat ikut pindah:
+//   1. jadwalkanVideo() tidak memeriksa riwayat, jadi video yang SUDAH tayang di
+//      akun asal akan diposting ulang di akun tujuan tanpa peringatan apa pun.
+//   2. ulangiPlatformGagal() mencari baris gagal menurut `sp.akun_id` agent ASAL,
+//      tanpa melihat pemilik video sekarang — retry malam agent asal akan terus
+//      menembakkan video yang sudah dipindah ke akun asal.
+const BELUM_PERNAH_DIJADWALKAN = `NOT EXISTS (SELECT 1 FROM viralframe_scheduled_posts sp
+  WHERE sp.video_id = viralframe_agent_videos.id AND sp.video_type = 'agent')`;
+
+// Pindahkan video ke antrean agent lain. Yang berpindah hanya baris D1 — file
+// ada di bucket R2 bersama tanpa identitas agent (migrasi 0043), jadi tidak ada
+// yang perlu disalin. Ini PINDAH, bukan SALIN: video tidak akan tayang di akun
+// asal sama sekali.
+async function transfer(env, ids, tujuanMentah) {
+  const tujuan = parseInt(tujuanMentah, 10);
+  if (!Number.isInteger(tujuan) || tujuan <= 0) return jsonError('character_id tujuan wajib diisi', 422);
+  const agent = await env.DB.prepare('SELECT id FROM viralframe_characters WHERE id = ?').bind(tujuan).first();
+  if (!agent) return jsonError('Agent tujuan tidak ditemukan', 422);
+
+  const unik = [...new Set(ids)];
+  const placeholders = unik.map(() => '?').join(',');
+  const rows = (await env.DB.prepare(
+    `SELECT id, character_id, trashed_at, urutan_kirim,
+            CASE WHEN ${BELUM_PERNAH_DIJADWALKAN} THEN 0 ELSE 1 END AS pernah
+       FROM viralframe_agent_videos WHERE id IN (${placeholders})`
+  ).bind(...unik).all()).results ?? [];
+
+  const dilewati = { pernah_dijadwalkan: [], di_sampah: [], sudah_di_tujuan: [], tidak_ada: [], berubah_bersamaan: [] };
+  const ketemu = new Set(rows.map(r => r.id));
+  for (const id of unik) if (!ketemu.has(id)) dilewati.tidak_ada.push(id);
+  const lolos = [];
+  for (const r of rows) {
+    if (r.trashed_at) dilewati.di_sampah.push(r.id);
+    else if (r.character_id === tujuan) dilewati.sudah_di_tujuan.push(r.id);
+    else if (r.pernah) dilewati.pernah_dijadwalkan.push(r.id);
+    else lolos.push(r);
+  }
+
+  // Urutan relatif di antrean asal dipertahankan, lalu ditempel di UJUNG antrean
+  // tujuan — pola yang sama dengan 'restore' di bawah: nilai NULL/basi di
+  // ORDER BY ASC muncul PALING DEPAN, jadi tanpa ini video pindahan diam-diam
+  // menyerobot jadi prioritas #1 scheduler agent tujuan.
+  const MAKS = Number.MAX_SAFE_INTEGER;
+  lolos.sort((a, b) => ((a.urutan_kirim ?? MAKS) - (b.urutan_kirim ?? MAKS)) || (a.id - b.id));
+  const { maxUrutan } = await env.DB.prepare(
+    'SELECT COALESCE(MAX(urutan_kirim), 0) AS maxUrutan FROM viralframe_agent_videos WHERE character_id = ? AND trashed_at IS NULL'
+  ).bind(tujuan).first();
+
+  // Syarat lolos DIULANG di WHERE: cron auto-schedule bisa saja menjadwalkan
+  // atau men-Sampah-kan video di antara SELECT di atas dan UPDATE ini. Dengan
+  // syarat di WHERE, pemeriksaan + penulisan atomik per baris; yang kalah
+  // balapan cukup tidak berubah (changes = 0) dan dilaporkan.
+  //
+  // asal_character_id (migrasi 0058) mencatat produsen PERTAMA: pemindahan
+  // berantai A→B→C tetap A, dan kembali ke A mengosongkannya. SQLite membaca
+  // nilai LAMA di seluruh ekspresi SET, jadi urutan kolom di sini tidak penting.
+  let base = maxUrutan ?? 0;
+  const stmts = lolos.map(r => {
+    base += 1000;
+    return env.DB.prepare(
+      `UPDATE viralframe_agent_videos
+          SET asal_character_id = CASE WHEN COALESCE(asal_character_id, character_id) = ? THEN NULL
+                                       ELSE COALESCE(asal_character_id, character_id) END,
+              character_id = ?,
+              urutan_kirim = ?
+        WHERE id = ? AND trashed_at IS NULL AND character_id <> ? AND ${BELUM_PERNAH_DIJADWALKAN}`
+    ).bind(tujuan, tujuan, base, r.id, tujuan);
+  });
+
+  let affected = 0;
+  if (stmts.length > 0) {
+    const hasil = await env.DB.batch(stmts);
+    hasil.forEach((h, i) => {
+      if ((h.meta?.changes ?? 0) > 0) affected++;
+      else dilewati.berubah_bersamaan.push(lolos[i].id);
+    });
+  }
+  return jsonOk({ affected, dilewati });
+}
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -27,6 +115,8 @@ export async function onRequestPost(context) {
   const placeholders = ids.map(() => '?').join(',');
 
   try {
+    if (action === 'transfer') return await transfer(env, ids, body.character_id);
+
     if (action === 'trash') {
       await env.DB.prepare(`UPDATE viralframe_agent_videos SET trashed_at = datetime('now') WHERE id IN (${placeholders})`).bind(...ids).run();
       return jsonOk({ affected: ids.length });

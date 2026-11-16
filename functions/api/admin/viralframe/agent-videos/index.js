@@ -27,7 +27,11 @@ const SELECT_COLS = `
   v.post_url, v.platform_targets, v.trashed_at, v.created_at,
   v.views, v.likes, v.gaya, v.metrics_updated_at,
   c.nama AS character_nama, c.foto_url AS character_foto_url,
-  p.kode_listing, p.title AS property_title,
+  -- Produsen pertama bila video pernah dipindah antar agent (migrasi 0058).
+  -- Talent di video = agent ini, bukan pemilik antrean sekarang. Butuh
+  -- LEFT JOIN viralframe_characters ca di setiap query yang memakai SELECT_COLS.
+  v.asal_character_id, ca.nama AS asal_nama,
+  p.kode_listing, p.title AS property_title, p.jenis_properti,
   p.status_sold, p.badge_premium, p.badge_featured, p.badge_hot, p.properti_pilihan,
   -- Platform yang gagal dan BELUM punya jadwal aktif pengganti. Dipakai tombol
   -- "Ulangi platform gagal" di Konten Agent. Syarat NOT EXISTS-nya sama persis
@@ -154,6 +158,7 @@ export async function onRequestGet(context) {
       `SELECT ${SELECT_COLS}
        FROM viralframe_agent_videos v
        JOIN viralframe_characters c ON c.id = v.character_id
+       LEFT JOIN viralframe_characters ca ON ca.id = v.asal_character_id
        JOIN properties p ON p.id = v.property_id
        ${where}
        ORDER BY ${orderBy}
