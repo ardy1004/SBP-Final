@@ -93,7 +93,11 @@ export async function onRequestPost({ request, env }) {
      WHERE ${manual
        ? 'c.id = ?'
        : `(a.jam_auto = ?${tertundaLama.length > 0 ? ` OR c.id IN (${tertundaLama.map(() => '?').join(',')})` : ''})`}`
-  ).bind(...(manual ? [paksaAgent] : [jamSlot, ...tertundaLama])).all().catch(() => null);
+  ).bind(...(manual ? [paksaAgent] : [jamSlot, ...tertundaLama])).all();
+  // ⚠️ Tanpa .catch (2026-11-17). Dulu D1 error di sini terbaca "tidak ada
+  // agent pada jam ini" DAN menandai cron sehat (auto_terakhir bergerak) —
+  // agent pemilik slot ini kehilangan harinya tanpa jejak. Sekarang request
+  // gagal 500: worker cron mencatatnya dan auto_terakhir tidak bergerak.
 
   const agents = kandidat?.results ?? [];
   if (agents.length === 0) {
@@ -132,121 +136,142 @@ export async function onRequestPost({ request, env }) {
     }
     if (!dry && ag.auto_aktif !== 1) { hasilAgent.alasan = 'auto agent ini dimatikan'; laporan.push(hasilAgent); continue; }
 
-    const akun = await resolveScheduler(env, ag.id);
-    if (!akun.bufferKey && !akun.zernioKey) { hasilAgent.alasan = 'belum ada kredensial scheduler'; laporan.push(hasilAgent); continue; }
-    if (Object.keys(akun.channels).length === 0) { hasilAgent.alasan = 'belum ada channel sosmed'; laporan.push(hasilAgent); continue; }
+    // ⚠️ try/catch PER AGENT (2026-11-17). Penjaga slot & kuota kini MELEMPAR
+    // saat D1 error (gagal-tertutup) — dulu mereka diam-diam menganggap "kosong"
+    // dan menjadwalkan di atas post yang sudah ada. Agent yang kena error
+    // dilewati, dicatat, dan dicoba lagi di tick berikutnya; agent lain tetap
+    // diproses.
+    try {
+      const akun = await resolveScheduler(env, ag.id);
+      if (!akun.bufferKey && !akun.zernioKey) { hasilAgent.alasan = 'belum ada kredensial scheduler'; laporan.push(hasilAgent); continue; }
+      if (Object.keys(akun.channels).length === 0) { hasilAgent.alasan = 'belum ada channel sosmed'; laporan.push(hasilAgent); continue; }
 
-    const { targetId } = await resolveAkunTarget(env, ag.id);
-    const { kuota, hari, preset, mode } = await kuotaAkun(env, targetId, utama);
-    const terpakai = await slotTerpakaiHariIni(env, targetId);
-    if (!klaimPerAkun.has(targetId)) klaimPerAkun.set(targetId, await slotDipakai(env, targetId));
-    const dipakai = klaimPerAkun.get(targetId);
-    hasilAgent.kuota = kuota;
-    hasilAgent.hari_nyata = hari;
-    hasilAgent.mode_jadwal = mode;
-    hasilAgent.sudah_terjadwal = terpakai;
+      const { targetId } = await resolveAkunTarget(env, ag.id);
+      const { kuota, hari, preset, mode } = await kuotaAkun(env, targetId, utama);
+      const terpakai = await slotTerpakaiHariIni(env, targetId);
+      if (!klaimPerAkun.has(targetId)) klaimPerAkun.set(targetId, await slotDipakai(env, targetId));
+      const dipakai = klaimPerAkun.get(targetId);
+      hasilAgent.kuota = kuota;
+      hasilAgent.hari_nyata = hari;
+      hasilAgent.mode_jadwal = mode;
+      hasilAgent.sudah_terjadwal = terpakai;
 
-    // Kekurangan, BUKAN kuota penuh — inilah yang membuat cron idempoten:
-    // dijalankan dua kali, atau bercampur dengan klik manual, tidak pernah
-    // melebihi kuota harian.
-    const butuh = Math.max(0, kuota - terpakai);
-    if (butuh === 0) hasilAgent.alasan = 'kuota hari ini sudah penuh';
+      // Kekurangan, BUKAN kuota penuh — inilah yang membuat cron idempoten:
+      // dijalankan dua kali, atau bercampur dengan klik manual, tidak pernah
+      // melebihi kuota harian.
+      const butuh = Math.max(0, kuota - terpakai);
+      if (butuh === 0) hasilAgent.alasan = 'kuota hari ini sudah penuh';
 
-    // ⚠️ "kuota penuh" dan "stok habis" TIDAK lagi `continue` — keduanya justru
-    // kondisi paling wajar untuk menjalankan ulangi-platform-gagal di bawah.
-    // Dulu keduanya melompati sisa badan loop, jadi jalur pemulihan tidak akan
-    // pernah jalan untuk agent yang stoknya habis.
-    let videos = [];
-    if (butuh > 0) {
-      // Urutan kirim manual (drag & drop admin), bukan lagi FIFO created_at —
-      // hashtags WAJIB diikutkan, tanpa ini hashtag tersimpan di DB tapi tidak
-      // pernah ikut terkirim ke Buffer/Zernio (dilaporkan user 2026-08-15, sama
-      // seperti jalur manual).
-      //
-      // ⚠️ Antrean = HANYA video yang belum pernah dikirim sama sekali
-      // (sqlBelumPernahDikirim). trashed_at saja TIDAK cukup: video yang
-      // dipulihkan dari Sampah sesudah tayang, dan video yang gagal total, dulu
-      // dikirim ulang ke semua platform — video 1191 tayang dua kali (21 & 27
-      // Okt 2026). Video berriwayat hanya lewat jalur Ulangi di bawah.
-      const antre = await env.DB.prepare(
-        `SELECT id, cloudinary_url, caption, hashtags FROM viralframe_agent_videos
-         WHERE character_id = ? AND trashed_at IS NULL AND cloudinary_url IS NOT NULL
-           AND ${sqlBelumPernahDikirim('viralframe_agent_videos.id')}
-         ORDER BY urutan_kirim ASC, id ASC LIMIT ?`
-      ).bind(ag.id, butuh).all().catch(() => null);
-      videos = antre?.results ?? [];
-      if (videos.length === 0) hasilAgent.alasan = 'stok video habis';
-      else if (videos.length < butuh) hasilAgent.alasan = `stok kurang (${videos.length} dari ${butuh})`;
-    }
-
-    for (let i = 0; i < videos.length; i++) {
-      if (!dry && anggaranHabis()) {
-        terpotong = true;
-        tertundaBaru.add(ag.id);
-        hasilAgent.detail.push({ video_id: videos[i].id, alasan: 'anggaran waktu habis' });
-        break;
+      // ⚠️ "kuota penuh" dan "stok habis" TIDAK lagi `continue` — keduanya justru
+      // kondisi paling wajar untuk menjalankan ulangi-platform-gagal di bawah.
+      // Dulu keduanya melompati sisa badan loop, jadi jalur pemulihan tidak akan
+      // pernah jalan untuk agent yang stoknya habis.
+      let videos = [];
+      if (butuh > 0) {
+        // Urutan kirim manual (drag & drop admin), bukan lagi FIFO created_at —
+        // hashtags WAJIB diikutkan, tanpa ini hashtag tersimpan di DB tapi tidak
+        // pernah ikut terkirim ke Buffer/Zernio (dilaporkan user 2026-08-15, sama
+        // seperti jalur manual).
+        //
+        // ⚠️ Antrean = HANYA video yang belum pernah dikirim sama sekali
+        // (sqlBelumPernahDikirim). trashed_at saja TIDAK cukup: video yang
+        // dipulihkan dari Sampah sesudah tayang, dan video yang gagal total, dulu
+        // dikirim ulang ke semua platform — video 1191 tayang dua kali (21 & 27
+        // Okt 2026). Video berriwayat hanya lewat jalur Ulangi di bawah.
+        const antre = await env.DB.prepare(
+          `SELECT id, cloudinary_url, caption, hashtags FROM viralframe_agent_videos
+           WHERE character_id = ? AND trashed_at IS NULL AND cloudinary_url IS NOT NULL
+             AND ${sqlBelumPernahDikirim('viralframe_agent_videos.id')}
+           ORDER BY urutan_kirim ASC, id ASC LIMIT ?`
+        ).bind(ag.id, butuh).all(); // tanpa .catch: D1 error dulu terbaca "stok video habis"
+        videos = antre?.results ?? [];
+        if (videos.length === 0) hasilAgent.alasan = 'stok video habis';
+        else if (videos.length < butuh) hasilAgent.alasan = `stok kurang (${videos.length} dari ${butuh})`;
       }
-      // ⚠️ try/catch WAJIB per video. Sebelumnya satu exception (mis. D1 menolak
-      // INSERT) naik sampai ke sini dan mematikan SELURUH putaran — agent yang
-      // antre di belakang tidak pernah diproses, tanpa jejak (audit 2026-08-29).
-      try {
-        const r = await jadwalkanVideo(env, {
-          video: videos[i], akun, targetId, kuota, jendela, preset, dipakai, dryRun: dry,
-        });
-        if (!r.ok) { hasilAgent.gagal++; hasilAgent.detail.push({ video_id: videos[i].id, alasan: r.alasan }); continue; }
-        if (dry) { hasilAgent.detail.push({ video_id: videos[i].id, jendela: r.jendela, waktu: r.waktu }); hasilAgent.terjadwal++; continue; }
-        const gagalPlatform = (r.rows ?? []).filter(x => !x.result.ok);
-        // Belum pasti ≠ gagal: post-nya mungkin sudah ada. Dulu terhitung
-        // `gagal` dan memicu banner "Gagal menjadwalkan" untuk video yang
-        // ternyata sudah tayang (laporan user 2026-11-17).
-        if (r.adaSukses) hasilAgent.terjadwal++;
-        else if (r.belumPasti) hasilAgent.belum_pasti++;
-        else hasilAgent.gagal++;
-        hasilAgent.detail.push({
-          video_id: videos[i].id, jendela: r.jendela,
-          gagal_platform: gagalPlatform.map(x => `${x.platform}: ${x.result.error}${x.result.ambigu ? ' (belum pasti)' : ''}`),
-        });
-      } catch (err) {
-        hasilAgent.gagal++;
-        hasilAgent.detail.push({ video_id: videos[i].id, alasan: `error tak terduga: ${err.message}` });
-        console.error('[auto-schedule] video', videos[i].id, err.message);
-        await logServerError(env, {
-          source: 'server',
-          message: `[scheduler] error tak terduga saat menjadwalkan video ${videos[i].id} (agent ${ag.nama}): ${err.message}`,
-          stack: err.stack,
-          url: '/api/internal/viralframe/auto-schedule',
-          context: { video_id: videos[i].id, character_id: ag.id, akun_id: targetId },
-        });
-      }
-    }
 
-    // Pemulihan dijalankan SETELAH video baru, memakai Set klaim yang sama —
-    // supaya retry tidak pernah merebut jendela yang sudah dipesan video baru
-    // hari itu. Efek sampingnya (baris retry ikut terhitung di
-    // slotTerpakaiHariIni besok) memang diinginkan: total post per hari tetap
-    // terkurung kuota.
-    if (!anggaranHabis()) {
-      try {
-        const ulang = await ulangiPlatformGagal(env, {
-          akun, targetId, kuota, jendela, preset, dipakai, dryRun: dry,
-        });
-        if (ulang.diulang > 0 || ulang.dilewati > 0) hasilAgent.ulangi = ulang;
-      } catch (err) {
-        console.error('[auto-schedule] ulangi', ag.id, err.message);
-        await logServerError(env, {
-          source: 'server',
-          message: `[scheduler] error saat mengulang platform gagal untuk agent ${ag.nama}: ${err.message}`,
-          stack: err.stack,
-          url: '/api/internal/viralframe/auto-schedule',
-          context: { character_id: ag.id, akun_id: targetId },
-        });
+      for (let i = 0; i < videos.length; i++) {
+        if (!dry && anggaranHabis()) {
+          terpotong = true;
+          tertundaBaru.add(ag.id);
+          hasilAgent.detail.push({ video_id: videos[i].id, alasan: 'anggaran waktu habis' });
+          break;
+        }
+        // ⚠️ try/catch WAJIB per video. Sebelumnya satu exception (mis. D1 menolak
+        // INSERT) naik sampai ke sini dan mematikan SELURUH putaran — agent yang
+        // antre di belakang tidak pernah diproses, tanpa jejak (audit 2026-08-29).
+        try {
+          const r = await jadwalkanVideo(env, {
+            video: videos[i], akun, targetId, kuota, jendela, preset, dipakai, dryRun: dry,
+          });
+          if (!r.ok) { hasilAgent.gagal++; hasilAgent.detail.push({ video_id: videos[i].id, alasan: r.alasan }); continue; }
+          if (dry) { hasilAgent.detail.push({ video_id: videos[i].id, jendela: r.jendela, waktu: r.waktu }); hasilAgent.terjadwal++; continue; }
+          const gagalPlatform = (r.rows ?? []).filter(x => !x.result.ok);
+          // Belum pasti ≠ gagal: post-nya mungkin sudah ada. Dulu terhitung
+          // `gagal` dan memicu banner "Gagal menjadwalkan" untuk video yang
+          // ternyata sudah tayang (laporan user 2026-11-17).
+          if (r.adaSukses) hasilAgent.terjadwal++;
+          else if (r.belumPasti) hasilAgent.belum_pasti++;
+          else hasilAgent.gagal++;
+          hasilAgent.detail.push({
+            video_id: videos[i].id, jendela: r.jendela,
+            gagal_platform: gagalPlatform.map(x => `${x.platform}: ${x.result.error}${x.result.ambigu ? ' (belum pasti)' : ''}`),
+          });
+        } catch (err) {
+          hasilAgent.gagal++;
+          hasilAgent.detail.push({ video_id: videos[i].id, alasan: `error tak terduga: ${err.message}` });
+          console.error('[auto-schedule] video', videos[i].id, err.message);
+          await logServerError(env, {
+            source: 'server',
+            message: `[scheduler] error tak terduga saat menjadwalkan video ${videos[i].id} (agent ${ag.nama}): ${err.message}`,
+            stack: err.stack,
+            url: '/api/internal/viralframe/auto-schedule',
+            context: { video_id: videos[i].id, character_id: ag.id, akun_id: targetId },
+          });
+        }
       }
-    }
 
-    if (!dry) {
-      await setStatusAgent(env, ag.id, hasilAgent);
+      // Pemulihan dijalankan SETELAH video baru, memakai Set klaim yang sama —
+      // supaya retry tidak pernah merebut jendela yang sudah dipesan video baru
+      // hari itu. Efek sampingnya (baris retry ikut terhitung di
+      // slotTerpakaiHariIni besok) memang diinginkan: total post per hari tetap
+      // terkurung kuota.
+      if (!anggaranHabis()) {
+        try {
+          const ulang = await ulangiPlatformGagal(env, {
+            akun, targetId, kuota, jendela, preset, dipakai, dryRun: dry, anggaranHabis,
+          });
+          if (ulang.diulang > 0 || ulang.dilewati > 0) hasilAgent.ulangi = ulang;
+        } catch (err) {
+          console.error('[auto-schedule] ulangi', ag.id, err.message);
+          await logServerError(env, {
+            source: 'server',
+            message: `[scheduler] error saat mengulang platform gagal untuk agent ${ag.nama}: ${err.message}`,
+            stack: err.stack,
+            url: '/api/internal/viralframe/auto-schedule',
+            context: { character_id: ag.id, akun_id: targetId },
+          });
+        }
+      }
+
+      if (!dry) {
+        await setStatusAgent(env, ag.id, hasilAgent);
+      }
+      laporan.push(hasilAgent);
+    } catch (err) {
+      hasilAgent.alasan = `error database — agent dilewati putaran ini: ${err.message}`;
+      // Dicoba lagi tick berikutnya. Aman: kuota harian membuat putaran idempoten.
+      if (!dry && !manual) tertundaBaru.add(ag.id);
+      console.error('[auto-schedule] agent', ag.id, err.message);
+      await logServerError(env, {
+        source: 'server',
+        message: `[scheduler] agent ${ag.nama} dilewati karena error database: ${err.message}`,
+        stack: err.stack,
+        url: '/api/internal/viralframe/auto-schedule',
+        context: { character_id: ag.id },
+      });
+      if (!dry) await setStatusAgent(env, ag.id, hasilAgent);
+      laporan.push(hasilAgent);
     }
-    laporan.push(hasilAgent);
   }
 
   if (!dry) {

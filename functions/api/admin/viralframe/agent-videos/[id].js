@@ -16,15 +16,29 @@ export async function onRequestDelete(context) {
   if (!row) return jsonError('Video tidak ditemukan', 404);
   // Video yang masih ditunggu tayang Buffer/Zernio tidak boleh dihapus sekarang
   // — link medianya akan mati sebelum sempat tayang (audit 2026-08-15).
-  if (await adaJadwalTertunda(env, id)) {
-    return jsonError('Video ini masih ditunggu tayang dari jadwal sebelumnya — hapus setelah waktu tayangnya lewat.', 409);
+  // adaJadwalTertunda MELEMPAR saat D1 error (2026-11-17): tidak bisa
+  // memastikan = jangan hapus.
+  try {
+    if (await adaJadwalTertunda(env, id)) {
+      return jsonError('Video ini masih ditunggu tayang dari jadwal sebelumnya — hapus setelah waktu tayangnya lewat.', 409);
+    }
+  } catch (err) {
+    console.error('[vf agent-videos] cek jadwal tertunda', err.message);
+    return jsonError('Database sedang bermasalah — video tidak dihapus. Coba lagi sebentar lagi.', 503);
   }
 
   // Hapus di tempat aset ini benar-benar tersimpan: bucket R2 (migrasi 0043)
   // atau cloud Cloudinary yang tercatat di barisnya — yang terakhir bisa berbeda
   // dari akun agent sekarang kalau agent-nya pernah pindah akun (migrasi 0037).
+  //
+  // ⚠️ Gagal hapus file = baris D1 TIDAK dihapus (2026-11-17), sama dengan
+  // hapus massal & purge. Dulu kegagalan ditelan lalu barisnya tetap dihapus —
+  // objek R2 jadi yatim selamanya, tanpa satu pun penanda untuk dicoba lagi.
   try { await hapusAsetVideo(env, row); }
-  catch (err) { console.error('[vf agent-videos] destroy aset', err.message); }
+  catch (err) {
+    console.error('[vf agent-videos] destroy aset', err.message);
+    return jsonError(`Gagal menghapus file video di storage — catatan video tidak dihapus supaya bisa dicoba lagi. (${err.message})`, 502);
+  }
 
   try {
     await env.DB.prepare('DELETE FROM viralframe_agent_videos WHERE id = ?').bind(id).run();
@@ -74,9 +88,15 @@ export async function onRequestPatch(context) {
     // Video yang SUDAH (mungkin) tayang tidak boleh kembali ke antrean — cron
     // akan mengirimnya lagi (video 1191 tayang dua kali, 21 & 27 Okt 2026).
     // Aturan yang sama dengan restore massal di bulk.js.
-    const terkirim = await env.DB.prepare(
-      `SELECT 1 AS ada FROM viralframe_agent_videos WHERE id = ? AND ${sqlSudahTerkirim('viralframe_agent_videos.id')}`
-    ).bind(id).first();
+    let terkirim;
+    try {
+      terkirim = await env.DB.prepare(
+        `SELECT 1 AS ada FROM viralframe_agent_videos WHERE id = ? AND ${sqlSudahTerkirim('viralframe_agent_videos.id')}`
+      ).bind(id).first();
+    } catch (err) {
+      console.error('[vf agent-videos] cek riwayat kirim', err.message);
+      return jsonError('Database sedang bermasalah — video tidak dipulihkan. Coba lagi sebentar lagi.', 503);
+    }
     if (terkirim) {
       return jsonError('Video ini sudah terkirim ke scheduler — tidak bisa dikembalikan ke antrean, karena akan tayang dua kali. Posting ulang konten yang sama belum didukung.', 409);
     }

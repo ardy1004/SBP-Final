@@ -93,7 +93,20 @@ async function konfirmasi(env, videoId, k) {
   return jsonOk({ mode: 'konfirmasi', hasil, diubah, dilewati });
 }
 
+// Penjaga slot, kuota & riwayat MELEMPAR saat D1 error (gagal-tertutup,
+// 2026-11-17). Semuanya dibaca SEBELUM fan-out ke provider, dan semua langkah
+// sesudah fan-out (persistScheduleResult, logServerError) menangkap error-nya
+// sendiri — jadi error yang sampai ke sini berarti belum ada yang terkirim.
 export async function onRequestPost(context) {
+  try {
+    return await prosesPost(context);
+  } catch (err) {
+    console.error('[vf commit-agent]', err.message);
+    return jsonError(`Database sedang bermasalah — belum ada yang dikirim ke Buffer/Zernio. Coba lagi sebentar lagi. (${err.message})`, 503);
+  }
+}
+
+async function prosesPost(context) {
   const { request, env } = context;
   let body;
   try { body = await request.json(); } catch { return jsonError('Body JSON tidak valid', 400); }

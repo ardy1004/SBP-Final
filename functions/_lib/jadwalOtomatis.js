@@ -93,20 +93,18 @@ export async function getPresetUtama(env) {
 // jendela mengubah makna slot_index — logika persis yang dulu melahirkan bug
 // tabrakan (lihat catatan di slotTersedia).
 //
-// ⚠️ Gagal membaca (mis. kolom belum ada karena kode ter-deploy sebelum
-// migrasi) = mode otomatis, BUKAN error. JSON yang ada tapi rusak dicatat ke
-// Error Logs supaya admin tidak melihat "Manual" di UI sementara mesin diam-diam
-// memakai ramp.
+// ⚠️ D1 error saat membaca = MELEMPAR (2026-11-17), bukan diam-diam jatuh ke
+// mode otomatis. Dulu catch → null: agent Manual yang barisnya gagal terbaca
+// dijadwalkan di jam jendela yang sama sekali lain, dengan kunci slot yang
+// bermakna lain pula. Alasan lamanya (kolom belum ada sebelum migrasi 0057)
+// sudah tidak berlaku. Baris yang memang tidak ada tetap = mode otomatis. JSON
+// yang ada tapi rusak dicatat ke Error Logs supaya admin tidak melihat "Manual"
+// di UI sementara mesin diam-diam memakai ramp.
 export async function getJadwalManual(env, akunId) {
-  let raw;
-  try {
-    const row = await env.DB.prepare(
-      'SELECT jadwal_manual FROM viralframe_agent_accounts WHERE character_id = ?'
-    ).bind(akunId).first();
-    raw = row?.jadwal_manual ?? null;
-  } catch {
-    return null;
-  }
+  const row = await env.DB.prepare(
+    'SELECT jadwal_manual FROM viralframe_agent_accounts WHERE character_id = ?'
+  ).bind(akunId).first();
+  const raw = row?.jadwal_manual ?? null;
   if (!raw) return null;
   try {
     const v = JSON.parse(raw);
@@ -431,34 +429,37 @@ export async function kuotaAkun(env, akunId, akunUtamaId) {
 // Inilah yang membuat cron idempoten: jalan dua kali, atau bercampur dengan klik
 // manual, tetap tidak pernah melebihi kuota. 'unconfirmed' ikut dihitung —
 // post-nya mungkin sudah ada.
+//
+// ⚠️ D1 error = MELEMPAR (2026-11-17). Dulu catch → 0: satu query yang gagal
+// membuat akun terlihat kosong, dan putaran itu menjadwalkan kuota PENUH lagi
+// di atas yang sudah ada. Pemanggil cron menangkapnya per agent.
 export async function slotTerpakaiHariIni(env, akunId, tanggal = tanggalWib()) {
-  try {
-    const row = await env.DB.prepare(
-      `SELECT COUNT(DISTINCT video_id) AS n FROM viralframe_scheduled_posts
-       WHERE akun_id = ? AND status IN ${STATUS_TERKIRIM_SQL} AND substr(scheduled_at,1,10) = ?`
-    ).bind(akunId, tanggal).first();
-    return row?.n ?? 0;
-  } catch {
-    return 0;
-  }
+  const row = await env.DB.prepare(
+    `SELECT COUNT(DISTINCT video_id) AS n FROM viralframe_scheduled_posts
+     WHERE akun_id = ? AND status IN ${STATUS_TERKIRIM_SQL} AND substr(scheduled_at,1,10) = ?`
+  ).bind(akunId, tanggal).first();
+  return row?.n ?? 0;
 }
 
 // ── Slot yang sudah terisi ───────────────────────────────────────────────────
 // Kunci slot = "<tanggal>|<slot_index>", dengan slot_index = index jendela + 1
 // (nilai yang sama yang ditulis persistScheduleResult). Hari ini DAN besok ikut
 // dibaca, karena penjadwalan sore/malam wajar mendarat di jendela besok.
+//
+// ⚠️ D1 error = MELEMPAR (2026-11-17). Dulu catch → Set kosong ("kolom/tabel
+// belum ada"): satu query yang gagal membuat semua slot terlihat kosong, dan
+// video berikutnya mendarat di MENIT YANG SAMA dengan post yang sudah ada di
+// akun yang sama. Lebih baik agent ini dilewati satu putaran.
 export async function slotDipakai(env, akunId, sekarang = Date.now()) {
   const set = new Set();
-  try {
-    const hariIni = tanggalWib(new Date(sekarang), 0);
-    const besok = tanggalWib(new Date(sekarang), 1);
-    const res = await env.DB.prepare(
-      `SELECT DISTINCT substr(scheduled_at,1,10) AS tgl, slot_index
-         FROM viralframe_scheduled_posts
-        WHERE akun_id = ? AND status IN ${STATUS_TERKIRIM_SQL} AND substr(scheduled_at,1,10) IN (?, ?)`
-    ).bind(akunId, hariIni, besok).all();
-    for (const r of res.results ?? []) set.add(`${r.tgl}|${r.slot_index}`);
-  } catch { /* kolom/tabel belum ada -> anggap kosong, jangan matikan penjadwalan */ }
+  const hariIni = tanggalWib(new Date(sekarang), 0);
+  const besok = tanggalWib(new Date(sekarang), 1);
+  const res = await env.DB.prepare(
+    `SELECT DISTINCT substr(scheduled_at,1,10) AS tgl, slot_index
+       FROM viralframe_scheduled_posts
+      WHERE akun_id = ? AND status IN ${STATUS_TERKIRIM_SQL} AND substr(scheduled_at,1,10) IN (?, ?)`
+  ).bind(akunId, hariIni, besok).all();
+  for (const r of res.results ?? []) set.add(`${r.tgl}|${r.slot_index}`);
   return set;
 }
 
@@ -642,7 +643,11 @@ export function bolehDiulang(errorMessage) {
 const MAKS_PERCOBAAN = 2;
 const UMUR_MAKS_HARI = 14;
 
-export async function ulangiPlatformGagal(env, { akun, targetId, kuota, jendela, preset, dipakai, maksVideo = 2, dryRun = false }) {
+// `anggaranHabis` = fungsi yang SAMA dengan loop utama auto-schedule (sudah
+// mencadangkan biaya terburuk satu video). Diperiksa sebelum TIAP video: dulu
+// hanya sekali sebelum memanggil fungsi ini, lalu dua video berurutan masing-
+// masing bisa memakan TIMEOUT_POST_MS — ±32 detik, melewati batas Worker.
+export async function ulangiPlatformGagal(env, { akun, targetId, kuota, jendela, preset, dipakai, maksVideo = 2, dryRun = false, anggaranHabis = () => false }) {
   let baris;
   try {
     const res = await env.DB.prepare(
@@ -686,6 +691,7 @@ export async function ulangiPlatformGagal(env, { akun, targetId, kuota, jendela,
   let diulang = 0;
   for (const [videoId, { video, platforms }] of perVideo) {
     if (diulang >= maksVideo) break;
+    if (!dryRun && anggaranHabis()) { detail.push({ video_id: videoId, alasan: 'anggaran waktu habis — dicoba putaran berikutnya' }); break; }
 
     // Hanya platform yang channelnya memang masih terkonfigurasi di akun ini.
     const daftar = [...platforms].filter(p => akun.channels?.[p]?.id);
@@ -754,10 +760,12 @@ export async function ulangiPlatformVideo(env, { video, akun, targetId, kuota, j
   // 'unconfirmed' ikut terlarang: post-nya mungkin sudah ada. Admin wajib
   // memastikan dulu lewat konfirmasi ("Tidak ada di sana" mengubahnya jadi
   // 'failed', baru boleh diulang).
+  // Tanpa .catch: query yang gagal dulu = daftar terlarang KOSONG = platform
+  // yang sudah terjadwal ikut dikirim lagi. Penjaga anti-dobel wajib tertutup.
   const sudah = await env.DB.prepare(
     `SELECT DISTINCT platform FROM viralframe_scheduled_posts
       WHERE video_id = ? AND video_type = 'agent' AND status IN ${STATUS_TERKIRIM_SQL}`
-  ).bind(video.id).all().catch(() => null);
+  ).bind(video.id).all();
   const terlarang = new Set((sudah?.results ?? []).map(r => r.platform));
   const daftar = diminta.filter(p => !terlarang.has(p));
   if (daftar.length === 0) {

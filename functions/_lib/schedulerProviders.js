@@ -86,24 +86,25 @@ export function statusBaris(result) {
 // dua risiko nyata (audit 2026-08-15): (a) menjadwalkan ulang video yang masih
 // ditunggu tayang = posting dua kali, (b) menghapus/purge video yang masih
 // ditunggu Buffer/Zernio = link media di post terjadwal jadi mati.
+// ⚠️ D1 error = MELEMPAR (2026-11-17), bukan "tidak tertunda". Dulu catch →
+// false ("anggap aman"): purge-trash & hapus permanen lalu MENGHAPUS media video
+// yang masih ditunggu Buffer/Zernio — link mati sebelum tayang. Penjaga yang
+// melindungi tindakan destruktif wajib gagal-tertutup; pemanggilnya sudah
+// punya try/catch yang mengembalikan error (purge dicoba lagi malam berikutnya).
 export async function adaJadwalTertunda(env, videoId) {
-  try {
-    // ⚠️ WAJIB julianday(), BUKAN `scheduled_at > datetime('now')` mentah.
-    // scheduled_at berformat ISO "...T06:03:00+07:00" (pemisah 'T', ada offset),
-    // datetime('now') berformat "...  14:01:18" (pemisah spasi, UTC tanpa offset).
-    // Dites langsung ke D1 produksi: perbandingan TEKS salah — begitu tanggal UTC
-    // di kedua sisi sama, karakter 'T' (0x54) > spasi (0x20) MENDOMINASI hasil
-    // SEBELUM jamnya sendiri sempat dibandingkan, jadi jam yang sudah lewat
-    // berjam-jam tetap terbaca "masih tertunda" sampai tengah malam UTC berganti
-    // tanggal. julianday() mem-parse offset dengan benar, hasilnya akurat.
-    const row = await env.DB.prepare(
-      `SELECT 1 FROM viralframe_scheduled_posts
-       WHERE video_id = ? AND status IN ${STATUS_TERKIRIM_SQL} AND julianday(scheduled_at) > julianday('now') LIMIT 1`
-    ).bind(videoId).first();
-    return !!row;
-  } catch {
-    return false; // tabel/kolom belum ada -> anggap aman, jangan macetkan hapus/jadwalkan
-  }
+  // ⚠️ WAJIB julianday(), BUKAN `scheduled_at > datetime('now')` mentah.
+  // scheduled_at berformat ISO "...T06:03:00+07:00" (pemisah 'T', ada offset),
+  // datetime('now') berformat "...  14:01:18" (pemisah spasi, UTC tanpa offset).
+  // Dites langsung ke D1 produksi: perbandingan TEKS salah — begitu tanggal UTC
+  // di kedua sisi sama, karakter 'T' (0x54) > spasi (0x20) MENDOMINASI hasil
+  // SEBELUM jamnya sendiri sempat dibandingkan, jadi jam yang sudah lewat
+  // berjam-jam tetap terbaca "masih tertunda" sampai tengah malam UTC berganti
+  // tanggal. julianday() mem-parse offset dengan benar, hasilnya akurat.
+  const row = await env.DB.prepare(
+    `SELECT 1 FROM viralframe_scheduled_posts
+     WHERE video_id = ? AND status IN ${STATUS_TERKIRIM_SQL} AND julianday(scheduled_at) > julianday('now') LIMIT 1`
+  ).bind(videoId).first();
+  return !!row;
 }
 
 // Fan-out inti. Kredensial WAJIB dikirim pemanggil (`akun` hasil
