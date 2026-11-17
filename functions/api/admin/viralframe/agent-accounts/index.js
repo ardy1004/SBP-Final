@@ -9,7 +9,7 @@ import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { maskKey } from '../../../../_lib/aiProviders.js';
 import { parseSpesialis, parseChannels, getModeAkun, PLATFORMS } from '../../../../_lib/agentAccounts.js';
 import { setSetting, getSetting } from '../../../../_lib/schedulerProviders.js';
-import { kuotaAkun, kuotaRamp, PRESET_UTAMA_DEFAULT } from '../../../../_lib/jadwalOtomatis.js';
+import { kuotaAkun, kuotaRamp, PRESET_UTAMA_DEFAULT, sqlBelumPernahDikirim } from '../../../../_lib/jadwalOtomatis.js';
 import { susunJamSemuaAgent } from '../../../../_lib/susunJam.js';
 
 export async function onRequestGet({ env }) {
@@ -19,7 +19,13 @@ export async function onRequestGet({ env }) {
              a.gmail, a.spesialis, a.cloudinary_name, a.cloudinary_api_key, a.cloudinary_api_secret,
              a.buffer_api_key, a.zernio_api_key, a.channels_json,
              a.jam_auto, a.auto_aktif, a.mulai_aktif, a.auto_terakhir, a.auto_hasil,
-             (SELECT COUNT(*) FROM viralframe_agent_videos v WHERE v.character_id = c.id AND v.trashed_at IS NULL) AS video_aktif
+             (SELECT COUNT(*) FROM viralframe_agent_videos v WHERE v.character_id = c.id AND v.trashed_at IS NULL) AS video_aktif,
+             -- Stok yang BENAR-BENAR akan dikirim cron: syarat yang sama persis
+             -- dengan antrean di auto-schedule.js. video_aktif ikut menghitung
+             -- video berriwayat (gagal total) yang tidak pernah dikirim cron lagi,
+             -- jadi perkiraan "±hari" & peringatan stok memakai angka ini.
+             (SELECT COUNT(*) FROM viralframe_agent_videos v WHERE v.character_id = c.id AND v.trashed_at IS NULL
+                AND v.cloudinary_url IS NOT NULL AND ${sqlBelumPernahDikirim('v.id')}) AS stok_antre
       FROM viralframe_characters c
       LEFT JOIN viralframe_agent_accounts a ON a.character_id = c.id
       ORDER BY c.id
@@ -44,6 +50,7 @@ export async function onRequestGet({ env }) {
       // channel menghasilkan nol baris, yang dulu terbaca seperti sukses.
       scheduler_siap: !!(r.buffer_api_key || r.zernio_api_key) && Object.keys(parseChannels(r.channels_json)).length > 0,
       video_aktif: r.video_aktif ?? 0,
+      stok_antre: r.stok_antre ?? 0,
       jam_auto: r.jam_auto ?? '',
       auto_aktif: r.auto_aktif === 1,
       mulai_aktif: r.mulai_aktif ?? null,

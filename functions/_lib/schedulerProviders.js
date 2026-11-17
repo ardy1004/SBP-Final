@@ -187,6 +187,20 @@ export async function persistScheduleResult(env, { videoId, videoType, trashTabl
 
   const sukses = rows.some(r => r.result.ok);
   const belumPasti = rows.some(r => !r.result.ok && r.result.ambigu);
+
+  // Riwayat hari posting untuk ramp kuota (migrasi 0060) — hanya yang PASTI
+  // sukses. Tabel ini tidak ikut dibersihkan purge, beda dengan baris jadwal.
+  // Non-fatal: gagal mencatat hanya membuat ramp sedikit lebih lambat.
+  if (sukses && akunId) {
+    const tanggal = [...new Set(rows.filter(r => r.result.ok).map(r => String(r.scheduledAt).slice(0, 10)))];
+    try {
+      await Promise.all(tanggal.map(t => env.DB.prepare(
+        'INSERT OR IGNORE INTO viralframe_hari_posting (akun_id, tanggal) VALUES (?, ?)'
+      ).bind(akunId, t).run()));
+    } catch (err) {
+      console.error('[persistScheduleResult] hari_posting', err.message);
+    }
+  }
   // Video keluar dari antrean begitu post-nya (MUNGKIN) sudah ada di provider —
   // termasuk hasil ambigu. Dulu hanya `sukses`: video yang kelima platformnya
   // timeout tetap Aktif dan cron besoknya mengirimnya lagi, padahal provider

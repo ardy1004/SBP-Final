@@ -42,9 +42,15 @@ async function bersihkanTabel(env) {
   // selamanya. Diukur 2026-08-31: 720 dari 901 baris (80%) sudah yatim, dan
   // tabelnya tumbuh tanpa batas karena tidak ada yang pernah membersihkannya.
   //
-  // Aman dihapus: keempat pembaca tabel ini (slotDipakai, slotTerpakaiHariIni,
-  // adaJadwalTertunda, platform_gagal) hanya peduli baris TERKINI, dan
-  // analytics.js tidak membacanya sama sekali.
+  // Aman dihapus: pembaca tabel ini (slotDipakai, slotTerpakaiHariIni,
+  // adaJadwalTertunda, platform_gagal/belum_pasti) hanya peduli baris TERKINI,
+  // dan analytics.js tidak membacanya sama sekali.
+  //
+  // ⚠️ hariPosting() DULU juga membaca tabel ini (COUNT DISTINCT tanggal) dan
+  // terlewat dari daftar di atas — pembersih ini memotong riwayatnya ±31 hari
+  // sehingga ramp kuota mentok. Sejak migrasi 0060 ia membaca
+  // viralframe_hari_posting. Pembaca BARU yang butuh riwayat panjang wajib
+  // memakai tabel sendiri, bukan tabel ini.
   //
   // ⚠️ Dua penjaga yang WAJIB dipertahankan:
   //  · umur > 30 hari — videonya sendiri baru dihapus sesudah 30 hari di

@@ -35,6 +35,15 @@ export default function AutoJadwalBanner() {
           : 'Auto-jadwal belum pernah jalan sejak dinyalakan — cek worker cron.');
       }
 
+      // Per AGENT (2026-11-17). `auto_terakhir` global di atas bergerak oleh
+      // tick agent MANA PUN — kalau tick satu agent gagal (HTTP 5xx, D1 error),
+      // agent itu kehilangan harinya tanpa satu pun peringatan. Hanya agent yang
+      // memang siap jalan: auto menyala, punya jam kirim, dan scheduler lengkap.
+      const sekarang = Date.now();
+      const diam = items.filter(a => a.auto_aktif && a.jam_auto && a.scheduler_siap
+        && (!a.auto_terakhir || (sekarang - new Date(a.auto_terakhir).getTime()) / 3600000 > AMBANG_DIAM_JAM));
+      if (diam.length) out.push(`Tidak diproses cron >${AMBANG_DIAM_JAM} jam: ${diam.map(a => a.nama).join(', ')} — cek Error Logs [scheduler].`);
+
       const gagal = items.filter(a => a.auto_aktif && (a.auto_hasil?.gagal ?? 0) > 0);
       if (gagal.length) out.push(`Gagal menjadwalkan: ${gagal.map(a => a.nama).join(', ')}.`);
 
@@ -43,8 +52,14 @@ export default function AutoJadwalBanner() {
       const ragu = items.filter(a => a.auto_aktif && (a.auto_hasil?.belum_pasti ?? 0) > 0);
       if (ragu.length) out.push(`Perlu dicek (post belum pasti): ${ragu.map(a => a.nama).join(', ')}.`);
 
-      const kosong = items.filter(a => a.auto_aktif && a.video_aktif === 0);
+      // Stok = video yang BENAR-BENAR akan dikirim cron (stok_antre), bukan
+      // jumlah tab Aktif. Peringatan menipis muncul sebelum habis: < 3 hari
+      // pada kuota sekarang (8 agent × 5/hari = 40 video/hari).
+      const stok = (a: typeof items[number]) => a.stok_antre ?? a.video_aktif;
+      const kosong = items.filter(a => a.auto_aktif && stok(a) === 0);
       if (kosong.length) out.push(`Stok video habis: ${kosong.map(a => a.nama).join(', ')}.`);
+      const tipis = items.filter(a => a.auto_aktif && a.kuota > 0 && stok(a) > 0 && stok(a) < a.kuota * 3);
+      if (tipis.length) out.push(`Stok menipis (<3 hari): ${tipis.map(a => `${a.nama} ±${Math.floor(stok(a) / a.kuota)} hari`).join(', ')}.`);
 
       setPesan(out);
     }).catch(() => { /* banner bersifat tambahan — jangan pernah merusak dashboard */ });

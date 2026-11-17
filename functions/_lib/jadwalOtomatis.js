@@ -388,11 +388,16 @@ export function slotPresetHariIni(akunId, tanggalWib_, preset, platforms) {
 // sempat posting 1x lalu kehabisan stok 25 hari tetap naik ke 2x/hari di hari
 // ke-31 — dengan akun yang riwayatnya baru 1 post. Justru profil seperti itu
 // yang paling mudah dicurigai.
+//
+// Sumbernya tabel viralframe_hari_posting (migrasi 0060), BUKAN lagi
+// viralframe_scheduled_posts: pembersih baris jadwal yatim di purge-trash.js
+// menghapus riwayat >30 hari, sehingga dulu `hari` mentok ±31 dan kuota tidak
+// pernah naik ke 3. Tabel itu diisi persistScheduleResult & konfirmasi tayang.
+// Error = 0 (kuota terendah) — gagal ke arah lebih sedikit posting, aman.
 export async function hariPosting(env, akunId) {
   try {
     const row = await env.DB.prepare(
-      `SELECT COUNT(DISTINCT substr(scheduled_at,1,10)) AS n
-       FROM viralframe_scheduled_posts WHERE akun_id = ? AND status = 'scheduled'`
+      'SELECT COUNT(*) AS n FROM viralframe_hari_posting WHERE akun_id = ?'
     ).bind(akunId).first();
     return row?.n ?? 0;
   } catch {

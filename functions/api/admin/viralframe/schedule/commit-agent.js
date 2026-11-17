@@ -65,6 +65,12 @@ async function konfirmasi(env, videoId, k) {
             SET status = 'scheduled', error_message = substr(? || COALESCE(error_message, ''), 1, 500)
           WHERE id = ? AND status IN ('failed','unconfirmed')`
       ).bind(`Dikonfirmasi tayang oleh admin (${cap}); asal: `, terbaru.id));
+      // Tayang = hari posting nyata untuk ramp kuota (migrasi 0060).
+      stmts.push(env.DB.prepare(
+        `INSERT OR IGNORE INTO viralframe_hari_posting (akun_id, tanggal)
+         SELECT akun_id, substr(scheduled_at, 1, 10) FROM viralframe_scheduled_posts
+          WHERE id = ? AND akun_id IS NOT NULL`
+      ).bind(terbaru.id));
     } else {
       const ragu = milik.filter(b => b.status === 'unconfirmed');
       if (ragu.length === 0) { dilewati.push({ platform: p, alasan: 'tidak berstatus belum pasti' }); continue; }

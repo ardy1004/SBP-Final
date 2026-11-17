@@ -118,7 +118,10 @@ export default function TransferAgentModal({ videos, asal, onClose, onSelesai }:
             ) : (
               <div className="space-y-1.5 mb-3">
                 {agents.map(a => {
-                  const hari = a.kuota > 0 ? Math.floor(a.video_aktif / a.kuota) : null;
+                  // Stok yang benar-benar akan dikirim cron (stok_antre), bukan
+                  // jumlah tab Aktif — video berriwayat tidak ikut antrean.
+                  const stok = a.stok_antre ?? a.video_aktif;
+                  const hari = a.kuota > 0 ? Math.floor(stok / a.kuota) : null;
                   const dipilih = tujuanId === a.character_id;
                   return (
                     <label key={a.character_id}
@@ -131,10 +134,10 @@ export default function TransferAgentModal({ videos, asal, onClose, onSelesai }:
                       {/* Stok dihitung dengan rumus yang sama seperti kartu Akun
                           Agent, supaya dua tempat tidak pernah menyebut angka beda. */}
                       <span className={`text-[11px] flex-shrink-0 ${
-                        a.video_aktif === 0 ? 'text-red-600 font-semibold' : hari != null && hari < 3 ? 'text-amber-700' : 'text-[#94A3B8]'
+                        stok === 0 ? 'text-red-600 font-semibold' : hari != null && hari < 3 ? 'text-amber-700' : 'text-[#94A3B8]'
                       }`}>
-                        {a.video_aktif === 0 ? 'stok habis' : `${a.video_aktif} video`}
-                        {a.video_aktif > 0 && hari != null && ` · ±${hari} hari`}
+                        {stok === 0 ? 'stok habis' : `${stok} video`}
+                        {stok > 0 && hari != null && ` · ±${hari} hari`}
                       </span>
                     </label>
                   );

@@ -609,6 +609,10 @@ export interface AgentAccount {
   storage_siap: boolean;
   scheduler_siap: boolean;
   video_aktif: number;
+  /** Video yang benar-benar akan dikirim cron (aktif, ber-URL, belum pernah
+   *  dikirim). Dasar perkiraan "±hari" & peringatan stok. Tidak ada di respons
+   *  server lama → opsional. */
+  stok_antre?: number;
   /** Jam kirim ke Buffer/Zernio (WIB, kelipatan 30 menit) — BUKAN jam tayang. */
   jam_auto: string;
   auto_aktif: boolean;

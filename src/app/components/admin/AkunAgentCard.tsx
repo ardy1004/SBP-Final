@@ -217,7 +217,7 @@ export default function AkunAgentCard({ onTersimpan, muatUlang = 0 }: {
   // Ringkasan yang tampil saat kartu tertutup. Tanpa ini, saklar auto yang mati
   // atau agent yang bermasalah jadi tak terlihat sama sekali begitu diciutkan.
   const siap = items?.filter(a => a.storage_siap && a.scheduler_siap).length ?? 0;
-  const perluPerhatian = items?.filter(a => a.auto_aktif && ((a.auto_hasil?.gagal ?? 0) > 0 || (a.auto_hasil?.belum_pasti ?? 0) > 0 || a.video_aktif === 0)).length ?? 0;
+  const perluPerhatian = items?.filter(a => a.auto_aktif && ((a.auto_hasil?.gagal ?? 0) > 0 || (a.auto_hasil?.belum_pasti ?? 0) > 0 || (a.stok_antre ?? a.video_aktif) === 0)).length ?? 0;
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
@@ -313,7 +313,10 @@ export default function AkunAgentCard({ onTersimpan, muatUlang = 0 }: {
                   {a.mode_jadwal === 'manual' && ' (manual)'}
                   {a.mode_jadwal === 'otomatis' && a.hari != null && ` · ${a.hari} hari nyata`}
                 </span>
-                <span className="ml-auto text-[10px] text-[#94A3B8]">{a.video_aktif} video</span>
+                <span className="ml-auto text-[10px] text-[#94A3B8]"
+                  title="Video yang akan dikirim cron (belum pernah terkirim). Angka tab Aktif bisa lebih besar.">
+                  {a.stok_antre ?? a.video_aktif} antre
+                </span>
               </button>
 
               {terbuka && form && (
@@ -448,7 +451,7 @@ export default function AkunAgentCard({ onTersimpan, muatUlang = 0 }: {
                       ) : (() => {
                         const manual = form.jadwal_manual != null;
                         const kuotaBaru = manual ? form.jadwal_manual!.slots.length : (a.kuota_otomatis ?? a.kuota);
-                        const hariStok = kuotaBaru > 0 ? Math.floor(a.video_aktif / kuotaBaru) : null;
+                        const hariStok = kuotaBaru > 0 ? Math.floor((a.stok_antre ?? a.video_aktif) / kuotaBaru) : null;
                         return (
                           <>
                             <div className="flex flex-col gap-1.5">
@@ -476,7 +479,7 @@ export default function AkunAgentCard({ onTersimpan, muatUlang = 0 }: {
                             <div className="space-y-1 text-[11px]">
                               {hariStok != null && (
                                 <p className={hariStok < 7 ? 'text-amber-700' : 'text-[#64748B]'}>
-                                  Stok {a.video_aktif} video ≈ cukup <strong>{hariStok} hari</strong> pada {kuotaBaru} video/hari.
+                                  Stok {a.stok_antre ?? a.video_aktif} video antre ≈ cukup <strong>{hariStok} hari</strong> pada {kuotaBaru} video/hari.
                                 </p>
                               )}
                               {manual && (a.hari ?? 0) < 30 && kuotaBaru > 2 && (
