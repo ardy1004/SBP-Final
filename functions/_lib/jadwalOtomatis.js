@@ -14,8 +14,26 @@
 // luar tapi stabil di dalam.
 
 import { tanggalWib } from './waktu.js';
-import { getSetting, scheduleFanOut, persistScheduleResult } from './schedulerProviders.js';
+import { getSetting, scheduleFanOut, persistScheduleResult, STATUS_TERKIRIM_SQL } from './schedulerProviders.js';
 import { logServerError } from './logError.js';
+
+// ── Riwayat kirim sebuah video (SATU sumber, 2026-11-17) ────────────────────
+// `kolomId` = ekspresi kolom id video di query pemanggil, mis. 'v.id' atau
+// 'viralframe_agent_videos.id' (UPDATE tanpa alias).
+//
+// BELUM PERNAH DIKIRIM = tidak punya SATU PUN baris jadwal, status apa pun.
+// Inilah syarat masuk antrean cron dan syarat transfer antar agent. Video
+// berriwayat hanya boleh dikirim lewat jalur Ulangi (terbatas & terklasifikasi)
+// — dulu antrean cron cuma memeriksa trashed_at, sehingga video yang dipulihkan
+// dari Sampah, atau yang gagal total, dikirim ulang ke SEMUA platform
+// (terbukti: video 1191 tayang dua kali, 21 & 27 Okt 2026).
+export const sqlBelumPernahDikirim = (kolomId) => `NOT EXISTS (SELECT 1 FROM viralframe_scheduled_posts sp_r
+  WHERE sp_r.video_id = ${kolomId} AND sp_r.video_type = 'agent')`;
+
+// SUDAH TERKIRIM = punya baris yang post-nya (mungkin) ada di provider.
+// Video seperti ini tidak boleh kembali ke antrean (Pulihkan ditolak).
+export const sqlSudahTerkirim = (kolomId) => `EXISTS (SELECT 1 FROM viralframe_scheduled_posts sp_t
+  WHERE sp_t.video_id = ${kolomId} AND sp_t.video_type = 'agent' AND sp_t.status IN ${STATUS_TERKIRIM_SQL})`;
 
 export const JENDELA_DEFAULT = [
   { nama: 'Pagi', mulai: '06:30', akhir: '08:30' },
@@ -408,15 +426,16 @@ export async function kuotaAkun(env, akunId, akunUtamaId) {
   return { kuota: kuotaRamp(hari), hari, utama: false, mode: 'otomatis', preset: null };
 }
 
-// Berapa slot yang SUDAH terisi sukses hari ini untuk akun ini. Dihitung dari
-// jumlah video berbeda, bukan jumlah baris (1 video = 1 slot = banyak platform).
+// Berapa slot yang SUDAH terisi hari ini untuk akun ini. Dihitung dari jumlah
+// video berbeda, bukan jumlah baris (1 video = 1 slot = banyak platform).
 // Inilah yang membuat cron idempoten: jalan dua kali, atau bercampur dengan klik
-// manual, tetap tidak pernah melebihi kuota.
+// manual, tetap tidak pernah melebihi kuota. 'unconfirmed' ikut dihitung —
+// post-nya mungkin sudah ada.
 export async function slotTerpakaiHariIni(env, akunId, tanggal = tanggalWib()) {
   try {
     const row = await env.DB.prepare(
       `SELECT COUNT(DISTINCT video_id) AS n FROM viralframe_scheduled_posts
-       WHERE akun_id = ? AND status = 'scheduled' AND substr(scheduled_at,1,10) = ?`
+       WHERE akun_id = ? AND status IN ${STATUS_TERKIRIM_SQL} AND substr(scheduled_at,1,10) = ?`
     ).bind(akunId, tanggal).first();
     return row?.n ?? 0;
   } catch {
@@ -436,7 +455,7 @@ export async function slotDipakai(env, akunId, sekarang = Date.now()) {
     const res = await env.DB.prepare(
       `SELECT DISTINCT substr(scheduled_at,1,10) AS tgl, slot_index
          FROM viralframe_scheduled_posts
-        WHERE akun_id = ? AND status = 'scheduled' AND substr(scheduled_at,1,10) IN (?, ?)`
+        WHERE akun_id = ? AND status IN ${STATUS_TERKIRIM_SQL} AND substr(scheduled_at,1,10) IN (?, ?)`
     ).bind(akunId, hariIni, besok).all();
     for (const r of res.results ?? []) set.add(`${r.tgl}|${r.slot_index}`);
   } catch { /* kolom/tabel belum ada -> anggap kosong, jangan matikan penjadwalan */ }
@@ -520,27 +539,47 @@ function gabungCaptionHashtag(caption, hashtags) {
 //
 // Satu baris per VIDEO, bukan per platform: satu video gagal di 5 platform itu
 // satu peristiwa, dan 5 baris identik cuma menenggelamkan error lain.
+//
+// Hasil AMBIGU dicatat terpisah dengan pesan berbeda: tindakannya berlawanan.
+// Gagal definitif = boleh diulang; belum pasti = JANGAN diulang sebelum dicek
+// (post-nya mungkin sudah tayang — dilaporkan user 2026-11-17).
 async function catatKegagalanPlatform(env, { rows, videoId, targetId, slot }) {
-  const gagal = (rows ?? []).filter(r => !r.result.ok);
-  if (gagal.length === 0) return;
+  const semuaBaris = rows ?? [];
+  const tidakOk = semuaBaris.filter(r => !r.result.ok);
+  if (tidakOk.length === 0) return;
 
-  const semua = gagal.length === (rows ?? []).length;
-  const daftar = gagal.map(r => r.platform).join(', ');
-  await logServerError(env, {
-    source: 'server',
-    message: semua
-      ? `[scheduler] SEMUA ${gagal.length} platform gagal dijadwalkan (${daftar}) — video ${videoId} tidak terbit di mana pun`
-      : `[scheduler] ${gagal.length} platform gagal dijadwalkan (${daftar}) — video ${videoId}`,
-    url: '/api/internal/viralframe/auto-schedule',
-    context: {
-      video_id: videoId,
-      akun_id: targetId,
-      tanggal: slot?.tanggal ?? null,
-      jendela: slot?.jendela?.nama ?? null,
-      total_platform: (rows ?? []).length,
-      gagal: gagal.map(r => ({ platform: r.platform, provider: r.provider, error: r.result.error })),
-    },
+  const konteks = (daftar) => ({
+    video_id: videoId,
+    akun_id: targetId,
+    tanggal: slot?.tanggal ?? null,
+    jendela: slot?.jendela?.nama ?? null,
+    total_platform: semuaBaris.length,
+    platform: daftar.map(r => ({ platform: r.platform, provider: r.provider, error: r.result.error })),
   });
+
+  const ambigu = tidakOk.filter(r => r.result.ambigu);
+  const gagal = tidakOk.filter(r => !r.result.ambigu);
+
+  if (ambigu.length > 0) {
+    await logServerError(env, {
+      source: 'server',
+      message: `[scheduler] ${ambigu.length} platform BELUM PASTI (${ambigu.map(r => r.platform).join(', ')}) — video ${videoId} mungkin sudah terjadwal di provider; cek & konfirmasi di Konten Agent, JANGAN diulang sebelum dicek`,
+      url: '/api/internal/viralframe/auto-schedule',
+      context: konteks(ambigu),
+    });
+  }
+  if (gagal.length > 0) {
+    const semua = gagal.length === semuaBaris.length;
+    const daftar = gagal.map(r => r.platform).join(', ');
+    await logServerError(env, {
+      source: 'server',
+      message: semua
+        ? `[scheduler] SEMUA ${gagal.length} platform gagal dijadwalkan (${daftar}) — video ${videoId} tidak terbit di mana pun`
+        : `[scheduler] ${gagal.length} platform gagal dijadwalkan (${daftar}) — video ${videoId}`,
+      url: '/api/internal/viralframe/auto-schedule',
+      context: konteks(gagal),
+    });
+  }
 }
 
 // ── Ulangi platform yang gagal ───────────────────────────────────────────────
@@ -562,18 +601,39 @@ async function catatKegagalanPlatform(env, { rows, videoId, targetId, slot }) {
 //   "… belum diatur"
 //        -> salah konfigurasi, mengulang tidak menolong -> JANGAN
 //
-// Dibaca dari TEKS error_message, bukan kolom baru — jadi berlaku juga untuk
-// baris lama yang mau dipulihkan, dan tidak perlu migrasi sama sekali.
-const POLA_TIDAK_DIULANG = [
-  /gagal menghubungi/i,
-  /already scheduled/i,
+// Sejak 2026-11-17 hasil ambigu punya statusnya sendiri ('unconfirmed') dan
+// tidak pernah sampai ke sini. Klasifikasi teks di bawah tetap dipertahankan
+// sebagai lapis kedua, dan sekarang berupa DAFTAR PUTIH: hanya pola yang
+// TERBUKTI berarti "provider menolak, tidak ada post" yang diulang. Dulu daftar
+// hitam — pesan yang tidak dikenal (HTTP 5xx, "tidak mengembalikan post id")
+// otomatis dianggap aman diulang, padahal sama ambigunya dengan timeout.
+// Dicocokkan di AWAL pesan: konfirmasi admin menulis "Tidak ada di …; asal:
+// <pesan lama>", dan pesan lama di ekornya tidak boleh ikut menentukan.
+const POLA_BOLEH_DIULANG = [
+  /^Buffer: /,                        // MutationError Buffer (Invalid post: …)
+  /^Buffer GraphQL: /,                // validasi GraphQL (lihat callBufferCreatePost)
+  /^(Buffer|Zernio) HTTP 4(?!09)\d\d/, // 4xx selain 409 ("already scheduled" = post ADA)
+  /^Tidak ada di (Buffer|Zernio)\b/,  // admin sudah memastikan post tidak ada
+];
+
+// Penolakan yang PERMANEN sampai manusia memperbaiki sesuatu — mengulang
+// otomatis hanya menghasilkan penolakan yang sama. Diukur di produksi
+// 2026-11-17: Threads >500 karakter dan "Channel not found" gagal identik tiap
+// percobaan. Pemulihannya lewat tombol Ulangi manual sesudah diperbaiki.
+const POLA_PERMANEN = [
+  /channel not found/i,
+  /cannot exceed \d+ characters/i,
+  /cannot contain/i,
   /belum diatur/i,
 ];
 
 export function bolehDiulang(errorMessage) {
   const s = String(errorMessage ?? '').trim();
   if (!s) return false; // tanpa keterangan = tidak tahu apa yang terjadi = jangan
-  return !POLA_TIDAK_DIULANG.some(re => re.test(s));
+  if (!POLA_BOLEH_DIULANG.some(re => re.test(s))) return false;
+  // Untuk "Tidak ada di …; asal: …" yang diperiksa cuma pesan asalnya — kalau
+  // asalnya penolakan permanen, mengulang tetap percuma.
+  return !POLA_PERMANEN.some(re => re.test(s));
 }
 
 // Total percobaan per (video, platform), termasuk yang pertama. 2 = boleh sekali
@@ -595,12 +655,13 @@ export async function ulangiPlatformGagal(env, { akun, targetId, kuota, jendela,
         WHERE sp.akun_id = ? AND sp.status = 'failed' AND sp.video_type = 'agent'
           AND julianday('now') - julianday(sp.created_at) < ?
           AND v.cloudinary_url IS NOT NULL
-          -- ⚠️ WAJIB: kalau (video, platform) itu sudah punya baris 'scheduled',
-          -- berarti sudah pernah berhasil dijadwalkan. Tanpa penyaring ini,
-          -- percobaan yang SUDAH pulih akan dikirim lagi -> post dobel.
+          -- ⚠️ WAJIB: kalau (video, platform) itu sudah punya baris 'scheduled'
+          -- (atau 'unconfirmed' — mungkin sudah ada), jangan dikirim lagi.
+          -- Tanpa penyaring ini, percobaan yang SUDAH pulih dikirim ulang ->
+          -- post dobel.
           AND NOT EXISTS (SELECT 1 FROM viralframe_scheduled_posts s2
                            WHERE s2.video_id = sp.video_id AND s2.platform = sp.platform
-                             AND s2.status = 'scheduled')
+                             AND s2.status IN ${STATUS_TERKIRIM_SQL})
         ORDER BY sp.created_at ASC`
     ).bind(targetId, UMUR_MAKS_HARI).all();
     baris = res.results ?? [];
@@ -648,11 +709,13 @@ export async function ulangiPlatformGagal(env, { akun, targetId, kuota, jendela,
       waktu: slot.waktu, slotIndex: slot.jendela.index + 1,
     });
 
-    // trashTable null: videonya SUDAH di Sampah, dan menulis ulang trashed_at
-    // justru mengatur ulang jam purge 30 harinya. adaJadwalTertunda() sudah
-    // melindunginya dari purge selama baris 'scheduled' ini masih di depan.
+    // trashTable SELALU dikirim (2026-11-17). Dulu null dengan asumsi "video
+    // retry pasti sudah di Sampah" — salah untuk video yang gagal TOTAL: ia
+    // tetap Aktif, retry sukses, lalu cron besoknya mengirimnya lagi ke semua
+    // platform. persistScheduleResult hanya mengubah video yang trashed_at-nya
+    // masih NULL, jadi jam purge video yang sudah di Sampah tidak tersentuh.
     await persistScheduleResult(env, {
-      videoId, videoType: 'agent', trashTable: null,
+      videoId, videoType: 'agent', trashTable: 'viralframe_agent_videos',
       slotIndex: slot.jendela.index + 1, rows, akunId: targetId,
     });
     await catatKegagalanPlatform(env, { rows, videoId, targetId, slot });
@@ -674,23 +737,26 @@ export async function ulangiPlatformGagal(env, { akun, targetId, kuota, jendela,
  * permanen (2026-08-31). Yang ini dipicu manusia yang sudah bisa memeriksa
  * dulu ke Buffer/Zernio, jadi timeout BOLEH diulang di sini.
  *
- * Berbeda dari jadwalkanVideo() dalam tiga hal yang disengaja:
- *   · `trashTable: null` — video retry SUDAH di Sampah, dan menulis ulang
- *     trashed_at akan MENGATUR ULANG jam purge 30 harinya.
+ * Berbeda dari jadwalkanVideo() dalam dua hal yang disengaja:
  *   · tidak memakai kuota harian — ini memulihkan kiriman yang slotnya sudah
  *     terpakai, bukan menambah konten baru.
  *   · hanya platform yang diminta, bukan seluruh channel akun.
+ * (Sampah: video Aktif dipindah ke Sampah begitu berhasil; video yang sudah di
+ * Sampah tidak disentuh jam purge-nya — lihat persistScheduleResult.)
  *
  * Penjaga anti-dobel tetap ada dan justru lebih tepat sasaran: platform yang
- * SUDAH punya baris 'scheduled' untuk video ini ditolak.
+ * SUDAH punya baris 'scheduled'/'unconfirmed' untuk video ini ditolak.
  */
 export async function ulangiPlatformVideo(env, { video, akun, targetId, kuota, jendela, preset, platforms }) {
   const diminta = [...new Set(platforms)].filter(p => akun.channels?.[p]?.id);
   if (diminta.length === 0) return { ok: false, alasan: 'platform yang diminta tidak punya channel di akun ini' };
 
+  // 'unconfirmed' ikut terlarang: post-nya mungkin sudah ada. Admin wajib
+  // memastikan dulu lewat konfirmasi ("Tidak ada di sana" mengubahnya jadi
+  // 'failed', baru boleh diulang).
   const sudah = await env.DB.prepare(
     `SELECT DISTINCT platform FROM viralframe_scheduled_posts
-      WHERE video_id = ? AND status = 'scheduled'`
+      WHERE video_id = ? AND video_type = 'agent' AND status IN ${STATUS_TERKIRIM_SQL}`
   ).bind(video.id).all().catch(() => null);
   const terlarang = new Set((sudah?.results ?? []).map(r => r.platform));
   const daftar = diminta.filter(p => !terlarang.has(p));
@@ -710,8 +776,10 @@ export async function ulangiPlatformVideo(env, { video, akun, targetId, kuota, j
     waktu: slot.waktu, slotIndex: slot.jendela.index + 1,
   });
 
+  // trashTable dikirim: video Aktif yang gagal total lalu diulang manual harus
+  // keluar dari antrean begitu berhasil (lihat ulangiPlatformGagal).
   await persistScheduleResult(env, {
-    videoId: video.id, videoType: 'agent', trashTable: null,
+    videoId: video.id, videoType: 'agent', trashTable: 'viralframe_agent_videos',
     slotIndex: slot.jendela.index + 1, rows, akunId: targetId,
   });
   await catatKegagalanPlatform(env, { rows, videoId: video.id, targetId, slot });
@@ -738,7 +806,7 @@ export async function jadwalkanVideo(env, { video, akun, targetId, kuota, jendel
     waktu: slot.waktu, slotIndex: slot.jendela.index + 1,
   });
 
-  const adaSukses = await persistScheduleResult(env, {
+  const { sukses: adaSukses, belumPasti } = await persistScheduleResult(env, {
     videoId: video.id, videoType: 'agent', trashTable: 'viralframe_agent_videos',
     slotIndex: slot.jendela.index + 1, rows, akunId: targetId,
   });
@@ -753,5 +821,5 @@ export async function jadwalkanVideo(env, { video, akun, targetId, kuota, jendel
     ).bind(slot.tanggal, targetId).run().catch(() => {});
   }
 
-  return { ok: true, tanggal: slot.tanggal, jendela: slot.jendela.nama, waktu: slot.waktu, rows, adaSukses };
+  return { ok: true, tanggal: slot.tanggal, jendela: slot.jendela.nama, waktu: slot.waktu, rows, adaSukses, belumPasti };
 }

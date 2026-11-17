@@ -614,7 +614,9 @@ export interface AgentAccount {
   auto_aktif: boolean;
   mulai_aktif: string | null;
   auto_terakhir: string | null;
-  auto_hasil: { terjadwal: number; gagal: number; alasan: string | null } | null;
+  /** `belum_pasti` (2026-11-17): video yang platformnya timeout/5xx — post-nya
+   *  mungkin sudah ada. Bukan kegagalan; tidak ada di hasil lama (undefined). */
+  auto_hasil: { terjadwal: number; belum_pasti?: number; gagal: number; alasan: string | null } | null;
   /** Kuota harian efektif: agent utama & mode manual = jumlah jam, mode
    *  otomatis naik menurut hari nyata (1→2→3). */
   kuota: number;
@@ -686,7 +688,11 @@ export interface StatusSlotAkun {
    *  terisi tidak selalu berurutan. */
   rencana: { nama: string; terpakai: boolean; waktu: Record<string, string> }[];
   tersedia: number;
+  /** Ditolak provider dan belum pulih. */
   gagal: { platform: string; error: string | null }[];
+  /** Ambigu (timeout/5xx/409) — post-nya mungkin sudah ada. Tidak ada di
+   *  respons server lama, jadi opsional. */
+  belum_pasti?: { platform: string; error: string | null }[];
 }
 
 export async function getScheduleSlotsStatus(characterId: number) {

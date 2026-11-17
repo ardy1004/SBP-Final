@@ -38,6 +38,11 @@ export default function AutoJadwalBanner() {
       const gagal = items.filter(a => a.auto_aktif && (a.auto_hasil?.gagal ?? 0) > 0);
       if (gagal.length) out.push(`Gagal menjadwalkan: ${gagal.map(a => a.nama).join(', ')}.`);
 
+      // Belum pasti BUKAN gagal: provider tidak menjawab tepat waktu, post-nya
+      // mungkin sudah tayang. Butuh pengecekan manusia, bukan pengulangan.
+      const ragu = items.filter(a => a.auto_aktif && (a.auto_hasil?.belum_pasti ?? 0) > 0);
+      if (ragu.length) out.push(`Perlu dicek (post belum pasti): ${ragu.map(a => a.nama).join(', ')}.`);
+
       const kosong = items.filter(a => a.auto_aktif && a.video_aktif === 0);
       if (kosong.length) out.push(`Stok video habis: ${kosong.map(a => a.nama).join(', ')}.`);
 

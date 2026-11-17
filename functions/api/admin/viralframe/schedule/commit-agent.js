@@ -7,14 +7,91 @@
 // pernah dijadwalkan, hanya ke platform yang gagal. Dipakai tombol "Ulangi
 // platform gagal" di Konten Agent, terutama untuk kegagalan TIMEOUT yang
 // sengaja tidak pernah diulang otomatis (lihat bolehDiulang di jadwalOtomatis).
+//
+// Dengan `konfirmasi: { platforms, hasil: 'tayang'|'tidak_ada' }` → MODE
+// KONFIRMASI (2026-11-17): admin sudah memeriksa medsos / Buffer / Zernio dan
+// mencatat kenyataannya. Lahir dari laporan user: video bertanda "gagal"
+// ternyata sudah tayang (timeout — provider membuat post-nya, kita sudah
+// memutus koneksi). Tidak memanggil provider sama sekali.
+//   tayang    → baris TERBARU per platform ('failed'/'unconfirmed') jadi
+//               'scheduled'; video Aktif pindah ke Sampah.
+//   tidak_ada → baris 'unconfirmed' jadi 'failed' berawalan "Tidak ada di …",
+//               yang membuka tombol Ulangi dan retry otomatis.
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { resolveScheduler, resolveAkunTarget, getModeAkun } from '../../../../_lib/agentAccounts.js';
-import { jadwalkanVideo, ulangiPlatformVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai } from '../../../../_lib/jadwalOtomatis.js';
-import { adaJadwalTertunda } from '../../../../_lib/schedulerProviders.js';
+import { jadwalkanVideo, ulangiPlatformVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai, sqlBelumPernahDikirim } from '../../../../_lib/jadwalOtomatis.js';
+import { statusBaris } from '../../../../_lib/schedulerProviders.js';
 
 const PLATFORM_SAH = ['facebook', 'instagram', 'threads', 'tiktok', 'youtube'];
+const NAMA_PROVIDER = { buffer: 'Buffer', zernio: 'Zernio' };
+
+const ringkasHasil = (rows) => rows.map(r => ({
+  platform: r.platform,
+  status: statusBaris(r.result),
+  error: r.result.ok ? null : r.result.error,
+}));
+
+async function konfirmasi(env, videoId, k) {
+  const hasil = k?.hasil;
+  if (hasil !== 'tayang' && hasil !== 'tidak_ada') return jsonError("konfirmasi.hasil harus 'tayang' atau 'tidak_ada'", 422);
+  const platforms = Array.isArray(k.platforms)
+    ? [...new Set(k.platforms.filter(p => typeof p === 'string' && PLATFORM_SAH.includes(p)))]
+    : [];
+  if (platforms.length === 0) return jsonError(`konfirmasi.platforms hanya boleh berisi: ${PLATFORM_SAH.join(', ')}`, 422);
+
+  const ph = platforms.map(() => '?').join(',');
+  const res = await env.DB.prepare(
+    `SELECT id, platform, provider, status FROM viralframe_scheduled_posts
+      WHERE video_id = ? AND video_type = 'agent' AND platform IN (${ph})
+      ORDER BY id DESC`
+  ).bind(videoId, ...platforms).all();
+  const baris = res.results ?? [];
+
+  const cap = `${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+  const stmts = [];
+  const diubah = [];
+  const dilewati = [];
+  for (const p of platforms) {
+    const milik = baris.filter(b => b.platform === p);
+    if (milik.some(b => b.status === 'scheduled')) { dilewati.push({ platform: p, alasan: 'sudah tercatat terjadwal' }); continue; }
+
+    if (hasil === 'tayang') {
+      const terbaru = milik.find(b => b.status === 'failed' || b.status === 'unconfirmed');
+      if (!terbaru) { dilewati.push({ platform: p, alasan: 'tidak ada catatan gagal/belum pasti' }); continue; }
+      stmts.push(env.DB.prepare(
+        `UPDATE viralframe_scheduled_posts
+            SET status = 'scheduled', error_message = substr(? || COALESCE(error_message, ''), 1, 500)
+          WHERE id = ? AND status IN ('failed','unconfirmed')`
+      ).bind(`Dikonfirmasi tayang oleh admin (${cap}); asal: `, terbaru.id));
+    } else {
+      const ragu = milik.filter(b => b.status === 'unconfirmed');
+      if (ragu.length === 0) { dilewati.push({ platform: p, alasan: 'tidak berstatus belum pasti' }); continue; }
+      // Awalan "Tidak ada di <Provider>" WAJIB persis — itu yang dibaca
+      // bolehDiulang() untuk mengizinkan retry.
+      for (const b of ragu) {
+        stmts.push(env.DB.prepare(
+          `UPDATE viralframe_scheduled_posts
+              SET status = 'failed', error_message = substr(? || COALESCE(error_message, ''), 1, 500)
+            WHERE id = ? AND status = 'unconfirmed'`
+        ).bind(`Tidak ada di ${NAMA_PROVIDER[b.provider] ?? b.provider} (dicek admin ${cap}); asal: `, b.id));
+      }
+    }
+    diubah.push(p);
+  }
+
+  // Tayang = video sudah dipakai → keluar dari antrean, sama seperti hasil
+  // penjadwalan sukses. Syarat trashed_at IS NULL menjaga jam purge video yang
+  // sudah di Sampah.
+  if (hasil === 'tayang' && diubah.length > 0) {
+    stmts.push(env.DB.prepare(
+      `UPDATE viralframe_agent_videos SET trashed_at = datetime('now') WHERE id = ? AND trashed_at IS NULL`
+    ).bind(videoId));
+  }
+  if (stmts.length > 0) await env.DB.batch(stmts);
+  return jsonOk({ mode: 'konfirmasi', hasil, diubah, dilewati });
+}
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -43,6 +120,17 @@ export async function onRequestPost(context) {
      WHERE v.id = ?`
   ).bind(videoId).first().catch(() => null);
   if (!video) return jsonError('Video tidak ditemukan', 404);
+
+  // Konfirmasi tidak memanggil provider — tidak butuh URL, kredensial, kuota.
+  if (body.konfirmasi != null) {
+    try {
+      return await konfirmasi(env, videoId, body.konfirmasi);
+    } catch (err) {
+      console.error('[vf commit-agent] konfirmasi', err.message);
+      return jsonError('Gagal menyimpan konfirmasi', 500);
+    }
+  }
+
   if (!video.cloudinary_url) return jsonError('Video belum punya URL Cloudinary', 422);
 
   // ⚠️ Kedua penjaga di bawah HANYA untuk penjadwalan baru, dan sengaja
@@ -52,12 +140,16 @@ export async function onRequestPost(context) {
   // ulangiPlatformVideo() menolak platform yang sudah punya baris 'scheduled'.
   if (!mintaUlang) {
     if (video.trashed_at) return jsonError('Video sudah ada di Sampah', 409);
-    // Video yang berhasil dijadwalkan otomatis masuk Sampah (persistScheduleResult),
-    // tapi kalau di-restore lalu diklik lagi, cek trashed_at di atas tidak lagi
-    // menangkapnya — tanpa ini video bisa terkirim DUA KALI ke Buffer/Zernio
-    // (audit 2026-08-15).
-    if (await adaJadwalTertunda(env, videoId)) {
-      return jsonError('Video ini masih ditunggu tayang dari jadwal sebelumnya — menjadwalkan lagi akan membuatnya posting dua kali.', 409);
+    // Jadwalkan = HANYA untuk video yang belum pernah dikirim sama sekali —
+    // syarat yang sama dengan antrean cron. Dulu cuma adaJadwalTertunda()
+    // (jadwal yang MASIH di depan), jadi video yang sudah tayang lalu
+    // dipulihkan tetap bisa dikirim lagi. Video berriwayat dikirim lewat
+    // Ulangi (platform gagal) atau dicatat lewat konfirmasi.
+    const riwayat = await env.DB.prepare(
+      `SELECT 1 AS ada FROM viralframe_agent_videos WHERE id = ? AND NOT ${sqlBelumPernahDikirim('viralframe_agent_videos.id')}`
+    ).bind(videoId).first();
+    if (riwayat) {
+      return jsonError('Video ini sudah pernah dikirim ke scheduler — mengirimnya lagi bisa membuatnya tayang dua kali. Pakai "Ulangi platform gagal" atau konfirmasi status "Belum pasti".', 409);
     }
   }
 
@@ -101,7 +193,7 @@ export async function onRequestPost(context) {
       tanggal: hasil.tanggal,
       waktu: hasil.waktu,
       dilewati: hasil.dilewati,
-      results: hasil.rows.map(r => ({ platform: r.platform, status: r.result.ok ? 'scheduled' : 'failed', error: r.result.ok ? null : r.result.error })),
+      results: ringkasHasil(hasil.rows),
     });
   }
 
@@ -121,8 +213,8 @@ export async function onRequestPost(context) {
     jendela: hasil.jendela,
     tanggal: hasil.tanggal,
     waktu: hasil.waktu,
-    results: hasil.rows.map(r => ({ platform: r.platform, status: r.result.ok ? 'scheduled' : 'failed', error: r.result.ok ? null : r.result.error })),
-    trashed: hasil.adaSukses,
+    results: ringkasHasil(hasil.rows),
+    trashed: hasil.adaSukses || hasil.belumPasti,
   });
 }
 

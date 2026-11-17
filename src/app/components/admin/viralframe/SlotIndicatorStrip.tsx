@@ -81,9 +81,17 @@ export default function SlotIndicatorStrip({ characterId, refreshKey }: { charac
         </div>
       )}
 
+      {/* Merah HANYA untuk penolakan provider yang belum pulih. Hasil ambigu
+          (timeout/5xx) dipisah — dulu ikut "Gagal hari ini" padahal post-nya
+          sudah tayang (laporan user 2026-11-17). */}
       {data.gagal.length > 0 && (
         <p className="mt-2 text-[11px] text-red-600">
-          Gagal hari ini: {data.gagal.map(g => g.platform).join(', ')}
+          Gagal hari ini: {[...new Set(data.gagal.map(g => g.platform))].join(', ')}
+        </p>
+      )}
+      {Array.isArray(data.belum_pasti) && data.belum_pasti.length > 0 && (
+        <p className="mt-1 text-[11px] text-amber-700">
+          Belum pasti hari ini: {[...new Set(data.belum_pasti.map(g => g.platform))].join(', ')} — mungkin sudah tayang, cek &amp; konfirmasi di kartu videonya.
         </p>
       )}
     </div>

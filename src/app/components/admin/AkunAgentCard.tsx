@@ -217,7 +217,7 @@ export default function AkunAgentCard({ onTersimpan, muatUlang = 0 }: {
   // Ringkasan yang tampil saat kartu tertutup. Tanpa ini, saklar auto yang mati
   // atau agent yang bermasalah jadi tak terlihat sama sekali begitu diciutkan.
   const siap = items?.filter(a => a.storage_siap && a.scheduler_siap).length ?? 0;
-  const perluPerhatian = items?.filter(a => a.auto_aktif && ((a.auto_hasil?.gagal ?? 0) > 0 || a.video_aktif === 0)).length ?? 0;
+  const perluPerhatian = items?.filter(a => a.auto_aktif && ((a.auto_hasil?.gagal ?? 0) > 0 || (a.auto_hasil?.belum_pasti ?? 0) > 0 || a.video_aktif === 0)).length ?? 0;
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
@@ -431,7 +431,7 @@ export default function AkunAgentCard({ onTersimpan, muatUlang = 0 }: {
                       {a.auto_terakhir && (
                         <span className="text-[10px] text-[#64748B]">
                           Terakhir: {new Date(a.auto_terakhir).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
-                          {a.auto_hasil && ` · ${a.auto_hasil.terjadwal} terjadwal${a.auto_hasil.gagal ? `, ${a.auto_hasil.gagal} gagal` : ''}${a.auto_hasil.alasan ? ` (${a.auto_hasil.alasan})` : ''}`}
+                          {a.auto_hasil && ` · ${a.auto_hasil.terjadwal} terjadwal${a.auto_hasil.belum_pasti ? `, ${a.auto_hasil.belum_pasti} belum pasti` : ''}${a.auto_hasil.gagal ? `, ${a.auto_hasil.gagal} gagal` : ''}${a.auto_hasil.alasan ? ` (${a.auto_hasil.alasan})` : ''}`}
                         </span>
                       )}
                     </div>

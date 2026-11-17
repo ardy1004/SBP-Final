@@ -5,8 +5,9 @@
 // ber-jadwal MANUAL (2026-11-05, migrasi 0057): kuota = jumlah jam yang diatur
 // admin, jam PERSIS + drift linear. Agent mode otomatis: kuota naik bertahap
 // menurut hari nyata, jam diundi ber-seed di dalam jendela primetime.
-// `mode_jadwal` di respons = 'utama' | 'manual' | 'otomatis'. Slot dianggap terpakai hanya kalau ada baris
-// SUKSES — percobaan gagal total tidak menutup slot, jadi bisa dicoba ulang.
+// `mode_jadwal` di respons = 'utama' | 'manual' | 'otomatis'. Slot dianggap terpakai kalau ada baris
+// SUKSES atau BELUM PASTI ('unconfirmed' — post-nya mungkin ada); percobaan
+// yang ditolak provider tidak menutup slot, jadi bisa dicoba ulang.
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
@@ -31,14 +32,24 @@ export async function onRequestGet({ env, request }) {
     const platforms = Object.keys(akun.channels);
     const hariIni = tanggalWib();
 
-    // Baris sukses hari ini, dikelompokkan per video (1 video = 1 slot).
+    // Baris hari ini, dikelompokkan per video (1 video = 1 slot). `pulih` =
+    // pasangan (video, platform) itu sudah punya pengganti di tanggal MANA PUN
+    // (retry bisa mendarat besok) — kegagalan yang sudah pulih tidak boleh
+    // tampil sebagai "Gagal hari ini".
     const res = await env.DB.prepare(
-      `SELECT video_id, slot_index, platform, status, error_message, scheduled_at
-       FROM viralframe_scheduled_posts
-       WHERE akun_id = ? AND substr(scheduled_at,1,10) = ?`
+      `SELECT sp.video_id, sp.slot_index, sp.platform, sp.status, sp.error_message, sp.scheduled_at,
+              EXISTS (SELECT 1 FROM viralframe_scheduled_posts s2
+                       WHERE s2.video_id = sp.video_id AND s2.platform = sp.platform AND s2.id <> sp.id
+                         AND s2.status = 'scheduled') AS pulih,
+              EXISTS (SELECT 1 FROM viralframe_scheduled_posts s3
+                       WHERE s3.video_id = sp.video_id AND s3.platform = sp.platform AND s3.id <> sp.id
+                         AND s3.status = 'unconfirmed') AS ada_ragu
+       FROM viralframe_scheduled_posts sp
+       WHERE sp.akun_id = ? AND substr(sp.scheduled_at,1,10) = ?`
     ).bind(targetId, hariIni).all();
     const baris = res.results ?? [];
-    const videoSukses = new Set(baris.filter(b => b.status === 'scheduled').map(b => b.video_id));
+    // 'unconfirmed' ikut terhitung terisi — sama dengan slotTerpakaiHariIni.
+    const videoSukses = new Set(baris.filter(b => b.status === 'scheduled' || b.status === 'unconfirmed').map(b => b.video_id));
 
     // Jam rencana hari ini menurut mesin — ditampilkan apa adanya supaya admin
     // bisa melihat jadwal SEBELUM apa pun dikirim.
@@ -77,7 +88,15 @@ export async function onRequestGet({ env, request }) {
       // `dipakai` wajib ikut: tanpa itu angka ini menghitung jendela yang
       // sebenarnya sudah terisi, jadi UI menjanjikan slot yang akan ditolak.
       tersedia: slotTersedia({ akunId: targetId, kuota, platforms, jendela, preset, dipakai }).length,
-      gagal: baris.filter(b => b.status === 'failed').map(b => ({ platform: b.platform, error: b.error_message })),
+      // Gagal DEFINITIF yang belum pulih. Hasil ambigu dipisah ke `belum_pasti`
+      // — dulu keduanya tampil sebagai "Gagal hari ini", termasuk video yang
+      // ternyata sudah tayang (laporan user 2026-11-17).
+      gagal: baris
+        .filter(b => b.status === 'failed' && !b.pulih && !b.ada_ragu)
+        .map(b => ({ platform: b.platform, error: b.error_message })),
+      belum_pasti: baris
+        .filter(b => b.status === 'unconfirmed' && !b.pulih)
+        .map(b => ({ platform: b.platform, error: b.error_message })),
     });
   } catch (err) {
     console.error('[vf schedule/status]', err.message);

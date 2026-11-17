@@ -56,10 +56,31 @@ export async function setSetting(env, key, value) {
   return env.DB.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').bind(key, value).run();
 }
 
-// ⚠️ `viralframe_scheduled_posts.status` cuma punya 'scheduled'/'failed' — TIDAK
-// ADA status "sudah benar-benar tayang" (Buffer/Zernio tidak mengirim webhook
-// balik), jadi baris 'scheduled' TIDAK PERNAH berubah lagi walau videonya sudah
-// tayang berminggu-minggu lalu. `scheduled_at` (kapan SEHARUSNYA tayang) dipakai
+// ── Status baris viralframe_scheduled_posts ─────────────────────────────────
+//   'scheduled'   provider MENERIMA (ada jawaban sukses)
+//   'unconfirmed' hasil AMBIGU — timeout/jaringan, HTTP 5xx, 2xx tanpa body/id
+//                 yang terbaca, Zernio 409. Post-nya BISA SAJA sudah dibuat
+//                 (dilaporkan user 2026-11-17: video bertanda "gagal" ternyata
+//                 sudah tayang). Diperlakukan seperti 'scheduled' untuk SEMUA
+//                 penjaga (slot, kuota, jadwal tertunda, masuk Sampah) dan TIDAK
+//                 PERNAH diulang otomatis — admin yang memastikan lewat
+//                 konfirmasi di Konten Agent (commit-agent.js mode konfirmasi).
+//   'failed'      provider MENOLAK secara eksplisit — pasti tidak ada post.
+// Kolom status TEXT tanpa CHECK (migrasi 0030), jadi tidak perlu migrasi skema.
+//
+// Daftar status yang berarti "post (mungkin) sudah ada di provider" — SATU
+// sumber untuk semua penjaga, supaya tidak ada yang lupa menyertakan
+// 'unconfirmed' (lupa satu = pintu posting dobel).
+export const STATUS_TERKIRIM_SQL = "('scheduled','unconfirmed')";
+
+export function statusBaris(result) {
+  if (result?.ok) return 'scheduled';
+  return result?.ambigu ? 'unconfirmed' : 'failed';
+}
+
+// ⚠️ TIDAK ADA status "sudah benar-benar tayang" (Buffer/Zernio tidak mengirim
+// webhook balik), jadi baris 'scheduled' TIDAK PERNAH berubah lagi walau videonya
+// sudah tayang berminggu-minggu lalu. `scheduled_at` (kapan SEHARUSNYA tayang) dipakai
 // sebagai proksi: lewat dari itu, anggap sudah tayang & aman disentuh lagi.
 // Bukan solusi sempurna (butuh webhook postback untuk itu), tapi cukup menutup
 // dua risiko nyata (audit 2026-08-15): (a) menjadwalkan ulang video yang masih
@@ -77,7 +98,7 @@ export async function adaJadwalTertunda(env, videoId) {
     // tanggal. julianday() mem-parse offset dengan benar, hasilnya akurat.
     const row = await env.DB.prepare(
       `SELECT 1 FROM viralframe_scheduled_posts
-       WHERE video_id = ? AND status = 'scheduled' AND julianday(scheduled_at) > julianday('now') LIMIT 1`
+       WHERE video_id = ? AND status IN ${STATUS_TERKIRIM_SQL} AND julianday(scheduled_at) > julianday('now') LIMIT 1`
     ).bind(videoId).first();
     return !!row;
   } catch {
@@ -118,7 +139,14 @@ export async function scheduleFanOut(env, { assetUrl, caption, akun, waktu, slot
     }
   }
 
-  const hasil = await Promise.all(tugas.map(t => t.jalan()));
+  // ⚠️ Tiap platform WAJIB ditangkap sendiri. Satu exception yang lolos (mis.
+  // abort saat MEMBACA body respons) dulu menolak seluruh Promise.all: platform
+  // lain yang sudah sukses tidak pernah tercatat, video tetap Aktif, dan cron
+  // besok mengirimnya lagi. Exception di sini = tidak tahu apa yang terjadi di
+  // provider = AMBIGU, bukan gagal.
+  const hasil = await Promise.all(tugas.map(t => t.jalan().catch(err => ({
+    ok: false, ambigu: true, error: `Error tak terduga (${t.provider}): ${err?.message ?? err}`,
+  }))));
   const rows = tugas.map((t, i) => ({ platform: t.platform, provider: t.provider, scheduledAt: t.scheduledAt, result: hasil[i] }));
   return { slotIndex, rows };
 }
@@ -137,7 +165,7 @@ export async function persistScheduleResult(env, { videoId, videoType, trashTabl
        VALUES (?,?,?,?,?,?,?,?,?,?)`
     ).bind(
       videoId, videoType, r.provider, r.platform, slotIndex, r.scheduledAt,
-      r.result.ok ? 'scheduled' : 'failed',
+      statusBaris(r.result),
       r.result.ok ? (r.result.remoteId ?? null) : null,
       r.result.ok ? null : (r.result.error ?? 'Gagal tanpa keterangan').slice(0, 500),
       akunId,
@@ -156,16 +184,22 @@ export async function persistScheduleResult(env, { videoId, videoType, trashTabl
     });
   }
 
-  const anySuccess = rows.some(r => r.result.ok);
-  // trashTable null = pemanggil sengaja tidak mau memindahkan video ke Sampah.
-  // Dipakai jalur ulangi-platform-gagal: videonya SUDAH di Sampah, dan menulis
-  // ulang trashed_at justru MENGATUR ULANG jam purge 30 harinya.
-  if (anySuccess && trashTable) {
-    await env.DB.prepare(`UPDATE ${trashTable} SET trashed_at = datetime('now') WHERE id = ?`).bind(videoId).run().catch(err => {
+  const sukses = rows.some(r => r.result.ok);
+  const belumPasti = rows.some(r => !r.result.ok && r.result.ambigu);
+  // Video keluar dari antrean begitu post-nya (MUNGKIN) sudah ada di provider —
+  // termasuk hasil ambigu. Dulu hanya `sukses`: video yang kelima platformnya
+  // timeout tetap Aktif dan cron besoknya mengirimnya lagi, padahal provider
+  // sudah membuat post-nya (posting dobel).
+  //
+  // `AND trashed_at IS NULL` WAJIB: video yang sudah di Sampah (jalur ulangi)
+  // tidak boleh ditulis ulang — itu MENGATUR ULANG jam purge 30 harinya. Dengan
+  // syarat ini pemanggil boleh selalu mengirim trashTable.
+  if ((sukses || belumPasti) && trashTable) {
+    await env.DB.prepare(`UPDATE ${trashTable} SET trashed_at = datetime('now') WHERE id = ? AND trashed_at IS NULL`).bind(videoId).run().catch(err => {
       console.error('[scheduleFanOut] trash video', err.message);
     });
   }
-  return anySuccess;
+  return { sukses, belumPasti };
 }
 
 // Kategori "People & Blogs" — default aman generik untuk video promosi properti,
@@ -243,16 +277,30 @@ export async function callBufferCreatePost({ apiKey, channelId, assetUrl, dueAt,
       signal: AbortSignal.timeout(TIMEOUT_POST_MS),
     });
   } catch (err) {
-    return { ok: false, error: `Gagal menghubungi Buffer: ${err.message}` };
+    // Timeout/jaringan: request bisa saja SUDAH diproses Buffer sebelum kita
+    // memutusnya — AMBIGU, bukan gagal (lihat STATUS_TERKIRIM_SQL).
+    return { ok: false, ambigu: true, error: `Gagal menghubungi Buffer: ${err.message}` };
   }
 
   const json = await res.json().catch(() => null);
-  if (!res.ok || !json) return { ok: false, error: `Buffer HTTP ${res.status}` };
-  if (json.errors?.length) return { ok: false, error: json.errors.map(e => e.message).join('; ').slice(0, 300) };
+  // 5xx = server Buffer bermasalah di tengah jalan; post bisa saja sudah dibuat.
+  // 4xx = ditolak sebelum diproses (auth, rate limit, input) — pasti tidak ada.
+  if (res.status >= 500) return { ok: false, ambigu: true, error: `Buffer HTTP ${res.status}` };
+  if (!res.ok) return { ok: false, error: `Buffer HTTP ${res.status}` };
+  if (!json) return { ok: false, ambigu: true, error: `Buffer HTTP ${res.status}: respons bukan JSON` };
+  if (json.errors?.length) {
+    const pesan = json.errors.map(e => e.message).join('; ').slice(0, 280);
+    // Error GraphQL tingkat atas biasanya validasi (mutasi tidak jalan). Yang
+    // berbau kegagalan server di tengah eksekusi tetap diperlakukan ambigu.
+    const server = /internal|timed? ?out|unexpected|unavailable/i.test(pesan);
+    return { ok: false, ...(server ? { ambigu: true } : {}), error: `Buffer GraphQL: ${pesan}` };
+  }
   const result = json.data?.createPost;
   if (result?.message) return { ok: false, error: `Buffer: ${result.message}`.slice(0, 300) };
   const id = result?.post?.id;
-  if (!id) return { ok: false, error: 'Buffer tidak mengembalikan post id' };
+  // Respons sukses tanpa id: mutasi kemungkinan jalan, kita cuma tidak bisa
+  // membuktikannya — ambigu, JANGAN diulang otomatis.
+  if (!id) return { ok: false, ambigu: true, error: 'Buffer tidak mengembalikan post id' };
   return { ok: true, remoteId: String(id) };
 }
 
@@ -372,17 +420,27 @@ export async function callZernioCreatePost({ env, apiKey, content, scheduledFor,
       signal: AbortSignal.timeout(TIMEOUT_POST_MS),
     });
   } catch (err) {
-    return { ok: false, error: `Gagal menghubungi Zernio: ${err.message}` };
+    // Timeout Zernio adalah penyebab utama "gagal tapi ternyata tayang"
+    // (diukur 2026-11-17: belasan baris dalam 10 hari) — AMBIGU, bukan gagal.
+    return { ok: false, ambigu: true, error: `Gagal menghubungi Zernio: ${err.message}` };
   }
 
-  const raw = await res.text();
+  // Membaca body juga bisa terputus oleh AbortSignal — status sudah diterima,
+  // isi tidak. Dulu ini melempar dan menjatuhkan seluruh fan-out.
+  let raw = '';
+  try { raw = await res.text(); } catch (err) {
+    return { ok: false, ambigu: true, error: `Gagal membaca respons Zernio (HTTP ${res.status}): ${err.message}` };
+  }
   let json = null;
   try { json = JSON.parse(raw); } catch { /* body bukan JSON, pakai raw text di bawah */ }
   if (!res.ok || !json) {
     // Field pesan error Zernio belum terverifikasi persis (message/error/detail/errors[]) —
     // coba semua kandidat umum, fallback ke potongan body mentah supaya tidak pernah kosong.
     const detail = json?.message ?? json?.error ?? json?.detail ?? json?.errors?.[0]?.message ?? raw.slice(0, 300);
-    return { ok: false, error: `Zernio HTTP ${res.status}: ${detail}`.trim() };
+    // Ambigu: 5xx (server di tengah jalan), 409 "already scheduled" (post-nya
+    // justru SUDAH ada — video 185, 2026-08-31), dan 2xx tanpa JSON.
+    const ambigu = res.status >= 500 || res.status === 409 || res.ok;
+    return { ok: false, ...(ambigu ? { ambigu: true } : {}), error: `Zernio HTTP ${res.status}: ${detail}`.trim() };
   }
   // ⚠️ Bentuk respons Zernio: { message, post: { _id, ... } } — id-nya `_id` di
   // DALAM `post`, bukan di root. Jalur lama (json.id / json.data.id / json.postId)

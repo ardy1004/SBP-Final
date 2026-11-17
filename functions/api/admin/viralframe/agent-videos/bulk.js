@@ -9,25 +9,25 @@ import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { hapusAsetVideo } from '../../../../_lib/videoStorage.js';
 import { logServerError } from '../../../../_lib/logError.js';
 import { adaJadwalTertunda } from '../../../../_lib/schedulerProviders.js';
+import { sqlBelumPernahDikirim, sqlSudahTerkirim } from '../../../../_lib/jadwalOtomatis.js';
 
 const VALID_ACTIONS = ['trash', 'restore', 'delete', 'transfer'];
 const MAX_IDS = 100;
 
 // "Belum pernah masuk scheduler" = tidak punya SATU PUN baris di
 // viralframe_scheduled_posts, status apa pun — termasuk yang semua platformnya
-// gagal. Dipakai dua kali (klasifikasi & WHERE UPDATE) supaya pemeriksaan dan
-// penulisan memakai definisi yang sama persis. Sengaja tanpa alias tabel: frasa
-// ini disisipkan ke SELECT maupun UPDATE yang sama-sama menyebut nama tabel penuh.
+// gagal. Definisinya SATU sumber dengan antrean cron (sqlBelumPernahDikirim di
+// jadwalOtomatis.js). Dipakai dua kali (klasifikasi & WHERE UPDATE) supaya
+// pemeriksaan dan penulisan memakai definisi yang sama persis. Tanpa alias
+// tabel: frasa ini disisipkan ke SELECT maupun UPDATE yang sama-sama menyebut
+// nama tabel penuh.
 //
-// Kenapa seketat itu — dua jebakan nyata di jadwalOtomatis.js kalau video
-// berriwayat ikut pindah:
-//   1. jadwalkanVideo() tidak memeriksa riwayat, jadi video yang SUDAH tayang di
-//      akun asal akan diposting ulang di akun tujuan tanpa peringatan apa pun.
-//   2. ulangiPlatformGagal() mencari baris gagal menurut `sp.akun_id` agent ASAL,
-//      tanpa melihat pemilik video sekarang — retry malam agent asal akan terus
-//      menembakkan video yang sudah dipindah ke akun asal.
-const BELUM_PERNAH_DIJADWALKAN = `NOT EXISTS (SELECT 1 FROM viralframe_scheduled_posts sp
-  WHERE sp.video_id = viralframe_agent_videos.id AND sp.video_type = 'agent')`;
+// Kenapa seketat itu — jebakan nyata kalau video berriwayat ikut pindah:
+// ulangiPlatformGagal() mencari baris gagal menurut `sp.akun_id` agent ASAL,
+// tanpa melihat pemilik video sekarang — retry malam agent asal akan terus
+// menembakkan video yang sudah dipindah ke akun asal.
+const BELUM_PERNAH_DIJADWALKAN = sqlBelumPernahDikirim('viralframe_agent_videos.id');
+const SUDAH_TERKIRIM = sqlSudahTerkirim('viralframe_agent_videos.id');
 
 // Pindahkan video ke antrean agent lain. Yang berpindah hanya baris D1 — file
 // ada di bucket R2 bersama tanpa identitas agent (migrasi 0043), jadi tidak ada
@@ -128,10 +128,19 @@ export async function onRequestPost(context) {
       // SQLite ORDER BY ASC muncul PALING DEPAN, jadi tanpa ini video pulih bisa
       // diam-diam menyerobot jadi prioritas #1 scheduler. Antrean akhir dihitung
       // PER GRUP character_id, bukan sekali untuk seluruh batch.
+      //
+      // ⚠️ Video yang SUDAH (mungkin) tayang tidak boleh kembali ke antrean.
+      // Dulu bisa — dan cron mengirimnya lagi ke semua platform: video 1191
+      // tayang 21 Okt, dipulihkan, lalu tayang lagi 27 Okt 2026. Posting ulang
+      // konten yang sama adalah fitur Salin (sengaja belum ada). Video yang
+      // hanya punya baris 'failed' tetap boleh dipulihkan.
       const rows = await env.DB.prepare(
-        `SELECT id, character_id FROM viralframe_agent_videos WHERE id IN (${placeholders})`
+        `SELECT id, character_id, CASE WHEN ${SUDAH_TERKIRIM} THEN 1 ELSE 0 END AS terkirim
+           FROM viralframe_agent_videos WHERE id IN (${placeholders})`
       ).bind(...ids).all();
-      const found = rows.results ?? [];
+      const semua = rows.results ?? [];
+      const dilewatiTerkirim = semua.filter(r => r.terkirim).map(r => r.id);
+      const found = semua.filter(r => !r.terkirim);
 
       const grupPerKarakter = new Map();
       for (const row of found) {
@@ -147,14 +156,20 @@ export async function onRequestPost(context) {
         let base = maxUrutan ?? 0;
         for (const videoId of videoIds.sort((a, b) => a - b)) {
           base += 1000;
+          // Syarat diulang di WHERE supaya atomik terhadap jadwal yang masuk
+          // di antara SELECT dan UPDATE (mis. tombol Ulangi di tab lain).
           statements.push(
-            env.DB.prepare('UPDATE viralframe_agent_videos SET trashed_at = NULL, urutan_kirim = ? WHERE id = ?').bind(base, videoId)
+            env.DB.prepare(`UPDATE viralframe_agent_videos SET trashed_at = NULL, urutan_kirim = ? WHERE id = ? AND NOT ${SUDAH_TERKIRIM}`).bind(base, videoId)
           );
         }
       }
 
-      if (statements.length > 0) await env.DB.batch(statements);
-      return jsonOk({ affected: statements.length });
+      let affected = 0;
+      if (statements.length > 0) {
+        const hasil = await env.DB.batch(statements);
+        affected = hasil.filter(h => (h.meta?.changes ?? 0) > 0).length;
+      }
+      return jsonOk({ affected, dilewati_terkirim: dilewatiTerkirim });
     }
 
     // delete: HANYA video yang sudah di Sampah (trashed_at IS NOT NULL) — dulu

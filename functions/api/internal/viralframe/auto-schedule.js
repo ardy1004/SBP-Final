@@ -18,7 +18,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
 import { getSetting, setSetting, TIMEOUT_POST_MS } from '../../../_lib/schedulerProviders.js';
 import { resolveScheduler, resolveAkunTarget, getModeAkun } from '../../../_lib/agentAccounts.js';
-import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai, ulangiPlatformGagal } from '../../../_lib/jadwalOtomatis.js';
+import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai, ulangiPlatformGagal, sqlBelumPernahDikirim } from '../../../_lib/jadwalOtomatis.js';
 import { tanggalWib } from '../../../_lib/waktu.js';
 import { logServerError } from '../../../_lib/logError.js';
 
@@ -120,7 +120,7 @@ export async function onRequestPost({ request, env }) {
   const tertundaBaru = new Set();
 
   for (const ag of agents) {
-    const hasilAgent = { agent: ag.nama, character_id: ag.id, terjadwal: 0, gagal: 0, detail: [] };
+    const hasilAgent = { agent: ag.nama, character_id: ag.id, terjadwal: 0, belum_pasti: 0, gagal: 0, detail: [] };
 
     // Dry-run tidak menyentuh provider sama sekali, jadi tidak perlu dibatasi.
     if (!dry && anggaranHabis()) {
@@ -162,9 +162,16 @@ export async function onRequestPost({ request, env }) {
       // hashtags WAJIB diikutkan, tanpa ini hashtag tersimpan di DB tapi tidak
       // pernah ikut terkirim ke Buffer/Zernio (dilaporkan user 2026-08-15, sama
       // seperti jalur manual).
+      //
+      // ⚠️ Antrean = HANYA video yang belum pernah dikirim sama sekali
+      // (sqlBelumPernahDikirim). trashed_at saja TIDAK cukup: video yang
+      // dipulihkan dari Sampah sesudah tayang, dan video yang gagal total, dulu
+      // dikirim ulang ke semua platform — video 1191 tayang dua kali (21 & 27
+      // Okt 2026). Video berriwayat hanya lewat jalur Ulangi di bawah.
       const antre = await env.DB.prepare(
         `SELECT id, cloudinary_url, caption, hashtags FROM viralframe_agent_videos
          WHERE character_id = ? AND trashed_at IS NULL AND cloudinary_url IS NOT NULL
+           AND ${sqlBelumPernahDikirim('viralframe_agent_videos.id')}
          ORDER BY urutan_kirim ASC, id ASC LIMIT ?`
       ).bind(ag.id, butuh).all().catch(() => null);
       videos = antre?.results ?? [];
@@ -189,10 +196,15 @@ export async function onRequestPost({ request, env }) {
         if (!r.ok) { hasilAgent.gagal++; hasilAgent.detail.push({ video_id: videos[i].id, alasan: r.alasan }); continue; }
         if (dry) { hasilAgent.detail.push({ video_id: videos[i].id, jendela: r.jendela, waktu: r.waktu }); hasilAgent.terjadwal++; continue; }
         const gagalPlatform = (r.rows ?? []).filter(x => !x.result.ok);
-        if (r.adaSukses) hasilAgent.terjadwal++; else hasilAgent.gagal++;
+        // Belum pasti ≠ gagal: post-nya mungkin sudah ada. Dulu terhitung
+        // `gagal` dan memicu banner "Gagal menjadwalkan" untuk video yang
+        // ternyata sudah tayang (laporan user 2026-11-17).
+        if (r.adaSukses) hasilAgent.terjadwal++;
+        else if (r.belumPasti) hasilAgent.belum_pasti++;
+        else hasilAgent.gagal++;
         hasilAgent.detail.push({
           video_id: videos[i].id, jendela: r.jendela,
-          gagal_platform: gagalPlatform.map(x => `${x.platform}: ${x.result.error}`),
+          gagal_platform: gagalPlatform.map(x => `${x.platform}: ${x.result.error}${x.result.ambigu ? ' (belum pasti)' : ''}`),
         });
       } catch (err) {
         hasilAgent.gagal++;
@@ -291,7 +303,7 @@ async function tulisTertunda(env, ids) {
 
 async function setStatusAgent(env, characterId, hasil) {
   const ringkas = JSON.stringify({
-    terjadwal: hasil.terjadwal, gagal: hasil.gagal, alasan: hasil.alasan ?? null,
+    terjadwal: hasil.terjadwal, belum_pasti: hasil.belum_pasti ?? 0, gagal: hasil.gagal, alasan: hasil.alasan ?? null,
     kuota: hasil.kuota ?? null, hari_nyata: hasil.hari_nyata ?? null,
   });
   await env.DB.prepare(

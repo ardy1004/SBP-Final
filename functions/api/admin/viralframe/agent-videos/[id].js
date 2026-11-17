@@ -5,6 +5,7 @@
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { hapusAsetVideo } from '../../../../_lib/videoStorage.js';
 import { adaJadwalTertunda } from '../../../../_lib/schedulerProviders.js';
+import { sqlSudahTerkirim } from '../../../../_lib/jadwalOtomatis.js';
 
 export async function onRequestDelete(context) {
   const { env, params } = context;
@@ -70,6 +71,15 @@ export async function onRequestPatch(context) {
   // kemudian oleh worker cron); false -> pulihkan ke Aktif.
   if (trash === true) { sets.push("trashed_at = datetime('now')"); }
   else if (trash === false) {
+    // Video yang SUDAH (mungkin) tayang tidak boleh kembali ke antrean — cron
+    // akan mengirimnya lagi (video 1191 tayang dua kali, 21 & 27 Okt 2026).
+    // Aturan yang sama dengan restore massal di bulk.js.
+    const terkirim = await env.DB.prepare(
+      `SELECT 1 AS ada FROM viralframe_agent_videos WHERE id = ? AND ${sqlSudahTerkirim('viralframe_agent_videos.id')}`
+    ).bind(id).first();
+    if (terkirim) {
+      return jsonError('Video ini sudah terkirim ke scheduler — tidak bisa dikembalikan ke antrean, karena akan tayang dua kali. Posting ulang konten yang sama belum didukung.', 409);
+    }
     sets.push('trashed_at = NULL');
     // Video pulih WAJIB dapat urutan_kirim baru di akhir antrean karakternya —
     // NULL/nilai basi di SQLite ORDER BY ASC muncul PALING DEPAN, jadi tanpa ini

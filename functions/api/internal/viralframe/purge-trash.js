@@ -58,7 +58,10 @@ async function bersihkanTabel(env) {
       `DELETE FROM viralframe_scheduled_posts
         WHERE video_type = 'agent'
           AND julianday('now') - julianday(created_at) > 30
-          AND NOT (status = 'scheduled' AND scheduled_at > datetime('now'))
+          -- julianday(), BUKAN perbandingan teks: scheduled_at ber-'T' + offset
+          -- sedangkan datetime('now') berspasi & UTC (jebakan yang sama dengan
+          -- adaJadwalTertunda). 'unconfirmed' ikut dilindungi.
+          AND NOT (status IN ('scheduled','unconfirmed') AND julianday(scheduled_at) > julianday('now'))
           AND NOT EXISTS (SELECT 1 FROM viralframe_agent_videos v WHERE v.id = video_id)`
     ).run();
     jadwalYatim = r?.meta?.changes ?? 0;

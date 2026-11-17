@@ -18,6 +18,7 @@ import JamPrimetimeCard from './JamPrimetimeCard';
 import PresetUtamaCard from './PresetUtamaCard';
 import PanelUnggahAgent from './viralframe/PanelUnggahAgent';
 import TransferAgentModal from './viralframe/TransferAgentModal';
+import KonfirmasiTayangModal from './viralframe/KonfirmasiTayangModal';
 import {
   type StatusProperti, pickStatusProperti,
   keAtas, keBawah, kePosisi, posisiMaks,
@@ -102,9 +103,15 @@ interface AgentVideo {
   badge_featured: number | null;
   badge_hot: number | null;
   properti_pilihan: number | null;
-  // Platform yang gagal dijadwalkan dan belum punya pengganti aktif, dipisah
-  // koma (GROUP_CONCAT di agent-videos/index.js). null = tidak ada yang gagal.
+  // Platform yang DITOLAK provider dan belum punya pengganti, dipisah koma
+  // (GROUP_CONCAT di agent-videos/index.js). null = tidak ada yang gagal.
   platform_gagal: string | null;
+  // Platform BELUM PASTI (timeout/5xx/409): post-nya mungkin sudah ada di
+  // provider. Dikonfirmasi admin, TIDAK diulang. null = tidak ada.
+  platform_belum_pasti: string | null;
+  // 1 = sudah (mungkin) tayang di minimal satu platform → tidak bisa dipulihkan
+  // ke antrean (server menolak; posting ulang = fitur Salin yang belum ada).
+  sudah_terkirim: number;
   // Posisi dalam antrean kirim scheduler (ASC = duluan dikirim), diatur lewat
   // drag & drop di grid ini. NULL untuk baris di Sampah (trashed_at terisi) —
   // tidak relevan, dan diisi ulang otomatis saat video dipulihkan.
@@ -203,6 +210,9 @@ export default function AdminViralFrameAgentVideosPage() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [scheduleTarget, setScheduleTarget] = useState<AgentVideo | null>(null);
+  // Modal "Pastikan status posting": dari chip Belum pasti (boleh "Tidak ada")
+  // atau dari modal Ulangi → "Ternyata sudah tayang" (kegagalan definitif).
+  const [konfirmasiTarget, setKonfirmasiTarget] = useState<{ videoId: number; platforms: string[]; bolehTidakAda: boolean } | null>(null);
   // Video yang sedang dipindah ke agent lain — SALINAN saat modal dibuka, bukan
   // turunan selectedIds, supaya Escape global (membatalkan pilihan) tidak
   // mengubah isi modal yang sedang terbuka.
@@ -555,6 +565,22 @@ export default function AdminViralFrameAgentVideosPage() {
         if (!j.success) setAksiError(`${label} ${ids.length} video gagal: ${j.error ?? `HTTP ${res.status}`}`);
         else if (j.data?.skipped_pending?.length) {
           setAksiError(`${j.data.skipped_pending.length} video dilewati — masih ditunggu tayang dari jadwal sebelumnya, hapus setelah waktu tayangnya lewat.`);
+        }
+      } catch (err: unknown) {
+        setAksiError(`${label} ${ids.length} video gagal: ${err instanceof Error ? err.message : 'koneksi bermasalah'}`);
+      }
+    } else if (action === 'restore') {
+      // Server melewati video yang SUDAH terkirim (cron akan mengirimnya lagi
+      // = tayang dua kali). Jumlahnya wajib terlihat, bukan diam-diam berkurang.
+      try {
+        const res = await fetch('/api/admin/viralframe/agent-videos/bulk', {
+          method: 'POST', headers: JSON_HEADER, credentials: 'include',
+          body: JSON.stringify({ ids, action }),
+        });
+        const j = await bacaJson<{ affected: number; dilewati_terkirim?: number[] }>(res);
+        if (!j.success) setAksiError(`${label} ${ids.length} video gagal: ${j.error ?? `HTTP ${res.status}`}`);
+        else if (Array.isArray(j.data?.dilewati_terkirim) && j.data.dilewati_terkirim.length > 0) {
+          setAksiError(`${j.data.dilewati_terkirim.length} video tidak dipulihkan — sudah terkirim ke scheduler, mengembalikannya ke antrean akan membuatnya tayang dua kali.`);
         }
       } catch (err: unknown) {
         setAksiError(`${label} ${ids.length} video gagal: ${err instanceof Error ? err.message : 'koneksi bermasalah'}`);
@@ -1031,7 +1057,13 @@ export default function AdminViralFrameAgentVideosPage() {
                             <button onClick={() => trashOne(v.id)} className="p-1.5 rounded-lg text-[#64748B] hover:bg-gray-100" title="Pindahkan ke Sampah"><Archive size={14} /></button>
                           ) : (
                             <>
-                              <button onClick={() => restoreOne(v.id)} className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50" title="Pulihkan ke Aktif"><RotateCcw size={14} /></button>
+                              {/* Video yang sudah terkirim tidak bisa kembali ke
+                                  antrean — server menolaknya (tayang dua kali). */}
+                              {v.sudah_terkirim ? (
+                                <span className="p-1.5 rounded-lg text-gray-300 cursor-not-allowed" title="Sudah terkirim ke scheduler — tidak bisa dikembalikan ke antrean (akan tayang dua kali)"><RotateCcw size={14} /></span>
+                              ) : (
+                                <button onClick={() => restoreOne(v.id)} className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50" title="Pulihkan ke Aktif"><RotateCcw size={14} /></button>
+                              )}
                               <button onClick={() => deletePermanentOne(v.id)} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50" title="Hapus permanen sekarang"><Trash2 size={14} /></button>
                             </>
                           )}
@@ -1106,15 +1138,30 @@ export default function AdminViralFrameAgentVideosPage() {
                           sanalah semua kegagalan platform berada. Syarat
                           `view === 'active'` saja membuat pemulihan mustahil
                           dijangkau (kasus video 185, 2026-08-31). */}
-                      {(view === 'active' || v.platform_gagal) && (
+                      {/* BELUM PASTI (2026-11-17): timeout/5xx/409 — post-nya
+                          mungkin sudah ada. Dulu tampil sebagai "gagal" dan
+                          user mendapati videonya ternyata sudah tayang. Yang
+                          ditawarkan konfirmasi, BUKAN Ulangi. */}
+                      {v.platform_belum_pasti && (
+                        <button onClick={() => setKonfirmasiTarget({ videoId: v.id, platforms: v.platform_belum_pasti!.split(','), bolehTidakAda: true })}
+                          className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-300 hover:bg-amber-100"
+                          title="Buffer/Zernio tidak memberi jawaban pasti — post-nya mungkin sudah dibuat. Cek dulu sebelum mengulang.">
+                          ⏳ Belum pasti: {v.platform_belum_pasti.split(',').length} platform — cek &amp; konfirmasi
+                        </button>
+                      )}
+                      {v.platform_gagal ? (
                         <button onClick={() => setScheduleTarget(v)}
-                          className={`mt-auto flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white ${
-                            v.platform_gagal ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'
-                          }`}>
+                          className="mt-auto flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700">
                           <Send size={12} />
-                          {v.platform_gagal
-                            ? `Ulangi ${v.platform_gagal.split(',').length} platform gagal`
-                            : 'Jadwalkan ke Sosmed'}
+                          {`Ulangi ${v.platform_gagal.split(',').length} platform gagal`}
+                        </button>
+                      ) : view === 'active' && !v.sudah_terkirim && !v.platform_belum_pasti && (
+                        // Jadwalkan hanya untuk video yang belum pernah terkirim —
+                        // server juga menolak video berriwayat (commit-agent.js).
+                        <button onClick={() => setScheduleTarget(v)}
+                          className="mt-auto flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700">
+                          <Send size={12} />
+                          Jadwalkan ke Sosmed
                         </button>
                       )}
                     </div>
@@ -1184,7 +1231,14 @@ export default function AdminViralFrameAgentVideosPage() {
 
       {scheduleTarget && (
         <AgentScheduleModal video={scheduleTarget} onClose={() => setScheduleTarget(null)}
-          onScheduled={() => { setScheduleTarget(null); setSlotRefreshTick(t => t + 1); if (selectedCharId != null) loadVideos(selectedCharId, view); }} />
+          onScheduled={() => { setScheduleTarget(null); setSlotRefreshTick(t => t + 1); if (selectedCharId != null) loadVideos(selectedCharId, view); }}
+          onSudahTayang={platforms => { setScheduleTarget(null); setKonfirmasiTarget({ videoId: scheduleTarget.id, platforms, bolehTidakAda: false }); }} />
+      )}
+
+      {konfirmasiTarget && (
+        <KonfirmasiTayangModal videoId={konfirmasiTarget.videoId} platforms={konfirmasiTarget.platforms}
+          bolehTidakAda={konfirmasiTarget.bolehTidakAda} onClose={() => setKonfirmasiTarget(null)}
+          onSelesai={() => { setKonfirmasiTarget(null); setSlotRefreshTick(t => t + 1); refreshAfterAction(); }} />
       )}
     </div>
   );
@@ -1200,11 +1254,15 @@ export default function AdminViralFrameAgentVideosPage() {
 // Sejak fitur badge dihapus (2026-08-11) yang dikirim adalah file asli yang
 // sudah jadi sejak diupload — tidak ada transcode on-the-fly, jadi tidak ada
 // yang perlu dipanaskan.
-function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo; onClose: () => void; onScheduled: () => void }) {
+function AgentScheduleModal({ video, onClose, onScheduled, onSudahTayang }: {
+  video: AgentVideo; onClose: () => void; onScheduled: () => void;
+  /** Mode Ulangi: admin mendapati post-nya ternyata ada → catat, jangan kirim. */
+  onSudahTayang: (platforms: string[]) => void;
+}) {
   const [caption, setCaption] = useState(video.caption ?? '');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
   const [errorMsg, setErrorMsg] = useState('');
-  const [results, setResults] = useState<{ platform: string; status: 'scheduled' | 'failed'; error: string | null }[]>([]);
+  const [results, setResults] = useState<{ platform: string; status: 'scheduled' | 'unconfirmed' | 'failed'; error: string | null }[]>([]);
 
   // Mode ULANGI: video ini punya platform yang gagal dan belum tergantikan.
   // Kegagalan TIMEOUT sengaja tidak pernah diulang otomatis — mesin tidak tahu
@@ -1225,7 +1283,7 @@ function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo
         }),
       });
       const json = await bacaJson<{ results: typeof results; trashed: boolean }>(res);
-      if (!json.success || !json.data) throw new Error(json.error ?? 'Gagal menjadwalkan post');
+      if (!json.success || !Array.isArray(json.data?.results)) throw new Error(json.error ?? 'Gagal menjadwalkan post');
       setResults(json.data.results);
       setPhase('done');
     } catch (err: unknown) {
@@ -1264,9 +1322,13 @@ function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo
                   Periksa dulu di Buffer/Zernio sebelum mengulang — kalau ternyata sudah ada, mengulang
                   akan membuatnya tayang dua kali.
                 </p>
+                <button type="button" onClick={() => onSudahTayang(platformGagal)}
+                  className="w-full mb-3 py-2 rounded-xl text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100">
+                  Ternyata sudah tayang? Catat tanpa mengirim ulang
+                </button>
               </>
             ) : (
-              <p className="text-xs text-[#64748B] mb-3">Video akan dijadwalkan otomatis ke 5 akun (YT Shorts, TikTok, Threads, FB Pages, Instagram) pada slot jam primetime berikutnya yang masih kosong hari ini.</p>
+              <p className="text-xs text-[#64748B] mb-3">Video akan dikirim ke semua akun sosmed agent ini pada slot jam kosong berikutnya — hari ini kalau masih ada, kalau tidak besok.</p>
             )}
             <textarea value={caption} onChange={e => setCaption(e.target.value)} rows={3} placeholder="Caption / deskripsi post…"
               className="w-full text-sm px-3 py-2 border border-gray-200 rounded-xl outline-none focus:border-[#1565C0] mb-2" />
@@ -1289,7 +1351,7 @@ function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo
         {phase === 'submitting' && (
           <div className="py-6 text-center text-sm text-[#64748B]">
             <Loader2 size={20} className="animate-spin mx-auto mb-2" />
-            {modeUlangi ? `Mengirim ulang ke ${platformGagal.length} platform…` : 'Menjadwalkan ke 5 akun…'}
+            {modeUlangi ? `Mengirim ulang ke ${platformGagal.length} platform…` : 'Menjadwalkan ke akun sosmed agent…'}
           </div>
         )}
 
@@ -1298,18 +1360,22 @@ function AgentScheduleModal({ video, onClose, onScheduled }: { video: AgentVideo
             {results.map(r => (
               <div key={r.platform} className="flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg bg-gray-50">
                 <span className="font-medium text-[#0F172A]">{platformLabel[r.platform] ?? r.platform}</span>
-                {/* 409 "already scheduled" = provider menolak DUPLIKAT, bukan
-                    gagal. Artinya post-nya sudah ada di sana — biasanya karena
-                    percobaan sebelumnya timeout SESUDAH provider menerimanya.
-                    Menampilkannya sebagai "Gagal" bikin admin mengira ada yang
-                    rusak lalu mengulang terus-menerus (kejadian video 185). */}
+                {/* 'unconfirmed' = timeout/5xx/409: post-nya MUNGKIN sudah ada.
+                    Menampilkannya sebagai "Gagal" bikin admin mengulang lalu
+                    post tayang dua kali (video 185; laporan user 2026-11-17). */}
                 {r.status === 'scheduled'
                   ? <span className="text-emerald-600 font-semibold">✅ Terjadwal</span>
-                  : /already scheduled/i.test(r.error ?? '')
-                    ? <span className="text-emerald-600 font-semibold" title={r.error ?? ''}>✅ Sudah ada di provider</span>
+                  : r.status === 'unconfirmed'
+                    ? <span className="text-amber-700 font-semibold" title={r.error ?? ''}>⏳ Belum pasti</span>
                     : <span className="text-red-500 font-semibold" title={r.error ?? ''}>❌ Gagal</span>}
               </div>
             ))}
+            {results.some(r => r.status === 'unconfirmed') && (
+              <p className="text-[11px] text-amber-700 pt-1">
+                “Belum pasti” = Buffer/Zernio tidak menjawab tepat waktu; post-nya bisa saja sudah dibuat.
+                Cek di medsos lalu konfirmasi lewat tombol “Belum pasti” di kartu video — jangan dikirim ulang dulu.
+              </p>
+            )}
             {results.some(r => r.status === 'failed') && (
               <p className="text-[11px] text-[#94A3B8] pt-1">
                 Platform yang gagal bisa dicoba ulang lewat tombol yang sama — video yang punya

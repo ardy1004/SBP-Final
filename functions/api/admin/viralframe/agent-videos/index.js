@@ -17,6 +17,7 @@ import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
 import { resolveCloudinaryByCloudName, cloudNameDariUrl } from '../../../../_lib/agentAccounts.js';
 import { hapusAsetVideo } from '../../../../_lib/videoStorage.js';
 import { logServerError } from '../../../../_lib/logError.js';
+import { sqlSudahTerkirim } from '../../../../_lib/jadwalOtomatis.js';
 
 const SELECT_COLS = `
   v.id, v.character_id, v.property_id, v.caption, v.hashtags,
@@ -33,30 +34,31 @@ const SELECT_COLS = `
   v.asal_character_id, ca.nama AS asal_nama,
   p.kode_listing, p.title AS property_title, p.jenis_properti,
   p.status_sold, p.badge_premium, p.badge_featured, p.badge_hot, p.properti_pilihan,
-  -- Platform yang gagal dan BELUM punya jadwal aktif pengganti. Dipakai tombol
-  -- "Ulangi platform gagal" di Konten Agent. Syarat NOT EXISTS-nya sama persis
-  -- dengan penjaga anti-dobel di ulangiPlatformVideo(): platform yang sudah
-  -- punya baris 'scheduled' bukan lagi kegagalan, dan mengulangnya akan membuat
-  -- post dobel. Kegagalan TIMEOUT ikut di sini — justru itu yang tidak pernah
-  -- diulang otomatis dan karenanya butuh tombol manual.
+  -- Platform yang GAGAL DEFINITIF (provider menolak) dan belum punya pengganti
+  -- 'scheduled'/'unconfirmed'. Dipakai tombol "Ulangi platform gagal". Syarat
+  -- NOT EXISTS-nya sama dengan penjaga anti-dobel di ulangiPlatformVideo().
   --
-  -- ⚠️ HTTP 409 "already scheduled" BUKAN kegagalan yang bisa dipulihkan — itu
-  -- provider memberi tahu bahwa kontennya SUDAH ADA di sana. Terjadi 2026-08-31
-  -- pada video 185: percobaan pertama timeout, kita catat gagal, padahal Zernio
-  -- sudah menerima dan menjadwalkannya (diverifikasi lewat GET /v1/posts —
-  -- kedua post ada, status 'scheduled'). Tanpa pengecualian ini tombol "Ulangi"
-  -- akan menawarkan diri SELAMANYA pada video yang sebenarnya sehat, dan tiap
-  -- klik menambah dua baris gagal baru. Sejalan dengan POLA_TIDAK_DIULANG di
-  -- jadwalOtomatis.js, yang juga menolak mengulang 'already scheduled'.
+  -- Sejak 2026-11-17 hasil AMBIGU (timeout, 5xx, Zernio 409 "already
+  -- scheduled") tidak lagi berstatus 'failed' melainkan 'unconfirmed' — dulu
+  -- semuanya tampil sebagai gagal, dan user mendapati video "gagal" itu
+  -- ternyata sudah tayang. Pengecualian teks '%already scheduled%' yang dulu
+  -- ada di sini (video 185, 2026-08-31) karena itu tidak diperlukan lagi:
+  -- migrasi 0059 memindahkan baris lamanya ke 'unconfirmed'.
   (SELECT GROUP_CONCAT(DISTINCT sp.platform) FROM viralframe_scheduled_posts sp
-    WHERE sp.video_id = v.id AND sp.status = 'failed'
-      AND COALESCE(sp.error_message,'') NOT LIKE '%already scheduled%'
+    WHERE sp.video_id = v.id AND sp.video_type = 'agent' AND sp.status = 'failed'
       AND NOT EXISTS (SELECT 1 FROM viralframe_scheduled_posts s2
                        WHERE s2.video_id = sp.video_id AND s2.platform = sp.platform
-                         AND s2.status = 'scheduled')
-      AND NOT EXISTS (SELECT 1 FROM viralframe_scheduled_posts s3
-                       WHERE s3.video_id = sp.video_id AND s3.platform = sp.platform
-                         AND COALESCE(s3.error_message,'') LIKE '%already scheduled%')) AS platform_gagal
+                         AND s2.status IN ('scheduled','unconfirmed'))) AS platform_gagal,
+  -- Platform BELUM PASTI: post-nya mungkin sudah ada di provider. Ditampilkan
+  -- sebagai chip "Belum pasti" + tombol konfirmasi, BUKAN tombol Ulangi.
+  (SELECT GROUP_CONCAT(DISTINCT sp.platform) FROM viralframe_scheduled_posts sp
+    WHERE sp.video_id = v.id AND sp.video_type = 'agent' AND sp.status = 'unconfirmed'
+      AND NOT EXISTS (SELECT 1 FROM viralframe_scheduled_posts s2
+                       WHERE s2.video_id = sp.video_id AND s2.platform = sp.platform
+                         AND s2.status = 'scheduled')) AS platform_belum_pasti,
+  -- Sudah (mungkin) tayang di minimal satu platform → tidak boleh dipulihkan ke
+  -- antrean (lihat restore di agent-videos/bulk.js & [id].js).
+  CASE WHEN ${sqlSudahTerkirim('v.id')} THEN 1 ELSE 0 END AS sudah_terkirim
 `;
 
 // Video lama (sebelum kolom width/height ada) tidak punya dimensi tersimpan.
