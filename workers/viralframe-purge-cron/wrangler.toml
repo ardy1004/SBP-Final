@@ -14,3 +14,11 @@ compatibility_date = "2026-01-01"
 # tidak akan pernah dijadwalkan — diam total, tanpa error.
 [triggers]
 crons = ["10 20 * * *", "0,30 18-21 * * *"]
+
+# Workers Logs (2026-11-17). Worker ini memanggil auto-schedule/purge-trash
+# SEKALI tanpa retry; kalau panggilan itu gagal (5xx, D1 error), satu-satunya
+# jejaknya adalah console.error di src/index.js — dan tanpa blok ini log
+# tersebut tidak tersimpan sama sekali (hanya terlihat lewat `wrangler tail`
+# yang sedang terbuka). Lihat di Dashboard → Workers → viralframe-purge-cron → Logs.
+[observability]
+enabled = true
