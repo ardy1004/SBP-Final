@@ -730,6 +730,11 @@ export default function AdminViralFrameAgentVideosPage() {
       <div className="bg-white rounded-2xl border border-gray-100 p-4">
         <div className="text-sm font-semibold text-[#0F172A] mb-2 flex items-center gap-1.5">
           <BarChart3 size={15} className="text-[#1565C0]" /> Performa per Gaya
+          {/* Metrik kini ditarik OTOMATIS dari Buffer & Zernio (2026-11-18) —
+              kartu manual ini dipertahankan untuk data lama saja. */}
+          <Link to="/admin/viralframe/performa" className="ml-auto text-xs font-semibold text-[#1565C0] hover:underline">
+            Performa Konten otomatis →
+          </Link>
         </div>
         {analytics.length === 0 ? (
           <p className="text-xs text-[#94A3B8]">

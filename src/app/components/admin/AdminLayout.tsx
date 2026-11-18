@@ -4,7 +4,7 @@ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router';
 import {
   LayoutDashboard, List, Users, LogOut, Menu, X, Bell, Shield,
   FileText, Star, BookOpen, Briefcase, Image, Settings, MapPin, Video, AlertTriangle,
-  ChevronLeft, ChevronRight, UserSquare2,
+  ChevronLeft, ChevronRight, UserSquare2, TrendingUp,
 } from 'lucide-react';
 
 interface AdminUser {
@@ -154,8 +154,11 @@ export default function AdminLayout() {
     { to: '/admin/agreements', label: 'Titip Jual', icon: FileText, end: false, badge: titipJualBadge },
     { to: '/admin/listing', label: 'Properti', icon: List, end: false, badge: 0 },
     // excludePrefix: jangan aktif kalau path masuk sub-route lain yang punya menu sendiri
-    { to: '/admin/viralframe', label: 'Viral Frame', icon: Video, end: false, badge: 0, excludePrefix: '/admin/viralframe/agent-videos' },
+    // excludePrefix ber-garis-miring: SEMUA sub-route Viral Frame punya menu
+    // sendiri (Konten Agent, Performa Konten), halaman meja kerja tidak punya sub-route.
+    { to: '/admin/viralframe', label: 'Viral Frame', icon: Video, end: false, badge: 0, excludePrefix: '/admin/viralframe/' },
     { to: '/admin/viralframe/agent-videos', label: 'Konten Agent', icon: UserSquare2, end: false, badge: 0 },
+    { to: '/admin/viralframe/performa', label: 'Performa Konten', icon: TrendingUp, end: false, badge: 0 },
     { to: '/admin/leads', label: 'Leads', icon: Users, end: false, badge: leadsBadge },
     { to: '/admin/testimoni', label: 'Testimoni', icon: Star, end: false, badge: 0 },
     { to: '/admin/blog', label: 'Blog', icon: BookOpen, end: false, badge: 0 },

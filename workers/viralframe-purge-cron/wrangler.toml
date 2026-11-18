@@ -12,8 +12,13 @@ compatibility_date = "2026-01-01"
 # memilih SALAH SATU cabang lewat event.cron. Kalau Cloudflare mengirim pola
 # purge di menit itu, agent ber-jam_auto 03:00 WIB (= 20:00 UTC, dipakai Ayu)
 # tidak akan pernah dijadwalkan — diam total, tanpa error.
+#
+# 00:20-17:20 UTC tiap jam di menit :20 = 07:20-00:20 WIB — tarik metrik post
+#   dari Buffer & Zernio, SATU agent per tick bergiliran (2026-11-18). Menit
+#   :20 sengaja tidak pernah sama dengan :00/:30 (auto-jadwal) maupun :10
+#   (purge), dan jamnya tidak menyentuh 18-21 UTC milik auto-jadwal.
 [triggers]
-crons = ["10 20 * * *", "0,30 18-21 * * *"]
+crons = ["10 20 * * *", "0,30 18-21 * * *", "20 0-17 * * *"]
 
 # Workers Logs (2026-11-17). Worker ini memanggil auto-schedule/purge-trash
 # SEKALI tanpa retry; kalau panggilan itu gagal (5xx, D1 error), satu-satunya

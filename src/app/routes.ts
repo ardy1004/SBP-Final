@@ -35,6 +35,7 @@ export default [
     route("admin/listing/:id", "./routes/admin/property-detail.tsx", { id: "admin-property-detail" }),
     route("admin/viralframe", "./routes/admin/viralframe.tsx", { id: "admin-viralframe" }),
     route("admin/viralframe/agent-videos", "./routes/admin/viralframe-agent-videos.tsx", { id: "admin-viralframe-agent-videos" }),
+    route("admin/viralframe/performa", "./routes/admin/viralframe-performa.tsx", { id: "admin-viralframe-performa" }),
     route("admin/leads", "./routes/admin/leads.tsx"),
     route("admin/leads/:id", "./routes/admin/lead-detail.tsx", { id: "admin-lead-detail" }),
     route("admin/testimoni", "./routes/admin/testimoni.tsx", { id: "admin-testimoni" }),

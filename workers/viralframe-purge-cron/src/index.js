@@ -4,6 +4,7 @@
 //
 //   "10 20 * * *"       -> purge sampah (03:10 WIB)
 //   "0,30 18-21 * * *"  -> auto-jadwal (01:00-04:30 WIB, tiap 30 menit)
+//   "20 0-17 * * *"     -> tarik metrik Buffer/Zernio (07:20-00:20 WIB, 1 agent per tick)
 //
 // Menitnya SENGAJA berbeda supaya tidak pernah ada satu menit yang cocok dengan
 // dua pola sekaligus — alasannya di wrangler.toml.
@@ -20,6 +21,10 @@ export default {
   async scheduled(event, env) {
     if (event.cron === '10 20 * * *') {
       await panggil('purge-trash', env.VIRALFRAME_PURGE_SECRET, 'purge-trash');
+      return;
+    }
+    if (event.cron === '20 0-17 * * *') {
+      await panggil('tarik-metrik', env.VIRALFRAME_PURGE_SECRET, 'tarik-metrik');
       return;
     }
     await panggil('auto-schedule', env.VIRALFRAME_PURGE_SECRET, 'auto-schedule');

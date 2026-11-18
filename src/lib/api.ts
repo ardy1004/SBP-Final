@@ -699,6 +699,55 @@ export interface StatusSlotAkun {
   belum_pasti?: { platform: string; error: string | null }[];
 }
 
+// ── Performa konten (metrik ditarik otomatis dari Buffer & Zernio, migrasi 0061)
+// Aturan statistik: functions/_lib/metrikKonten.js → analisisPerforma().
+export interface PerformaKelompok {
+  nilai: string;
+  n: number;
+  /** Median (views D7 ÷ median akun+platform). 1 = performa biasa akun itu. */
+  median_indeks: number | null;
+  /** Porsi post dengan indeks > 1 (0–1). */
+  menang: number;
+  kualitas_per_1000: number | null;
+  retensi: number | null;
+  data_kurang: boolean;
+}
+export interface PerformaVideo {
+  video_id: number;
+  indeks: number;
+  total_views_d7: number;
+  agent: string | null;
+  talent: string | null;
+  kode_listing: string | null;
+  jenis_properti: string | null;
+  kecamatan: string | null;
+  harga: number | null;
+  durasi_detik: number | null;
+  poster_url: string | null;
+  dna: { sudut: string | null; hook: string | null; naratif: string | null; foto_pembuka: string | null; mood: string | null };
+  terbit_at: string;
+  platform: { platform: string; views_d7: number; indeks: number; kualitas: number | null; retensi: number | null }[];
+}
+export interface PerformaData {
+  filter: { hari: number; platform: string | null; character_id: number | null };
+  ditarik_terakhir: string | null;
+  agent: { id: number; nama: string }[];
+  n_post: number;
+  n_matang: number;
+  ringkasan: { platform: string; n_post: number; n_matang: number; median_views_d7: number | null; total_views: number; kualitas_per_1000: number | null; retensi: number | null }[];
+  akun_lemah: { akun_id: number; agent: string; platform: string; n: number; median_views_d7: number; median_platform: number }[];
+  top: PerformaVideo[];
+  pola: { dimensi: string; n_terisi: number; kelompok: PerformaKelompok[] }[];
+}
+
+/** GET /api/admin/viralframe/performa */
+export async function getPerforma(q: { hari: number; platform?: string; characterId?: number }) {
+  const p = new URLSearchParams({ hari: String(q.hari) });
+  if (q.platform) p.set('platform', q.platform);
+  if (q.characterId) p.set('character_id', String(q.characterId));
+  return apiFetch<PerformaData>(`/admin/viralframe/performa?${p.toString()}`);
+}
+
 export async function getScheduleSlotsStatus(characterId: number) {
   return apiFetch<StatusSlotAkun>(`/admin/viralframe/schedule/status?character_id=${characterId}`);
 }
