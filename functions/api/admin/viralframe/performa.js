@@ -21,7 +21,7 @@ export async function onRequestGet({ env, request }) {
   try {
     const [res, agen, terakhir] = await Promise.all([
       env.DB.prepare(
-        `SELECT pm.akun_id, pm.platform, pm.provider, pm.video_id, pm.terbit_at,
+        `SELECT pm.akun_id, pm.platform, pm.provider, pm.video_id, pm.terbit_at, pm.ditarik_at,
                 pm.views, pm.likes, pm.comments, pm.shares, pm.saves, pm.avg_tonton_detik,
                 pm.views_d7, pm.likes_d7, pm.comments_d7, pm.shares_d7, pm.saves_d7, pm.avg_tonton_d7,
                 vp.character_id, vp.asal_character_id, vp.property_id, vp.kode_listing, vp.jenis_properti,
@@ -37,7 +37,9 @@ export async function onRequestGet({ env, request }) {
       env.DB.prepare('SELECT MAX(ditarik_at) AS t FROM viralframe_post_metrik').first(),
     ]);
     const namaAgent = new Map((agen.results ?? []).map(a => [a.id, a.nama]));
-    const analisis = analisisPerforma(res.results ?? [], namaAgent);
+    // Satu platform terpilih = tiap video paling banyak 1 platform; syarat
+    // "≥ 2 platform" akan mengosongkan daftar teratas.
+    const analisis = analisisPerforma(res.results ?? [], namaAgent, { minPlatformTop: platform ? 1 : 2 });
     return jsonOk({
       filter: { hari, platform, character_id: akunId },
       ditarik_terakhir: terakhir?.t ?? null,

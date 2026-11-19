@@ -197,7 +197,38 @@ export function pernyataanTulis(env, h) {
 }
 
 // ── Analisis ────────────────────────────────────────────────────────────────
-export const N_MIN = 8;
+//
+// Metode DIREVISI 2026-11-19 — laporan analisis pertama (35 hari, 8 agent,
+// 2.358 post bermetrik) membuktikan metode awal menyesatkan:
+//   1. Grup akun+platform berjangkauan nyaris nol (median < 10 views, atau
+//      < 5% median platform) DIKELUARKAN dari indeks. Pada median ±1, satu
+//      post ber-100 views terbaca "100×" — top 10 lama dikuasai TikTok ayu
+//      60–114×, padahal yang terukur cuma platform hidup/mati, bukan mutu.
+//   2. Indeks DINETRALKAN PER MINGGU: views ÷ median (akun, platform, minggu
+//      terbit). Jangkauan akun turun dari minggu ke minggu (Monica FB 2.071 →
+//      526), jadi tanpa ini listing yang kebetulan diposting lebih awal selalu
+//      tampak menang ("kost 1,31×" ternyata 1,02× setelah dinetralkan).
+//   3. Indeks video = MEDIAN lintas platform, bukan rata-rata.
+//   4. n dihitung per VIDEO dan per LISTING. Satu listing diposting 40× bukan
+//      40 bukti ("tanah n376" ternyata 1 listing). data_kurang bila < 8 video
+//      ATAU < 3 listing.
+//   5. Kualitas = Σinteraksi ÷ Σviews (gabungan). Median per post → 0 karena
+//      sebagian besar post tanpa interaksi sama sekali.
+//   6. Dimensi "Talent" DIBUANG: indeks dinormalkan per akun dan tiap akun
+//      satu wajah, jadi hasilnya ±1,00× BY CONSTRUCTION. Perbandingan antar
+//      agent ada di `grid` (angka absolut, % nol, tren, retensi) — retensi
+//      pada listing yang SAMA terbukti sinyal paling kokoh (Monica 55–72% vs
+//      22–32% agent lain).
+export const N_MIN = 8;              // video per kelompok
+export const N_MIN_LISTING = 3;      // listing berbeda per kelompok
+export const AMBANG_SEHAT_VIEWS = 10;
+export const AMBANG_SEHAT_RASIO = 0.05;
+const N_MIN_GRUP = 5;                // post matang minimal agar status grup dinilai
+const N_MIN_MINGGU = 4;              // post minimal agar median mingguan dipakai
+const UMUR_CAKUPAN_HARI = 2;         // post lebih muda belum tentu sudah ditarik
+const CAKUPAN_RENDAH = 0.5;
+const MIN_VIEWS_KUALITAS = 100;      // Σviews minimal agar rasio interaksi bermakna
+const HARI_MS = 86400000;
 
 export function median(arr) {
   const a = arr.filter(x => x != null && Number.isFinite(x)).sort((x, y) => x - y);
@@ -219,6 +250,20 @@ function bagianHari(terbitAt) {
 }
 
 /**
+ * Nomor minggu (Senin–Minggu) dari TANGGAL di depan `terbit_at`. terbit_at
+ * tersimpan "YYYY-MM-DDTHH:MM:SS+07:00", jadi tanggalnya sudah tanggal WIB —
+ * dibaca sebagai teks, bukan lewat Date (string tanpa zona diparse sebagai
+ * waktu LOKAL mesin, dan Worker = UTC).
+ */
+export function mingguKe(terbitAt) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(terbitAt ?? ''));
+  if (!m) return null;
+  const hari = Math.floor(Date.UTC(+m[1], +m[2] - 1, +m[3]) / HARI_MS);
+  return Math.floor((hari + 3) / 7); // 1970-01-01 = Kamis → geser ke Senin
+}
+export const awalMinggu = (w) => new Date((w * 7 - 3) * HARI_MS).toISOString().slice(0, 10);
+
+/**
  * Creative DNA sudut/hook/naratif adalah TEKS BEBAS tulisan AI (stasiunKonsep
  * tidak memvalidasinya ke katalog) — dikelompokkan mentah, tiap video jadi
  * kelompoknya sendiri dan tidak ada pola yang terbaca. Dipetakan ke label
@@ -233,33 +278,99 @@ export function labelKatalog(teks, katalog) {
   return hit ? (hit.label ?? hit.id) : 'Lainnya (di luar katalog)';
 }
 
+const interaksi = (r) => (r.likes_d7 ?? 0) + (r.comments_d7 ?? 0) + (r.shares_d7 ?? 0) + (r.saves_d7 ?? 0);
+/** Rasio GABUNGAN Σinteraksi ÷ Σviews × 1000 (null bila Σviews terlalu kecil). */
+function kualitasGabungan(rs) {
+  const v = rs.reduce((s, r) => s + (r.views_d7 ?? 0), 0);
+  return v >= MIN_VIEWS_KUALITAS ? rs.reduce((s, r) => s + interaksi(r), 0) / v * 1000 : null;
+}
+const retensiPost = (r) => (r.avg_tonton_d7 > 0 && r.durasi_detik > 0 ? Math.min(1.5, r.avg_tonton_d7 / r.durasi_detik) : null);
+/** Post pernah ditemukan di provider (cocok minimal sekali). */
+const ditemukan = (r) => r.ditarik_at != null || r.views != null || r.views_d7 != null;
+
 /**
  * @param {any[]} rows   baris viralframe_post_metrik ⨝ viralframe_video_profil
  * @param {Map<number,string>} namaAgent
+ * @param {{ sekarangMs?: number, minPlatformTop?: number }} [opsi]
  */
-export function analisisPerforma(rows, namaAgent = new Map()) {
+export function analisisPerforma(rows, namaAgent = new Map(), opsi = {}) {
+  const sekarang = opsi.sekarangMs ?? Date.now();
+  const minPlatformTop = opsi.minPlatformTop ?? 2;
   const nama = (id) => (id == null ? null : namaAgent.get(id) ?? `#${id}`);
   const matang = rows.filter(r => r.views_d7 != null);
-
-  // Median per akun+platform → indeks tiap post.
-  const grupAkun = new Map();
-  for (const r of matang) {
-    const k = `${r.akun_id}|${r.platform}`;
-    if (!grupAkun.has(k)) grupAkun.set(k, []);
-    grupAkun.get(k).push(r.views_d7);
-  }
-  const medAkun = new Map([...grupAkun].map(([k, v]) => [k, median(v)]));
-  const kualitas = (r) => (r.views_d7 > 0 ? ((r.likes_d7 ?? 0) + (r.comments_d7 ?? 0) + (r.shares_d7 ?? 0) + (r.saves_d7 ?? 0)) / r.views_d7 * 1000 : null);
-  const retensi = (r) => (r.avg_tonton_d7 > 0 && r.durasi_detik > 0 ? Math.min(1.5, r.avg_tonton_d7 / r.durasi_detik) : null);
-  for (const r of matang) {
-    const m = medAkun.get(`${r.akun_id}|${r.platform}`);
-    r._indeks = m > 0 ? r.views_d7 / m : null;
-    r._kualitas = kualitas(r);
-    r._retensi = retensi(r);
+  for (const r of rows) {
+    r._minggu = mingguKe(r.terbit_at);
+    r._retensi = r.views_d7 != null ? retensiPost(r) : null;
+    r._ix = null;
   }
 
-  // Ringkasan per platform.
+  // ── Median platform (semua akun) = patokan "lemah" ──
   const platforms = [...new Set(rows.map(r => r.platform))].sort();
+  const medPlatform = new Map(platforms.map(p => [p, median(matang.filter(r => r.platform === p).map(r => r.views_d7))]));
+
+  // ── Grid akun × platform ──
+  const grupMap = new Map();
+  for (const r of rows) {
+    const k = `${r.akun_id}|${r.platform}`;
+    if (!grupMap.has(k)) grupMap.set(k, { akun_id: r.akun_id, platform: r.platform, semua: [], matang: [] });
+    const g = grupMap.get(k);
+    g.semua.push(r);
+    if (r.views_d7 != null) g.matang.push(r);
+  }
+  const grid = [];
+  for (const g of grupMap.values()) {
+    const views = g.matang.map(r => r.views_d7);
+    const med = median(views);
+    const mp = medPlatform.get(g.platform);
+    const lama = g.semua.filter(r => {
+      const t = Date.parse(r.terbit_at);
+      return Number.isFinite(t) && (sekarang - t) / HARI_MS >= UMUR_CAKUPAN_HARI;
+    });
+    const nDitemukan = lama.filter(ditemukan).length;
+    let status;
+    if (g.matang.length === 0) status = 'tanpa_data';
+    else if (g.matang.length < N_MIN_GRUP) status = 'data_kurang';
+    else if (med < AMBANG_SEHAT_VIEWS || (mp > 0 && med < mp * AMBANG_SEHAT_RASIO)) status = 'lemah';
+    else status = 'sehat';
+    const perMinggu = new Map();
+    for (const r of g.matang) {
+      if (r._minggu == null) continue;
+      if (!perMinggu.has(r._minggu)) perMinggu.set(r._minggu, []);
+      perMinggu.get(r._minggu).push(r.views_d7);
+    }
+    g.status = status;
+    g.med = med;
+    g.medMinggu = new Map([...perMinggu].filter(([, v]) => v.length >= N_MIN_MINGGU).map(([w, v]) => [w, median(v)]));
+    grid.push({
+      akun_id: g.akun_id,
+      agent: nama(g.akun_id),
+      platform: g.platform,
+      n_post: g.semua.length,
+      n_matang: g.matang.length,
+      n_lama: lama.length,
+      n_ditemukan: nDitemukan,
+      cakupan_rendah: lama.length >= N_MIN_GRUP && nDitemukan / lama.length < CAKUPAN_RENDAH,
+      median_views_d7: med,
+      persen_nol: views.length ? views.filter(v => v === 0).length / views.length : null,
+      retensi: median(g.matang.map(r => r._retensi)),
+      kualitas_per_1000: kualitasGabungan(g.matang),
+      tren: [...perMinggu].filter(([, v]) => v.length >= 3).sort((a, b) => a[0] - b[0]).slice(-6)
+        .map(([w, v]) => ({ minggu: awalMinggu(w), median: median(v), n: v.length })),
+      status,
+    });
+  }
+  grid.sort((a, b) => String(a.agent).localeCompare(String(b.agent)) || a.platform.localeCompare(b.platform));
+
+  // ── Indeks per post: hanya grup sehat, dinetralkan per minggu ──
+  for (const g of grupMap.values()) {
+    if (g.status !== 'sehat') continue;
+    for (const r of g.matang) {
+      const dasar = g.medMinggu.get(r._minggu) ?? g.med;
+      r._ix = dasar > 0 ? r.views_d7 / dasar : null;
+    }
+  }
+
+  // ── Ringkasan per platform ──
   const ringkasan = platforms.map(p => {
     const semua = rows.filter(r => r.platform === p);
     const mt = matang.filter(r => r.platform === p);
@@ -267,95 +378,131 @@ export function analisisPerforma(rows, namaAgent = new Map()) {
       platform: p,
       n_post: semua.length,
       n_matang: mt.length,
-      median_views_d7: median(mt.map(r => r.views_d7)),
+      median_views_d7: medPlatform.get(p),
       total_views: semua.reduce((s, r) => s + (r.views ?? 0), 0),
-      kualitas_per_1000: median(mt.filter(r => r.views_d7 >= 50).map(r => r._kualitas)),
+      kualitas_per_1000: kualitasGabungan(mt),
       retensi: median(mt.map(r => r._retensi)),
+      n_akun_sehat: grid.filter(x => x.platform === p && x.status === 'sehat').length,
     };
   });
 
-  // Akun berjangkauan nyaris nol: median akun < 5% median platform, n ≥ 3.
-  const medPlatform = new Map(ringkasan.map(s => [s.platform, s.median_views_d7]));
-  const akunLemah = [];
-  for (const [k, v] of grupAkun) {
-    const [akun, p] = k.split('|');
-    const mp = medPlatform.get(p);
-    const ma = medAkun.get(k);
-    if (v.length >= 3 && mp > 0 && ma < mp * 0.05) {
-      akunLemah.push({ akun_id: Number(akun), agent: nama(Number(akun)), platform: p, n: v.length, median_views_d7: ma, median_platform: mp });
+  // ── Per video (median lintas platform sehat) ──
+  // Dari SEMUA baris (bukan hanya yang matang) supaya urutan kemunculan
+  // listing di bawah menghitung setiap video yang memang diposting.
+  const perVideo = new Map();
+  for (const r of rows) {
+    if (r.video_id == null) continue;
+    if (!perVideo.has(r.video_id)) perVideo.set(r.video_id, { r, post: [], terbitAwal: r.terbit_at });
+    const v = perVideo.get(r.video_id);
+    if (v.r.kode_listing == null && r.kode_listing != null) v.r = r; // baris berprofil lebih lengkap
+    if (String(r.terbit_at) < String(v.terbitAwal)) v.terbitAwal = r.terbit_at;
+    if (r._ix != null) v.post.push(r);
+  }
+  // Urutan kemunculan listing per agent dalam periode (pengulangan berat
+  // terukur: 1 listing sampai 47–60 video per agent dalam 35 hari).
+  const perAgent = new Map();
+  for (const v of perVideo.values()) {
+    const ag = v.r.character_id ?? v.r.akun_id;
+    if (!perAgent.has(ag)) perAgent.set(ag, []);
+    perAgent.get(ag).push(v);
+  }
+  for (const vs of perAgent.values()) {
+    vs.sort((a, b) => String(a.terbitAwal).localeCompare(String(b.terbitAwal)));
+    const hit = new Map();
+    for (const v of vs) {
+      if (v.r.property_id == null) continue;
+      const n = (hit.get(v.r.property_id) ?? 0) + 1;
+      hit.set(v.r.property_id, n);
+      v.urutan = n;
     }
   }
+  const video = [...perVideo.values()]
+    .filter(v => v.post.length > 0)
+    .map(v => ({ ...v, ix: median(v.post.map(p => p._ix)), nPlatform: new Set(v.post.map(p => p.platform)).size }));
 
-  // Top video: rata-rata indeks lintas platformnya (min 2 platform matang).
-  const perVideo = new Map();
-  for (const r of matang) {
-    if (r._indeks == null) continue;
-    if (!perVideo.has(r.video_id)) perVideo.set(r.video_id, { r, post: [] });
-    perVideo.get(r.video_id).post.push(r);
-  }
-  const top = [...perVideo.values()]
-    .filter(x => x.post.length >= 2)
-    .map(({ r, post }) => ({
+  const kualitasPost = (r) => (r.views_d7 > 0 ? interaksi(r) / r.views_d7 * 1000 : null);
+  const top = video
+    .filter(v => v.nPlatform >= minPlatformTop)
+    .sort((a, b) => b.ix - a.ix)
+    .slice(0, 20)
+    .map(({ r, post, ix }) => ({
       video_id: r.video_id,
-      indeks: post.reduce((s, x) => s + x._indeks, 0) / post.length,
+      indeks: ix,
       total_views_d7: post.reduce((s, x) => s + x.views_d7, 0),
-      agent: nama(r.character_id), talent: nama(r.asal_character_id ?? r.character_id),
-      kode_listing: r.kode_listing, jenis_properti: r.jenis_properti, kecamatan: r.kecamatan, harga: r.harga,
-      durasi_detik: r.durasi_detik, poster_url: r.poster_url,
+      agent: nama(r.character_id ?? r.akun_id),
+      talent: nama(r.asal_character_id ?? r.character_id ?? r.akun_id),
+      kode_listing: r.kode_listing ?? null, jenis_properti: r.jenis_properti ?? null, kecamatan: r.kecamatan ?? null, harga: r.harga ?? null,
+      durasi_detik: r.durasi_detik ?? null, poster_url: r.poster_url ?? null,
       dna: {
         sudut: labelKatalog(r.dna_sudut, SUDUT), hook: labelKatalog(r.dna_hook, HOOK_MEKANISME),
-        naratif: labelKatalog(r.dna_naratif, STRUKTUR_NARATIF), foto_pembuka: r.dna_foto_pembuka,
+        naratif: labelKatalog(r.dna_naratif, STRUKTUR_NARATIF), foto_pembuka: r.dna_foto_pembuka ?? null,
         mood: labelKatalog(r.dna_mood, MOOD),
       },
       terbit_at: r.terbit_at,
-      platform: post.map(x => ({ platform: x.platform, views_d7: x.views_d7, indeks: x._indeks, kualitas: x._kualitas, retensi: x._retensi })),
-    }))
-    .sort((a, b) => b.indeks - a.indeks)
-    .slice(0, 20);
+      platform: post.map(x => ({ platform: x.platform, views_d7: x.views_d7, indeks: x._ix, kualitas: kualitasPost(x), retensi: x._retensi })),
+    }));
 
-  // Pola per dimensi.
+  // ── Pola per dimensi (unit = VIDEO) ──
   const DIMENSI = [
-    ['Hook (mekanisme)', r => labelKatalog(r.dna_hook, HOOK_MEKANISME)],
-    ['Sudut cerita', r => labelKatalog(r.dna_sudut, SUDUT)],
-    ['Struktur naratif', r => labelKatalog(r.dna_naratif, STRUKTUR_NARATIF)],
-    ['Foto pembuka (ruangan)', r => r.dna_foto_pembuka],
-    ['Mood', r => labelKatalog(r.dna_mood, MOOD)],
-    ['Jenis properti', r => r.jenis_properti],
-    ['Rentang harga', r => bucket(r.harga, BUCKET_HARGA)],
-    ['Kecamatan', r => r.kecamatan],
-    ['Durasi video', r => bucket(r.durasi_detik, BUCKET_DURASI)],
-    ['Jam tayang', r => bagianHari(r.terbit_at)],
-    ['Talent (wajah)', r => nama(r.asal_character_id ?? r.character_id)],
-    ['Asal video', r => (r.asal_character_id ? 'Pindahan agent lain' : 'Asli agent ini')],
+    ['Hook (mekanisme)', v => labelKatalog(v.r.dna_hook, HOOK_MEKANISME)],
+    ['Sudut cerita', v => labelKatalog(v.r.dna_sudut, SUDUT)],
+    ['Struktur naratif', v => labelKatalog(v.r.dna_naratif, STRUKTUR_NARATIF)],
+    ['Foto pembuka (ruangan)', v => v.r.dna_foto_pembuka],
+    ['Mood', v => labelKatalog(v.r.dna_mood, MOOD)],
+    ['Jenis properti', v => v.r.jenis_properti],
+    ['Rentang harga', v => bucket(v.r.harga, BUCKET_HARGA)],
+    ['Kecamatan', v => v.r.kecamatan],
+    ['Durasi video', v => bucket(v.r.durasi_detik, BUCKET_DURASI)],
+    ['Jam tayang', v => bagianHari(v.terbitAwal)],
+    ['Pengulangan listing (per agent)', v => (v.urutan == null ? null : v.urutan === 1 ? 'Kemunculan ke-1' : v.urutan <= 3 ? 'Ke-2–3' : v.urutan <= 10 ? 'Ke-4–10' : 'Ke-11 dst.')],
+    ['Asal video', v => (v.r.asal_character_id ? 'Pindahan agent lain' : 'Asli agent ini')],
   ];
   const pola = DIMENSI.map(([label, ambil]) => {
     const grup = new Map();
-    for (const r of matang) {
-      if (r._indeks == null) continue;
-      const v = ambil(r);
-      if (v == null || v === '') continue;
-      if (!grup.has(v)) grup.set(v, []);
-      grup.get(v).push(r);
+    for (const v of video) {
+      const nilai = ambil(v);
+      if (nilai == null || nilai === '') continue;
+      if (!grup.has(nilai)) grup.set(nilai, []);
+      grup.get(nilai).push(v);
     }
-    const kelompok = [...grup].map(([nilai, rs]) => ({
-      nilai,
-      n: rs.length,
-      median_indeks: median(rs.map(x => x._indeks)),
-      menang: rs.filter(x => x._indeks > 1).length / rs.length,
-      kualitas_per_1000: median(rs.filter(x => x.views_d7 >= 50).map(x => x._kualitas)),
-      retensi: median(rs.map(x => x._retensi)),
-      data_kurang: rs.length < N_MIN,
-    }));
+    const kelompok = [...grup].map(([nilai, vs]) => {
+      const post = vs.flatMap(v => v.post);
+      const nListing = new Set(vs.map(v => v.r.property_id ?? `v${v.r.video_id}`)).size;
+      return {
+        nilai,
+        n: vs.length,
+        n_listing: nListing,
+        n_agent: new Set(vs.map(v => v.r.character_id ?? v.r.akun_id)).size,
+        median_indeks: median(vs.map(v => v.ix)),
+        menang: vs.filter(v => v.ix > 1).length / vs.length,
+        kualitas_per_1000: kualitasGabungan(post),
+        retensi: median(post.map(p => p._retensi)),
+        data_kurang: vs.length < N_MIN || nListing < N_MIN_LISTING,
+      };
+    });
     // Kelompok cukup data diurutkan dulu; yang data_kurang di bawah.
     kelompok.sort((a, b) => (a.data_kurang - b.data_kurang) || (b.median_indeks - a.median_indeks));
     return { dimensi: label, n_terisi: kelompok.reduce((s, k) => s + k.n, 0), kelompok: label === 'Kecamatan' ? kelompok.slice(0, 12) : kelompok };
   });
 
+  const akunLemah = grid
+    .filter(x => x.status === 'lemah')
+    .map(x => ({ akun_id: x.akun_id, agent: x.agent, platform: x.platform, n: x.n_matang, median_views_d7: x.median_views_d7, median_platform: medPlatform.get(x.platform) }))
+    .sort((a, b) => a.median_views_d7 - b.median_views_d7);
+
   return {
     n_post: rows.length,
     n_matang: matang.length,
+    n_video_berindeks: video.length,
+    n_listing_berindeks: new Set(video.map(v => v.r.property_id ?? `v${v.r.video_id}`)).size,
+    metode: {
+      ambang_sehat_views: AMBANG_SEHAT_VIEWS, ambang_sehat_rasio: AMBANG_SEHAT_RASIO,
+      n_min_video: N_MIN, n_min_listing: N_MIN_LISTING, n_min_minggu: N_MIN_MINGGU, top_min_platform: minPlatformTop,
+    },
     ringkasan,
-    akun_lemah: akunLemah.sort((a, b) => a.median_views_d7 - b.median_views_d7),
+    grid,
+    akun_lemah: akunLemah,
+    tak_ditemukan: grid.filter(x => x.cakupan_rendah).map(x => ({ akun_id: x.akun_id, agent: x.agent, platform: x.platform, n_lama: x.n_lama, n_ditemukan: x.n_ditemukan })),
     top,
     pola,
   };

@@ -37,14 +37,16 @@ async function gqlBuffer(apiKey, query, variables, timeoutMs) {
 
 /**
  * @param {{ apiKey: string, channelIds: string[], sejakIso: string, timeoutMs: number, bolehLanjut: () => boolean }} p
- * @returns {Promise<{ items: {remote_post_id:string, channelId:string, dueAt:string, metrics:any[], metricsUpdatedAt:string|null}[], galat: string[], panggilan: number, terpotong: boolean }>}
+ * @returns {Promise<{ items: {remote_post_id:string, channelId:string, dueAt:string, metrics:any[], metricsUpdatedAt:string|null}[], galat: string[], panggilan: number, terpotong: boolean, channelBasi: string[] }>}
+ *   channelBasi = id di channelIds yang TIDAK terlihat oleh key ini di organisasi mana pun.
  */
 export async function tarikBuffer({ apiKey, channelIds, sejakIso, timeoutMs, bolehLanjut }) {
   const items = [];
   const galat = [];
+  const channelBasi = [];
   let panggilan = 0;
   let terpotong = false;
-  if (!apiKey || channelIds.length === 0) return { items, galat, panggilan, terpotong };
+  if (!apiKey || channelIds.length === 0) return { items, galat, panggilan, terpotong, channelBasi };
 
   let orgs;
   try {
@@ -52,8 +54,37 @@ export async function tarikBuffer({ apiKey, channelIds, sejakIso, timeoutMs, bol
     const d = await gqlBuffer(apiKey, 'query { account { organizations { id } } }', {}, timeoutMs);
     orgs = (d?.account?.organizations ?? []).map(o => o.id);
   } catch (err) {
-    return { items, galat: [`organisasi: ${err.message}`], panggilan, terpotong };
+    return { items, galat: [`organisasi: ${err.message}`], panggilan, terpotong, channelBasi };
   }
+
+  // Saring channelIds per organisasi ke channel yang BENAR-BENAR terlihat key.
+  // WAJIB: Buffer menolak SELURUH query posts ("Actor can not access the
+  // specified channels") bila SATU saja id di filter tidak bisa diakses — mis.
+  // channel yang disambung ulang (Buffer memberi ID baru) sementara
+  // channels_json masih menyimpan ID lama. Tanpa penyaring ini satu channel
+  // basi mematikan metrik SEMUA platform Buffer agent itu: 2026-11-18 angle,
+  // Andi & vina kehilangan Instagram + YouTube karena TikTok-nya saja yang basi.
+  const perOrg = [];
+  const terlihat = new Set();
+  let daftarLengkap = true;
+  for (const org of orgs) {
+    if (!bolehLanjut()) { terpotong = true; daftarLengkap = false; break; }
+    try {
+      panggilan++;
+      const d = await gqlBuffer(apiKey, 'query C($o: OrganizationId!) { channels(input: { organizationId: $o }) { id } }', { o: org }, timeoutMs);
+      const ada = new Set((d?.channels ?? []).map(c => String(c.id)));
+      const milik = channelIds.map(String).filter(id => ada.has(id));
+      for (const id of milik) terlihat.add(id);
+      if (milik.length > 0) perOrg.push([org, milik]);
+    } catch (err) {
+      daftarLengkap = false;
+      galat.push(`daftar channel: ${err.message}`);
+      if (err.status === 429) { terpotong = true; break; }
+    }
+  }
+  // "Basi" hanya disimpulkan bila SEMUA organisasi berhasil didaftar — kalau
+  // satu gagal, channel yang tak terlihat bisa saja justru ada di sana.
+  if (daftarLengkap) for (const id of channelIds.map(String)) if (!terlihat.has(id)) channelBasi.push(id);
 
   const query = `query P($input: PostsInput!, $after: String) {
     posts(first: ${UKURAN_HALAMAN}, after: $after, input: $input) {
@@ -63,7 +94,7 @@ export async function tarikBuffer({ apiKey, channelIds, sejakIso, timeoutMs, bol
   }`;
   // Channel milik akun lain di organisasi yang sama tidak ikut — filter
   // channelIds. Satu agent biasanya satu organisasi.
-  for (const org of orgs) {
+  for (const [org, milik] of perOrg) {
     let after = null;
     for (let hal = 0; hal < BATAS_HALAMAN; hal++) {
       if (!bolehLanjut()) { terpotong = true; break; }
@@ -71,7 +102,7 @@ export async function tarikBuffer({ apiKey, channelIds, sejakIso, timeoutMs, bol
         panggilan++;
         const d = await gqlBuffer(apiKey, query, {
           after,
-          input: { organizationId: org, filter: { channelIds, status: ['sent'], dueAt: { start: sejakIso, end: new Date().toISOString() } } },
+          input: { organizationId: org, filter: { channelIds: milik, status: ['sent'], dueAt: { start: sejakIso, end: new Date().toISOString() } } },
         }, timeoutMs);
         for (const e of d?.posts?.edges ?? []) {
           const n = e.node;
@@ -86,7 +117,7 @@ export async function tarikBuffer({ apiKey, channelIds, sejakIso, timeoutMs, bol
       }
     }
   }
-  return { items, galat, panggilan, terpotong };
+  return { items, galat, panggilan, terpotong, channelBasi };
 }
 
 /**

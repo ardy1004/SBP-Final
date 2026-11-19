@@ -78,7 +78,10 @@ export async function onRequestPost({ request, env }) {
       : { items: [], galat: [], panggilan: 0, terpotong: false };
 
     const { hasil, takCocok } = cocokkan({ buffer: b.items, zernio: z.items }, peta);
-    laporan.buffer = { post: b.items.length, panggilan: b.panggilan, terpotong: b.terpotong, galat: b.galat };
+    // Channel basi → nama platform, supaya log bisa langsung ditindaklanjuti.
+    const platformDariId = new Map(Object.entries(akun.channels).filter(([, c]) => c.provider === 'buffer').map(([p, c]) => [String(c.id), p]));
+    const basi = (b.channelBasi ?? []).map(id => platformDariId.get(id) ?? 'tak dikenal');
+    laporan.buffer = { post: b.items.length, panggilan: b.panggilan, terpotong: b.terpotong, galat: b.galat, channel_basi: basi };
     laporan.zernio = { post: z.items.length, panggilan: z.panggilan, terpotong: z.terpotong, galat: z.galat };
     laporan.cocok = hasil.length;
     laporan.tak_cocok = takCocok;   // post di provider yang tidak ada di catatan kita (mis. baris 'Belum pasti' tanpa id)
@@ -94,7 +97,11 @@ export async function onRequestPost({ request, env }) {
       laporan.ditulis = ditulis;
     }
 
-    const galat = [...b.galat.map(g => `Buffer ${g}`), ...z.galat.map(g => `Zernio ${g}`)];
+    const galat = [
+      ...(basi.length ? [`Buffer channel ${basi.join(', ')} tidak lagi terlihat oleh API key (disambung ulang?) — buka Akun Agent → "Ambil dari API"; platform lain tetap ditarik`] : []),
+      ...b.galat.map(g => `Buffer ${g}`),
+      ...z.galat.map(g => `Zernio ${g}`),
+    ];
     if (galat.length > 0 && !dry) {
       await logServerError(env, {
         source: 'server',

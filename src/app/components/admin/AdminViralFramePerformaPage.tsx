@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
 import { TrendingUp, Loader2, AlertTriangle, Info, Film } from 'lucide-react';
-import { getPerforma, type PerformaData, type PerformaKelompok } from '../../../lib/api';
+import { getPerforma, type PerformaData, type PerformaKelompok, type PerformaGrid, type StatusGrupPerforma } from '../../../lib/api';
 
-// Performa Konten (2026-11-18) — metrik DITARIK OTOMATIS dari Buffer & Zernio
-// (functions/api/internal/viralframe/tarik-metrik.js, tiap jam :20).
-// Semua angka & aturan statistik dihitung server (metrikKonten.js →
-// analisisPerforma); halaman ini hanya menampilkan. Prinsipnya: TIDAK ada skor
-// AI — indeks = views hari ke-7 ÷ median akun+platform yang sama, jadi akun
-// besar tidak otomatis menang, dan kelompok ber-n kecil ditandai, bukan diberi
-// peringkat.
+// Performa Konten (2026-11-18, metode direvisi 2026-11-19) — metrik DITARIK
+// OTOMATIS dari Buffer & Zernio (functions/api/internal/viralframe/tarik-metrik.js,
+// tiap jam :20). Semua angka & aturan statistik dihitung server (metrikKonten.js
+// → analisisPerforma); halaman ini hanya menampilkan. Prinsipnya: TIDAK ada skor
+// AI — indeks = views hari ke-7 ÷ median akun+platform+MINGGU yang sama, hanya
+// untuk akun berjangkauan sehat, dan kelompok ber-n kecil (video ATAU listing)
+// ditandai, bukan diberi peringkat. Perbandingan ANTAR agent ada di grid
+// kesehatan akun — indeks selalu relatif terhadap akunnya sendiri.
 
 const PLATFORM: Record<string, string> = {
   youtube: 'YouTube', tiktok: 'TikTok', threads: 'Threads', facebook: 'Facebook', instagram: 'Instagram',
@@ -37,8 +38,14 @@ export default function AdminViralFramePerformaPage() {
       .then(r => {
         if (batal) return;
         // Bentuk respons diperiksa, bukan dipercaya — apiFetch hanya meng-cast.
-        if (r.success && Array.isArray(r.data?.ringkasan) && Array.isArray(r.data?.pola) && Array.isArray(r.data?.top)) setData(r.data);
-        else { setData(null); setGalat(r.error ?? 'Gagal memuat performa'); }
+        if (r.success && Array.isArray(r.data?.ringkasan) && Array.isArray(r.data?.pola) && Array.isArray(r.data?.top)) {
+          setData({
+            ...r.data,
+            grid: Array.isArray(r.data.grid) ? r.data.grid : [],
+            akun_lemah: Array.isArray(r.data.akun_lemah) ? r.data.akun_lemah : [],
+            tak_ditemukan: Array.isArray(r.data.tak_ditemukan) ? r.data.tak_ditemukan : [],
+          });
+        } else { setData(null); setGalat(r.error ?? 'Gagal memuat performa'); }
       })
       .catch(() => { if (!batal) setGalat('Koneksi bermasalah'); })
       .finally(() => { if (!batal) setMemuat(false); });
@@ -89,21 +96,46 @@ export default function AdminViralFramePerformaPage() {
           <div className="flex items-start gap-2 bg-[#F0F7FF] border border-[#BFDBFE] rounded-2xl px-4 py-3 text-xs text-[#1E3A8A]">
             <Info size={14} className="flex-shrink-0 mt-0.5" />
             <div>
-              <strong>{fmt(data.n_post)}</strong> post tercatat, <strong>{fmt(data.n_matang)}</strong> sudah berumur ≥ 7 hari dan dipakai untuk perbandingan.
-              {' '}<strong>Indeks</strong> = views hari ke-7 ÷ median views akun yang sama di platform yang sama — <strong>1,00×</strong> = performa biasa akun itu,
-              {' '}<strong>2,00×</strong> = dua kali lipat. <strong>Kualitas</strong> = (likes + komentar + share + simpan) per 1.000 views. <strong>Retensi</strong> = rata-rata durasi tonton ÷ durasi video.
+              <strong>{fmt(data.n_post)}</strong> post tercatat, <strong>{fmt(data.n_matang)}</strong> sudah berumur ≥ 7 hari.
+              {' '}Yang dibandingkan: <strong>{fmt(data.n_video_berindeks)}</strong> video dari <strong>{fmt(data.n_listing_berindeks)}</strong> listing, hanya dari akun yang jangkauannya sehat di platform itu.
+              {' '}<strong>Indeks</strong> = views hari ke-7 ÷ median views akun yang sama, di platform yang sama, <strong>pada minggu yang sama</strong> — <strong>1,00×</strong> = performa biasa akun itu minggu itu,
+              {' '}jadi naik-turunnya jangkauan akun dari minggu ke minggu tidak ikut terbaca sebagai mutu konten. Indeks video = median lintas platformnya.
+              {' '}<strong>Kualitas</strong> = total interaksi ÷ total views × 1.000. <strong>Retensi</strong> = rata-rata durasi tonton ÷ durasi video.
+              {' '}Kelompok di bawah {data.metode?.n_min_video ?? 8} video atau {data.metode?.n_min_listing ?? 3} listing ditandai <em>data kurang</em> — satu listing yang diposting 40× bukan 40 bukti.
             </div>
           </div>
+
+          {data.tak_ditemukan.length > 0 && (
+            <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-2xl px-4 py-3 text-xs text-red-800">
+              <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+              <div>
+                <strong>Post tidak ditemukan di provider</strong> — diterima scheduler dan sudah lewat 2 hari, tapi tidak pernah muncul di data Buffer/Zernio.
+                {' '}Penyebab yang pernah terukur: akun ditangguhkan (YouTube), otorisasi channel hilang (Buffer → Refresh channel), channel disambung ulang
+                {' '}(ID baru belum diambil — Akun Agent → &quot;Ambil dari API&quot;), atau provider memang tidak memberi analitik (Threads lewat Zernio).
+                <ul className="mt-1 space-y-0.5">
+                  {data.tak_ditemukan.map(a => (
+                    <li key={`${a.akun_id}-${a.platform}`}>
+                      {a.agent ?? `#${a.akun_id}`} · {PLATFORM[a.platform] ?? a.platform}: {fmt(a.n_ditemukan)} dari {fmt(a.n_lama)} post ditemukan
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
 
           {data.akun_lemah.length > 0 && (
             <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-xs text-amber-800">
               <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
               <div>
-                <strong>Jangkauan nyaris nol</strong> — median views akun ini di bawah 5% median platformnya. Periksa akunnya (dibatasi, privat, atau baru):
+                <strong>Jangkauan nyaris nol</strong> — median views di bawah {data.metode?.ambang_sehat_views ?? 10} atau di bawah {Math.round((data.metode?.ambang_sehat_rasio ?? 0.05) * 100)}% median platformnya.
+                {' '}Dikeluarkan dari indeks (variasinya mencerminkan platform hidup/mati, bukan mutu konten). Periksa akunnya (dibatasi, privat, atau baru):
                 <ul className="mt-1 space-y-0.5">
-                  {data.akun_lemah.map(a => (
-                    <li key={`${a.akun_id}-${a.platform}`}>
-                      {a.agent} · {PLATFORM[a.platform] ?? a.platform}: median {fmt(a.median_views_d7)} views vs {fmt(a.median_platform)} umumnya ({a.n} post)
+                  {/* Satu baris per agent — rinciannya ada di grid kesehatan akun. */}
+                  {[...new Map(data.akun_lemah.map(a => [a.akun_id, a.agent])).entries()].map(([id, agent]) => (
+                    <li key={id}>
+                      <strong>{agent}</strong>:{' '}
+                      {data.akun_lemah.filter(a => a.akun_id === id)
+                        .map(a => `${PLATFORM[a.platform] ?? a.platform} ${fmt(a.median_views_d7)} (umumnya ${fmt(a.median_platform)})`).join(' · ')}
                     </li>
                   ))}
                 </ul>
@@ -127,11 +159,25 @@ export default function AdminViralFramePerformaPage() {
             ))}
           </div>
 
+          {/* Kesehatan akun per platform — tempat membandingkan ANTAR agent */}
+          {data.grid.length > 0 && (
+            <div className="bg-white rounded-2xl border border-gray-100 p-4">
+              <div className="text-sm font-semibold text-[#0F172A]">Kesehatan akun per platform</div>
+              <p className="text-[11px] text-[#64748B] mb-2">
+                Median views hari ke-7 · tren median per minggu terbit (lama → baru) · porsi post 0 views · retensi.
+                {' '}Bandingkan antar agent di sini — indeks di bawah selalu relatif terhadap akunnya sendiri.
+              </p>
+              <GridAkun grid={data.grid} />
+            </div>
+          )}
+
           {/* Top konten */}
           <div className="bg-white rounded-2xl border border-gray-100 p-4">
-            <div className="text-sm font-semibold text-[#0F172A] mb-3">Konten terbaik (indeks rata-rata lintas platform, min. 2 platform)</div>
+            <div className="text-sm font-semibold text-[#0F172A] mb-3">
+              Konten di atas biasanya (indeks median lintas platform{(data.metode?.top_min_platform ?? 2) > 1 ? `, min. ${data.metode?.top_min_platform ?? 2} platform sehat` : ''})
+            </div>
             {data.top.length === 0 ? (
-              <p className="text-xs text-[#94A3B8]">Belum ada video dengan ≥ 2 platform berumur 7 hari.</p>
+              <p className="text-xs text-[#94A3B8]">Belum ada video dengan ≥ {data.metode?.top_min_platform ?? 2} platform sehat berumur 7 hari.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {data.top.map((v, i) => (
@@ -169,7 +215,7 @@ export default function AdminViralFramePerformaPage() {
               <div key={d.dimensi} className="bg-white rounded-2xl border border-gray-100 p-4">
                 <div className="flex items-baseline justify-between mb-2">
                   <div className="text-sm font-semibold text-[#0F172A]">{d.dimensi}</div>
-                  <div className="text-[10px] text-[#94A3B8]">{fmt(d.n_terisi)} post</div>
+                  <div className="text-[10px] text-[#94A3B8]">{fmt(d.n_terisi)} video</div>
                 </div>
                 <TabelPola kelompok={d.kelompok} />
               </div>
@@ -193,9 +239,9 @@ function TabelPola({ kelompok }: { kelompok: PerformaKelompok[] }) {
       <thead>
         <tr className="text-[#94A3B8] text-left">
           <th className="font-medium pb-1">Nilai</th>
-          <th className="font-medium pb-1 text-right">n</th>
+          <th className="font-medium pb-1 text-right whitespace-nowrap" title="Jumlah video / listing berbeda">Video / listing</th>
           <th className="font-medium pb-1 pl-2">Indeks median</th>
-          <th className="font-medium pb-1 text-right" title="Porsi post di atas median akunnya">Menang</th>
+          <th className="font-medium pb-1 text-right" title="Porsi video di atas biasanya akunnya">Menang</th>
           <th className="font-medium pb-1 text-right">Kualitas</th>
           <th className="font-medium pb-1 text-right">Retensi</th>
         </tr>
@@ -207,7 +253,7 @@ function TabelPola({ kelompok }: { kelompok: PerformaKelompok[] }) {
               {k.nilai}
               {k.data_kurang && <span className="ml-1 px-1 rounded bg-gray-100 text-[9px] text-[#94A3B8]">data kurang</span>}
             </td>
-            <td className="py-0.5 text-right">{k.n}</td>
+            <td className="py-0.5 text-right whitespace-nowrap">{k.n} / {k.n_listing ?? '—'}</td>
             <td className="py-0.5 pl-2">
               <div className="flex items-center gap-1.5">
                 <div className="h-1.5 rounded-full bg-gray-100 flex-1 min-w-[40px]">
@@ -224,5 +270,71 @@ function TabelPola({ kelompok }: { kelompok: PerformaKelompok[] }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+const URUTAN_GRID = ['facebook', 'instagram', 'tiktok', 'youtube', 'threads'];
+
+const GAYA_STATUS: Record<StatusGrupPerforma, { kotak: string; label: string }> = {
+  sehat: { kotak: 'bg-emerald-50/60 border-emerald-100', label: 'Sehat — ikut dihitung di indeks' },
+  lemah: { kotak: 'bg-amber-50 border-amber-200', label: 'Jangkauan nyaris nol — dikeluarkan dari indeks' },
+  data_kurang: { kotak: 'bg-gray-50 border-gray-100', label: 'Data kurang (< 5 post berumur 7 hari)' },
+  tanpa_data: { kotak: 'bg-gray-50 border-dashed border-gray-200', label: 'Belum ada post bermetrik' },
+};
+
+function GridAkun({ grid }: { grid: PerformaGrid[] }) {
+  const platforms = URUTAN_GRID.filter(p => grid.some(g => g.platform === p));
+  const agents = [...new Map(grid.map(g => [g.akun_id, g.agent ?? `#${g.akun_id}`])).entries()];
+  const sel = new Map(grid.map(g => [`${g.akun_id}|${g.platform}`, g]));
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[640px] text-[11px] border-separate border-spacing-1">
+        <thead>
+          <tr className="text-left text-[#94A3B8]">
+            <th className="font-medium">Agent</th>
+            {platforms.map(p => <th key={p} className="font-medium">{PLATFORM[p]}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {agents.map(([id, nama]) => (
+            <tr key={id}>
+              <td className="pr-2 pt-2 align-top font-semibold text-[#0F172A] whitespace-nowrap">{nama}</td>
+              {platforms.map(p => {
+                const g = sel.get(`${id}|${p}`);
+                return <td key={p} className="align-top">{g ? <SelGrid g={g} /> : <div className="px-2 py-1.5 text-[#CBD5E1]">—</div>}</td>;
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SelGrid({ g }: { g: PerformaGrid }) {
+  const s = GAYA_STATUS[g.status] ?? GAYA_STATUS.data_kurang;
+  const awal = g.tren[0]?.median;
+  const akhir = g.tren[g.tren.length - 1]?.median;
+  const arah = g.tren.length >= 2 && awal != null && akhir != null && awal > 0
+    ? (akhir >= awal * 1.5 ? '↑' : akhir <= awal / 1.5 ? '↓' : '→')
+    : null;
+  const judul = `${s.label}. ${g.n_matang}/${g.n_post} post berumur ≥ 7 hari. Tren: ${g.tren.map(t => `minggu ${t.minggu} = ${fmt(t.median)} (${t.n} post)`).join(', ') || '—'}`;
+  return (
+    <div className={`rounded-lg border px-2 py-1.5 ${s.kotak}`} title={judul}>
+      <div className={`text-xs font-bold ${g.status === 'lemah' ? 'text-amber-700' : 'text-[#0F172A]'}`}>
+        {g.status === 'tanpa_data' ? '—' : fmt(g.median_views_d7)}
+      </div>
+      {g.tren.length >= 2 && (
+        <div className="text-[10px] text-[#64748B] whitespace-nowrap">
+          <span className={arah === '↓' ? 'text-red-600' : arah === '↑' ? 'text-emerald-600' : ''}>{arah}</span> {g.tren.map(t => fmt(t.median)).join('→')}
+        </div>
+      )}
+      {g.status !== 'tanpa_data' && (
+        <div className="text-[10px] text-[#64748B] whitespace-nowrap">
+          {g.persen_nol ? `nol ${fmtPct(g.persen_nol)} · ` : ''}ret {fmtPct(g.retensi)}
+        </div>
+      )}
+      {g.cakupan_rendah && <div className="text-[10px] font-semibold text-red-600 whitespace-nowrap">{fmt(g.n_ditemukan)}/{fmt(g.n_lama)} ditemukan</div>}
+    </div>
   );
 }

@@ -703,14 +703,38 @@ export interface StatusSlotAkun {
 // Aturan statistik: functions/_lib/metrikKonten.js → analisisPerforma().
 export interface PerformaKelompok {
   nilai: string;
+  /** Jumlah VIDEO (bukan post). */
   n: number;
-  /** Median (views D7 ÷ median akun+platform). 1 = performa biasa akun itu. */
+  n_listing: number;
+  n_agent: number;
+  /** Median indeks video (views D7 ÷ median akun+platform+minggu). 1 = performa biasa akun itu. */
   median_indeks: number | null;
-  /** Porsi post dengan indeks > 1 (0–1). */
+  /** Porsi video dengan indeks > 1 (0–1). */
   menang: number;
+  /** Σinteraksi ÷ Σviews × 1000. */
   kualitas_per_1000: number | null;
   retensi: number | null;
+  /** < 8 video ATAU < 3 listing. */
   data_kurang: boolean;
+}
+export type StatusGrupPerforma = 'sehat' | 'lemah' | 'data_kurang' | 'tanpa_data';
+export interface PerformaGrid {
+  akun_id: number;
+  agent: string | null;
+  platform: string;
+  n_post: number;
+  n_matang: number;
+  /** Post berumur ≥ 2 hari, dan berapa yang pernah ditemukan di provider. */
+  n_lama: number;
+  n_ditemukan: number;
+  cakupan_rendah: boolean;
+  median_views_d7: number | null;
+  persen_nol: number | null;
+  retensi: number | null;
+  kualitas_per_1000: number | null;
+  /** Median views D7 per minggu terbit (Senin), lama → baru, maks 6 minggu. */
+  tren: { minggu: string; median: number | null; n: number }[];
+  status: StatusGrupPerforma;
 }
 export interface PerformaVideo {
   video_id: number;
@@ -734,8 +758,13 @@ export interface PerformaData {
   agent: { id: number; nama: string }[];
   n_post: number;
   n_matang: number;
-  ringkasan: { platform: string; n_post: number; n_matang: number; median_views_d7: number | null; total_views: number; kualitas_per_1000: number | null; retensi: number | null }[];
+  n_video_berindeks: number;
+  n_listing_berindeks: number;
+  metode: { ambang_sehat_views: number; ambang_sehat_rasio: number; n_min_video: number; n_min_listing: number; n_min_minggu: number; top_min_platform: number };
+  ringkasan: { platform: string; n_post: number; n_matang: number; median_views_d7: number | null; total_views: number; kualitas_per_1000: number | null; retensi: number | null; n_akun_sehat: number }[];
+  grid: PerformaGrid[];
   akun_lemah: { akun_id: number; agent: string; platform: string; n: number; median_views_d7: number; median_platform: number }[];
+  tak_ditemukan: { akun_id: number; agent: string | null; platform: string; n_lama: number; n_ditemukan: number }[];
   top: PerformaVideo[];
   pola: { dimensi: string; n_terisi: number; kelompok: PerformaKelompok[] }[];
 }
