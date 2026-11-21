@@ -43,7 +43,7 @@
   - Pengecualian sah: `React.lazy` aman bila komponennya **tidak pernah dirender saat SSR sama sekali**. Contoh yang sudah ada dan JANGAN "diperbaiki": `PropertiesPage.tsx` merender `LazyPropertyMap` di balik `viewMode === 'map' && isMounted`, sedangkan `viewMode` default `'grid'` — server tidak pernah merender Suspense-nya, jadi tidak ada mismatch.
 
 ## Modul Admin — Peta Cepat
-13 area sidebar admin, 11 sudah terisi penuh (Overview, Listing, Detail Properti, Titip Jual/Agreements, Leads/CRM, Testimoni, Blog, Lokasi, Pengaturan, Konten Agent + Performa Konten). Menu **Viral Frame (meja kerja storyboard/prompt) DIHAPUS 2026-11-21** — tidak dipakai (0 dari 1.369 video agent lewat sana); `/admin/viralframe` dialihkan ke Konten Agent. **Portfolio dan Media masih placeholder** ("Segera hadir") — belum dikerjakan sama sekali. Lihat `CATATAN_PROGRES.md` section "AUDIT KOMPREHENSIF" untuk status lengkap per modul dan endpoint.
+13 area sidebar admin, 11 sudah terisi penuh (Overview, Listing, Detail Properti, Titip Jual/Agreements, Leads/CRM, Testimoni, Blog, Lokasi, Pengaturan, Konten Agent + Performa Konten). Menu **Viral Frame (meja kerja storyboard/prompt) DIHAPUS 2026-11-21** — tidak dipakai (0 dari 1.369 video agent lewat sana); `/admin/viralframe` dialihkan ke Konten Agent. **Portfolio LIVE 2026-11-21** (migrasi 0062, Admin → Portfolio: seret-lepas foto, alat sensor canvas, strip "Bukti Kerja" beranda ≥ 4 foto, /portfolio); **Media masih placeholder** ("Segera hadir"). Lihat `CATATAN_PROGRES.md` section "AUDIT KOMPREHENSIF" untuk status lengkap per modul dan endpoint.
 
 ## AI APIs yang Dipakai
 - DeepSeek: `https://api.deepseek.com/chat/completions`, model `deepseek-chat` — AI Description Generator (`functions/api/admin/ai/generate-description.js`)

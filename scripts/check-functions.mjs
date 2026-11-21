@@ -103,6 +103,17 @@ const SKENARIO = [
     ctx: () => ({ request: new Request('https://x/auto-schedule', { method: 'POST', headers: { 'X-Purge-Secret': 'salah' } }), env: envInternal() }) },
   { file: '../../internal/viralframe/tarik-metrik.js', fn: 'onRequestPost', nama: 'POST internal/tarik-metrik (dry)',
     ctx: () => ({ request: reqInternal('https://x/tarik-metrik?dry=1'), env: envInternal() }) },
+  // ─── Portofolio (2026-11-21, migrasi 0062) ───────────────────────────────
+  { file: '../portfolio/index.js', fn: 'onRequestGet', nama: 'GET /portfolio (admin)',
+    ctx: () => ({ env: env() }) },
+  { file: '../portfolio/index.js', fn: 'onRequestPost', nama: 'POST /portfolio (key tidak sah → 400)',
+    ctx: () => ({ request: req('https://x/portfolio', { foto_key: 'signatures/x.png', thumb_key: 'x' }), env: env() }) },
+  { file: '../portfolio/index.js', fn: 'onRequestPost', nama: 'POST /portfolio (sah)',
+    ctx: () => ({ request: req('https://x/portfolio', { foto_key: 'portfolio/123e4567-e89b-12d3-a456-426614174000.webp', thumb_key: 'portfolio/123e4567-e89b-12d3-a456-426614174000-t.webp', kategori: 'ajb', keterangan: 'uji' }), env: env() }) },
+  { file: '../portfolio/[id].js', fn: 'onRequestPatch', nama: 'PATCH /portfolio/:id (tidak ada → 404)',
+    ctx: () => ({ request: req('https://x/portfolio/1', { tampil: true }), env: env(), params: { id: '1' } }) },
+  { file: '../portfolio/urutan.js', fn: 'onRequestPost', nama: 'POST /portfolio/urutan',
+    ctx: () => ({ request: req('https://x/portfolio/urutan', { ids: [3, 1, 2] }), env: env() }) },
 ];
 
 async function bagian1() {

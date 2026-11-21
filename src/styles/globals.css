@@ -87,6 +87,22 @@ body {
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
 }
 
+/* ===== PORTOFOLIO "BUKTI KERJA" — strip beranda bergulir (PortfolioStrip.tsx) ===== */
+@keyframes portofolioGeser {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.portofolio-jalur { overflow: hidden; }
+.portofolio-geser { animation: portofolioGeser 40s linear infinite; will-change: transform; }
+.portofolio-jalur:hover .portofolio-geser,
+.portofolio-jalur:focus-within .portofolio-geser,
+.portofolio-jalur:active .portofolio-geser { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .portofolio-jalur { overflow-x: auto; }
+  .portofolio-geser { animation: none; }
+  .portofolio-salinan { display: none; }
+}
+
 /* ===== HERO BREATHING ANIMATION ===== */
 @keyframes heroBreath {
   0%   { transform: scale(1.00); }

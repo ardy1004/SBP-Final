@@ -774,6 +774,65 @@ export async function getScheduleSlotsStatus(characterId: number) {
 }
 
 
+// ── Portofolio "bukti kerja" (migrasi 0062) ─────────────────────────────────
+// Aturan validasi & label kategori: functions/_lib/portfolio.js.
+export type KategoriPortfolio = 'ajb' | 'survey' | 'serah_terima' | 'lainnya';
+export interface PortfolioItem {
+  id: number;
+  kategori: KategoriPortfolio;
+  foto_key: string;
+  thumb_key: string;
+  keterangan: string;
+  lokasi: string | null;
+  tanggal: string | null;
+  property_id: number | null;
+  kode_listing: string | null;
+  tampil: number;
+  aman_dikonfirmasi: number;
+  urutan: number;
+  dibuat_at: string;
+  diubah_at: string | null;
+}
+/** Item publik (beranda & /portfolio) — hanya yang `tampil = 1`. */
+export interface PortfolioPublik {
+  id: number;
+  kategori: KategoriPortfolio;
+  foto_key: string;
+  thumb_key: string;
+  keterangan: string;
+  lokasi: string | null;
+  tanggal: string | null;
+  /** Path listing terkait (hanya bila listing masih tayang). */
+  url_listing: string | null;
+}
+export type IsianPortfolio = Partial<{
+  kategori: KategoriPortfolio; keterangan: string; lokasi: string; tanggal: string;
+  kode_listing: string; aman_dikonfirmasi: boolean; tampil: boolean;
+}>;
+/** URL publik foto portofolio (prefiks portfolio/ diizinkan di /api/media). */
+export const urlFotoPortfolio = (key: string) => `/api/media?key=${encodeURIComponent(key)}`;
+
+export async function getPortfolioAdmin() {
+  return apiFetch<{ items: PortfolioItem[] }>('/admin/portfolio');
+}
+export async function unggahFotoPortfolio(foto: string, thumb: string) {
+  return apiFetch<{ foto_key: string; thumb_key: string }>('/admin/portfolio/foto', {
+    method: 'POST', body: JSON.stringify({ foto, thumb }),
+  });
+}
+export async function buatPortfolio(body: IsianPortfolio & { foto_key: string; thumb_key: string }) {
+  return apiFetch<{ item: PortfolioItem }>('/admin/portfolio', { method: 'POST', body: JSON.stringify(body) });
+}
+export async function ubahPortfolio(id: number, body: IsianPortfolio) {
+  return apiFetch<{ item: PortfolioItem }>(`/admin/portfolio/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+export async function hapusPortfolio(id: number) {
+  return apiFetch<{ id: number; dihapus: boolean }>(`/admin/portfolio/${id}`, { method: 'DELETE' });
+}
+export async function urutPortfolio(ids: number[]) {
+  return apiFetch<{ jumlah: number }>('/admin/portfolio/urutan', { method: 'POST', body: JSON.stringify({ ids }) });
+}
+
 /** GET /api/testimonials */
 export async function getTestimonials() {
   return apiFetch<ApiTestimonialsData>('/testimonials');

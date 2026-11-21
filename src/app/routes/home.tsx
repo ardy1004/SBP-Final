@@ -1,7 +1,8 @@
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData } from "react-router";
 import HomePage from "../components/HomePage";
-import type { NormalizedProperty, ApiTestimonial, ApiBlogPost, InvestTeaserProp } from "../../lib/api";
+import type { NormalizedProperty, ApiTestimonial, ApiBlogPost, InvestTeaserProp, PortfolioPublik } from "../../lib/api";
+import { ambilPortfolioPublik } from "../../../functions/_lib/portfolio.js";
 import { normalizeProperty } from "../../lib/api";
 
 // ── Cloudflare D1 bindings tersedia via context.cloudflare.env (dari cloudflareDevProxy / Pages Functions)
@@ -9,11 +10,11 @@ export async function loader({ context }: LoaderFunctionArgs) {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const env = (context as any)?.cloudflare?.env;
-    if (!env?.DB) return { properties: [], testimonials: [], blogPosts: [], stats: null, coverageAreas: [], investProp: null };
+    if (!env?.DB) return { properties: [], testimonials: [], blogPosts: [], stats: null, coverageAreas: [], investProp: null, portfolio: [] as PortfolioPublik[] };
 
     const db = env.DB as D1Database;
 
-    const [propsRes, testimRes, blogRes, statsRes, coverageRes, investRes] = await Promise.all([
+    const [propsRes, testimRes, blogRes, statsRes, coverageRes, investRes, portfolio] = await Promise.all([
       // Query identik dengan GET /api/properties — kolom dan filter sama persis
       db.prepare(`
         SELECT
@@ -98,6 +99,14 @@ export async function loader({ context }: LoaderFunctionArgs) {
         ORDER BY yield_persen DESC
         LIMIT 1
       `).first(),
+
+      // Portofolio bukti kerja (migrasi 0062). .catch SENDIRI: Promise.all di
+      // sini menjatuhkan SELURUH data beranda bila satu query gagal (mis. tabel
+      // belum dimigrasi) — portofolio kosong jauh lebih baik daripada beranda kosong.
+      ambilPortfolioPublik(db, 24).catch((err: unknown) => {
+        console.error('[home loader] portofolio:', (err as Error)?.message);
+        return [] as PortfolioPublik[];
+      }),
     ]);
 
     // Normalisasi properties (integer → boolean, dll.)
@@ -170,10 +179,10 @@ export async function loader({ context }: LoaderFunctionArgs) {
       yield_persen: Number(investRow.yield_persen),
     } : null;
 
-    return { properties, testimonials, blogPosts, stats, coverageAreas, investProp };
+    return { properties, testimonials, blogPosts, stats, coverageAreas, investProp, portfolio };
   } catch (e) {
     console.error("[home loader]", e);
-    return { properties: [], testimonials: [], blogPosts: [], stats: null, coverageAreas: [], investProp: null };
+    return { properties: [], testimonials: [], blogPosts: [], stats: null, coverageAreas: [], investProp: null, portfolio: [] as PortfolioPublik[] };
   }
 }
 
@@ -260,7 +269,7 @@ export const meta: MetaFunction = () => [
 ];
 
 export default function HomeRoute() {
-  const { properties, testimonials, blogPosts, stats, coverageAreas, investProp } = useLoaderData<typeof loader>();
+  const { properties, testimonials, blogPosts, stats, coverageAreas, investProp, portfolio } = useLoaderData<typeof loader>();
   return (
     <HomePage
       ssrProperties={properties}
@@ -269,6 +278,7 @@ export default function HomeRoute() {
       ssrStats={stats}
       ssrCoverageAreas={coverageAreas}
       ssrInvestProp={investProp}
+      ssrPortfolio={portfolio}
     />
   );
 }

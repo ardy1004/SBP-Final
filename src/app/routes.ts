@@ -40,7 +40,7 @@ export default [
     route("admin/leads/:id", "./routes/admin/lead-detail.tsx", { id: "admin-lead-detail" }),
     route("admin/testimoni", "./routes/admin/testimoni.tsx", { id: "admin-testimoni" }),
     route("admin/blog", "./routes/admin/blog.tsx", { id: "admin-blog" }),
-    route("admin/portfolio", "./routes/admin/placeholder.tsx", { id: "admin-portfolio" }),
+    route("admin/portfolio", "./routes/admin/portfolio.tsx", { id: "admin-portfolio" }),
     route("admin/media", "./routes/admin/placeholder.tsx", { id: "admin-media" }),
     route("admin/pengaturan", "./routes/admin/pengaturan.tsx", { id: "admin-pengaturan" }),
     route("admin/lokasi", "./routes/admin/lokasi.tsx"),

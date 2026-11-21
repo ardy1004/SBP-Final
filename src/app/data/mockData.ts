@@ -75,11 +75,3 @@ export const FAQ_DATA = [
   },
 ];
 
-export const PORTFOLIO_ITEMS = [
-  { id: 1, judul: 'Rumah 3KT di Condongcatur', lokasi: 'Depok, Sleman', foto: 'https://images.unsplash.com/photo-1675657144518-025804f1812c?w=600&q=80', harga: 780000000, jenis: 'Rumah' },
-  { id: 2, judul: 'Kost 15 Kamar Mlati', lokasi: 'Mlati, Sleman', foto: 'https://images.unsplash.com/photo-1735461932749-e602a9f6fc82?w=600&q=80', harga: 1100000000, jenis: 'Kost' },
-  { id: 3, judul: 'Villa Kaliurang Premium', lokasi: 'Pakem, Sleman', foto: 'https://images.unsplash.com/photo-1692736933760-8a8a9b8c1b6f?w=600&q=80', harga: 4200000000, jenis: 'Villa' },
-  { id: 4, judul: 'Tanah 300m² Banguntapan', lokasi: 'Banguntapan, Bantul', foto: 'https://images.unsplash.com/photo-1613553507747-5f8d62ad5904?w=600&q=80', harga: 900000000, jenis: 'Tanah' },
-  { id: 5, judul: 'Apartemen Studio UGM Area', lokasi: 'Depok, Sleman', foto: 'https://images.unsplash.com/photo-1515263487990-61b07816b324?w=600&q=80', harga: 420000000, jenis: 'Apartemen' },
-  { id: 6, judul: 'Hotel Melati Malioboro', lokasi: 'Gondomanan, Kota Yogyakarta', foto: 'https://images.unsplash.com/photo-1692736933732-ad902fc34626?w=600&q=80', harga: 7500000000, jenis: 'Hotel' },
-];

@@ -14,10 +14,12 @@ import {
   getTestimonials, type ApiTestimonial,
   getBlogPosts, type ApiBlogPost,
   hitungSkorInvestasi, type InvestTeaserProp,
+  type PortfolioPublik,
 } from '../../lib/api';
 import { PROPERTY_TYPES } from '../../lib/propertyTypes';
 import { cfImg, cfSrcSet } from '../../lib/img';
 import PropertyCard from './PropertyCard';
+import PortfolioStrip from './PortfolioStrip';
 import { Skeleton } from './ui/skeleton';
 
 /* ── STATS STRIP ── */
@@ -548,10 +550,12 @@ interface HomePageProps {
   ssrStats?: HomeStats | null;
   ssrCoverageAreas?: CoverageArea[];
   ssrInvestProp?: InvestTeaserProp | null;
+  /** Portofolio bukti kerja (SSR, migrasi 0062) — strip tampil bila ≥ 4 item. */
+  ssrPortfolio?: PortfolioPublik[];
 }
 
 /* ── MAIN HOMEPAGE ── */
-export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts, ssrStats, ssrCoverageAreas, ssrInvestProp }: HomePageProps) {
+export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts, ssrStats, ssrCoverageAreas, ssrInvestProp, ssrPortfolio }: HomePageProps) {
   const hasSSR = ssrProperties !== undefined;
 
   // Angka real dari DB; fallback ke angka brand hanya bila DB tak tersedia (mis. dev tanpa SSR)
@@ -816,6 +820,9 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
           </div>
         </div>
       </section>
+
+      {/* PORTOFOLIO — bukti kerja (AJB, survey, serah terima); null bila < 4 item */}
+      <PortfolioStrip items={ssrPortfolio ?? []} />
 
       {/* TESTIMONIALS — data dari GET /api/testimonials */}
       {testimonialsLoading
