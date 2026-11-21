@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Briefcase, Upload, Trash2, GripVertical, ShieldAlert, Loader2, Square, X, Eye, EyeOff } from 'lucide-react';
+import { Briefcase, Upload, Trash2, GripVertical, ShieldAlert, Loader2, Square, X, Eye, EyeOff, Shuffle } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, rectSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -7,7 +7,7 @@ import {
   getPortfolioAdmin, unggahFotoPortfolio, buatPortfolio, ubahPortfolio, hapusPortfolio, urutPortfolio,
   urlFotoPortfolio, type PortfolioItem, type KategoriPortfolio, type IsianPortfolio,
 } from '../../../lib/api';
-import { KATEGORI_PORTFOLIO, MAKS_KETERANGAN, MIN_TAMPIL_BERANDA, periksaKeterangan } from '../../../../functions/_lib/portfolio.js';
+import { KATEGORI_PORTFOLIO, MAKS_KETERANGAN, MIN_TAMPIL_BERANDA, BATAS_BERANDA, periksaKeterangan, acakCampur, labelKategori } from '../../../../functions/_lib/portfolio.js';
 import SensorFoto, { type KotakSensor } from './portfolio/SensorFoto';
 
 // Admin → Portfolio (2026-11-21, migrasi 0062): foto bukti kerja (AJB, survey
@@ -189,6 +189,23 @@ export default function AdminPortfolioPage() {
     if (!r.success) { setItems(lama); setPesan({ jenis: 'galat', teks: r.error ?? 'Gagal menyimpan urutan' }); }
   };
 
+  // Acak urutan: kategori dicampur merata (acakCampur), lalu disimpan lewat
+  // endpoint urutan yang sama dengan seret — masih bisa dirapikan manual sesudahnya.
+  const [mengacak, setMengacak] = useState(false);
+  const acakUrutan = async () => {
+    if (!items || items.length < 2) return;
+    if (!window.confirm('Acak urutan semua foto? Kategori (AJB, survey, negosiasi, …) akan dicampur merata. Urutan yang diatur manual akan diganti.')) return;
+    const lama = items;
+    const baru = acakCampur(items);
+    setItems(baru); setMengacak(true); setPesan(null);
+    const r = await urutPortfolio(baru.map(x => x.id));
+    setMengacak(false);
+    if (!r.success) { setItems(lama); setPesan({ jenis: 'galat', teks: r.error ?? 'Gagal menyimpan urutan' }); return; }
+    const awal = baru.filter(x => x.tampil === 1).slice(0, BATAS_BERANDA);
+    const komposisi = KATEGORI_PORTFOLIO.map(k => ({ label: labelKategori(k.id), n: awal.filter(x => x.kategori === k.id).length })).filter(k => k.n > 0);
+    setPesan({ jenis: 'ok', teks: `Urutan diacak. ${awal.length} foto teratas di beranda: ${komposisi.map(k => `${k.n} ${k.label}`).join(', ')}. Beranda diperbarui paling lambat ±5 menit.` });
+  };
+
   const jumlahTampil = (items ?? []).filter(x => x.tampil === 1).length;
   const drafSensor = draf.find(d => d.kunci === sensorKunci);
 
@@ -197,7 +214,7 @@ export default function AdminPortfolioPage() {
       <div>
         <h1 className="text-xl font-bold text-[#0F172A] flex items-center gap-2"><Briefcase size={20} className="text-[#1565C0]" /> Portfolio — Bukti Kerja</h1>
         <p className="text-sm text-[#64748B]">
-          Foto AJB, survey lokasi, dan serah terima kunci untuk strip &quot;Bukti Kerja&quot; di beranda dan halaman /portfolio.
+          Foto AJB, survey lokasi, negosiasi, dan serah terima kunci untuk strip &quot;Bukti Kerja&quot; di beranda dan halaman /portfolio.
           {' '}Tampil sekarang: <strong>{jumlahTampil}</strong> foto
           {jumlahTampil < MIN_TAMPIL_BERANDA ? ` — strip beranda baru muncul pada ${MIN_TAMPIL_BERANDA} foto.` : '.'}
         </p>
@@ -290,8 +307,17 @@ export default function AdminPortfolioPage() {
 
       {/* Item tersimpan */}
       <div className="bg-white rounded-2xl border border-gray-100 p-4">
-        <div className="text-sm font-semibold text-[#0F172A] mb-1">Foto tersimpan {items ? `(${items.length})` : ''}</div>
-        <p className="text-[11px] text-[#64748B] mb-3">Seret pegangan <GripVertical size={11} className="inline" /> untuk mengatur urutan tampil — paling kiri-atas tampil pertama.</p>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+          <div className="text-sm font-semibold text-[#0F172A]">Foto tersimpan {items ? `(${items.length})` : ''}</div>
+          <button type="button" onClick={() => void acakUrutan()} disabled={mengacak || !items || items.length < 2}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-200 text-xs font-semibold text-[#334155] hover:border-[#1565C0] hover:text-[#1565C0] disabled:opacity-40">
+            {mengacak ? <Loader2 size={13} className="animate-spin" /> : <Shuffle size={13} />} Acak urutan
+          </button>
+        </div>
+        <p className="text-[11px] text-[#64748B] mb-3">
+          Seret pegangan <GripVertical size={11} className="inline" /> untuk mengatur urutan tampil — paling kiri-atas tampil pertama; beranda mengambil {BATAS_BERANDA} foto teratas.
+          {' '}Foto baru selalu masuk paling depan, jadi tekan <strong>Acak urutan</strong> setelah mengunggah banyak foto sekaligus agar kategori tercampur.
+        </p>
         {items === null ? (
           <div className="text-sm text-[#94A3B8] flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Memuat…</div>
         ) : items.length === 0 ? (

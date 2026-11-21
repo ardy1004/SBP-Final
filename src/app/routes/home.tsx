@@ -2,7 +2,7 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData } from "react-router";
 import HomePage from "../components/HomePage";
 import type { NormalizedProperty, ApiTestimonial, ApiBlogPost, InvestTeaserProp, PortfolioPublik } from "../../lib/api";
-import { ambilPortfolioPublik } from "../../../functions/_lib/portfolio.js";
+import { ambilPortfolioPublik, BATAS_BERANDA } from "../../../functions/_lib/portfolio.js";
 import { normalizeProperty } from "../../lib/api";
 
 // ── Cloudflare D1 bindings tersedia via context.cloudflare.env (dari cloudflareDevProxy / Pages Functions)
@@ -103,7 +103,7 @@ export async function loader({ context }: LoaderFunctionArgs) {
       // Portofolio bukti kerja (migrasi 0062). .catch SENDIRI: Promise.all di
       // sini menjatuhkan SELURUH data beranda bila satu query gagal (mis. tabel
       // belum dimigrasi) — portofolio kosong jauh lebih baik daripada beranda kosong.
-      ambilPortfolioPublik(db, 24).catch((err: unknown) => {
+      ambilPortfolioPublik(db, BATAS_BERANDA).catch((err: unknown) => {
         console.error('[home loader] portofolio:', (err as Error)?.message);
         return [] as PortfolioPublik[];
       }),

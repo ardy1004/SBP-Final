@@ -825,7 +825,7 @@ export async function simpanTemplatePerjanjian(body: { blok: BlokTemplate[]; cat
 
 // ── Portofolio "bukti kerja" (migrasi 0062) ─────────────────────────────────
 // Aturan validasi & label kategori: functions/_lib/portfolio.js.
-export type KategoriPortfolio = 'ajb' | 'survey' | 'serah_terima' | 'lainnya';
+export type KategoriPortfolio = 'ajb' | 'survey' | 'negosiasi' | 'serah_terima' | 'lainnya';
 export interface PortfolioItem {
   id: number;
   kategori: KategoriPortfolio;

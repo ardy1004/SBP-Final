@@ -7,17 +7,62 @@ import { buildPropertyUrl } from './propertyUrl.js';
 export const KATEGORI_PORTFOLIO = [
   { id: 'ajb', label: 'AJB' },
   { id: 'survey', label: 'Survey lokasi' },
+  { id: 'negosiasi', label: 'Negosiasi' },
   { id: 'serah_terima', label: 'Serah terima kunci' },
   { id: 'lainnya', label: 'Lainnya' },
 ];
 export const KATEGORI_SAH = KATEGORI_PORTFOLIO.map(k => k.id);
 export const labelKategori = (id) => KATEGORI_PORTFOLIO.find(k => k.id === id)?.label ?? 'Lainnya';
 
+/**
+ * Susunan "acak campur" untuk tombol Acak urutan (admin). Bukan acak murni —
+ * acak murni tetap bisa menggumpalkan satu kategori, padahal tujuannya justru
+ * memastikan AJB, survey, negosiasi, dst. tersebar merata di SELURUH daftar,
+ * terutama di 24 foto pertama yang diambil strip beranda.
+ *
+ * Cara: urutan di dalam tiap kategori diacak (Fisher–Yates), lalu anggota ke-k
+ * dari kategori berisi n foto diberi posisi (k + fase + goyang) / n — fase acak
+ * per kategori, goyang kecil per foto — dan semua diurutkan menurut posisi itu.
+ * Hasilnya proporsional di setiap potongan daftar, berbeda tiap kali ditekan.
+ * Foto yang tampil didahulukan (yang tersembunyi tidak memengaruhi tampilan
+ * publik), lalu yang tersembunyi dicampur dengan cara yang sama di belakangnya.
+ *
+ * @template {{kategori: string, tampil?: number}} T
+ * @param {T[]} items
+ * @param {() => number} [rng] sumber acak [0,1) — disuntikkan untuk uji
+ * @returns {T[]} permutasi baru (masukan tidak diubah)
+ */
+export function acakCampur(items, rng = Math.random) {
+  const campur = (daftar) => {
+    const grup = new Map();
+    for (const it of daftar) {
+      if (!grup.has(it.kategori)) grup.set(it.kategori, []);
+      grup.get(it.kategori).push(it);
+    }
+    const berposisi = [];
+    for (const anggota of grup.values()) {
+      for (let i = anggota.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [anggota[i], anggota[j]] = [anggota[j], anggota[i]];
+      }
+      const n = anggota.length;
+      const fase = rng();
+      anggota.forEach((it, k) => berposisi.push({ it, pos: (k + fase + (rng() - 0.5) * 0.5) / n, seri: rng() }));
+    }
+    berposisi.sort((a, b) => a.pos - b.pos || a.seri - b.seri);
+    return berposisi.map(x => x.it);
+  };
+  return [...campur(items.filter(x => x.tampil === 1)), ...campur(items.filter(x => x.tampil !== 1))];
+}
+
 export const MAKS_KETERANGAN = 140;
 export const MAKS_LOKASI = 80;
 // Strip beranda baru tampil bila foto yang tampil sudah cukup — 1–3 kotak yang
 // bergulir terlihat sepi dan justru menurunkan kesan kredibel.
 export const MIN_TAMPIL_BERANDA = 4;
+// Jumlah foto yang diambil strip beranda (urutan teratas) — dipakai loader home
+// dan ringkasan komposisi setelah "Acak urutan" di admin.
+export const BATAS_BERANDA = 24;
 
 // 16 digit beruntun (boleh dipisah spasi/titik/strip) = pola NIK. Keterangan
 // publik tidak boleh memuatnya — NIK pemilik pernah bocor lewat jalur lain
