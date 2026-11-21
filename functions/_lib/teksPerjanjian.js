@@ -167,6 +167,47 @@ export function placeholderAsing(teks) {
   return [...String(teks ?? '').matchAll(/\{([^{}]*)\}/g)].map(m => m[1]).filter(k => !Object.prototype.hasOwnProperty.call(PLACEHOLDER, k));
 }
 
+// ─── Validasi editor (C2 per perjanjian, C3 template) ───────────────────────
+export const MAKS_BLOK = 30;
+export const MAKS_JUDUL = 120;
+export const MAKS_ISI = 5000;
+
+/**
+ * Karakter yang TIDAK bisa dicetak font PDF (WinAnsi) dan akan menjadi "?"
+ * di arsip PDF — lihat toWinAnsi() di functions/_lib/pdf.js. Tanda pisah,
+ * kutip lengkung, elipsis, ≥ ≤ diganti padanan ASCII (bukan "?"), jadi tidak
+ * dilaporkan. Dipakai editor untuk memperingatkan SEBELUM disimpan.
+ */
+const DIPETAKAN_PDF = new Set(['—', '–', '‘', '’', '“', '”', '…', '≥', '≤']);
+export function karakterHilangDiPdf(teks) {
+  return [...new Set([...String(teks ?? '')].filter(c => c.codePointAt(0) > 0xFF && !DIPETAKAN_PDF.has(c)))];
+}
+
+/**
+ * Validasi daftar blok kiriman editor. Hanya {judul, isi} yang diambil
+ * (field lain dibuang); spasi tepi dirapikan.
+ * @returns {{galat: string} | {blok: {judul: string, isi: string}[]}}
+ */
+export function validasiBlok(blok) {
+  if (!Array.isArray(blok) || blok.length === 0) return { galat: 'Minimal satu pasal' };
+  if (blok.length > MAKS_BLOK) return { galat: `Maksimal ${MAKS_BLOK} pasal` };
+  const bersih = [];
+  for (let i = 0; i < blok.length; i++) {
+    const b = blok[i];
+    const judul = typeof b?.judul === 'string' ? b.judul.trim() : '';
+    const isi = typeof b?.isi === 'string' ? b.isi.trim() : '';
+    const no = `Pasal ${i + 1}`;
+    if (!judul) return { galat: `${no}: judul wajib diisi` };
+    if (!isi) return { galat: `${no}: isi wajib diisi` };
+    if (judul.length > MAKS_JUDUL) return { galat: `${no}: judul maksimal ${MAKS_JUDUL} karakter` };
+    if (isi.length > MAKS_ISI) return { galat: `${no}: isi maksimal ${MAKS_ISI} karakter` };
+    const asing = [...placeholderAsing(judul), ...placeholderAsing(isi)];
+    if (asing.length) return { galat: `${no}: placeholder tidak dikenal {${asing[0]}} — pakai tombol sisip data` };
+    bersih.push({ judul, isi });
+  }
+  return { blok: bersih };
+}
+
 /** Pasal untuk ditampilkan/ditandatangani/dicetak: salinan bila ada, selain itu teks lama. */
 export function pasalDokumen(agr) {
   const snap = bacaSnapshot(agr.pasal_json);

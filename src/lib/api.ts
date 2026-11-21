@@ -774,6 +774,34 @@ export async function getScheduleSlotsStatus(characterId: number) {
 }
 
 
+// ── Isi pasal perjanjian (Tahap C2, migrasi 0063/0064) ──────────────────────
+// Aturan & render: functions/_lib/teksPerjanjian.js.
+export interface BlokPasal { judul: string; isi: string }
+export interface VarianPasal { listing: 'open' | 'exclusive'; tx: { kode: 'jual' | 'sewa' | 'jual_sewa'; label: string; hasil: string; pihak: string } }
+export interface PasalPerjanjian {
+  id: number;
+  kode_perjanjian: string;
+  status: string;
+  terkunci: boolean;
+  salinan_rusak: boolean;
+  /** template = belum ada salinan; salinan = salinan template; kustom = disunting admin; arsip_pdf = signed lama. */
+  sumber: 'template' | 'salinan' | 'kustom' | 'arsip_pdf';
+  template_versi: number;
+  diubah_oleh: string | null;
+  diubah_at: string | null;
+  varian: VarianPasal;
+  varian_sekarang: VarianPasal;
+  blok: BlokPasal[];
+  data_render: Record<string, string | number | null>;
+  placeholder: Record<string, string>;
+}
+export async function getPasalPerjanjian(id: number | string) {
+  return apiFetch<PasalPerjanjian>(`/admin/agreements/${id}/pasal`);
+}
+export async function simpanPasalPerjanjian(id: number | string, body: { blok: BlokPasal[] } | { reset: true }) {
+  return apiFetch<PasalPerjanjian>(`/admin/agreements/${id}/pasal`, { method: 'PUT', body: JSON.stringify(body) });
+}
+
 // ── Portofolio "bukti kerja" (migrasi 0062) ─────────────────────────────────
 // Aturan validasi & label kategori: functions/_lib/portfolio.js.
 export type KategoriPortfolio = 'ajb' | 'survey' | 'serah_terima' | 'lainnya';

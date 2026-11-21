@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { IDENTITAS, normalisasiJenisIdentitas } from '../../../../functions/_lib/identitas.js';
 import { labelBertindak, jenisTransaksi, teksHargaPenawaran, LABEL_BERTINDAK, BERTINDAK_VALID } from '../../../../functions/_lib/isiPerjanjian.js';
+import EditorPasal from './perjanjian/EditorPasal';
 import {
   ArrowLeft, Edit2, Check, X, AlertCircle, Copy, MessageCircle,
   FileText, ExternalLink, User, Home, Image as ImageIcon, CheckCircle,
@@ -827,6 +828,10 @@ export default function AdminAgreementDetailPage() {
           </div>
         </div>
       )}
+
+      {/* ─── Isi Perjanjian (Pasal) — editor per perjanjian, Tahap C2 ─── */}
+      {/* key: dimuat ulang setelah configure (salinan pasal dibekukan ulang). */}
+      <EditorPasal key={`${data.status}-${signToken ?? ''}`} agreementId={data.id} />
 
       {/* ─── Link + WA Section ──────────────────────────────────── */}
       {signToken && (
