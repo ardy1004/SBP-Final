@@ -10,6 +10,7 @@ import { decryptNIK } from '../../_lib/crypto.js';
 import { IDENTITAS, normalisasiJenisIdentitas } from '../../_lib/identitas.js';
 import { labelBertindak, susunAlamatPemilik, jenisTransaksi, teksHargaPenawaran } from '../../_lib/isiPerjanjian.js';
 import { generateAgreementPDF } from '../../_lib/pdf.js';
+import { pasalDokumen } from '../../_lib/teksPerjanjian.js';
 import { logServerError } from '../../_lib/logError.js';
 import { redaksiUrl } from '../../_lib/redaksiUrl.js';
 
@@ -20,7 +21,7 @@ async function getAgreementByToken(db, token) {
       a.id, a.kode_perjanjian, a.property_id, a.owner_id,
       a.jenis_transaksi, a.jenis_listing, a.durasi_kontrak, a.fee_persen,
       a.status, a.sign_token, a.token_expires_at, a.token_used,
-      a.link_opened_count, a.digantikan_oleh,
+      a.link_opened_count, a.digantikan_oleh, a.pasal_json,
       p.kode_listing,
       p.title, p.slug, p.jenis_properti, p.tujuan,
       p.harga, p.harga_sewa_tahun, p.nego, p.nett, p.luas_tanah, p.luas_bangunan,
@@ -68,6 +69,13 @@ async function ambilPengganti(db, id) {
 }
 
 // ─── Hash SHA-256 konten dokumen (untuk audit_hash_dokumen) ──────────────────
+// Versi formula (agreements.audit_hash_versi, migrasi 0063):
+//   1 = field kepala saja (perjanjian tanpa salinan pasal — perilaku lama,
+//       hash lama tak pernah dihitung ulang di mana pun);
+//   2 = kepala + SELURUH pasal ter-render, untuk perjanjian bersalinan pasal
+//       (pasal_json). Tanpa ini tak bisa dibuktikan teks pasal mana yang
+//       ditandatangani begitu isi pasal bisa diedit admin.
+const versiHash = (agr) => (agr.pasal_json ? 2 : 1);
 async function hashDokumen(agr, nikPlain, signedAt) {
   // Label mengikuti jenis identitas. Untuk KTP teks ini IDENTIK byte-per-byte
   // dengan sebelum fitur SIM ("NIK", "KTP"). Hash ini tidak pernah dihitung ulang
@@ -89,9 +97,12 @@ async function hashDokumen(agr, nikPlain, signedAt) {
     `Durasi Kontrak: ${agr.durasi_kontrak ?? '-'} bulan`,
     `Fee Pemasaran: ${agr.fee_persen}%`,
     teksHargaPenawaran(agr),
-  ].join('\n');
+  ];
+  if (versiHash(agr) === 2) {
+    for (const p of pasalDokumen(agr)) doc.push(`Pasal ${p.pasal} — ${p.judul}: ${p.isi}`);
+  }
 
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(doc));
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(doc.join('\n')));
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
@@ -103,78 +114,7 @@ function alamatPemilik(agr) {
   }) || '-';
 }
 
-// ─── Pasal-pasal perjanjian (spec 12.6) ──────────────────────────────────────
-// Jenis transaksi & harga dibaca dari `tujuan` properti (isiPerjanjian.js).
-// Untuk listing `dijual`, teks pasal 2–8 IDENTIK dengan versi sebelumnya; yang
-// berubah hanya keterangan harga di Pasal 1 (kini sesuai pilihan nego/nett).
-function buildPasalPasal(agr) {
-  const isExclusive    = agr.jenis_listing === 'exclusive';
-  const jenisListing   = isExclusive ? 'Exclusive Listing' : 'Open Listing';
-  const tx             = jenisTransaksi(agr.tujuan);
-  const alamatProperti = [agr.alamat, agr.kelurahan, agr.kecamatan, agr.kabupaten, agr.provinsi].filter(Boolean).join(', ');
-
-  // Waktu pembayaran fee per jenis transaksi. Kalimat Jual Beli tidak berubah.
-  const bayarJual = 'paling lambat 3 (tiga) hari kerja setelah penandatanganan Akta Jual Beli (AJB), atau setelah pembayaran uang muka minimal 30% dari harga kesepakatan apabila pembayaran dilakukan secara tunai bertahap';
-  const bayarSewa = 'paling lambat 3 (tiga) hari kerja setelah Pihak Kedua menerima pembayaran sewa pertama dari penyewa';
-  const nilaiSewa = 'Untuk transaksi Sewa Menyewa, nilai transaksi adalah total nilai sewa untuk masa sewa yang disepakati dengan penyewa.';
-  const kalimatBayar = tx.kode === 'sewa'
-    ? `${nilaiSewa} Fee dibayarkan ${bayarSewa}.`
-    : tx.kode === 'jual_sewa'
-      ? `${nilaiSewa} Untuk transaksi Jual Beli, fee dibayarkan ${bayarJual}; untuk transaksi Sewa Menyewa, fee dibayarkan ${bayarSewa}.`
-      : `Fee dibayarkan ${bayarJual}.`;
-
-  // Pasal 5 base — Pihak Kedua; huruf (d) hanya untuk Exclusive
-  const p5Base = `Pihak Pertama berkewajiban: (a) memasarkan properti secara profesional dan aktif; (b) menjaga kerahasiaan data Pihak Kedua; (c) melaporkan perkembangan pemasaran secara berkala. Pihak Kedua berkewajiban: (a) memberikan informasi properti yang benar dan lengkap; (b) menyediakan akses untuk survei dan pemotretan; (c) memberitahukan kepada Pihak Pertama apabila properti telah ${tx.hasil} atau ditarik dari pemasaran.`;
-
-  return [
-    {
-      pasal: 1,
-      judul: 'OBJEK PERJANJIAN',
-      isi: `Pihak Pertama diberikan hak pemasaran ${jenisListing} atas properti: ${agr.jenis_properti ?? 'Properti'}, berlokasi di ${alamatProperti || `${agr.kecamatan}, ${agr.kabupaten}`}. Legalitas: ${agr.legalitas ?? 'belum diverifikasi'}. ${teksHargaPenawaran(agr)}.`,
-    },
-    {
-      pasal: 2,
-      judul: 'JENIS LISTING & MASA KONTRAK',
-      isi: isExclusive
-        ? `Perjanjian ini bersifat Exclusive Listing dengan jangka waktu ${agr.durasi_kontrak} bulan terhitung sejak tanggal penandatanganan. Selama jangka waktu tersebut, Pihak Kedua memberikan hak pemasaran secara eksklusif kepada Pihak Pertama dan tidak menunjuk agen lain maupun memasarkan sendiri di luar koordinasi dengan Pihak Pertama.`
-        : `Perjanjian ini bersifat Open Listing. Pihak Kedua berhak menunjuk agen pemasaran lain dan/atau memasarkan sendiri properti tersebut. Perjanjian berlaku sejak ditandatangani sampai properti ${tx.hasil} atau sampai diakhiri oleh salah satu Pihak sesuai Pasal 6.`,
-    },
-    {
-      pasal: 3,
-      judul: 'FEE PEMASARAN',
-      isi: `Pihak Kedua menyetujui fee pemasaran sebesar ${agr.fee_persen}% dari nilai transaksi ${tx.label}. Fee menjadi hak Pihak Pertama apabila transaksi terjadi dengan ${tx.pihak} yang diperkenalkan, diperantarai, atau diperoleh melalui upaya pemasaran Pihak Pertama. ${kalimatBayar}`,
-    },
-    {
-      pasal: 4,
-      judul: 'JENIS PEMASARAN',
-      isi: isExclusive
-        ? `Pihak Pertama memperoleh hak pemasaran tunggal (eksklusif) dan berhak memasarkan properti melalui seluruh kanal yang dimilikinya. Selama masa eksklusif, seluruh pemasaran properti dikoordinasikan melalui Pihak Pertama.`
-        : `Pihak Pertama berhak memasarkan properti melalui seluruh kanal yang dimilikinya tanpa pembatasan eksklusif. Pemasaran oleh Pihak Pertama tidak menghapus hak Pihak Kedua untuk memasarkan sendiri atau melalui pihak lain.`,
-    },
-    {
-      pasal: 5,
-      judul: 'KEWAJIBAN PARA PIHAK',
-      isi: isExclusive
-        ? p5Base.slice(0, -1) + '; (d) tidak memasarkan properti kepada pihak lain maupun menunjuk agen lain selama jangka waktu eksklusif berlangsung.'
-        : p5Base,
-    },
-    {
-      pasal: 6,
-      judul: 'PENARIKAN PROPERTI & PENGAKHIRAN',
-      isi: `Salah satu Pihak dapat mengakhiri perjanjian ini dengan pemberitahuan tertulis kepada Pihak lain sekurang-kurangnya 14 (empat belas) hari sebelumnya. Apabila Pihak Kedua menarik properti dari pemasaran atau mengakhiri perjanjian setelah Pihak Pertama mengeluarkan biaya pemasaran yang nyata (antara lain biaya iklan, pemotretan, atau survei), Pihak Kedua mengganti biaya yang telah dikeluarkan tersebut secara wajar dan dapat dibuktikan. Apabila dalam jangka waktu 60 (enam puluh) hari setelah perjanjian berakhir properti ${tx.hasil} kepada ${tx.pihak} yang sebelumnya telah diperkenalkan atau diperantarai oleh Pihak Pertama, Pihak Pertama tetap berhak atas fee pemasaran sebagaimana diatur dalam Pasal 3.`,
-    },
-    {
-      pasal: 7,
-      judul: 'PENYELESAIAN SENGKETA',
-      isi: `Apabila timbul perselisihan dalam pelaksanaan perjanjian ini, Para Pihak sepakat menyelesaikannya secara musyawarah untuk mufakat. Apabila musyawarah tidak mencapai kesepakatan dalam 30 (tiga puluh) hari, Para Pihak sepakat menyelesaikannya melalui Pengadilan Negeri yang wilayah hukumnya meliputi lokasi properti objek perjanjian sebagaimana disebut dalam Pasal 1.`,
-    },
-    {
-      pasal: 8,
-      judul: 'LAIN-LAIN',
-      isi: `Perjanjian ini dibuat dan ditandatangani secara elektronik oleh Para Pihak dengan kesadaran penuh tanpa paksaan, dan memiliki kekuatan hukum yang sama dengan perjanjian tertulis sesuai UU ITE No. 11 Tahun 2008 dan perubahannya. Segala perubahan atas perjanjian ini hanya sah apabila dibuat secara tertulis dan disetujui oleh kedua belah pihak.`,
-    },
-  ];
-}
+// Pasal-pasal: functions/_lib/teksPerjanjian.js (pasalDokumen / susunPasalLama).
 
 // ═════════════════════════════════════════════════════════════════════════════
 // GET /api/sign/:token
@@ -257,7 +197,19 @@ export async function onRequestGet(context) {
     }
   }
 
-  const dokumen = susunDokumen(agr, nik_owner);
+  // Salinan pasal rusak → GAGAL TERTUTUP (bacaSnapshot melempar). Diam-diam
+  // jatuh ke teks lama berarti menampilkan isi yang berbeda dari yang dibekukan.
+  let dokumen;
+  try {
+    dokumen = susunDokumen(agr, nik_owner);
+  } catch (err) {
+    context.waitUntil(logServerError(env, {
+      message: `[sign GET] Isi pasal tidak bisa disusun — ${agr.kode_perjanjian}: ${err.message}`,
+      url: redaksiUrl(request.url),
+      context: { kind: 'pasal-rusak', kode_perjanjian: agr.kode_perjanjian },
+    }));
+    return jsonError('Dokumen belum bisa ditampilkan karena kendala teknis. Tim SBP sudah menerima laporannya dan akan menghubungi Anda.', 500);
+  }
   return jsonOk({
     status: 'valid',
     token_expires_at: agr.token_expires_at,
@@ -319,8 +271,9 @@ function susunDokumen(agr, nik_owner) {
     jenis_listing: agr.jenis_listing,
     durasi_kontrak: agr.durasi_kontrak,
     fee_persen: agr.fee_persen,
-    // Pasal-pasal dokumen (spec 12.6)
-    pasal: buildPasalPasal(agr),
+    // Pasal-pasal dokumen: salinan beku (pasal_json, migrasi 0063) bila ada,
+    // selain itu teks lama — lihat functions/_lib/teksPerjanjian.js.
+    pasal: pasalDokumen(agr),
   };
 }
 
@@ -444,7 +397,18 @@ export async function onRequestPost(context) {
   // Dokumen disusun ulang dari data TERKINI. Bila berbeda dari versi yang
   // dibaca pemilik (admin mengedit data saat link masih terbuka), tolak dan
   // minta muat ulang — jangan pernah menandatangani isi yang tidak ia lihat.
-  if (body.versi_dokumen !== await versiDokumen(susunDokumen(agr, nikPlain))) {
+  let dokumenKini;
+  try {
+    dokumenKini = susunDokumen(agr, nikPlain);
+  } catch (err) {
+    context.waitUntil(logServerError(env, {
+      message: `[sign POST] Isi pasal tidak bisa disusun — penandatanganan ditolak (500): ${err.message}`,
+      url: urlAman,
+      context: { kind: 'pasal-rusak', kode_perjanjian: agr.kode_perjanjian },
+    }));
+    return jsonError('Dokumen belum bisa ditandatangani karena kendala teknis. Tim SBP sudah menerima laporannya dan akan menghubungi Anda.', 500);
+  }
+  if (body.versi_dokumen !== await versiDokumen(dokumenKini)) {
     return tolak(
       409,
       'dokumen-berubah',
@@ -490,6 +454,7 @@ export async function onRequestPost(context) {
           audit_ip            = ?,
           audit_user_agent    = ?,
           audit_hash_dokumen  = ?,
+          audit_hash_versi    = ?,
           updated_at          = CURRENT_TIMESTAMP
       WHERE sign_token = ? AND token_used = 0
     `).bind(
@@ -498,6 +463,7 @@ export async function onRequestPost(context) {
       audit_ip,
       audit_user_agent,
       audit_hash_dokumen,
+      versiHash(agr),
       token
     ).run();
   } catch (err) {
@@ -554,7 +520,7 @@ export async function onRequestPost(context) {
       auditIp:   audit_ip,
       auditHash: audit_hash_dokumen,
       ownerSigBytes,
-      pasalList: buildPasalPasal(agr),
+      pasalList: pasalDokumen(agr),
     });
 
     const pdfKey = `agreements/${agr.kode_perjanjian}-${crypto.randomUUID()}.pdf`;

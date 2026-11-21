@@ -3,6 +3,7 @@
 // Auth: JWT cookie/Bearer — ditangani oleh _middleware.js di functions/api/admin/
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
+import { TEMPLATE_V1, buatSnapshot, bacaSnapshot, varianDari } from '../../../../_lib/teksPerjanjian.js';
 
 const TOKEN_EXPIRY_HOURS = 72;
 
@@ -56,7 +57,9 @@ export async function onRequestPost(context) {
 
   // ─── Pastikan agreement ada dan masih bisa dikonfigurasi ──────────────────
   const agr = await env.DB
-    .prepare('SELECT id, status FROM agreements WHERE id = ?')
+    .prepare(`SELECT a.id, a.status, a.pasal_json, a.pasal_kustom, p.tujuan
+                FROM agreements a LEFT JOIN properties p ON p.id = a.property_id
+               WHERE a.id = ?`)
     .bind(id)
     .first();
 
@@ -65,6 +68,28 @@ export async function onRequestPost(context) {
   }
   if (agr.status === 'signed') {
     return jsonError('Agreement sudah ditandatangani, tidak bisa dikonfigurasi ulang', 409);
+  }
+
+  // ─── Bekukan isi pasal (migrasi 0063, functions/_lib/teksPerjanjian.js) ────
+  // Salinan pasal untuk varian perjanjian ini disimpan SAAT link dibuat, supaya
+  // perubahan template/kode sesudahnya tidak mengubah isi yang sedang menunggu
+  // tanda tangan. Pasal kustom (diedit admin per perjanjian) dipertahankan —
+  // KECUALI jenis listing/transaksinya berubah: blok kustom itu disusun untuk
+  // varian lama (mis. pasal eksklusif) dan bisa bertentangan dengan varian baru.
+  const varianBaru = varianDari({ jenis_listing, tujuan: agr.tujuan });
+  let pasal_json, pasal_template_versi;
+  if (agr.pasal_kustom === 1 && agr.pasal_json) {
+    let lama = null;
+    try { lama = bacaSnapshot(agr.pasal_json); } catch { /* rusak → anggap varian beda */ }
+    if (!lama || lama.varian.listing !== varianBaru.listing || lama.varian.tx.kode !== varianBaru.tx.kode) {
+      return jsonError('Isi pasal perjanjian ini sudah disesuaikan manual untuk jenis listing/transaksi yang berbeda. Tinjau ulang isi pasal (atau kembalikan ke template) sebelum membuat link baru.', 409);
+    }
+    pasal_json = agr.pasal_json;
+    pasal_template_versi = lama.versi;
+  } else {
+    const snap = buatSnapshot(TEMPLATE_V1, { jenis_listing, tujuan: agr.tujuan });
+    pasal_json = JSON.stringify(snap);
+    pasal_template_versi = snap.versi;
   }
 
   // ─── Generate sign_token + expiry ─────────────────────────────────────────
@@ -81,6 +106,8 @@ export async function onRequestPost(context) {
         token_expires_at = ?,
         token_used      = 0,
         status          = 'menunggu_ttd',
+        pasal_json      = ?,
+        pasal_template_versi = ?,
         updated_at      = CURRENT_TIMESTAMP
     WHERE id = ?
   `).bind(
@@ -89,6 +116,8 @@ export async function onRequestPost(context) {
     fee_persen,
     sign_token,
     expiresAt,
+    pasal_json,
+    pasal_template_versi,
     id
   ).run();
 
