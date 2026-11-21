@@ -875,6 +875,17 @@ export async function buatPortfolio(body: IsianPortfolio & { foto_key: string; t
 export async function ubahPortfolio(id: number, body: IsianPortfolio) {
   return apiFetch<{ item: PortfolioItem }>(`/admin/portfolio/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
+/**
+ * Ganti foto item (setelah "Tutup bagian sensitif" pada foto tersimpan). Key
+ * baru dari unggahFotoPortfolio; server menghapus objek lama dari R2.
+ * `foto_lama_terhapus: false` = versi lama masih ada di penyimpanan (langka) —
+ * WAJIB dilaporkan ke admin, karena versi itu belum disensor.
+ */
+export async function gantiFotoPortfolio(id: number, keys: { foto_key: string; thumb_key: string }) {
+  return apiFetch<{ item: PortfolioItem; foto_lama_terhapus: boolean; foto_lama_gagal?: string[] }>(
+    `/admin/portfolio/${id}`, { method: 'PATCH', body: JSON.stringify(keys) },
+  );
+}
 export async function hapusPortfolio(id: number) {
   return apiFetch<{ id: number; dihapus: boolean }>(`/admin/portfolio/${id}`, { method: 'DELETE' });
 }

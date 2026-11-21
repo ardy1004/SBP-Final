@@ -4,7 +4,7 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type D
 import { SortableContext, rectSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
-  getPortfolioAdmin, unggahFotoPortfolio, buatPortfolio, ubahPortfolio, hapusPortfolio, urutPortfolio,
+  getPortfolioAdmin, unggahFotoPortfolio, buatPortfolio, ubahPortfolio, hapusPortfolio, urutPortfolio, gantiFotoPortfolio,
   urlFotoPortfolio, type PortfolioItem, type KategoriPortfolio, type IsianPortfolio,
 } from '../../../lib/api';
 import { KATEGORI_PORTFOLIO, MAKS_KETERANGAN, MIN_TAMPIL_BERANDA, BATAS_BERANDA, periksaKeterangan, acakCampur, labelKategori } from '../../../../functions/_lib/portfolio.js';
@@ -22,6 +22,12 @@ import SensorFoto, { type KotakSensor } from './portfolio/SensorFoto';
 //   · dua ukuran: 1280 px (lihat penuh) & 480 px (kotak beranda).
 // Item tersimpan baru tampil publik setelah dicentang "sudah aman" + Tampil
 // (dijaga juga di server — siapkanIsian di functions/_lib/portfolio.js).
+//
+// Foto yang SUDAH tersimpan (juga yang sedang tampil) bisa ditambah penutupnya
+// (2026-11-22): foto 1280 px tersimpan dimuat ke SensorFoto → diproses dengan
+// olahFoto yang sama → diunggah sebagai key BARU → PATCH mengganti key dan
+// menghapus versi lama dari R2. Penutup lama tidak bisa dibuka: versi asli
+// memang tidak pernah disimpan.
 
 const JENIS_DITERIMA = ['image/jpeg', 'image/png', 'image/webp'];
 const WARNA_SENSOR = '#1E293B';
@@ -206,6 +212,31 @@ export default function AdminPortfolioPage() {
     setPesan({ jenis: 'ok', teks: `Urutan diacak. ${awal.length} foto teratas di beranda: ${komposisi.map(k => `${k.n} ${k.label}`).join(', ')}. Beranda diperbarui paling lambat ±5 menit.` });
   };
 
+  // Tambah penutup pada foto tersimpan → ganti foto. Tanpa kotak baru = batal.
+  const [sensorItem, setSensorItem] = useState<PortfolioItem | null>(null);
+  const [memprosesId, setMemprosesId] = useState<number | null>(null);
+  const simpanSensorItem = async (it: PortfolioItem, kotak: KotakSensor[]) => {
+    setSensorItem(null);
+    if (kotak.length === 0) return;
+    setMemprosesId(it.id); setPesan(null);
+    try {
+      const { foto, thumb } = await olahFoto(urlFotoPortfolio(it.foto_key), kotak);
+      const up = await unggahFotoPortfolio(foto, thumb);
+      if (!up.success || !up.data) throw new Error(up.error ?? 'Gagal mengunggah foto');
+      const r = await gantiFotoPortfolio(it.id, up.data);
+      if (!r.success || !r.data?.item) throw new Error(r.error ?? 'Gagal menyimpan foto');
+      const { item, foto_lama_terhapus, foto_lama_gagal } = r.data;
+      setItems(prev => (prev ?? []).map(x => (x.id === it.id ? item : x)));
+      setPesan(foto_lama_terhapus === false
+        ? { jenis: 'galat', teks: `Penutup tersimpan dan website kini memakai foto baru, TETAPI foto versi lama gagal dihapus dari penyimpanan (${(foto_lama_gagal ?? []).join(', ')}). Laporkan kode ini agar dihapus manual — versi itu belum tertutup.` }
+        : { jenis: 'ok', teks: `Penutup tersimpan (${kotak.length} kotak baru). Foto versi lama sudah dihapus dari penyimpanan${it.tampil ? '; beranda & /portfolio memakai foto baru paling lambat ±5 menit' : ''}.` });
+    } catch (err) {
+      setPesan({ jenis: 'galat', teks: `Penutup belum tersimpan: ${(err as Error).message}. Foto di website belum berubah.` });
+    } finally {
+      setMemprosesId(null);
+    }
+  };
+
   const jumlahTampil = (items ?? []).filter(x => x.tampil === 1).length;
   const drafSensor = draf.find(d => d.kunci === sensorKunci);
 
@@ -330,7 +361,8 @@ export default function AdminPortfolioPage() {
                   <ItemSortable key={it.id} id={it.id}>
                     {({ setNodeRef, style, pegangan, seret }) => (
                       <div ref={setNodeRef} style={style} className={`border rounded-xl p-2.5 bg-white space-y-2 ${seret ? 'shadow-lg border-[#1565C0] z-10' : 'border-gray-100'}`} data-uji="item">
-                        <KartuItem item={it} pegangan={pegangan} onUbah={ubahItem} onHapus={hapusItem} />
+                        <KartuItem item={it} pegangan={pegangan} onUbah={ubahItem} onHapus={hapusItem}
+                          onSensor={setSensorItem} memproses={memprosesId === it.id} />
                       </div>
                     )}
                   </ItemSortable>
@@ -346,15 +378,28 @@ export default function AdminPortfolioPage() {
           onBatal={() => setSensorKunci(null)}
           onSelesai={k => { ubahDraf(drafSensor.kunci, { kotak: k }); setSensorKunci(null); }} />
       )}
+
+      {sensorItem && (
+        <SensorFoto url={urlFotoPortfolio(sensorItem.foto_key)} awal={[]} labelSelesai="Simpan penutup"
+          catatan={<>
+            {sensorItem.tampil === 1 ? <strong>Foto ini sedang tampil di website. </strong> : null}
+            Penutup yang sudah ada sudah menyatu di foto dan tidak bisa dibuka lagi — di sini Anda menambah penutup baru.
+            {' '}Setelah disimpan, foto versi lama dihapus permanen dan diganti versi baru.
+          </>}
+          onBatal={() => setSensorItem(null)}
+          onSelesai={k => void simpanSensorItem(sensorItem, k)} />
+      )}
     </div>
   );
 }
 
-function KartuItem({ item, pegangan, onUbah, onHapus }: {
+function KartuItem({ item, pegangan, onUbah, onHapus, onSensor, memproses }: {
   item: PortfolioItem;
   pegangan: React.HTMLAttributes<HTMLButtonElement>;
   onUbah: (id: number, body: IsianPortfolio) => Promise<string | null>;
   onHapus: (id: number) => void;
+  onSensor: (item: PortfolioItem) => void;
+  memproses: boolean;
 }) {
   const [ket, setKet] = useState(item.keterangan);
   const [lokasi, setLokasi] = useState(item.lokasi ?? '');
@@ -376,6 +421,10 @@ function KartuItem({ item, pegangan, onUbah, onHapus }: {
         <span className={`absolute top-1.5 right-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${item.tampil ? 'bg-emerald-600 text-white' : 'bg-white/90 text-[#64748B]'}`}>
           {item.tampil ? <><Eye size={10} /> Tampil</> : <><EyeOff size={10} /> Tersembunyi</>}
         </span>
+        <button type="button" onClick={() => onSensor(item)} disabled={memproses} data-uji="edit-sensor"
+          className="absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/90 text-[10px] font-semibold text-[#334155] hover:text-[#1565C0] disabled:opacity-80">
+          {memproses ? <><Loader2 size={11} className="animate-spin" /> Menyimpan penutup…</> : <><Square size={11} /> Tutup bagian sensitif</>}
+        </button>
       </div>
       <select value={item.kategori} onChange={e => void onUbah(item.id, { kategori: e.target.value as KategoriPortfolio })}
         className="w-full px-2 py-1 rounded-lg border border-gray-200 text-xs bg-white">

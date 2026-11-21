@@ -4,6 +4,7 @@
 // Auth: functions/api/admin/_middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
+import { buangCacheHalaman } from '../../../_lib/edgeCache.js';
 
 const MAKS_ID = 500;
 
@@ -16,6 +17,7 @@ export async function onRequestPost({ env, request }) {
   }
   const stmts = ids.map((id, i) => env.DB.prepare('UPDATE portfolio_items SET urutan = ? WHERE id = ?').bind(i, id));
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  await buangCacheHalaman(request.url, ['/', '/portfolio']);
   return jsonOk({ jumlah: ids.length });
 }
 

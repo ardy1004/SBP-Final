@@ -92,6 +92,27 @@ function tandai(response, status) {
 }
 
 /**
+ * Buang entri cache halaman publik setelah admin mengubah isinya (mis. foto
+ * portofolio diganti/disembunyikan). Cache API per DATA CENTER: ini hanya
+ * membersihkan colo yang melayani request admin — untuk SBP itu umumnya colo
+ * yang sama dengan mayoritas pengunjung (CGK). Colo lain tetap kedaluwarsa
+ * sendiri setelah TTL, jadi janji "paling lambat ±5 menit" tetap berlaku.
+ * Tidak pernah melempar — kegagalan purge bukan alasan menggagalkan simpanan.
+ *
+ * @param {string} requestUrl URL request admin (dipakai untuk origin)
+ * @param {string[]} paths    mis. ['/', '/portfolio']
+ */
+export async function buangCacheHalaman(requestUrl, paths) {
+  const cache = globalThis.caches && globalThis.caches.default;
+  if (!cache) return;
+  let origin;
+  try { origin = new URL(requestUrl).origin; } catch { return; }
+  await Promise.all(paths.map(p =>
+    cache.delete(new Request(cacheKeyUrl(origin + p), { method: 'GET' })).catch(() => false)
+  ));
+}
+
+/**
  * Bungkus produksi response dengan cache edge.
  *
  * @param {object} context  Pages Functions context (butuh .request dan .waitUntil)

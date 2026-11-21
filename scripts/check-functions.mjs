@@ -76,7 +76,8 @@ function buatDB(override = {}) {
     batch: async (s) => s.map((_, i) => ({ meta: { changes: 1, last_row_id: 500 + i }, results: [] })),
   };
 }
-const env = (override) => ({ DB: buatDB(override), MEDIA: { get: async () => null } });
+// MEDIA tiruan: head() mengembalikan objek (= key ada) kecuali ditimpa skenario.
+const env = (override, media = {}) => ({ DB: buatDB(override), MEDIA: { get: async () => null, head: async () => ({}), delete: async () => {}, ...media } });
 const req = (url, body, method = 'POST') => new Request(url, {
   method, headers: { 'content-type': 'application/json' },
   body: body === undefined ? undefined : JSON.stringify(body),
@@ -98,6 +99,17 @@ const FIXTURE_AGREEMENT = { 'from agreements a': [{
   tujuan: 'dijual', jenis_properti: 'Rumah', alamat: 'Jl. Uji', kelurahan: 'Tamantirto', kecamatan: 'Kasihan', kabupaten: 'Bantul',
   provinsi: 'DIY', legalitas: 'SHM', harga: 850000000, harga_sewa_tahun: null, nego: 1, nett: 0,
 }] };
+// Ganti foto portofolio (2026-11-22, "Tutup bagian sensitif" pada foto tersimpan).
+const UUID_LAMA = '11111111-1111-4111-8111-111111111111';
+const UUID_BARU = '22222222-2222-4222-8222-222222222222';
+const BARIS_PORTFOLIO = { id: 5, kategori: 'ajb', foto_key: `portfolio/${UUID_LAMA}.webp`, thumb_key: `portfolio/${UUID_LAMA}-t.webp`,
+  keterangan: 'AJB uji', lokasi: null, tanggal: null, property_id: null, tampil: 1, aman_dikonfirmasi: 1, urutan: 0 };
+const FIXTURE_PORTFOLIO = {
+  'select * from portfolio_items where id': [BARIS_PORTFOLIO],
+  'from portfolio_items where (foto_key': [],
+  'from portfolio_items pi left join': [BARIS_PORTFOLIO],
+  'select foto_key, thumb_key, tampil from portfolio_items': [BARIS_PORTFOLIO],
+};
 const reqInternal = (url) => new Request(url, { method: 'POST', headers: { 'X-Purge-Secret': 'uji-gate' } });
 const envInternal = () => ({ ...env(), VIRALFRAME_PURGE_SECRET: 'uji-gate' });
 const SKENARIO = [
@@ -120,6 +132,16 @@ const SKENARIO = [
     ctx: () => ({ request: req('https://x/portfolio', { foto_key: 'portfolio/123e4567-e89b-12d3-a456-426614174000.webp', thumb_key: 'portfolio/123e4567-e89b-12d3-a456-426614174000-t.webp', kategori: 'ajb', keterangan: 'uji' }), env: env() }) },
   { file: '../portfolio/[id].js', fn: 'onRequestPatch', nama: 'PATCH /portfolio/:id (tidak ada → 404)',
     ctx: () => ({ request: req('https://x/portfolio/1', { tampil: true }), env: env(), params: { id: '1' } }) },
+  { file: '../portfolio/[id].js', fn: 'onRequestPatch', nama: 'PATCH /portfolio/:id (ganti foto sah)',
+    ctx: () => ({ request: req('https://x/portfolio/5', { foto_key: `portfolio/${UUID_BARU}.webp`, thumb_key: `portfolio/${UUID_BARU}-t.webp` }, 'PATCH'), env: env(FIXTURE_PORTFOLIO), params: { id: '5' } }) },
+  { file: '../portfolio/[id].js', fn: 'onRequestPatch', nama: 'PATCH /portfolio/:id (ganti foto, pasangan beda uuid → 400)',
+    ctx: () => ({ request: req('https://x/portfolio/5', { foto_key: `portfolio/${UUID_BARU}.webp`, thumb_key: `portfolio/${UUID_LAMA}-t.webp` }, 'PATCH'), env: env(FIXTURE_PORTFOLIO), params: { id: '5' } }) },
+  { file: '../portfolio/[id].js', fn: 'onRequestPatch', nama: 'PATCH /portfolio/:id (ganti foto, belum terunggah → 400)',
+    ctx: () => ({ request: req('https://x/portfolio/5', { foto_key: `portfolio/${UUID_BARU}.webp`, thumb_key: `portfolio/${UUID_BARU}-t.webp` }, 'PATCH'), env: env(FIXTURE_PORTFOLIO, { head: async () => null }), params: { id: '5' } }) },
+  { file: '../portfolio/[id].js', fn: 'onRequestPatch', nama: 'PATCH /portfolio/:id (ubah keterangan item tampil)',
+    ctx: () => ({ request: req('https://x/portfolio/5', { keterangan: 'AJB rumah di Ngaglik' }, 'PATCH'), env: env(FIXTURE_PORTFOLIO), params: { id: '5' } }) },
+  { file: '../portfolio/[id].js', fn: 'onRequestDelete', nama: 'DELETE /portfolio/:id',
+    ctx: () => ({ request: req('https://x/portfolio/5', undefined, 'DELETE'), env: env(FIXTURE_PORTFOLIO), params: { id: '5' } }) },
   { file: '../portfolio/urutan.js', fn: 'onRequestPost', nama: 'POST /portfolio/urutan',
     ctx: () => ({ request: req('https://x/portfolio/urutan', { ids: [3, 1, 2] }), env: env() }) },
   // ─── Isi perjanjian (C2/C3, 2026-11-21, migrasi 0063–0065) ───────────────

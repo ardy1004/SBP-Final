@@ -10,11 +10,18 @@ export interface KotakSensor { x: number; y: number; w: number; h: number }
 // warna PADAT di <canvas> (lihat olahFoto di AdminPortfolioPage). Sengaja
 // warna padat, bukan blur/piksel: blur dan piksel kasar pada teks kadang masih
 // bisa ditebak, warna padat tidak bisa dibalikkan sama sekali.
-export default function SensorFoto({ url, awal, onSelesai, onBatal }: {
+//
+// Juga dipakai untuk foto yang SUDAH tersimpan/tampil (2026-11-22): `url` =
+// foto 1280 px yang tersimpan, `awal` = [] karena penutup lama sudah menyatu
+// di piksel — versi asli tidak pernah disimpan, jadi penutup hanya bisa
+// DITAMBAH, tidak dibuka. `catatan` menjelaskan itu ke admin.
+export default function SensorFoto({ url, awal, onSelesai, onBatal, catatan, labelSelesai = 'Selesai' }: {
   url: string;
   awal: KotakSensor[];
   onSelesai: (kotak: KotakSensor[]) => void;
   onBatal: () => void;
+  catatan?: React.ReactNode;
+  labelSelesai?: string;
 }) {
   const [kotak, setKotak] = useState<KotakSensor[]>(awal);
   const [tarik, setTarik] = useState<KotakSensor | null>(null);
@@ -42,6 +49,7 @@ export default function SensorFoto({ url, awal, onSelesai, onBatal }: {
               Tarik kotak di atas nama, NIK, alamat, nomor sertifikat, tanda tangan, atau wajah yang tidak ingin ditampilkan.
               Kotak akan menjadi warna padat permanen di foto yang diunggah.
             </p>
+            {catatan && <p className="mt-1.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">{catatan}</p>}
           </div>
           <button type="button" onClick={onBatal} className="p-1.5 rounded-lg hover:bg-gray-100" aria-label="Tutup"><X size={18} /></button>
         </div>
@@ -72,7 +80,7 @@ export default function SensorFoto({ url, awal, onSelesai, onBatal }: {
             </button>
             <button type="button" onClick={() => onSelesai(kotak)}
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1565C0] text-white text-sm font-semibold">
-              <Check size={14} /> Selesai
+              <Check size={14} /> {labelSelesai}
             </button>
           </div>
         </div>
