@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router';
 import {
   LayoutDashboard, List, Users, LogOut, Menu, X, Bell, Shield,
-  FileText, Star, BookOpen, Briefcase, Image, Settings, MapPin, Video, AlertTriangle,
+  FileText, Star, BookOpen, Briefcase, Image, Settings, MapPin, AlertTriangle,
   ChevronLeft, ChevronRight, UserSquare2, TrendingUp,
 } from 'lucide-react';
 
@@ -153,10 +153,9 @@ export default function AdminLayout() {
     { to: '/admin', label: 'Ringkasan', icon: LayoutDashboard, end: true,  badge: 0 },
     { to: '/admin/agreements', label: 'Titip Jual', icon: FileText, end: false, badge: titipJualBadge },
     { to: '/admin/listing', label: 'Properti', icon: List, end: false, badge: 0 },
-    // excludePrefix: jangan aktif kalau path masuk sub-route lain yang punya menu sendiri
-    // excludePrefix ber-garis-miring: SEMUA sub-route Viral Frame punya menu
-    // sendiri (Konten Agent, Performa Konten), halaman meja kerja tidak punya sub-route.
-    { to: '/admin/viralframe', label: 'Viral Frame', icon: Video, end: false, badge: 0, excludePrefix: '/admin/viralframe/' },
+    // Menu "Viral Frame" (meja kerja storyboard/prompt) dihapus 2026-11-21 — tidak
+    // dipakai (0 dari 1.369 video agent lewat sana). /admin/viralframe kini
+    // dialihkan ke Konten Agent (routes/admin/viralframe.tsx).
     { to: '/admin/viralframe/agent-videos', label: 'Konten Agent', icon: UserSquare2, end: false, badge: 0 },
     { to: '/admin/viralframe/performa', label: 'Performa Konten', icon: TrendingUp, end: false, badge: 0 },
     { to: '/admin/leads', label: 'Leads', icon: Users, end: false, badge: leadsBadge },

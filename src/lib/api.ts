@@ -535,13 +535,6 @@ export async function getAiStatus() {
   return apiFetch<Record<AiProviderId, AiStatusInfo>>('/admin/settings/ai-status');
 }
 
-/** GET /api/admin/viralframe/models?provider= — daftar model tersedia */
-export async function getAiModels(provider: AiProviderId) {
-  return apiFetch<{ provider: string; default: string; models: string[] }>(
-    `/admin/viralframe/models?provider=${encodeURIComponent(provider)}`,
-  );
-}
-
 // ── Scheduler ViralFrame (Buffer + Zernio) ──────────────────────────────────
 export type SchedulerProviderId = 'buffer' | 'zernio';
 /** Rentang jam tayang. Menit persisnya diundi ber-seed di dalam rentang ini,
@@ -748,7 +741,6 @@ export interface PerformaVideo {
   harga: number | null;
   durasi_detik: number | null;
   poster_url: string | null;
-  dna: { sudut: string | null; hook: string | null; naratif: string | null; foto_pembuka: string | null; mood: string | null };
   terbit_at: string;
   platform: { platform: string; views_d7: number; indeks: number; kualitas: number | null; retensi: number | null }[];
 }

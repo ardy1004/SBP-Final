@@ -11,7 +11,6 @@
 //   · Median, bukan rata-rata — satu video viral tidak boleh menyeret kelompok.
 //   · Kelompok dengan n kecil DITANDAI, bukan diberi peringkat.
 
-import { SUDUT, HOOK_MEKANISME, STRUKTUR_NARATIF, MOOD } from './viralframe.js';
 
 // ── Normalisasi ─────────────────────────────────────────────────────────────
 const angka =(v) => (v == null || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
@@ -263,21 +262,6 @@ export function mingguKe(terbitAt) {
 }
 export const awalMinggu = (w) => new Date((w * 7 - 3) * HARI_MS).toISOString().slice(0, 10);
 
-/**
- * Creative DNA sudut/hook/naratif adalah TEKS BEBAS tulisan AI (stasiunKonsep
- * tidak memvalidasinya ke katalog) — dikelompokkan mentah, tiap video jadi
- * kelompoknya sendiri dan tidak ada pola yang terbaca. Dipetakan ke label
- * katalog yang muncul di teksnya (prompt memang menyodorkan label katalog).
- */
-export function labelKatalog(teks, katalog) {
-  if (teks == null || String(teks).trim() === '') return null;
-  const t = String(teks).toLowerCase();
-  const hit = katalog.find(k => t.includes(String(k.label ?? '').toLowerCase())
-    || t.includes(String(k.id ?? '').toLowerCase())
-    || t.includes(String(k.id ?? '').toLowerCase().replace(/_/g, ' ')));
-  return hit ? (hit.label ?? hit.id) : 'Lainnya (di luar katalog)';
-}
-
 const interaksi = (r) => (r.likes_d7 ?? 0) + (r.comments_d7 ?? 0) + (r.shares_d7 ?? 0) + (r.saves_d7 ?? 0);
 /** Rasio GABUNGAN Σinteraksi ÷ Σviews × 1000 (null bila Σviews terlalu kecil). */
 function kualitasGabungan(rs) {
@@ -433,22 +417,15 @@ export function analisisPerforma(rows, namaAgent = new Map(), opsi = {}) {
       talent: nama(r.asal_character_id ?? r.character_id ?? r.akun_id),
       kode_listing: r.kode_listing ?? null, jenis_properti: r.jenis_properti ?? null, kecamatan: r.kecamatan ?? null, harga: r.harga ?? null,
       durasi_detik: r.durasi_detik ?? null, poster_url: r.poster_url ?? null,
-      dna: {
-        sudut: labelKatalog(r.dna_sudut, SUDUT), hook: labelKatalog(r.dna_hook, HOOK_MEKANISME),
-        naratif: labelKatalog(r.dna_naratif, STRUKTUR_NARATIF), foto_pembuka: r.dna_foto_pembuka ?? null,
-        mood: labelKatalog(r.dna_mood, MOOD),
-      },
       terbit_at: r.terbit_at,
       platform: post.map(x => ({ platform: x.platform, views_d7: x.views_d7, indeks: x._ix, kualitas: kualitasPost(x), retensi: x._retensi })),
     }));
 
   // ── Pola per dimensi (unit = VIDEO) ──
+  // Dimensi Creative DNA (hook, sudut, struktur naratif, foto pembuka, mood)
+  // DIBUANG 2026-11-21 bersama meja kerja Viral Frame — satu-satunya penghasil
+  // DNA. Kolom dna_* di viralframe_video_profil dibiarkan (data lama, tak dibaca).
   const DIMENSI = [
-    ['Hook (mekanisme)', v => labelKatalog(v.r.dna_hook, HOOK_MEKANISME)],
-    ['Sudut cerita', v => labelKatalog(v.r.dna_sudut, SUDUT)],
-    ['Struktur naratif', v => labelKatalog(v.r.dna_naratif, STRUKTUR_NARATIF)],
-    ['Foto pembuka (ruangan)', v => v.r.dna_foto_pembuka],
-    ['Mood', v => labelKatalog(v.r.dna_mood, MOOD)],
     ['Jenis properti', v => v.r.jenis_properti],
     ['Rentang harga', v => bucket(v.r.harga, BUCKET_HARGA)],
     ['Kecamatan', v => v.r.kecamatan],

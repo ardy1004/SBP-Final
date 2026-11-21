@@ -39,8 +39,6 @@ const catat = (pesan) => { console.log(`  ✗ ${pesan}`); masalah++; };
 // ════════════════════════════════════════════════════════════════════════════
 const FIXTURE = {
   'from viralframe_characters': [{ id: 20, nama: 'monica vera', gender: 'Wanita', usia: 27, etnik: 'Javanese', style: 'blazer krem', ciri_fisik: 'rambut panjang', foto_url: 'viralframe-characters/x.jpg' }],
-  'count(*) as n from viralframe_orders': [{ n: 0 }],
-  'select property_id from viralframe_orders': [],
   'from properties where id': [{
     id: 1025, kode_listing: 'SBP-1', title: 'Rumah Uji', jenis_properti: 'rumah', tujuan: 'dijual',
     harga: 850000000, kelurahan: 'Tamantirto', kecamatan: 'Kasihan', kabupaten: 'Bantul',
@@ -53,13 +51,6 @@ const FIXTURE = {
     { id: 12, url_webp: 'property-photos/b.webp', label_ruangan: 'Ruang Tamu', vf_skor: 70, vf_catatan: 'terang', vf_dinilai_at: '2026-09-04', is_cover: 0 },
   ],
   'count(*) as n from property_images': [{ n: 0 }],
-  'from viralframe_orders o': [{
-    id: 4, property_id: 1025, character_id: 20, status: 'menunggu_render',
-    variation_key: 'mekanisme:tur_cepat|hook:fakta_kaget|ritme:montase|mood:hangat|pembukaan:Fasad',
-    params_json: null, hasil_json: null, catatan: null, video_id: null, title: 'Rumah Uji',
-  }],
-  'select status, video_id from viralframe_orders': [{ status: 'baru', video_id: null }],
-  'variation_key from viralframe_orders': [],
   'from viralframe_agent_videos': [],
 };
 
@@ -91,76 +82,27 @@ const req = (url, body, method = 'POST') => new Request(url, {
   body: body === undefined ? undefined : JSON.stringify(body),
 });
 
-// Skenario per endpoint. `params` = parameter route ([id] dsb).
+// Skenario per endpoint. `params` = parameter route ([id] dsb). `file` relatif
+// terhadap functions/api/admin/viralframe.
+//
+// 2026-11-21: skenario meja kerja (orders/*, bahan, status, jalankan) DIBUANG
+// bersama endpoint-nya. Diganti endpoint ViralFrame yang MASIH hidup dan paling
+// sering diubah — penjadwal & metrik — supaya gate tetap menjalankan kode nyata.
+// Semua tanpa jaringan: kredensial scheduler kosong di D1 tiruan, jadi jalurnya
+// berhenti sebelum memanggil Buffer/Zernio.
+const reqInternal = (url) => new Request(url, { method: 'POST', headers: { 'X-Purge-Secret': 'uji-gate' } });
+const envInternal = () => ({ ...env(), VIRALFRAME_PURGE_SECRET: 'uji-gate' });
 const SKENARIO = [
-  { file: 'orders/index.js', fn: 'onRequestPost', nama: 'POST /orders',
-    ctx: () => ({ request: req('https://x/orders', { character_id: 20, property_ids: [1025], params: { jumlah_part: 3, detik_per_part: 10, vo_detik_per_part: 8, cta: 'survei', platform: 'tiktok' } }), env: env() }) },
-  { file: 'orders/index.js', fn: 'onRequestPost', nama: 'POST /orders (tanpa listing)',
-    ctx: () => ({ request: req('https://x/orders', { character_id: 20, property_ids: [] }), env: env() }) },
-  { file: 'orders/index.js', fn: 'onRequestGet', nama: 'GET /orders',
-    ctx: () => ({ request: req('https://x/orders?status=terbuka', undefined, 'GET'), env: env() }) },
-  { file: 'orders/[id]/index.js', fn: 'onRequestGet', nama: 'GET /orders/:id',
-    ctx: () => ({ env: env(), params: { id: '4' } }) },
-  { file: 'orders/[id]/index.js', fn: 'onRequestPatch', nama: 'PATCH /orders/:id (params)',
-    ctx: () => ({ request: req('https://x/o/4', { params: { cta: 'wa' } }), env: env(), params: { id: '4' } }) },
-  { file: 'orders/[id]/index.js', fn: 'onRequestPatch', nama: 'PATCH /orders/:id (hasil → render ulang)',
-    ctx: () => ({ request: req('https://x/o/4', { hasil: {
-      params: { jumlahPart: 1, detikPerPart: 10, voDetikPerPart: 8, cta: 'survei' },
-      variasi: { mood: 'hangat', ritme: 'montase' },
-      dna_agent: { nama: 'm', ciri: [], bahasaInggris: '27-year-old woman', suara: 'warm voice', fotoUrl: null },
-      parts: [{ peran: 'Hook', dialog: 'Rumah 120 meter di Kasihan', teks_layar: 'LT 120', cuts: [
-        { foto_id: 11, label: 'Fasad', detik: 5, skor: 88, kamera: 'Medium shot', aksi: 'walks' },
-        { foto_id: 12, label: 'Ruang Tamu', detik: 5, skor: 70, kamera: 'Wide', aksi: 'points' }] }],
-    } }), env: env(), params: { id: '4' } }) },
-  { file: 'orders/[id]/index.js', fn: 'onRequestPatch', nama: 'PATCH /orders/:id (selesai)',
-    ctx: () => ({ request: req('https://x/o/4', { status: 'selesai', video_id: 77 }), env: env(), params: { id: '4' } }) },
-  { file: 'orders/[id]/index.js', fn: 'onRequestDelete', nama: 'DELETE /orders/:id',
-    ctx: () => ({ env: env(), params: { id: '4' } }) },
-  { file: 'bahan.js', fn: 'onRequestGet', nama: 'GET /bahan',
-    ctx: () => ({ request: req('https://x/bahan?property_id=1025&character_id=20', undefined, 'GET'), env: env() }) },
-  { file: 'status.js', fn: 'onRequestGet', nama: 'GET /status',
-    ctx: () => ({ request: req('https://x/status', undefined, 'GET'), env: env() }) },
-  // ─── jalankan.js (rencana v2 — stasiun Konsep dilebur, kontrak K1-K4) ───────
-  // `env()` di harness ini TIDAK menaruh API key provider AI apa pun (tabel
-  // `settings` fixture kosong, dan objek `env()` tidak punya `GROQ_API_KEY` dkk),
-  // jadi endpoint yang memanggil AI (stasiun Konsep/Storyboard) SELALU gagal
-  // dengan 502 "semua provider gagal" — itu BUKAN bug, itu jalur gagal-terkontrol
-  // yang benar. `harap: 502` menandai skenario yang memang mengharapkan itu,
-  // supaya gate tetap membuktikan nol TDZ/exception di sepanjang jalur sampai
-  // titik itu, tanpa mensyaratkan kunci API sungguhan.
-  { file: 'orders/[id]/jalankan.js', fn: 'onRequestPost', nama: 'POST /orders/:id/jalankan (status material)',
-    // Mock `.batch()` di atas selalu membalas `results: []` apa pun SQL-nya
-    // (lihat komentar `buatDB`), jadi `hitungMaterial()` selalu melihat
-    // `labelUnik: 0` di harness ini — order lewat gerbang "listing ini tidak
-    // punya foto yang bisa dipakai" (422), BUKAN benar-benar menjalankan visi.
-    // Itu tetap smoke test yang jujur: membuktikan jalur status='material'
-    // sampai gerbang itu tidak meledak, cuma tidak menembus stasiun Material.
-    ctx: () => ({ env: env({
-      'character_id, status, variation_key, params_json, hasil_json': [
-        { id: 4, property_id: 1025, character_id: 20, status: 'material', variation_key: null, params_json: null, hasil_json: null },
-      ],
-    }), params: { id: '4' } }) },
-  { file: 'orders/[id]/jalankan.js', fn: 'onRequestPost', nama: 'POST /orders/:id/jalankan (status konsep → storyboard)',
-    ctx: () => ({ env: env({
-      'character_id, status, variation_key, params_json, hasil_json': [{
-        id: 4, property_id: 1025, character_id: 20, status: 'konsep',
-        variation_key: 'sudut:skala_tak_terduga|hookmek:fakta_kaget|naratif:tur_terpandu|buka:11',
-        params_json: JSON.stringify({ jumlah_part: 3, detik_per_part: 10, vo_detik_per_part: 8, cta: 'survei', platform: 'tiktok', faceless: false }),
-        hasil_json: JSON.stringify({ konsep: {
-          audiens: { utama: 'keluarga muda', keinginan: '...', keberatan: '...', pemicu: '...' },
-          kandidat: [],
-          dna: {
-            sudut: 'skala tak terduga di kawasan kampus padat', hook_mekanisme: 'fakta mengejutkan',
-            pemicu_psikologis: 'rasa penasaran', struktur_naratif: 'tur terpandu', foto_pembuka: 11,
-            urutan_informasi: ['lokasi', 'skala', 'interior', 'cta'], profil_pacing: 'progressive_discovery',
-            bahasa_kamera: 'controlled_observational', payoff: 'skala sesungguhnya', gaya_cta: 'survei langsung',
-          },
-          cerita_global: { janji: '...', part1_open_loop: '...', part2_payoff: '...', part2_open_loop: '...', part3_payoff: '...' },
-          peta_retensi: { '0_3': '...', '3_10': '...', '10_20': '...', '20_30': '...' },
-        } }),
-      }],
-    }), params: { id: '4' } }),
-    harap: 502 },
+  { file: 'performa.js', fn: 'onRequestGet', nama: 'GET /performa',
+    ctx: () => ({ request: req('https://x/performa?hari=30', undefined, 'GET'), env: env() }) },
+  { file: 'agent-accounts/index.js', fn: 'onRequestGet', nama: 'GET /agent-accounts',
+    ctx: () => ({ env: env() }) },
+  { file: '../../internal/viralframe/auto-schedule.js', fn: 'onRequestPost', nama: 'POST internal/auto-schedule (dry, semua agent)',
+    ctx: () => ({ request: reqInternal('https://x/auto-schedule?dry=1'), env: envInternal() }) },
+  { file: '../../internal/viralframe/auto-schedule.js', fn: 'onRequestPost', nama: 'POST internal/auto-schedule (secret salah → 403)',
+    ctx: () => ({ request: new Request('https://x/auto-schedule', { method: 'POST', headers: { 'X-Purge-Secret': 'salah' } }), env: envInternal() }) },
+  { file: '../../internal/viralframe/tarik-metrik.js', fn: 'onRequestPost', nama: 'POST internal/tarik-metrik (dry)',
+    ctx: () => ({ request: reqInternal('https://x/tarik-metrik?dry=1'), env: envInternal() }) },
 ];
 
 async function bagian1() {
@@ -284,7 +226,7 @@ function bagian2() {
     ...daftarBerkas(path.join(ROOT, 'functions/_lib')),
     ...daftarBerkas(VF),
     ...daftarBerkas(path.join(ROOT, 'src/app/components/admin/viralframe')),
-    path.join(ROOT, 'src/app/components/admin/AdminViralFramePage.tsx'),
+    // AdminViralFramePage.tsx (meja kerja) dihapus 2026-11-21.
   ];
   let n = 0;
   for (const f of target) {

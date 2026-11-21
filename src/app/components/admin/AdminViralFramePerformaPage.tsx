@@ -192,13 +192,6 @@ export default function AdminViralFramePerformaPage() {
                       </div>
                       <div className="truncate">{[v.jenis_properti, v.kecamatan, fmtHarga(v.harga)].filter(Boolean).join(' · ')}</div>
                       <div className="truncate">Agent {v.agent ?? '—'}{v.talent && v.talent !== v.agent ? ` · wajah ${v.talent}` : ''}{v.durasi_detik ? ` · ${Math.round(v.durasi_detik)} dtk` : ''}</div>
-                      {(v.dna.hook || v.dna.sudut) && (
-                        <div className="flex flex-wrap gap-1 pt-0.5">
-                          {[v.dna.hook, v.dna.sudut, v.dna.naratif, v.dna.foto_pembuka && `buka: ${v.dna.foto_pembuka}`].filter(Boolean).map(t => (
-                            <span key={t as string} className="px-1.5 py-0.5 rounded-full bg-[#F0F7FF] text-[#1565C0] text-[10px]">{t}</span>
-                          ))}
-                        </div>
-                      )}
                       <div className="pt-0.5 text-[10px] text-[#64748B]">
                         {v.platform.map(p => `${PLATFORM[p.platform] ?? p.platform} ${fmt(p.views_d7)} (${fmtX(p.indeks)})`).join(' · ')}
                       </div>
@@ -221,11 +214,6 @@ export default function AdminViralFramePerformaPage() {
               </div>
             ))}
           </div>
-          {data.pola.some(d => d.dimensi.startsWith('Hook') && d.kelompok.length === 0) && (
-            <p className="text-[11px] text-[#94A3B8]">
-              Dimensi Creative DNA (hook, sudut, struktur) hanya terisi untuk video yang dibuat lewat meja kerja ViralFrame — upload manual tidak punya catatan DNA.
-            </p>
-          )}
         </>
       )}
     </div>

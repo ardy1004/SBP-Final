@@ -1,6 +1,6 @@
 ---
 name: viralframe-context
-description: ViralFrame workbench architecture (agent→listing→bahan→parameter→storyboard→prompt→caption→unggah), R2 video storage (sbp-video, poster generation), Buffer/Zernio scheduler quirks, and AI provider (Gemini/DeepSeek/Mistral/Groq) latency and quota gotchas for the SBP property site. Load when building, debugging, or reviewing any ViralFrame feature (storyboard generation, video upload, scheduling, captions, retention checker).
+description: ViralFrame Konten Agent (the storyboard workbench was REMOVED 2026-11-21; its notes remain as history), R2 video storage (sbp-video, poster generation), Buffer/Zernio scheduler quirks, and AI provider (Gemini/DeepSeek/Mistral/Groq) latency and quota gotchas for the SBP property site. Load when building, debugging, or reviewing any ViralFrame feature (storyboard generation, video upload, scheduling, captions, retention checker).
 ---
 
 - **ViralFrame AI (multi-provider)**: **Gemini/DeepSeek/Mistral/Groq** via endpoint OpenAI-compatible, abstraksi di `functions/_lib/aiProviders.js`. (**OpenRouter DIGANTI Mistral** 2026-09-04.) Default provider **Gemini**, default model **`gemini-3.1-flash-lite`** (diganti 2026-08-04 dari `3.5-flash-lite` — lihat di bawah). Semua stasiun punya **fallback berantai** (`URUTAN` di tiap stasiun) dengan anggaran waktu di bawah wall-clock 30s. Model dropdown dari `/api/admin/viralframe/models?provider=`; status kuota dari `/api/admin/settings/ai-status`.
@@ -12,6 +12,23 @@ description: ViralFrame workbench architecture (agent→listing→bahan→parame
   - ⚠️ **KOREKSI 2026-08-19: klaim "vision Gemini terbukti lihat foto lewat URL, tanpa base64, 9,3 detik" TIDAK BERLAKU.** Audit forensik (diukur ke API dengan key produksi) menemukan endpoint OpenAI-compat Gemini **menolak `image_url` berisi URL remote — selalu HTTP 400** (URL Wikipedia pun 400, 2 model 400, tanpa `reasoning_effort` tetap 400). Yang diterima **hanya base64 data URI** (diukur OK 3,6 s dan benar-benar melihat). Sejak itu stasiun visi (kini `functions/_lib/visiFoto.js` + `stasiunMaterial.js`) mengirim base64 yang dibaca **langsung dari R2** (`env.MEDIA.get(key)` — `url_webp` memang key R2, hemat satu round-trip). Cap 6 foto ruangan + 1 karakter = 2,3-3,8 s, payload ~1,1 MB. Jangan lagi merujuk klaim URL lama itu untuk keputusan apa pun.
   - **Aturan fallback yang masih berlaku** (dari `suggest-storyboard.js` yang sudah dihapus, dipertahankan sebagai pelajaran): provider yang gagal karena **sebab apa pun selain kuota** (400/404/timeout) harus digeser ke BELAKANG urutan; yang gagal karena **kuota** tetap di depan, karena permintaan bervisi lebih berat daripada teks. Jangan "sederhanakan" jadi geser-semua.
 
+
+## 🔥 MEJA KERJA DIHAPUS 2026-11-21
+Meja kerja storyboard/prompt (menu "Viral Frame") beserta seluruh mesin AI-nya **sudah dihapus dari kode**:
+- komponen: AdminViralFramePage, PanelBahan/Prompt/Storyboard/Unggah;
+- endpoint: orders/*, bahan, status, models, backsounds;
+- lib: stasiun*, variasi, flowCompiler, dnaProduk, retensi, visiFoto.
+
+Alasannya: tidak dipakai — 0 dari 1.369 video agent dibuat lewat sana, hanya 5 pesanan.
+
+Yang TETAP hidup:
+- Konten Agent (unggah manual, penjadwal, cron);
+- Performa Konten (metrik Buffer/Zernio, tanpa dimensi DNA);
+- Akun Agent;
+- `viralframe.js` (kosakata label foto);
+- `aiProviders.js`.
+
+`AgentGrid.tsx` dipertahankan karena `agentCocok` dipakai PanelUnggahAgent & TransferAgentModal. Bagian "DIBANGUN ULANG TOTAL" di bawah kini **sejarah**: aturan prompt di sana tetap berguna bila suatu saat membangun ulang, tapi berkasnya tidak ada lagi.
 
 ## ViralFrame — DIBANGUN ULANG TOTAL 2026-09-04 (baca ini dulu)
 🔥 **Wizard lama SUDAH TIDAK ADA.** Dihapus: `ai-generate.js`, `suggest-storyboard.js`, `youtube-long.js`, `captions.js`, `transcribe.js`, `presets.js`, `thumbnail.js`, `dismiss.js`, `generations/*`, `siliconflow-token.js`, `functions/_lib/viralframe-shared.js`, `scripts/check-viralframe-rulebook.mjs`, `AdminViralFrameWorkspacePage.tsx`, dan seluruh `viralframe/{archetypes,options,masterPromptCompiler,jsonValidator,SceneCards,AIGenerateTab,CaptionStudio,YouTubeLongView,UploadAgentVideo,LabelFotoStep,CharacterStep,BacksoundPicker,workspaceShared}`. **Jangan mencarinya, jangan merujuknya.** Arketipe, koreografi kamera, Style Pair A/B, LIPSYNC/EXPRESSION_EN, `presentation`, `gesture`, tab Library & Riwayat: semuanya ikut hilang bersama wizard-nya.
