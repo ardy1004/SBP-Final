@@ -1,20 +1,57 @@
-import { useRef, useState } from 'react';
-import { X, Check, Undo2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { X, Check, Undo2, Loader2 } from 'lucide-react';
+import { gambarDenganPenutup, muatGambar, ovalDari, type KotakSensor } from './penutup';
 
-/** Kotak penutup dalam PECAHAN (0–1) terhadap lebar/tinggi foto — tak bergantung ukuran layar. */
-export interface KotakSensor { x: number; y: number; w: number; h: number }
+export type { KotakSensor } from './penutup';
 
 // Alat sensor portofolio (2026-11-21). Foto AJB memuat nama, NIK, alamat,
-// nomor sertifikat, dan tanda tangan; foto ini akan tampil PUBLIK di beranda.
-// Admin menarik kotak di atas bagian sensitif → saat diunggah, kotak itu diisi
-// warna PADAT di <canvas> (lihat olahFoto di AdminPortfolioPage). Sengaja
-// warna padat, bukan blur/piksel: blur dan piksel kasar pada teks kadang masih
-// bisa ditebak, warna padat tidak bisa dibalikkan sama sekali.
+// nomor sertifikat, dan tanda tangan, dan foto ini tampil PUBLIK di beranda.
+// Admin menarik kotak di atas bagian sensitif → bagian itu ditutup oval
+// "blur aman" (penutup.ts) dan ditanam permanen di foto yang diunggah.
+//
+// Sejak 2026-11-22 penutupnya bukan lagi kotak warna padat. Isi oval dibangun
+// HANYA dari warna di sekelilingnya, sehingga sama amannya dengan kotak padat
+// tapi tampil sebagai noda kabur lembut. Alasan lengkap & larangan memakai
+// blur/piksel dari isi asli: komentar kepala penutup.ts.
 //
 // Juga dipakai untuk foto yang SUDAH tersimpan/tampil (2026-11-22): `url` =
 // foto 1280 px yang tersimpan, `awal` = [] karena penutup lama sudah menyatu
-// di piksel — versi asli tidak pernah disimpan, jadi penutup hanya bisa
-// DITAMBAH, tidak dibuka. `catatan` menjelaskan itu ke admin.
+// di piksel. Versi asli tidak pernah disimpan, jadi penutup hanya bisa
+// DITAMBAH, tidak dibuka. `catatan` menjelaskan itu ke admin. Kotak hitam
+// gaya lama bisa diganti noda blur dengan menarik oval yang menutupinya.
+
+/**
+ * Pratinjau = hasil akhir: memakai gambarDenganPenutup yang sama dengan
+ * olahFoto (unggahan), pada resolusi yang sama (sisiMaks 1280 di alat sensor).
+ */
+export function KanvasPenutup({ url, kotak, sisiMaks = 1280, className }: {
+  url: string;
+  kotak: KotakSensor[];
+  sisiMaks?: number;
+  className?: string;
+}) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const [img, setImg] = useState<HTMLImageElement | null>(null);
+  const [galat, setGalat] = useState(false);
+  useEffect(() => {
+    let hidup = true;
+    setImg(null); setGalat(false);
+    muatGambar(url).then(i => { if (hidup) setImg(i); }).catch(() => { if (hidup) setGalat(true); });
+    return () => { hidup = false; };
+  }, [url]);
+  useEffect(() => {
+    if (!img || !ref.current) return;
+    gambarDenganPenutup(ref.current, img, kotak, sisiMaks);
+  }, [img, kotak, sisiMaks]);
+  if (galat) return <div className={`${className ?? ''} flex items-center justify-center text-xs text-red-600`}>Gagal memuat foto</div>;
+  return (
+    <>
+      {!img && <div className={`${className ?? ''} flex items-center justify-center text-[#94A3B8] min-h-24`}><Loader2 size={18} className="animate-spin" /></div>}
+      <canvas ref={ref} className={`${className ?? ''} ${img ? '' : 'hidden'}`} data-uji="kanvas-penutup" />
+    </>
+  );
+}
+
 export default function SensorFoto({ url, awal, onSelesai, onBatal, catatan, labelSelesai = 'Selesai' }: {
   url: string;
   awal: KotakSensor[];
@@ -38,6 +75,9 @@ export default function SensorFoto({ url, awal, onSelesai, onBatal, catatan, lab
   const keKotak = (a: { x: number; y: number }, b: { x: number; y: number }): KotakSensor => ({
     x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y),
   });
+  // Oval yang akan dipakai, dalam pecahan — ditampilkan SELAMA menarik supaya
+  // admin melihat persis jangkauan penutupnya sebelum melepas.
+  const ovalTarik = tarik ? ovalDari(tarik, 1, 1) : null;
 
   return (
     <div className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-3" role="dialog" aria-modal="true" aria-label="Tutup bagian sensitif foto">
@@ -46,8 +86,8 @@ export default function SensorFoto({ url, awal, onSelesai, onBatal, catatan, lab
           <div>
             <div className="font-semibold text-[#0F172A]">Tutup bagian sensitif</div>
             <p className="text-xs text-[#64748B]">
-              Tarik kotak di atas nama, NIK, alamat, nomor sertifikat, tanda tangan, atau wajah yang tidak ingin ditampilkan.
-              Kotak akan menjadi warna padat permanen di foto yang diunggah.
+              Tarik di atas nama, NIK, alamat, nomor sertifikat, tanda tangan, atau wajah yang tidak ingin ditampilkan.
+              Bagian itu ditutup lingkaran blur lembut yang permanen. Isi aslinya tidak ikut terbawa sama sekali, jadi tidak bisa dibaca ulang.
             </p>
             {catatan && <p className="mt-1.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">{catatan}</p>}
           </div>
@@ -64,15 +104,22 @@ export default function SensorFoto({ url, awal, onSelesai, onBatal, catatan, lab
             setTarik(null);
             if (k.w > 0.01 && k.h > 0.01) setKotak(prev => [...prev, k]);
           }}>
-          <img src={url} alt="Foto yang akan disensor" className="block w-full h-auto pointer-events-none" draggable={false} />
-          {[...kotak, ...(tarik ? [tarik] : [])].map((k, i) => (
-            <div key={i} className={`absolute ${i < kotak.length ? 'bg-[#1E293B]' : 'bg-[#1E293B]/60 border-2 border-white'}`}
-              style={{ left: `${k.x * 100}%`, top: `${k.y * 100}%`, width: `${k.w * 100}%`, height: `${k.h * 100}%` }} />
-          ))}
+          <KanvasPenutup url={url} kotak={kotak} className="block w-full h-auto pointer-events-none" />
+          {tarik && ovalTarik && (
+            <>
+              <div className="absolute border border-dashed border-white/80 pointer-events-none"
+                style={{ left: `${tarik.x * 100}%`, top: `${tarik.y * 100}%`, width: `${tarik.w * 100}%`, height: `${tarik.h * 100}%` }} />
+              <div className="absolute rounded-[50%] border-2 border-white bg-white/35 backdrop-blur-sm shadow-[0_0_0_1px_rgba(15,23,42,0.6)] pointer-events-none"
+                style={{
+                  left: `${(ovalTarik.cx - ovalTarik.rx) * 100}%`, top: `${(ovalTarik.cy - ovalTarik.ry) * 100}%`,
+                  width: `${ovalTarik.rx * 200}%`, height: `${ovalTarik.ry * 200}%`,
+                }} />
+            </>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs text-[#64748B]">{kotak.length} kotak penutup</span>
+          <span className="text-xs text-[#64748B]">{kotak.length} penutup</span>
           <div className="flex gap-2">
             <button type="button" disabled={kotak.length === 0} onClick={() => setKotak(prev => prev.slice(0, -1))}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-sm disabled:opacity-40">

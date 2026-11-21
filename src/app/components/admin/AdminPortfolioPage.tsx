@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Briefcase, Upload, Trash2, GripVertical, ShieldAlert, Loader2, Square, X, Eye, EyeOff, Shuffle } from 'lucide-react';
+import { Briefcase, Upload, Trash2, GripVertical, ShieldAlert, Loader2, CircleDashed, X, Eye, EyeOff, Shuffle } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, rectSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -8,7 +8,8 @@ import {
   urlFotoPortfolio, type PortfolioItem, type KategoriPortfolio, type IsianPortfolio,
 } from '../../../lib/api';
 import { KATEGORI_PORTFOLIO, MAKS_KETERANGAN, MIN_TAMPIL_BERANDA, BATAS_BERANDA, periksaKeterangan, acakCampur, labelKategori } from '../../../../functions/_lib/portfolio.js';
-import SensorFoto, { type KotakSensor } from './portfolio/SensorFoto';
+import SensorFoto, { KanvasPenutup, type KotakSensor } from './portfolio/SensorFoto';
+import { gambarDenganPenutup, muatGambar } from './portfolio/penutup';
 
 // Admin → Portfolio (2026-11-21, migrasi 0062): foto bukti kerja (AJB, survey
 // lokasi, serah terima kunci) untuk strip beranda & /portfolio.
@@ -16,10 +17,14 @@ import SensorFoto, { type KotakSensor } from './portfolio/SensorFoto';
 // Alur: seret banyak foto ke kotak → tiap foto jadi DRAF (pratinjau lokal,
 // belum terunggah) → admin memilih kategori, menulis keterangan, dan menutup
 // bagian sensitif (SensorFoto) → "Simpan" memproses di <canvas>:
-//   · kotak sensor diisi warna padat permanen,
+//   · foto diperkecil ke ≤1280 px, lalu tiap tarikan ditutup oval "blur aman"
+//     permanen (penutup.ts — isi asli tidak ikut terbawa; sejak 2026-11-22,
+//     dulu kotak warna padat),
 //   · di-encode ulang ke WebP → EXIF/GPS TERBUANG (foto survey dari HP
 //     menyimpan koordinat rumah),
 //   · dua ukuran: 1280 px (lihat penuh) & 480 px (kotak beranda).
+// Pratinjau (alat sensor & kartu draf) memakai fungsi yang sama → yang
+// terlihat = yang tersimpan.
 // Item tersimpan baru tampil publik setelah dicentang "sudah aman" + Tampil
 // (dijaga juga di server — siapkanIsian di functions/_lib/portfolio.js).
 //
@@ -30,7 +35,6 @@ import SensorFoto, { type KotakSensor } from './portfolio/SensorFoto';
 // memang tidak pernah disimpan.
 
 const JENIS_DITERIMA = ['image/jpeg', 'image/png', 'image/webp'];
-const WARNA_SENSOR = '#1E293B';
 
 interface Draf {
   kunci: string;
@@ -41,15 +45,6 @@ interface Draf {
   keterangan: string;
   status: 'siap' | 'mengunggah';
   galat?: string;
-}
-
-function muatGambar(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Gagal membaca gambar'));
-    img.src = url;
-  });
 }
 
 function keWebp(sumber: HTMLCanvasElement, sisiMaks: number, mutu: number): string {
@@ -64,17 +59,11 @@ function keWebp(sumber: HTMLCanvasElement, sisiMaks: number, mutu: number): stri
   return c.toDataURL('image/webp', mutu);
 }
 
-/** Terapkan sensor + encode ulang (EXIF terbuang) → dua ukuran WebP base64. */
+/** Perkecil ke ≤1280 px + terapkan penutup + encode ulang (EXIF terbuang) → dua ukuran WebP base64. */
 async function olahFoto(url: string, kotak: KotakSensor[]): Promise<{ foto: string; thumb: string }> {
   const img = await muatGambar(url); // <img> menghormati orientasi EXIF sebelum EXIF-nya dibuang
   const c = document.createElement('canvas');
-  c.width = img.naturalWidth;
-  c.height = img.naturalHeight;
-  const ctx = c.getContext('2d');
-  if (!ctx) throw new Error('Canvas tidak tersedia');
-  ctx.drawImage(img, 0, 0);
-  ctx.fillStyle = WARNA_SENSOR;
-  for (const k of kotak) ctx.fillRect(k.x * c.width, k.y * c.height, k.w * c.width, k.h * c.height);
+  gambarDenganPenutup(c, img, kotak, 1280); // resolusi SAMA dengan pratinjau alat sensor
   let foto = keWebp(c, 1280, 0.82);
   if (foto.length > 2.6e6) foto = keWebp(c, 1280, 0.65); // ±2 MB biner setelah base64
   const thumb = keWebp(c, 480, 0.78);
@@ -229,7 +218,7 @@ export default function AdminPortfolioPage() {
       setItems(prev => (prev ?? []).map(x => (x.id === it.id ? item : x)));
       setPesan(foto_lama_terhapus === false
         ? { jenis: 'galat', teks: `Penutup tersimpan dan website kini memakai foto baru, TETAPI foto versi lama gagal dihapus dari penyimpanan (${(foto_lama_gagal ?? []).join(', ')}). Laporkan kode ini agar dihapus manual — versi itu belum tertutup.` }
-        : { jenis: 'ok', teks: `Penutup tersimpan (${kotak.length} kotak baru). Foto versi lama sudah dihapus dari penyimpanan${it.tampil ? '; beranda & /portfolio memakai foto baru paling lambat ±5 menit' : ''}.` });
+        : { jenis: 'ok', teks: `Penutup tersimpan (${kotak.length} penutup baru). Foto versi lama sudah dihapus dari penyimpanan${it.tampil ? '; beranda & /portfolio memakai foto baru paling lambat ±5 menit' : ''}.` });
     } catch (err) {
       setPesan({ jenis: 'galat', teks: `Penutup belum tersimpan: ${(err as Error).message}. Foto di website belum berubah.` });
     } finally {
@@ -297,10 +286,9 @@ export default function AdminPortfolioPage() {
               return (
                 <div key={d.kunci} className="border border-gray-100 rounded-xl p-3 space-y-2" data-uji="draf">
                   <div className="relative rounded-lg overflow-hidden bg-gray-100">
-                    <img src={d.url} alt="" className="w-full h-40 object-cover" />
-                    {d.kotak.map((k, i) => (
-                      <div key={i} className="absolute" style={{ left: `${k.x * 100}%`, top: `${k.y * 100}%`, width: `${k.w * 100}%`, height: `${k.h * 100}%`, background: WARNA_SENSOR }} />
-                    ))}
+                    {d.kotak.length
+                      ? <KanvasPenutup url={d.url} kotak={d.kotak} sisiMaks={480} className="block w-full h-40 object-cover" />
+                      : <img src={d.url} alt="" className="w-full h-40 object-cover" />}
                   </div>
                   <div className="flex gap-2">
                     <select value={d.kategori} onChange={e => ubahDraf(d.kunci, { kategori: e.target.value as KategoriPortfolio })}
@@ -309,7 +297,7 @@ export default function AdminPortfolioPage() {
                     </select>
                     <button type="button" onClick={() => setSensorKunci(d.kunci)}
                       className={`inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border ${d.kategori === 'ajb' && d.kotak.length === 0 ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-gray-200 text-[#334155]'}`}>
-                      <Square size={12} /> Tutup bagian sensitif{d.kotak.length ? ` (${d.kotak.length})` : ''}
+                      <CircleDashed size={12} /> Tutup bagian sensitif{d.kotak.length ? ` (${d.kotak.length})` : ''}
                     </button>
                   </div>
                   <div>
@@ -423,7 +411,7 @@ function KartuItem({ item, pegangan, onUbah, onHapus, onSensor, memproses }: {
         </span>
         <button type="button" onClick={() => onSensor(item)} disabled={memproses} data-uji="edit-sensor"
           className="absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/90 text-[10px] font-semibold text-[#334155] hover:text-[#1565C0] disabled:opacity-80">
-          {memproses ? <><Loader2 size={11} className="animate-spin" /> Menyimpan penutup…</> : <><Square size={11} /> Tutup bagian sensitif</>}
+          {memproses ? <><Loader2 size={11} className="animate-spin" /> Menyimpan penutup…</> : <><CircleDashed size={11} /> Tutup bagian sensitif</>}
         </button>
       </div>
       <select value={item.kategori} onChange={e => void onUbah(item.id, { kategori: e.target.value as KategoriPortfolio })}
