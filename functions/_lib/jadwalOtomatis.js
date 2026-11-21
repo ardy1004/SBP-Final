@@ -124,7 +124,7 @@ export async function getJadwalManual(env, akunId) {
 // viralframe/agent-accounts/[id]). Tiga aturan baru 2026-11-05 menutup kelas
 // bug yang dulu sudah ditutup untuk JENDELA (jendelaMasukAkal) tapi belum untuk
 // preset:
-//   1. Jam ≥ JAM_PRESET_PALING_AWAL. Cron berjalan 01:00–04:30 WIB; jam yang
+//   1. Jam ≥ JAM_PRESET_PALING_AWAL. Cron berjalan 00:05–03:55 WIB; jam yang
 //      sudah lewat saat cron jalan tidak pernah terisi hari itu dan semua
 //      videonya tumpah ke slot besok.
 //   2. Jam + drift maksimum + geseran platform terjauh < 24:00. isoWib()
@@ -171,7 +171,7 @@ export function validasiPresetJam(p, jumlahPlatform = TANGGA_PLATFORM.length) {
   const slots = [...new Set(p.slots)].sort((a, b) => keMenit(a) - keMenit(b));
 
   if (keMenit(slots[0]) < keMenit(JAM_PRESET_PALING_AWAL)) {
-    return { ok: false, pesan: `Jam ${slots[0]} terlalu pagi — jadwal dikirim ke Buffer/Zernio pukul 01:00–04:30, jadi jam posting paling awal ${JAM_PRESET_PALING_AWAL}` };
+    return { ok: false, pesan: `Jam ${slots[0]} terlalu pagi — jadwal dikirim ke Buffer/Zernio pukul 00:05–03:55, jadi jam posting paling awal ${JAM_PRESET_PALING_AWAL}` };
   }
   const akhir = jamPresetPalingAkhir(p.intervalMenit, jumlahPlatform);
   const terakhir = slots[slots.length - 1];
@@ -446,6 +446,36 @@ export async function slotTerpakaiHariIni(env, akunId, tanggal = tanggalWib()) {
   return row?.n ?? 0;
 }
 
+// Berapa video BARU yang sudah DICOBA dikirim hari ini (tanggal WIB), status
+// apa pun — termasuk yang gagal di semua platform. Video yang barisnya hari ini
+// cuma hasil Ulangi (punya baris lebih tua) tidak dihitung.
+//
+// ⚠️ Penjaga stok-terbakar (2026-11-21). Sejak cron jalan ±24×/malam dan semua
+// agent ikut tiap putaran, agent yang SEMUA platformnya gagal (channel basi,
+// otorisasi hilang) tidak pernah menambah slotTerpakaiHariIni — baris 'failed'
+// tidak terhitung — sehingga tiap putaran ia mengambil video baru lagi dan
+// stoknya habis dalam semalam. Batas "kuota video baru per hari" ini menyamai
+// perilaku efektif lama (dulu satu agent diproses ±1–2 putaran semalam).
+//
+// D1 error = MELEMPAR, sama dengan slotTerpakaiHariIni (gagal-tertutup).
+export async function videoBaruDicobaHariIni(env, akunId, tanggal = tanggalWib()) {
+  const row = await env.DB.prepare(
+    `SELECT COUNT(DISTINCT sp.video_id) AS n FROM viralframe_scheduled_posts sp
+      WHERE sp.akun_id = ? AND sp.video_type = 'agent'
+        AND date(sp.created_at, '+7 hours') = ?
+        AND NOT EXISTS (SELECT 1 FROM viralframe_scheduled_posts lama
+                         WHERE lama.video_id = sp.video_id AND lama.video_type = 'agent'
+                           AND date(lama.created_at, '+7 hours') < ?)`
+  ).bind(akunId, tanggal, tanggal).first();
+  return row?.n ?? 0;
+}
+
+/** Jumlah video baru yang masih boleh dikirim putaran ini — tidak pernah negatif. */
+export function hitungButuh({ kuota, terpakai, dicoba }) {
+  const k = Math.max(0, Number(kuota) || 0);
+  return Math.max(0, Math.min(k - (Number(terpakai) || 0), k - (Number(dicoba) || 0)));
+}
+
 // ── Slot yang sudah terisi ───────────────────────────────────────────────────
 // Kunci slot = "<tanggal>|<slot_index>", dengan slot_index = index jendela + 1
 // (nilai yang sama yang ditulis persistScheduleResult). Hari ini DAN besok ikut
@@ -647,6 +677,12 @@ export function bolehDiulang(errorMessage) {
 // permanen tanpa membakar kuota API tiap hari.
 const MAKS_PERCOBAAN = 2;
 const UMUR_MAKS_HARI = 14;
+// Jeda minimum sebelum kegagalan diulang OTOMATIS (2026-11-21). Cron kini jalan
+// tiap 10 menit; tanpa jeda, putaran berikutnya langsung mengulang dan
+// kegagalan yang bergantung HARI — "maximum number of posts YouTube allows in a
+// day (2)" — membakar satu-satunya jatah ulang di hari yang sama. 6 jam =
+// ulangan jatuh ke malam berikutnya. Jalur Ulangi MANUAL tidak memakai ini.
+export const JEDA_ULANGI_JAM = 6;
 
 // `anggaranHabis` = fungsi yang SAMA dengan loop utama auto-schedule (sudah
 // mencadangkan biaya terburuk satu video). Diperiksa sebelum TIAP video: dulu
@@ -664,6 +700,7 @@ export async function ulangiPlatformGagal(env, { akun, targetId, kuota, jendela,
          JOIN viralframe_agent_videos v ON v.id = sp.video_id
         WHERE sp.akun_id = ? AND sp.status = 'failed' AND sp.video_type = 'agent'
           AND julianday('now') - julianday(sp.created_at) < ?
+          AND julianday('now') - julianday(sp.created_at) >= ?
           AND v.cloudinary_url IS NOT NULL
           -- ⚠️ WAJIB: kalau (video, platform) itu sudah punya baris 'scheduled'
           -- (atau 'unconfirmed' — mungkin sudah ada), jangan dikirim lagi.
@@ -673,7 +710,7 @@ export async function ulangiPlatformGagal(env, { akun, targetId, kuota, jendela,
                            WHERE s2.video_id = sp.video_id AND s2.platform = sp.platform
                              AND s2.status IN ${STATUS_TERKIRIM_SQL})
         ORDER BY sp.created_at ASC`
-    ).bind(targetId, UMUR_MAKS_HARI).all();
+    ).bind(targetId, UMUR_MAKS_HARI, JEDA_ULANGI_JAM / 24).all();
     baris = res.results ?? [];
   } catch (err) {
     console.error('[ulangiPlatformGagal] query', err.message);

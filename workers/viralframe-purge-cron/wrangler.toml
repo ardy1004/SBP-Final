@@ -3,9 +3,15 @@ main = "src/index.js"
 compatibility_date = "2026-01-01"
 
 # 20:10 UTC = 03:10 WIB — purge sampah, di luar jam kerja.
-# 18:00-21:30 UTC tiap 30 menit = 01:00-04:30 WIB — auto-jadwal per agent.
-#   Tiap agent punya jam_auto sendiri di D1; endpoint yang mencocokkan.
-#   Ini jam MENGIRIM KE Buffer/Zernio, bukan jam tayang di medsos.
+# 17:05-20:55 UTC tiap 10 menit (menit 5,15,…,55) = 00:05-03:55 WIB — auto-
+#   jadwal, 24 putaran. SEMUA agent ikut tiap putaran, paling sedikit terisi
+#   hari ini lebih dulu (2026-11-21). Dulu "0,30 18-21" = 8 putaran, satu slot
+#   jam_auto per agent: kapasitas ±20 video/malam untuk kebutuhan 40, dan Andi
+#   tidak kebagian sejak 16 Nov. Ini jam MENGIRIM KE Buffer/Zernio, bukan jam
+#   tayang di medsos — jadi harus selesai sebelum jam tayang paling awal
+#   (JAM_PRESET_PALING_AWAL 05:00 di functions/_lib/jadwalOtomatis.js).
+#   ⚠️ Deploy Pages DULU, baru worker ini: endpoint lama mencocokkan jam_auto
+#   ke slot :00/:30 dan tidak akan pernah cocok dengan menit :05–:55.
 #
 # ⚠️ Menit purge SENGAJA :10, JANGAN dikembalikan ke :00. Dulu "0 20 * * *"
 # bertabrakan tepat dengan slot auto-jadwal 20:00 UTC, sedangkan handler-nya
@@ -15,10 +21,10 @@ compatibility_date = "2026-01-01"
 #
 # 00:20-17:20 UTC tiap jam di menit :20 = 07:20-00:20 WIB — tarik metrik post
 #   dari Buffer & Zernio, SATU agent per tick bergiliran (2026-11-18). Menit
-#   :20 sengaja tidak pernah sama dengan :00/:30 (auto-jadwal) maupun :10
-#   (purge), dan jamnya tidak menyentuh 18-21 UTC milik auto-jadwal.
+#   :20 sengaja tidak pernah sama dengan menit auto-jadwal (:05/:15/…/:55)
+#   maupun :10 (purge) — termasuk 17:20 UTC yang berada di jam auto-jadwal.
 [triggers]
-crons = ["10 20 * * *", "0,30 18-21 * * *", "20 0-17 * * *"]
+crons = ["10 20 * * *", "5,15,25,35,45,55 17-20 * * *", "20 0-17 * * *"]
 
 # Workers Logs (2026-11-17). Worker ini memanggil auto-schedule/purge-trash
 # SEKALI tanpa retry; kalau panggilan itu gagal (5xx, D1 error), satu-satunya

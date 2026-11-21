@@ -1,10 +1,18 @@
 // POST /api/internal/viralframe/auto-schedule — kirim video ke Buffer/Zernio
-// otomatis, untuk agent yang jam_auto-nya jatuh di slot 30 menit saat ini.
+// otomatis. SETIAP putaran memproses SEMUA agent ber-auto aktif, yang paling
+// sedikit terisi hari ini lebih dulu, sampai anggaran waktu habis; sisanya
+// diambil putaran berikutnya (cron tiap 10 menit, 00:05–03:55 WIB).
 //
 // PENTING soal istilah: yang otomatis di sini adalah MENGIRIM KE SCHEDULER.
-// Buffer/Zernio yang kemudian menerbitkan ke medsos pada jam primetime. Jadi
-// cron dini hari (01:00–04:00 WIB) cuma mengisi antrean; tayangnya tetap pagi,
-// siang, dan malam.
+// Buffer/Zernio yang kemudian menerbitkan ke medsos pada jam tayang yang KITA
+// hitung per agent (preset/jendela) dan ikut kita kirim. Jadi jam kirim bebas —
+// asal sebelum jam tayang paling awal (JAM_PRESET_PALING_AWAL).
+//
+// ⚠️ Kenapa bukan lagi "satu agent satu slot jam_auto" (2026-11-21): satu
+// putaran hanya muat ±2–3 video (batas Worker 30 dtk), 8 putaran semalam = ±20
+// video untuk kebutuhan 40, dan sisa pekerjaan dulu diproses menurut urutan ID.
+// Urutan jam kebetulan kebalikan urutan ID, sehingga Andi (ID tertinggi) tidak
+// mendapat satu video pun sejak 16 Nov — tanpa error, statusnya hanya membeku.
 //
 // Dipanggil worker cron (workers/viralframe-purge-cron), BUKAN browser admin —
 // makanya di luar /api/admin/* dan pakai secret header sendiri, pola yang sama
@@ -16,9 +24,12 @@
 // Auth: header X-Purge-Secret == env.VIRALFRAME_PURGE_SECRET
 
 import { jsonOk, jsonError, handleOptions } from '../../_shared/response.js';
-import { getSetting, setSetting, TIMEOUT_POST_MS } from '../../../_lib/schedulerProviders.js';
+import { getSetting, setSetting, TIMEOUT_POST_MS, STATUS_TERKIRIM_SQL } from '../../../_lib/schedulerProviders.js';
 import { resolveScheduler, resolveAkunTarget, getModeAkun } from '../../../_lib/agentAccounts.js';
-import { jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, getJendela, slotDipakai, ulangiPlatformGagal, sqlBelumPernahDikirim } from '../../../_lib/jadwalOtomatis.js';
+import {
+  jadwalkanVideo, kuotaAkun, slotTerpakaiHariIni, videoBaruDicobaHariIni, hitungButuh,
+  getJendela, slotDipakai, ulangiPlatformGagal, sqlBelumPernahDikirim,
+} from '../../../_lib/jadwalOtomatis.js';
 import { tanggalWib } from '../../../_lib/waktu.js';
 import { logServerError } from '../../../_lib/logError.js';
 
@@ -34,8 +45,8 @@ import { logServerError } from '../../../_lib/logError.js';
 // melebihi kuota.
 const ANGGARAN_MS = 24000;
 
-// Sisihkan waktu untuk ekor putaran (setStatusAgent + setSetting + tulis daftar
-// tertunda) sesudah video terakhir selesai.
+// Sisihkan waktu untuk ekor putaran (setStatusAgent + setSetting + log)
+// sesudah video terakhir selesai.
 const CADANGAN_EKOR_MS = 2000;
 
 // ⚠️ Biaya TERBURUK satu video. Anggaran harus MENCADANGKAN sebanyak ini
@@ -50,8 +61,14 @@ const CADANGAN_EKOR_MS = 2000;
 // detik ke-12, selesai paling lambat detik ke-22, ekor sampai ~24).
 const BIAYA_VIDEO_MS = TIMEOUT_POST_MS + CADANGAN_EKOR_MS;
 
-// Jam WIB sekarang, dibulatkan ke bawah ke kelipatan 30 menit — dipakai
-// mencocokkan jam_auto agent. Runtime Worker selalu UTC, WIB = UTC+7.
+// Jam WIB putaran terakhir jendela cron ("5,15,…,55 17-20 * * *" UTC =
+// 00:05–03:55 WIB). Terpotong di putaran lebih awal itu NORMAL — sisanya
+// diambil 10 menit kemudian. Terpotong di jam terakhir = kapasitas semalam
+// benar-benar kurang → baru dicatat ke Error Logs.
+const JAM_WIB_TERAKHIR = 3;
+
+// Jam WIB sekarang, dibulatkan ke bawah ke kelipatan 30 menit — hanya untuk
+// laporan & log (jam_auto tidak lagi memilih agent). Runtime Worker = UTC.
 function slotJamWib(sekarang = Date.now()) {
   const wib = new Date(sekarang + 7 * 3600 * 1000);
   const jam = wib.getUTCHours();
@@ -78,34 +95,33 @@ export async function onRequestPost({ request, env }) {
   const jamSlot = slotJamWib();
   const manual = Number.isInteger(paksaAgent) && paksaAgent > 0;
 
-  // Agent yang putarannya TERPOTONG di tick sebelumnya, supaya sisanya diambil
-  // tick berikutnya (cron jalan 8× semalam, tiap 30 menit) alih-alih menunggu
-  // besok. Tanpa ini, putaran Monica yang terpotong 2026-08-31 membuat 4 dari 5
-  // videonya tidak pernah terkirim sama sekali.
+  // SEMUA agent ikut tiap putaran (2026-11-21), diurutkan PALING SEDIKIT video
+  // terisi hari ini lebih dulu — itulah keadilannya: agent yang terlewat karena
+  // anggaran habis otomatis berada di depan pada putaran berikutnya, dan agent
+  // yang kuotanya sudah penuh jatuh ke belakang. Menggantikan daftar
+  // `viralframe_auto_tertunda` + urutan ID yang membuat Andi kelaparan.
+  // Seri diputus c.id. Penghitung ini sama dengan slotTerpakaiHariIni untuk
+  // mode per_agent (akun_id = id agent); di mode terpusat semua agent bermuara
+  // ke akun utama, jadi urutannya jatuh ke c.id — kuotanya tetap dijaga
+  // slotTerpakaiHariIni akun utama.
   //
-  // Dibatasi tanggal WIB: daftar dari malam sebelumnya TIDAK boleh bocor ke hari
-  // berikutnya — hari baru punya kuotanya sendiri dan slotnya sendiri.
-  const tertundaLama = manual ? [] : await bacaTertunda(env);
-
+  // ⚠️ Tanpa .catch (2026-11-17). D1 error di sini = request gagal 500: worker
+  // cron mencatatnya dan auto_terakhir tidak bergerak.
   const kandidat = await env.DB.prepare(
-    `SELECT c.id, c.nama, a.auto_aktif, a.jam_auto
-     FROM viralframe_characters c JOIN viralframe_agent_accounts a ON a.character_id = c.id
-     WHERE ${manual
-       ? 'c.id = ?'
-       : `(a.jam_auto = ?${tertundaLama.length > 0 ? ` OR c.id IN (${tertundaLama.map(() => '?').join(',')})` : ''})`}`
-  ).bind(...(manual ? [paksaAgent] : [jamSlot, ...tertundaLama])).all();
-  // ⚠️ Tanpa .catch (2026-11-17). Dulu D1 error di sini terbaca "tidak ada
-  // agent pada jam ini" DAN menandai cron sehat (auto_terakhir bergerak) —
-  // agent pemilik slot ini kehilangan harinya tanpa jejak. Sekarang request
-  // gagal 500: worker cron mencatatnya dan auto_terakhir tidak bergerak.
+    `SELECT c.id, c.nama, a.auto_aktif,
+            (SELECT COUNT(DISTINCT sp.video_id) FROM viralframe_scheduled_posts sp
+              WHERE sp.akun_id = c.id AND sp.status IN ${STATUS_TERKIRIM_SQL}
+                AND substr(sp.scheduled_at, 1, 10) = ?) AS terisi_hari_ini
+       FROM viralframe_characters c JOIN viralframe_agent_accounts a ON a.character_id = c.id
+      WHERE ${manual ? 'c.id = ?' : '(? = 1 OR a.auto_aktif = 1)'}
+      ORDER BY terisi_hari_ini ASC, c.id ASC`
+  ).bind(tanggalWib(), manual ? paksaAgent : (dry ? 1 : 0)).all();
 
   const agents = kandidat?.results ?? [];
   if (agents.length === 0) {
-    // Tetap tandai cron-nya JALAN. Dulu return ini melewati setSetting di ekor,
-    // jadi 'viralframe_auto_terakhir' tidak bergerak di slot yang kebetulan
-    // tidak ada agentnya — terbaca seolah cron mati padahal sehat.
+    // Tetap tandai cron-nya JALAN — tidak ada agent aktif bukan berarti cron mati.
     if (!dry) await setSetting(env, 'viralframe_auto_terakhir', new Date().toISOString());
-    return jsonOk({ jam_slot: jamSlot, dilewati: 'tidak ada agent pada jam ini' });
+    return jsonOk({ jam_slot: jamSlot, dilewati: 'tidak ada agent dengan auto aktif' });
   }
 
   const { utama } = await getModeAkun(env);
@@ -120,17 +136,19 @@ export async function onRequestPost({ request, env }) {
   const klaimPerAkun = new Map();
 
   let terpotong = false;
-  // Agent yang belum tuntas di putaran ini; dilanjutkan tick berikutnya.
-  const tertundaBaru = new Set();
 
   for (const ag of agents) {
-    const hasilAgent = { agent: ag.nama, character_id: ag.id, terjadwal: 0, belum_pasti: 0, gagal: 0, detail: [] };
+    const hasilAgent = { agent: ag.nama, character_id: ag.id, terisi_hari_ini: ag.terisi_hari_ini, terjadwal: 0, belum_pasti: 0, gagal: 0, detail: [] };
 
     // Dry-run tidak menyentuh provider sama sekali, jadi tidak perlu dibatasi.
+    // Agent yang terlewat di sini TIDAK ditulis statusnya: auto_terakhir harus
+    // tetap berarti "terakhir benar-benar diproses" (banner >26 jam bergantung
+    // padanya). Ia otomatis di depan pada putaran berikutnya karena terisinya
+    // tidak bertambah.
     if (!dry && anggaranHabis()) {
       terpotong = true;
-      tertundaBaru.add(ag.id);
       hasilAgent.alasan = 'anggaran waktu habis — agent ini belum diproses';
+      hasilAgent.belum_tersentuh = true;
       laporan.push(hasilAgent);
       continue;
     }
@@ -149,18 +167,26 @@ export async function onRequestPost({ request, env }) {
       const { targetId } = await resolveAkunTarget(env, ag.id);
       const { kuota, hari, preset, mode } = await kuotaAkun(env, targetId, utama);
       const terpakai = await slotTerpakaiHariIni(env, targetId);
+      const dicoba = await videoBaruDicobaHariIni(env, targetId);
       if (!klaimPerAkun.has(targetId)) klaimPerAkun.set(targetId, await slotDipakai(env, targetId));
       const dipakai = klaimPerAkun.get(targetId);
       hasilAgent.kuota = kuota;
       hasilAgent.hari_nyata = hari;
       hasilAgent.mode_jadwal = mode;
       hasilAgent.sudah_terjadwal = terpakai;
+      hasilAgent.dicoba_hari_ini = dicoba;
 
       // Kekurangan, BUKAN kuota penuh — inilah yang membuat cron idempoten:
-      // dijalankan dua kali, atau bercampur dengan klik manual, tidak pernah
-      // melebihi kuota harian.
-      const butuh = Math.max(0, kuota - terpakai);
-      if (butuh === 0) hasilAgent.alasan = 'kuota hari ini sudah penuh';
+      // dijalankan berkali-kali, atau bercampur dengan klik manual, tidak pernah
+      // melebihi kuota harian. Dibatasi JUGA oleh video baru yang sudah dicoba
+      // hari ini (lihat videoBaruDicobaHariIni) — tanpa itu agent yang semua
+      // platformnya gagal menghabiskan stoknya dalam ±24 putaran semalam.
+      const butuh = hitungButuh({ kuota, terpakai, dicoba });
+      if (butuh === 0) {
+        hasilAgent.alasan = terpakai >= kuota
+          ? 'kuota hari ini sudah penuh'
+          : `batas percobaan video baru hari ini tercapai (${dicoba} dicoba, ${terpakai} terjadwal) — cek kegagalan platform`;
+      }
 
       // ⚠️ "kuota penuh" dan "stok habis" TIDAK lagi `continue` — keduanya justru
       // kondisi paling wajar untuk menjalankan ulangi-platform-gagal di bawah.
@@ -192,8 +218,10 @@ export async function onRequestPost({ request, env }) {
       for (let i = 0; i < videos.length; i++) {
         if (!dry && anggaranHabis()) {
           terpotong = true;
-          tertundaBaru.add(ag.id);
           hasilAgent.detail.push({ video_id: videos[i].id, alasan: 'anggaran waktu habis' });
+          // Dulu alasan dibiarkan null di sini — status "0 terjadwal" tanpa
+          // keterangan (Andi, 16 Nov). Sisanya diambil putaran berikutnya.
+          hasilAgent.alasan ??= `anggaran waktu habis — ${videos.length - i} video dilanjutkan putaran berikutnya`;
           break;
         }
         // ⚠️ try/catch WAJIB per video. Sebelumnya satu exception (mis. D1 menolak
@@ -259,8 +287,8 @@ export async function onRequestPost({ request, env }) {
       laporan.push(hasilAgent);
     } catch (err) {
       hasilAgent.alasan = `error database — agent dilewati putaran ini: ${err.message}`;
-      // Dicoba lagi tick berikutnya. Aman: kuota harian membuat putaran idempoten.
-      if (!dry && !manual) tertundaBaru.add(ag.id);
+      // Dicoba lagi putaran berikutnya (semua agent ikut tiap putaran). Aman:
+      // kuota harian membuat putaran idempoten.
       console.error('[auto-schedule] agent', ag.id, err.message);
       await logServerError(env, {
         source: 'server',
@@ -274,56 +302,33 @@ export async function onRequestPost({ request, env }) {
     }
   }
 
-  if (!dry) {
-    await setSetting(env, 'viralframe_auto_terakhir', new Date().toISOString());
-    // Agent yang sudah tuntas dibuang dari daftar; yang terpotong masuk/bertahan.
-    // Aman dijalankan berkali-kali: kuota harian (slotTerpakaiHariIni) membuat
-    // putaran idempoten, jadi agent yang terlanjur penuh cuma akan melaporkan
-    // "kuota hari ini sudah penuh" lalu keluar.
-    if (!manual) await tulisTertunda(env, [...tertundaBaru]);
-  }
+  if (!dry) await setSetting(env, 'viralframe_auto_terakhir', new Date().toISOString());
 
-  // Terpotong = putaran ini TIDAK menyelesaikan rencananya. Bukan error fatal
-  // (sisanya aman diambil putaran berikutnya), tapi kalau sering muncul artinya
-  // provider sedang lambat atau jumlah agent per slot sudah terlalu padat.
+  // Terpotong = putaran ini TIDAK menyelesaikan rencananya. Di putaran awal itu
+  // normal (sisanya diambil 10 menit kemudian) — dulu tiap putaran dicatat
+  // sebagai error, ±8×/malam, sehingga sinyal kelaparan Andi tenggelam di
+  // antara log yang selalu ada. Kini hanya putaran di JAM TERAKHIR jendela yang
+  // dicatat: di sana terpotong berarti kapasitas semalam benar-benar kurang.
   if (terpotong) {
-    await logServerError(env, {
-      source: 'server',
-      message: `[scheduler] putaran auto-schedule berhenti karena anggaran waktu ${ANGGARAN_MS} ms terlampaui — sebagian agent/video belum diproses`,
-      url: '/api/internal/viralframe/auto-schedule',
-      context: { jam_slot: jamSlot, durasi_ms: Date.now() - mulai, jumlah_agent: agents.length },
-    });
+    const belumTersentuh = laporan.filter(x => x.belum_tersentuh).map(x => x.agent);
+    const jamWib = Number(jamSlot.slice(0, 2));
+    if (!dry && !manual && jamWib === JAM_WIB_TERAKHIR) {
+      await logServerError(env, {
+        source: 'server',
+        message: `[scheduler] putaran jam terakhir masih terpotong (anggaran ${ANGGARAN_MS} ms) — kapasitas malam kurang${belumTersentuh.length ? `; belum tersentuh: ${belumTersentuh.join(', ')}` : ''}`,
+        url: '/api/internal/viralframe/auto-schedule',
+        context: {
+          jam_slot: jamSlot, durasi_ms: Date.now() - mulai, jumlah_agent: agents.length,
+          belum_tersentuh: belumTersentuh,
+          terisi: laporan.map(x => ({ agent: x.agent, terisi: x.terisi_hari_ini, kuota: x.kuota ?? null })),
+        },
+      });
+    } else {
+      console.log('[auto-schedule] terpotong, dilanjutkan putaran berikutnya', jamSlot, belumTersentuh.join(','));
+    }
   }
 
   return jsonOk({ jam_slot: jamSlot, dry, tanggal: tanggalWib(), durasi_ms: Date.now() - mulai, terpotong, laporan });
-}
-
-// Daftar agent yang putarannya terpotong, disimpan di `settings` supaya tidak
-// perlu migrasi. Bentuk: {"tanggal":"2026-08-31","ids":[20,15]}.
-const KUNCI_TERTUNDA = 'viralframe_auto_tertunda';
-
-/** Kembalikan id agent tertunda, HANYA bila masih tanggal WIB yang sama. */
-async function bacaTertunda(env) {
-  try {
-    const mentah = await getSetting(env, KUNCI_TERTUNDA);
-    if (!mentah) return [];
-    const isi = JSON.parse(mentah);
-    // ⚠️ Nilai lintas hari dibuang: hari baru punya kuota & slotnya sendiri,
-    // dan menyeret daftar kemarin berarti menjadwalkan agent di jam yang bukan
-    // miliknya.
-    if (isi?.tanggal !== tanggalWib()) return [];
-    return Array.isArray(isi.ids) ? isi.ids.filter(n => Number.isInteger(n)).slice(0, 50) : [];
-  } catch {
-    return [];   // setting rusak = anggap tidak ada; jangan jatuhkan putaran
-  }
-}
-
-async function tulisTertunda(env, ids) {
-  try {
-    await setSetting(env, KUNCI_TERTUNDA, JSON.stringify({ tanggal: tanggalWib(), ids }));
-  } catch (err) {
-    console.error('[auto-schedule] simpan tertunda', err.message);
-  }
 }
 
 async function setStatusAgent(env, characterId, hasil) {

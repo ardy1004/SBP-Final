@@ -2,9 +2,12 @@
 // sama sekali. Seluruh logic tetap satu-satunya di Pages Functions, supaya tidak
 // ada duplikasi kode.
 //
-//   "10 20 * * *"       -> purge sampah (03:10 WIB)
-//   "0,30 18-21 * * *"  -> auto-jadwal (01:00-04:30 WIB, tiap 30 menit)
-//   "20 0-17 * * *"     -> tarik metrik Buffer/Zernio (07:20-00:20 WIB, 1 agent per tick)
+//   "10 20 * * *"                   -> purge sampah (03:10 WIB)
+//   "5,15,25,35,45,55 17-20 * * *"  -> auto-jadwal (00:05-03:55 WIB, tiap 10 menit,
+//                                      semua agent tiap putaran — 2026-11-21)
+//   "20 0-17 * * *"                 -> tarik metrik Buffer/Zernio (07:20-00:20 WIB, 1 agent per tick)
+//
+// Auto-jadwal = cabang default di bawah (pola apa pun selain purge & metrik).
 //
 // Menitnya SENGAJA berbeda supaya tidak pernah ada satu menit yang cocok dengan
 // dua pola sekaligus — alasannya di wrangler.toml.

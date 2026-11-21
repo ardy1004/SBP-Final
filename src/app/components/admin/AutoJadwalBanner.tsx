@@ -38,9 +38,10 @@ export default function AutoJadwalBanner() {
       // Per AGENT (2026-11-17). `auto_terakhir` global di atas bergerak oleh
       // tick agent MANA PUN — kalau tick satu agent gagal (HTTP 5xx, D1 error),
       // agent itu kehilangan harinya tanpa satu pun peringatan. Hanya agent yang
-      // memang siap jalan: auto menyala, punya jam kirim, dan scheduler lengkap.
+      // memang siap jalan: auto menyala dan scheduler lengkap. (Syarat "punya
+      // jam kirim" dibuang 2026-11-21 — jam_auto tidak lagi memilih agent.)
       const sekarang = Date.now();
-      const diam = items.filter(a => a.auto_aktif && a.jam_auto && a.scheduler_siap
+      const diam = items.filter(a => a.auto_aktif && a.scheduler_siap
         && (!a.auto_terakhir || (sekarang - new Date(a.auto_terakhir).getTime()) / 3600000 > AMBANG_DIAM_JAM));
       if (diam.length) out.push(`Tidak diproses cron >${AMBANG_DIAM_JAM} jam: ${diam.map(a => a.nama).join(', ')} — cek Error Logs [scheduler].`);
 

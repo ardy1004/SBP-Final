@@ -22,10 +22,11 @@ const FIELDS = [
   'jam_auto',
 ];
 
-// Jam yang benar-benar dilalui cron: "0,30 18-21 UTC" = 01:00–04:30 WIB
-// (workers/viralframe-purge-cron/wrangler.toml). Di luar rentang ini nilainya
-// tersimpan rapi tapi agent-nya tidak akan pernah menyala — ditolak di sini
-// supaya kegagalannya terlihat saat menyimpan, bukan berbulan-bulan kemudian.
+// ⚠️ Sejak 2026-11-21 jam_auto TIDAK lagi memilih agent: auto-schedule.js
+// memproses semua agent ber-auto aktif tiap putaran (cron 00:05–03:55 WIB,
+// tiap 10 menit), dan UI tidak lagi mengirim kolom ini. Tetap DITERIMA dan
+// divalidasi demi kompatibilitas mundur (klien lama/skrip); kolomnya sengaja
+// tidak di-drop — tidak ada manfaatnya, dan perubahan skema ada risikonya.
 const JAM_RE = /^(0[1-4]):(00|30)$/;
 
 const PROVIDERS = ['buffer', 'zernio'];

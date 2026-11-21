@@ -33,7 +33,9 @@ type FormState = {
   cloudinary_name: string; cloudinary_api_key: string; cloudinary_api_secret: string;
   buffer_api_key: string; zernio_api_key: string;
   channels: AgentChannels;
-  jam_auto: string; auto_aktif: boolean;
+  // jam_auto TIDAK lagi diedit (2026-11-21): semua agent dikirim bergiliran tiap
+  // putaran cron. Kolomnya tetap ada & tetap diterima API (kompatibel mundur).
+  auto_aktif: boolean;
   /** null = mode Otomatis (ramp + jendela); objek = mode Manual. */
   jadwal_manual: PresetUtama | null;
 };
@@ -44,7 +46,7 @@ function formDari(a: AgentAccount): FormState {
     cloudinary_name: a.cloudinary_name, cloudinary_api_key: a.cloudinary_api_key,
     cloudinary_api_secret: '', buffer_api_key: '', zernio_api_key: '',
     channels: { ...a.channels },
-    jam_auto: a.jam_auto, auto_aktif: a.auto_aktif,
+    auto_aktif: a.auto_aktif,
     jadwal_manual: a.jadwal_manual ? { slots: [...a.jadwal_manual.slots], intervalMenit: a.jadwal_manual.intervalMenit } : null,
   };
 }
@@ -137,7 +139,7 @@ export default function AkunAgentCard({ onTersimpan, muatUlang = 0 }: {
       gmail: form.gmail, spesialis: form.spesialis,
       cloudinary_name: form.cloudinary_name, cloudinary_api_key: form.cloudinary_api_key,
       channels: form.channels,
-      jam_auto: form.jam_auto, auto_aktif: form.auto_aktif,
+      auto_aktif: form.auto_aktif,
     };
     if (form.cloudinary_api_secret.trim()) body.cloudinary_api_secret = form.cloudinary_api_secret.trim();
     if (form.buffer_api_key.trim()) body.buffer_api_key = form.buffer_api_key.trim();
@@ -309,7 +311,7 @@ export default function AkunAgentCard({ onTersimpan, muatUlang = 0 }: {
                   <span className="text-[10px] text-[#64748B] capitalize">{a.spesialis.join(', ')}</span>
                 )}
                 <span className="text-[10px] text-[#64748B]">
-                  {a.auto_aktif ? `auto ${a.jam_auto || '—'}` : 'auto mati'} · kuota {a.kuota}/hari
+                  {a.auto_aktif ? 'auto aktif' : 'auto mati'} · kuota {a.kuota}/hari
                   {a.mode_jadwal === 'manual' && ' (manual)'}
                   {a.mode_jadwal === 'otomatis' && a.hari != null && ` · ${a.hari} hari nyata`}
                 </span>
@@ -418,19 +420,15 @@ export default function AkunAgentCard({ onTersimpan, muatUlang = 0 }: {
                         <input type="checkbox" checked={form.auto_aktif} onChange={e => ubah('auto_aktif', e.target.checked as never)} />
                         Aktifkan
                       </label>
-                      <label className="flex items-center gap-1.5 text-xs text-[#334155]">
-                        Jam kirim
-                        {/* Daftar ini = jam yang BENAR-BENAR dijalankan cron
-                            (workers/viralframe-purge-cron/wrangler.toml:
-                            "0,30 18-21 UTC" = 01:00–04:30 WIB). Jam di luar itu
-                            tersimpan rapi tapi tidak pernah menyala — 00:30
-                            sempat ada di sini dan termasuk kasus itu. */}
-                        <select value={form.jam_auto} onChange={e => ubah('jam_auto', e.target.value)}
-                          className="px-2 py-1 rounded-lg border border-gray-200 text-xs">
-                          <option value="">—</option>
-                          {['01:00','01:30','02:00','02:30','03:00','03:30','04:00','04:30'].map(j => <option key={j} value={j}>{j} WIB</option>)}
-                        </select>
-                      </label>
+                      {/* Pilihan "Jam kirim" dihapus 2026-11-21: satu slot per
+                          agent membuat Andi (ID tertinggi) tidak pernah kebagian
+                          putaran. Sekarang semua agent ikut tiap putaran cron
+                          (workers/viralframe-purge-cron/wrangler.toml), yang
+                          paling sedikit terkirim hari ini lebih dulu. */}
+                      <span className="text-[11px] text-[#64748B]">
+                        Dikirim otomatis bergiliran 00:05–03:55 WIB — yang paling sedikit terkirim hari ini didahulukan.
+                        Jam tayang tetap mengikuti jadwal posting di bawah.
+                      </span>
                       {a.auto_terakhir && (
                         <span className="text-[10px] text-[#64748B]">
                           Terakhir: {new Date(a.auto_terakhir).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
