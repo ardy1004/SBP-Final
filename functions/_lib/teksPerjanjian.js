@@ -98,6 +98,73 @@ export const TEMPLATE_V1 = {
   ],
 };
 
+// ─── Template berversi (C3, migrasi 0065) ───────────────────────────────────
+// Versi 1 = TEMPLATE_V1 (kode). Versi ≥ 2 = baris perjanjian_template.
+// Menyimpan selalu menambah versi; configure.js membekukan versi TERBARU.
+
+/** Semua kombinasi varian — tiap kombinasi wajib menghasilkan ≥ 1 pasal. */
+export const SEMUA_VARIAN = SEMUA_LISTING.flatMap(listing => SEMUA_TUJUAN.map(tujuan => ({ listing, tujuan })));
+const TUJUAN_PROPERTI = { jual: 'dijual', sewa: 'disewa', jual_sewa: 'dijual_disewa' };
+/** Varian lengkap (dengan tx) dari pasangan listing/kode tujuan — untuk pratinjau template. */
+export const varianDariKode = (listing, tujuan) => varianDari({ jenis_listing: listing, tujuan: TUJUAN_PROPERTI[tujuan] });
+export const MAKS_BLOK_TEMPLATE = 60;
+
+/**
+ * Validasi blok template (punya `berlaku`). Selain aturan blok biasa:
+ * `berlaku` wajib subset tak kosong dari daftar sah, dan SETIAP varian
+ * (2 listing × 3 tujuan) harus mendapat minimal satu pasal — template yang
+ * membuat varian tertentu kosong akan menghasilkan perjanjian tanpa isi.
+ */
+export function validasiTemplate(blok) {
+  if (!Array.isArray(blok) || blok.length === 0) return { galat: 'Minimal satu pasal' };
+  if (blok.length > MAKS_BLOK_TEMPLATE) return { galat: `Maksimal ${MAKS_BLOK_TEMPLATE} blok pasal` };
+  const bersih = [];
+  for (let i = 0; i < blok.length; i++) {
+    const b = blok[i];
+    const satu = validasiBlok([{ judul: b?.judul, isi: b?.isi }]);
+    if (satu.galat) return { galat: satu.galat.replace('Pasal 1', `Blok ${i + 1}`) };
+    const listing = Array.isArray(b?.berlaku?.listing) ? [...new Set(b.berlaku.listing)].filter(x => SEMUA_LISTING.includes(x)) : [];
+    const tujuan = Array.isArray(b?.berlaku?.tujuan) ? [...new Set(b.berlaku.tujuan)].filter(x => SEMUA_TUJUAN.includes(x)) : [];
+    if (listing.length === 0 || tujuan.length === 0) return { galat: `Blok ${i + 1}: pilih minimal satu jenis listing dan satu jenis transaksi` };
+    bersih.push({ ...satu.blok[0], berlaku: { listing: SEMUA_LISTING.filter(x => listing.includes(x)), tujuan: SEMUA_TUJUAN.filter(x => tujuan.includes(x)) } });
+  }
+  for (const v of SEMUA_VARIAN) {
+    const n = bersih.filter(b => b.berlaku.listing.includes(v.listing) && b.berlaku.tujuan.includes(v.tujuan)).length;
+    if (n === 0) return { galat: `Varian ${v.listing === 'exclusive' ? 'Exclusive' : 'Open'} · ${varianDariKode(v.listing, v.tujuan).tx.label} tidak mendapat satu pasal pun` };
+    if (n > MAKS_BLOK) return { galat: `Varian ${v.listing} · ${v.tujuan} melebihi ${MAKS_BLOK} pasal` };
+  }
+  return { blok: bersih };
+}
+
+/**
+ * Template yang berlaku sekarang. Tabel kosong / belum dimigrasi → TEMPLATE_V1.
+ * Galat D1 LAIN dilempar: diam-diam memakai v1 padahal admin sudah menyimpan
+ * versi baru berarti membekukan teks yang salah ke perjanjian.
+ */
+export async function templateAktif(env) {
+  let row;
+  try {
+    row = await env.DB.prepare('SELECT versi, blok_json FROM perjanjian_template ORDER BY versi DESC LIMIT 1').first();
+  } catch (err) {
+    if (/no such table/i.test(err?.message ?? '')) return TEMPLATE_V1;
+    throw err;
+  }
+  if (!row) return TEMPLATE_V1;
+  const v = validasiTemplate(JSON.parse(row.blok_json));
+  if (v.galat) throw new Error(`template versi ${row.versi} rusak: ${v.galat}`);
+  return { versi: row.versi, blok: v.blok };
+}
+
+/** Data contoh untuk pratinjau template (bukan data pemilik mana pun). */
+export const DATA_CONTOH = {
+  jenis_properti: 'Rumah', alamat: 'Jl. Contoh No. 1', kelurahan: 'Sardonoharjo', kecamatan: 'Ngaglik',
+  kabupaten: 'Sleman', provinsi: 'DI Yogyakarta', legalitas: 'SHM', harga: 1250000000, harga_sewa_tahun: 60000000,
+  nego: 1, nett: 0, durasi_kontrak: 6, fee_persen: 3,
+};
+/** DATA_CONTOH untuk satu varian (listing + kode tujuan) — bentuk sama dengan data_render. */
+export const dataContohVarian = (listing, tujuan, dasar = DATA_CONTOH) =>
+  ({ ...dasar, jenis_listing: listing, tujuan: TUJUAN_PROPERTI[tujuan] });
+
 /** Varian perjanjian: listing + jenis transaksi (dari tujuan properti). */
 export function varianDari(agr) {
   return {

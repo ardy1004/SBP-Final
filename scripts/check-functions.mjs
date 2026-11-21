@@ -90,6 +90,14 @@ const req = (url, body, method = 'POST') => new Request(url, {
 // sering diubah — penjadwal & metrik — supaya gate tetap menjalankan kode nyata.
 // Semua tanpa jaringan: kredensial scheduler kosong di D1 tiruan, jadi jalurnya
 // berhenti sebelum memanggil Buffer/Zernio.
+const BLOK_TEMPLATE_UJI = [{ judul: 'OBJEK', isi: 'Fee {fee_persen}% untuk {jenis_transaksi}.', berlaku: { listing: ['open', 'exclusive'], tujuan: ['jual', 'sewa', 'jual_sewa'] } }];
+const FIXTURE_TEMPLATE_V2 = { 'from perjanjian_template': [{ versi: 2, blok_json: JSON.stringify(BLOK_TEMPLATE_UJI), catatan: null, dibuat_oleh: 'gate', dibuat_at: '2026-11-21 00:00:00' }] };
+const FIXTURE_AGREEMENT = { 'from agreements a': [{
+  id: 7, kode_perjanjian: 'SBP-AGR-GATE', status: 'draft', jenis_listing: 'open', durasi_kontrak: null, fee_persen: 3,
+  pasal_json: null, pasal_kustom: 0, pasal_template_versi: null, pasal_diubah_oleh: null, pasal_diubah_at: null,
+  tujuan: 'dijual', jenis_properti: 'Rumah', alamat: 'Jl. Uji', kelurahan: 'Tamantirto', kecamatan: 'Kasihan', kabupaten: 'Bantul',
+  provinsi: 'DIY', legalitas: 'SHM', harga: 850000000, harga_sewa_tahun: null, nego: 1, nett: 0,
+}] };
 const reqInternal = (url) => new Request(url, { method: 'POST', headers: { 'X-Purge-Secret': 'uji-gate' } });
 const envInternal = () => ({ ...env(), VIRALFRAME_PURGE_SECRET: 'uji-gate' });
 const SKENARIO = [
@@ -114,6 +122,23 @@ const SKENARIO = [
     ctx: () => ({ request: req('https://x/portfolio/1', { tampil: true }), env: env(), params: { id: '1' } }) },
   { file: '../portfolio/urutan.js', fn: 'onRequestPost', nama: 'POST /portfolio/urutan',
     ctx: () => ({ request: req('https://x/portfolio/urutan', { ids: [3, 1, 2] }), env: env() }) },
+  // ─── Isi perjanjian (C2/C3, 2026-11-21, migrasi 0063–0065) ───────────────
+  // configure & pasal memanggil templateAktif() (async, baca D1) — dijalankan
+  // dengan tabel template kosong (→ v1) DAN berisi versi 2.
+  { file: '../perjanjian-template/index.js', fn: 'onRequestGet', nama: 'GET /perjanjian-template (kosong → v1)',
+    ctx: () => ({ request: req('https://x/perjanjian-template', undefined, 'GET'), env: env() }) },
+  { file: '../perjanjian-template/index.js', fn: 'onRequestGet', nama: 'GET /perjanjian-template?versi=2',
+    ctx: () => ({ request: req('https://x/perjanjian-template?versi=2', undefined, 'GET'), env: env(FIXTURE_TEMPLATE_V2) }) },
+  { file: '../perjanjian-template/index.js', fn: 'onRequestPost', nama: 'POST /perjanjian-template (sah)',
+    ctx: () => ({ request: req('https://x/perjanjian-template', { blok: BLOK_TEMPLATE_UJI, catatan: 'uji' }), env: env(FIXTURE_TEMPLATE_V2), data: { admin: { nama: 'gate' } } }) },
+  { file: '../perjanjian-template/index.js', fn: 'onRequestPost', nama: 'POST /perjanjian-template (varian kosong → 422)',
+    ctx: () => ({ request: req('https://x/perjanjian-template', { blok: [{ ...BLOK_TEMPLATE_UJI[0], berlaku: { listing: ['open'], tujuan: ['jual'] } }] }), env: env() }) },
+  { file: '../agreements/[id]/configure.js', fn: 'onRequestPost', nama: 'POST /agreements/:id/configure (template v2)',
+    ctx: () => ({ request: req('https://x/agreements/7/configure', { jenis_listing: 'exclusive', fee_persen: 3, durasi_kontrak: 6 }), env: env({ ...FIXTURE_AGREEMENT, ...FIXTURE_TEMPLATE_V2 }), params: { id: '7' } }) },
+  { file: '../agreements/[id]/pasal.js', fn: 'onRequestGet', nama: 'GET /agreements/:id/pasal',
+    ctx: () => ({ env: env(FIXTURE_AGREEMENT), params: { id: '7' } }) },
+  { file: '../agreements/[id]/pasal.js', fn: 'onRequestPut', nama: 'PUT /agreements/:id/pasal (reset, template v2)',
+    ctx: () => ({ request: req('https://x/agreements/7/pasal', { reset: true }, 'PUT'), env: env({ ...FIXTURE_AGREEMENT, ...FIXTURE_TEMPLATE_V2 }), params: { id: '7' }, data: { admin: { nama: 'gate' } } }) },
 ];
 
 async function bagian1() {

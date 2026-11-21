@@ -5,6 +5,7 @@ import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { Lock, User, CheckCircle, XCircle, Eye, EyeOff, BarChart2, Plus, Trash2, Edit2, ToggleLeft, ToggleRight, KeyRound, RotateCcw } from 'lucide-react';
 import { META_EVENTS } from '../../../../functions/_lib/metaEvents.js';
+import EditorTemplatePerjanjian from './perjanjian/EditorTemplatePerjanjian';
 import {
   getAiKeys, saveAiKeys, getAiStatus, type AiProviderId, type AiKeyInfo, type AiStatusInfo, bacaJson,
 } from '../../../lib/api';
@@ -525,6 +526,9 @@ export default function AdminSettingsPage() {
       </div>
 
       </ResponsiveGridLayout>
+
+      {/* Di luar grid: editor panjang, tidak cocok sebagai kartu seret-ubah-ukuran. */}
+      <EditorTemplatePerjanjian />
     </div>
   );
 }

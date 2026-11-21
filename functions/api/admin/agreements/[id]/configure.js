@@ -3,7 +3,7 @@
 // Auth: JWT cookie/Bearer — ditangani oleh _middleware.js di functions/api/admin/
 
 import { jsonOk, jsonError, handleOptions } from '../../../_shared/response.js';
-import { TEMPLATE_V1, buatSnapshot, bacaSnapshot, varianDari } from '../../../../_lib/teksPerjanjian.js';
+import { templateAktif, buatSnapshot, bacaSnapshot, varianDari } from '../../../../_lib/teksPerjanjian.js';
 
 const TOKEN_EXPIRY_HOURS = 72;
 
@@ -87,7 +87,8 @@ export async function onRequestPost(context) {
     pasal_json = agr.pasal_json;
     pasal_template_versi = lama.versi;
   } else {
-    const snap = buatSnapshot(TEMPLATE_V1, { jenis_listing, tujuan: agr.tujuan });
+    // Versi TERBARU template (Pengaturan → Template Perjanjian, migrasi 0065).
+    const snap = buatSnapshot(await templateAktif(env), { jenis_listing, tujuan: agr.tujuan });
     pasal_json = JSON.stringify(snap);
     pasal_template_versi = snap.versi;
   }

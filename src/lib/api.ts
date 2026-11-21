@@ -802,6 +802,27 @@ export async function simpanPasalPerjanjian(id: number | string, body: { blok: B
   return apiFetch<PasalPerjanjian>(`/admin/agreements/${id}/pasal`, { method: 'PUT', body: JSON.stringify(body) });
 }
 
+// ── Template perjanjian berversi (Tahap C3, migrasi 0065) ───────────────────
+export type ListingTemplate = 'open' | 'exclusive';
+export type TujuanTemplate = 'jual' | 'sewa' | 'jual_sewa';
+export interface BlokTemplate extends BlokPasal { berlaku: { listing: ListingTemplate[]; tujuan: TujuanTemplate[] } }
+export interface RiwayatTemplate { versi: number; catatan: string | null; dibuat_oleh: string | null; dibuat_at: string | null }
+export interface TemplatePerjanjian {
+  aktif: { versi: number; blok: BlokTemplate[] };
+  riwayat: RiwayatTemplate[];
+  placeholder: Record<string, string>;
+  data_contoh: Record<string, string | number | null>;
+}
+export async function getTemplatePerjanjian() {
+  return apiFetch<TemplatePerjanjian>('/admin/perjanjian-template');
+}
+export async function getVersiTemplatePerjanjian(versi: number) {
+  return apiFetch<{ versi: number; blok: BlokTemplate[] }>(`/admin/perjanjian-template?versi=${versi}`);
+}
+export async function simpanTemplatePerjanjian(body: { blok: BlokTemplate[]; catatan?: string }) {
+  return apiFetch<TemplatePerjanjian>('/admin/perjanjian-template', { method: 'POST', body: JSON.stringify(body) });
+}
+
 // ── Portofolio "bukti kerja" (migrasi 0062) ─────────────────────────────────
 // Aturan validasi & label kategori: functions/_lib/portfolio.js.
 export type KategoriPortfolio = 'ajb' | 'survey' | 'serah_terima' | 'lainnya';
