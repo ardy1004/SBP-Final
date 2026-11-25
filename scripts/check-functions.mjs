@@ -112,6 +112,27 @@ const FIXTURE_PORTFOLIO = {
 };
 const reqInternal = (url) => new Request(url, { method: 'POST', headers: { 'X-Purge-Secret': 'uji-gate' } });
 const envInternal = () => ({ ...env(), VIRALFRAME_PURGE_SECRET: 'uji-gate' });
+
+// ─── Varian ukuran foto properti (2026-11-25, _lib/ukuranFoto.js) ──────────
+// R2 tiruan yang MENCATAT put/delete, supaya skenario bisa memeriksa kunci yang
+// benar-benar ditulis/dihapus — bukan sekadar "tidak 5xx".
+const objekR2 = (isi = 'x', ct = 'image/webp') => ({ arrayBuffer: async () => new TextEncoder().encode(isi).buffer, httpMetadata: { contentType: ct }, httpEtag: '"e"' });
+function mediaPencatat(ada = {}) {
+  const log = { put: [], delete: [] };
+  return {
+    log,
+    get: async (k) => (k in ada ? objekR2(ada[k]) : null),
+    head: async (k) => (k in ada ? {} : null),
+    put: async (k) => { log.put.push(k); },
+    delete: async (k) => { log.delete.push(...[].concat(k)); },
+    list: async () => ({ objects: Object.keys(ada).map(key => ({ key, uploaded: new Date(key.includes('baru') ? Date.now() : Date.now() - 3 * 864e5) })), truncated: false }),
+  };
+}
+const WEBP_MINI = 'data:image/webp;base64,' + Buffer.from('RIFF\x1a\x00\x00\x00WEBPVP8 ' + 'x'.repeat(14), 'latin1').toString('base64');
+const PNG_MINI = 'data:image/webp;base64,' + Buffer.from('\x89PNG\r\n\x1a\nxxxx', 'latin1').toString('base64');
+const BESAR = 'data:image/webp;base64,' + Buffer.alloc(2 * 1024 * 1024 + 10, 0x52).toString('base64');
+let mediaUji;
+const envMedia = (ada, override) => { mediaUji = mediaPencatat(ada); return { ...env(override), MEDIA: mediaUji }; };
 const SKENARIO = [
   { file: 'performa.js', fn: 'onRequestGet', nama: 'GET /performa',
     ctx: () => ({ request: req('https://x/performa?hari=30', undefined, 'GET'), env: env() }) },
@@ -161,6 +182,43 @@ const SKENARIO = [
     ctx: () => ({ env: env(FIXTURE_AGREEMENT), params: { id: '7' } }) },
   { file: '../agreements/[id]/pasal.js', fn: 'onRequestPut', nama: 'PUT /agreements/:id/pasal (reset, template v2)',
     ctx: () => ({ request: req('https://x/agreements/7/pasal', { reset: true }, 'PUT'), env: env({ ...FIXTURE_AGREEMENT, ...FIXTURE_TEMPLATE_V2 }), params: { id: '7' }, data: { admin: { nama: 'gate' } } }) },
+  // ─── Varian ukuran foto (2026-11-25) — `status` & `cek` WAJIB cocok ─────────
+  { file: '../../media.js', fn: 'onRequestGet', nama: 'GET /api/media varian ADA → 640, immutable', status: 200,
+    ctx: () => ({ request: req('https://x/api/media?key=property-photos%2F640%2Fa.webp', undefined, 'GET'), env: envMedia({ 'property-photos/640/a.webp': 'v', 'property-photos/a.webp': 'd' }) }),
+    cek: async (r) => r.headers.get('x-sbp-ukuran') === '640' && /immutable/.test(r.headers.get('cache-control')) && (await r.text()) === 'v' },
+  { file: '../../media.js', fn: 'onRequestGet', nama: 'GET /api/media varian BELUM ada → foto dasar, cache 1 jam', status: 200,
+    ctx: () => ({ request: req('https://x/api/media?key=property-photos%2F1280%2Fa.webp', undefined, 'GET'), env: envMedia({ 'property-photos/a.webp': 'd' }) }),
+    cek: async (r) => r.headers.get('x-sbp-ukuran') === 'asli' && r.headers.get('cache-control') === 'public, max-age=3600' && (await r.text()) === 'd' },
+  { file: '../../media.js', fn: 'onRequestGet', nama: 'GET /api/media varian & dasar tidak ada → 404', status: 404,
+    ctx: () => ({ request: req('https://x/api/media?key=property-photos%2F640%2Fhilang.webp', undefined, 'GET'), env: envMedia({}) }) },
+  { file: '../../media.js', fn: 'onRequestGet', nama: 'GET /api/media foto dasar biasa (tanpa header ukuran)', status: 200,
+    ctx: () => ({ request: req('https://x/api/media?key=property-photos%2Fa.webp', undefined, 'GET'), env: envMedia({ 'property-photos/a.webp': 'd' }) }),
+    cek: async (r) => r.headers.get('x-sbp-ukuran') === null && /immutable/.test(r.headers.get('cache-control')) },
+  { file: '../properties/[id]/photos/ukuran.js', fn: 'onRequestGet', nama: 'GET /photos/ukuran → hanya foto yang kurang varian', status: 200,
+    ctx: () => ({ env: envMedia({ 'property-photos/640/a.webp': 'v', 'property-photos/1280/a.webp': 'v', 'property-photos/640/b.webp': 'v' }), params: { id: '1025' } }),
+    cek: async (r) => { const j = await r.json(); return JSON.stringify(j.data.foto) === JSON.stringify([{ id: 12, url_webp: 'property-photos/b.webp', kurang: [1280] }]); } },
+  { file: '../properties/[id]/photos/[imageId]/ukuran.js', fn: 'onRequestPut', nama: 'PUT /photos/:id/ukuran sah → tulis ke kunci varian', status: 200,
+    ctx: () => ({ request: req('https://x/u', { 640: WEBP_MINI, 1280: WEBP_MINI }, 'PUT'), env: envMedia({}), params: { id: '1025', imageId: '11' } }),
+    cek: async () => JSON.stringify(mediaUji.log.put.sort()) === JSON.stringify(['property-photos/1280/a.webp', 'property-photos/640/a.webp']) },
+  { file: '../properties/[id]/photos/[imageId]/ukuran.js', fn: 'onRequestPut', nama: 'PUT /photos/:id/ukuran isi bukan WebP/JPEG → 415, tak menulis', status: 415,
+    ctx: () => ({ request: req('https://x/u', { 640: WEBP_MINI, 1280: PNG_MINI }, 'PUT'), env: envMedia({}), params: { id: '1025', imageId: '11' } }),
+    cek: async () => mediaUji.log.put.length === 0 },
+  { file: '../properties/[id]/photos/[imageId]/ukuran.js', fn: 'onRequestPut', nama: 'PUT /photos/:id/ukuran > 2 MB → 413', status: 413,
+    ctx: () => ({ request: req('https://x/u', { 640: BESAR }, 'PUT'), env: envMedia({}), params: { id: '1025', imageId: '11' } }) },
+  { file: '../properties/[id]/photos/[imageId]/ukuran.js', fn: 'onRequestPut', nama: 'PUT /photos/:id/ukuran foto milik properti lain → 404', status: 404,
+    ctx: () => ({ request: req('https://x/u', { 640: WEBP_MINI }, 'PUT'), env: envMedia({}, { 'from property_images': [] }), params: { id: '1', imageId: '11' } }) },
+  { file: '../properties/[id]/photos/[imageId]/index.js', fn: 'onRequestDelete', nama: 'DELETE /photos/:id → dasar + 2 varian ikut terhapus', status: 200,
+    ctx: () => ({ env: envMedia({}), params: { id: '1025', imageId: '11' } }),
+    cek: async () => ['property-photos/a.webp', 'property-photos/640/a.webp', 'property-photos/1280/a.webp'].every(k => mediaUji.log.delete.includes(k)) },
+  // 🔥 Sapuan yatim: varian dinilai lewat DASAR-nya. a & b dirujuk D1 → varian
+  // keduanya WAJIB selamat; c tak dirujuk → yatim; "baru" (< 24 jam) tak disentuh.
+  { file: '../../internal/viralframe/purge-trash.js', fn: 'onRequestPost', nama: 'POST internal/purge-trash → varian foto dirujuk TIDAK dihapus', status: 200,
+    ctx: () => ({ request: reqInternal('https://x/purge-trash'), env: { ...envMedia({
+      'property-photos/a.webp': 'd', 'property-photos/640/a.webp': 'v', 'property-photos/1280/a.webp': 'v',
+      'property-photos/1280/b.webp': 'v', 'property-photos/640/c.webp': 'v', 'property-photos/c.webp': 'd',
+      'property-photos/640/baru-d.webp': 'v' }), VIRALFRAME_PURGE_SECRET: 'uji-gate' } }),
+    cek: async () => JSON.stringify(mediaUji.log.delete.filter(k => k.startsWith('property-photos/')).sort())
+      === JSON.stringify(['property-photos/640/c.webp', 'property-photos/c.webp']) },
 ];
 
 async function bagian1() {
@@ -190,6 +248,13 @@ async function bagian1() {
         catat(`${s.nama} — HTTP ${status} ${pesan}`);
         continue;
       }
+      // Skenario ber-`status`/`cek` menuntut perilaku PERSIS, bukan cuma "tidak 5xx".
+      if (s.status && status !== s.status) {
+        try { pesan = (await res.clone().json())?.error ?? ''; } catch { /* bukan JSON */ }
+        catat(`${s.nama} — HTTP ${status}, diharapkan ${s.status} ${pesan}`);
+        continue;
+      }
+      if (s.cek && !(await s.cek(res.clone()))) { catat(`${s.nama} — isi/efek tidak sesuai harapan`); continue; }
       console.log(`  ✓ ${String(status).padEnd(4)} ${s.nama}`);
     } catch (e) {
       console.error = errAsli;

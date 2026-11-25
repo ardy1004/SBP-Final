@@ -88,6 +88,33 @@ export function pakaiCadangan(
   img.dataset.cadanganKe = String(ke);
 }
 
+// ─── Foto properti: ukuran TETAP di R2, bukan transformasi per permintaan ────
+// Sejak 2026-11-25 tiap foto properti punya varian property-photos/<640|1280>/
+// <nama> yang dibuat SEKALI (browser admin / skrip backfill) — lihat
+// functions/_lib/ukuranFoto.js. Foto properti WAJIB lewat fotoUkuran/srcSetFoto,
+// JANGAN kembali ke cfImg: itulah yang menghabiskan kuota 5.000 transformasi
+// unik/bulan (2.675 foto × 5–7 ukuran) dan membuat galeri "berkedip pecah".
+// Varian yang belum ada disajikan /api/media sebagai foto dasar (aman).
+// og:image tetap cfImgOg — butuh crop 1,91:1 dan jumlah uniknya kecil.
+
+export type LebarFoto = 640 | 1280;
+
+/** URL foto properti DASAR keluaran normalizeProperty: /api/media?key=property-photos%2F<nama>. */
+const POLA_FOTO_PROPERTI = /^\/api\/media\?key=property-photos%2F([^%?&#]+)$/;
+
+/** URL varian ukuran foto properti; sumber lain jatuh ke cfImg. */
+export function fotoUkuran(src: string, lebar: LebarFoto): string {
+  const m = POLA_FOTO_PROPERTI.exec(src ?? '');
+  if (!m) return cfImg(src, lebar);
+  return `/api/media?key=property-photos%2F${lebar}%2F${m[1]}`;
+}
+
+/** srcset 640w/1280w dari varian; sumber lain jatuh ke cfSrcSet. */
+export function srcSetFoto(src: string): string | undefined {
+  if (!POLA_FOTO_PROPERTI.test(src ?? '')) return cfSrcSet(src, [640, 1280]);
+  return `${fotoUkuran(src, 640)} 640w, ${fotoUkuran(src, 1280)} 1280w`;
+}
+
 /** srcset beberapa lebar — dipakai bersama atribut sizes. */
 export function cfSrcSet(src: string, widths: number[]): string | undefined {
   if (!src || !ENABLED) return undefined;

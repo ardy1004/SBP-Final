@@ -6,7 +6,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { Maximize2, BedDouble, Bath, MapPin, AlertCircle } from 'lucide-react';
 import { getMapProperties, formatRupiah, type MapPinItem } from '../../lib/api';
-import { cfImg } from '../../lib/img';
+import { fotoUkuran } from '../../lib/img';
 
 const JENIS_COLORS: Record<string, string> = {
   rumah: '#1565C0', kost: '#7C3AED', villa: '#10B981',
@@ -50,7 +50,7 @@ function FitBounds({ pins }: { pins: MapPinItem[] }) {
 
 function MapPopup({ pin }: { pin: MapPinItem }) {
   const imgSrc = pin.cover_url
-    ? cfImg(`/api/media?key=${encodeURIComponent(pin.cover_url)}`, 520)
+    ? fotoUkuran(`/api/media?key=${encodeURIComponent(pin.cover_url)}`, 640)
     : null;
 
   const kec  = pin.kecamatan.toLowerCase().replace(/\s+/g, '-');

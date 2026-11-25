@@ -10,7 +10,7 @@ import {
   formatRupiah,
 } from '../../lib/api';
 import { PROPERTY_TYPES, PROPERTY_TYPE_VALUES, getPropertyTypeLabel } from '../../lib/propertyTypes';
-import { cfImg, pakaiCadangan } from '../../lib/img';
+import { fotoUkuran, pakaiCadangan } from '../../lib/img';
 import { urlHalaman, deretHalaman, UKURAN_HALAMAN, basePathFilter, type PaginationInfo } from '../../lib/pagination';
 import { parseSmartQuery, type LocationIndex, type FlatLoc, type SmartFilters } from './smartSearchParser';
 import { trackEvent } from '../../lib/tracking';
@@ -844,7 +844,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
                   <div key={p.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex">
                     <div className="relative w-48 sm:w-64 flex-shrink-0">
                       <img
-                        src={cfImg(p.images[0] ?? '', 400)}
+                        src={fotoUkuran(p.images[0] ?? '', 640)}
                         alt={p.title}
                         className="w-full h-full object-cover"
                         style={{ minHeight: 160 }}

@@ -1,4 +1,6 @@
 import { bacaJson } from '../../../lib/api';
+import type { LebarFoto } from '../../../lib/img';
+import { buatUkuranFoto } from '../../lib/ukuranFoto';
 import { useState, useRef, useEffect } from 'react';
 import { Star, Trash2, ImageOff, GripVertical, Upload } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
@@ -144,6 +146,53 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
 
   const id = String(propertyId);
 
+  // ── Varian ukuran foto (640 & 1280) — 2026-11-25 ────────────────────────────
+  // Halaman publik memakai varian tetap di R2, bukan Cloudflare Image
+  // Transformations (kuota 5.000 unik/bulan habis 22 Nov). Varian dibuat DI SINI,
+  // di browser admin: tepat setelah unggah, dan saat kartu dibuka untuk foto
+  // yang belum punya (Titip Jual & impor CSV lahir tanpa varian). Gagal = hanya
+  // peringatan — /api/media menyajikan foto dasar selama varian belum ada.
+  const [ukuranStatus, setUkuranStatus] = useState('');
+  const simpanUkuran = async (imageId: number, sumber: Blob, lebar?: LebarFoto[]) => {
+    const varian = await buatUkuranFoto(sumber, lebar);
+    const res = await fetch(`/api/admin/properties/${id}/photos/${imageId}/ukuran`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(varian),
+    });
+    const json = await bacaJson(res);
+    if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
+  };
+
+  useEffect(() => {
+    if (isNew) return;
+    let hidup = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/admin/properties/${id}/photos/ukuran`, { credentials: 'include' });
+        const json = await bacaJson<{ foto: Array<{ id: number; url_webp: string; kurang: LebarFoto[] }> }>(res);
+        const kurang = Array.isArray(json.data?.foto) ? json.data.foto : [];
+        for (let i = 0; i < kurang.length && hidup; i++) {
+          setUkuranStatus(`Menyiapkan ukuran foto ${i + 1}/${kurang.length}…`);
+          try {
+            const asli = await fetch(`/api/admin/media?key=${encodeURIComponent(kurang[i].url_webp)}`, { credentials: 'include' });
+            if (!asli.ok) throw new Error(`HTTP ${asli.status}`);
+            await simpanUkuran(kurang[i].id, await asli.blob(), kurang[i].kurang);
+          } catch (err) {
+            console.warn('[ukuran foto] gagal melengkapi', kurang[i].id, err);
+          }
+        }
+      } catch (err) {
+        console.warn('[ukuran foto] cek varian gagal', err);
+      } finally {
+        if (hidup) setUkuranStatus('');
+      }
+    })();
+    return () => { hidup = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, isNew]);
+
   // Satu-satunya jalur mengubah urutan (seret maupun "Jadikan utama"). Posisi
   // pertama otomatis jadi foto utama di server (_lib/fotoUtama.js), jadi tidak
   // ada lagi endpoint cover terpisah. Optimistic: grid langsung berubah, dan
@@ -217,9 +266,14 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
           credentials: 'include',
           body: JSON.stringify({ photo: base64 }),
         });
-        const json = await bacaJson(res);
-        if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-        setPhotos(prev => [...prev, json.data.image]);
+        const json = await bacaJson<{ image: PropertyImage }>(res);
+        if (!res.ok || !json.data?.image) throw new Error(json.error ?? `HTTP ${res.status}`);
+        const baru = json.data.image;
+        setPhotos(prev => [...prev, baru]);
+        // Varian dari berkas yang sama (sudah di memori — tanpa unduh ulang).
+        // Gagal TIDAK menggagalkan unggahan: dilengkapi lagi saat kartu dibuka.
+        try { await simpanUkuran(baru.id, fileArr[i]); }
+        catch (e) { console.warn('[ukuran foto] gagal setelah unggah', baru.id, e); }
       } catch (err: unknown) {
         errors++;
         setPhotoError(`Foto ${i + 1} gagal: ${err instanceof Error ? err.message : 'Error'}`);
@@ -271,6 +325,7 @@ export default function PropertyPhotosCard({ propertyId, isNew, initialPhotos }:
         <h2 className="font-semibold text-[#0F172A] text-sm">Galeri Foto ({photos.length})</h2>
         {photoMsg && <span className="text-xs text-emerald-600 font-medium">{photoMsg}</span>}
         {photoError && <span className="text-xs text-red-600">{photoError}</span>}
+        {!photoMsg && !photoError && ukuranStatus && <span className="text-xs text-[#64748B]" data-uji="ukuran-status">{ukuranStatus}</span>}
       </div>
 
       {photos.length === 0 ? (

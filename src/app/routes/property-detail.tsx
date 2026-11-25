@@ -7,7 +7,7 @@ import PropertyDetailPage from "../components/PropertyDetailPage";
 // yang sama persis dengan jalur API, kalau tidak satu view bisa masuk tanggal
 // berbeda tergantung dilayani SSR atau API.
 import { SQL_TANGGAL_WIB } from "../../../functions/_lib/waktu.js";
-import { cfImg, cfImgOg, OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT } from "../../lib/img";
+import { fotoUkuran, cfImgOg, OG_IMAGE_WIDTH, OG_IMAGE_HEIGHT } from "../../lib/img";
 
 const ORIGIN = 'https://salambumi.xyz';
 
@@ -278,9 +278,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
             description: potongDiBatasKata(rawDesc, 500),
             // ⚠️ WAJIB absolut — schema.org tidak punya base URL. Sampai 2026-08-11
             // baris ini mengirim "/api/media?key=…" mentah sehingga Google tak pernah
-            // bisa mengambil satu pun gambar listing. Lebar 1200 mengikuti anjuran
-            // Google untuk rich result (≥1200px).
-            image: p.images.slice(0, 5).map(u => abs(cfImg(u, 1200))),
+            // bisa mengambil satu pun gambar listing. Lebar ≥1200 mengikuti anjuran
+            // Google untuk rich result — varian tetap 1280 (bukan transformasi).
+            image: p.images.slice(0, 5).map(u => abs(fotoUkuran(u, 1280))),
             url: canonicalUrl,
             offers: {
               "@type": "Offer",

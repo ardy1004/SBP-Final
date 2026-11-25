@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { cfImg } from '../../lib/img';
+import { fotoUkuran } from '../../lib/img';
 import { formatRupiah } from '../../lib/api';
 
 export interface ChatPropItem {
@@ -35,7 +35,7 @@ export default function ChatPropertyCard({ prop }: { prop: ChatPropItem }) {
     : `/dijual/${prop.jenis_properti}/${prov}/${kab}/${kec}/${prop.slug}`;
 
   const imgSrc = prop.cover_url
-    ? cfImg(`/api/media?key=${encodeURIComponent(prop.cover_url)}`, 320)
+    ? fotoUkuran(`/api/media?key=${encodeURIComponent(prop.cover_url)}`, 640)
     : null;
 
   return (

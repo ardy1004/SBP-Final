@@ -4,6 +4,16 @@
 
 // portfolio/ (2026-11-21, migrasi 0062): foto bukti kerja untuk beranda &
 // /portfolio — sudah disensor & dibuang EXIF-nya di browser sebelum diunggah.
+//
+// Varian ukuran foto properti (2026-11-25): property-photos/<640|1280>/<nama>
+// — lihat functions/_lib/ukuranFoto.js. Bila varian BELUM dibuat (foto Titip
+// Jual/impor CSV yang belum dibuka admin, atau selama backfill), foto dasar
+// disajikan sebagai gantinya: halaman tidak pernah rusak karena varian telat.
+// Cache-nya sengaja pendek (1 jam), bukan immutable — supaya browser beralih ke
+// varian asli begitu varian itu ada. Header X-SBP-Ukuran: 640|1280|asli
+// dipakai skrip backfill & audit untuk membedakan keduanya.
+import { POLA_VARIAN, kunciDasar } from '../_lib/ukuranFoto.js';
+
 const PUBLIC_PREFIXES = ['property-photos/', 'testimonials/', 'viralframe-characters/', 'portfolio/'];
 
 export async function onRequestGet(context) {
@@ -20,7 +30,13 @@ export async function onRequestGet(context) {
     return new Response('Forbidden', { status: 403 });
   }
 
-  const obj = await env.MEDIA.get(key);
+  const varian = POLA_VARIAN.exec(key);
+  let obj = await env.MEDIA.get(key);
+  let pakaiDasar = false;
+  if (!obj && varian) {
+    obj = await env.MEDIA.get(kunciDasar(key));
+    pakaiDasar = true;
+  }
   if (!obj) return new Response('Not found', { status: 404 });
 
   const buf = await obj.arrayBuffer();
@@ -29,9 +45,10 @@ export async function onRequestGet(context) {
 
   const headers = new Headers({
     'Content-Type': ct,
-    'Cache-Control': 'public, max-age=31536000, immutable',
+    'Cache-Control': pakaiDasar ? 'public, max-age=3600' : 'public, max-age=31536000, immutable',
   });
   if (etag) headers.set('ETag', etag);
+  if (varian) headers.set('X-SBP-Ukuran', pakaiDasar ? 'asli' : varian[1]);
 
   return new Response(buf, { headers });
 }

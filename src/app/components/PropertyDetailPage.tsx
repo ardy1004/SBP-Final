@@ -11,7 +11,7 @@ import {
 import { formatRibuan } from '../../lib/format';
 import { trackEvent } from '../../lib/tracking';
 import { TAMPILKAN_PETA_PUBLIK } from '../../lib/fiturPublik';
-import { cfImg, cfSrcSet, pakaiCadangan } from '../../lib/img';
+import { cfImg, fotoUkuran, srcSetFoto, pakaiCadangan } from '../../lib/img';
 import TombolKontakProperti from './TombolKontakProperti';
 // Kolom mana yang jadi harga tampil — SATU SUMBER dengan backend.
 // Listing `disewa` punya `harga` = 0 (kolom itu harga JUAL). Sampai 2026-09-10
@@ -47,12 +47,12 @@ import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnsti
 // Jenis properti yang menghasilkan income sewa — analisis investasi relevan di sini
 const INCOME_TYPES = ['kost', 'hotel', 'homestay', 'villa', 'apartment', 'gudang', 'komersial'];
 
-// WAJIB dipakai SAMA PERSIS oleh <img> lightbox dan preloader-nya. Kalau beda,
-// browser bisa memilih kandidat srcSet yang berbeda dan preload-nya MELESET —
-// unduhan tetap mulai dari nol saat diklik. 800/1200 sengaja ikut: keduanya
-// sudah dimuat galeri, jadi di mobile lightbox tampil tanpa request baru.
-const LIGHTBOX_WIDTHS = [800, 1200, 1600];
-const LIGHTBOX_SIZES = '100vw';
+// URL lightbox — WAJIB dipakai SAMA PERSIS oleh <img> lightbox dan preloader-nya,
+// kalau beda preload-nya MELESET dan unduhan mulai dari nol saat diklik.
+// Varian 1280 (2026-11-25) = varian yang sudah dimuat galeri di HP & desktop,
+// jadi lightbox umumnya tampil tanpa request baru. Satu URL, tanpa srcset —
+// dulu srcset 800/1200/1600 lewat transformasi Cloudflare (kuota habis).
+const fotoLightbox = (src: string) => fotoUkuran(src, 1280);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Investment Intelligence Panel — pakai nilai pre-computed dari API
@@ -507,10 +507,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
     if (!lightbox || fotos.length < 2) return;
     for (const i of [(currentImg + 1) % fotos.length, (currentImg - 1 + fotos.length) % fotos.length]) {
       const pre = new Image();
-      pre.sizes = LIGHTBOX_SIZES;
-      const ss = cfSrcSet(fotos[i], LIGHTBOX_WIDTHS);
-      if (ss) pre.srcset = ss;
-      pre.src = cfImg(fotos[i], 1600);
+      pre.src = fotoLightbox(fotos[i]);
     }
   }, [lightbox, currentImg, property]);
 
@@ -620,6 +617,11 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
   if (notFound || !property) return <PropertyNotFound />;
 
   const images = property.images.length > 0 ? property.images : [''];
+  // Slide yang dimuat segera: pertama (LCP), aktif, dan tetangga melingkar ±1.
+  const dekatSlideAktif = (i: number) => {
+    const n = images.length;
+    return i === 0 || i === currentImg || i === (currentImg + 1) % n || i === (currentImg - 1 + n) % n;
+  };
   // Harga per m² cuma relevan untuk Tanah — jenis lain dijual gelondongan.
   const isTanah = (property.jenisRaw ?? property.jenis).toLowerCase() === 'tanah';
   const hrg = hargaTampil(property);
@@ -685,19 +687,25 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                           kategori sudah lewat /cdn-cgi/image sejak lama. Terukur
                           2026-08-11: lewat cfImg turun ke ~1,16 MB (−52%), dan satu
                           foto di lebar mobile 288.880 B → 35.432 B (−88%).
-                          Hanya slide pertama yang eager — itu kandidat LCP; sisanya
-                          di luar viewport dan tidak boleh ikut menahan render.
+                          Sejak 2026-11-25 sumbernya varian TETAP 640/1280 di R2
+                          (srcSetFoto), bukan lagi /cdn-cgi/image — kuota 5.000
+                          transformasi unik/bulan habis 22 Nov.
+                          Eager hanya slide pertama (kandidat LCP) + slide saat
+                          ini & tetangga melingkar ±1: tanpa itu menggeser mundur
+                          dari foto pertama (loop → foto terakhir) menampilkan
+                          slide kosong ±0,4 dtk. Render awal currentImg=0 di SSR
+                          maupun klien, jadi atribut ini deterministik (aman hydration).
                           ⚠️ onError lewat pakaiCadangan, BUKAN `e.target.src = …`:
                           pola lama + srcSet = loop muat-ulang tanpa henti, galeri
                           "berkedip seperti pecah" (2026-11-24). Cadangan pertama =
                           foto asli tanpa transformasi; stok hanya untuk listing
                           tanpa foto (`img` kosong). */}
                       <img
-                        src={cfImg(img, 800)}
-                        srcSet={cfSrcSet(img, [400, 640, 800, 1200])}
+                        src={fotoUkuran(img, 1280)}
+                        srcSet={srcSetFoto(img)}
                         sizes="(max-width: 768px) 100vw, (max-width: 1280px) 66vw, 800px"
                         alt={`${property.title} ${i + 1}`}
-                        loading={i === 0 ? 'eager' : 'lazy'}
+                        loading={dekatSlideAktif(i) ? 'eager' : 'lazy'}
                         fetchPriority={i === 0 ? 'high' : undefined}
                         decoding="async"
                         className="absolute inset-0 w-full h-full object-cover"
@@ -1036,12 +1044,14 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
               </div>
             </>
           )}
-          {/* Lightbox = tampilan penuh, jadi lebarnya besar (1600) — tapi tetap lewat
-              cfImg supaya format auto (AVIF/WebP) dan bukan file asli mentah. */}
+          {/* Lightbox = varian 1280 (fotoLightbox) — sama dengan yang sudah dimuat
+              galeri & preloader, jadi umumnya tampil tanpa request baru.
+              Sengaja TANPA onError: satu <img> dipakai ulang untuk semua foto, jadi
+              penghitung pakaiCadangan akan terbawa antar-foto. Tanpa srcset tidak
+              ada risiko loop, dan varian yang belum ada sudah disajikan /api/media
+              sebagai foto dasar. */}
           <img
-            src={cfImg(images[currentImg], 1600)}
-            srcSet={cfSrcSet(images[currentImg], LIGHTBOX_WIDTHS)}
-            sizes={LIGHTBOX_SIZES}
+            src={fotoLightbox(images[currentImg])}
             alt={`${property.title} ${currentImg + 1}`}
             className="max-w-full max-h-full object-contain rounded-xl"
             style={{ transform: `translateX(${dragOffset}px)`, transition: dragOffset !== 0 ? 'none' : 'transform 0.2s ease' }}

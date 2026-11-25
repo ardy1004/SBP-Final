@@ -6,6 +6,7 @@
 // Auth: _middleware.js
 
 import { jsonOk, jsonError, handleOptions } from '../../../../../_shared/response.js';
+import { semuaKunciUkuran } from '../../../../../../_lib/ukuranFoto.js';
 
 const R2_PREFIXES = ['property-photos/', 'signatures/', 'agreements/'];
 
@@ -89,9 +90,11 @@ export async function onRequestDelete(context) {
     // Hapus dari R2 SESUDAH D1 — kalau D1 gagal, foto tetap utuh. Aman dari
     // efek samping: UNIQUE(url_webp) (migrasi 0054) menjamin tidak ada baris
     // lain yang masih memakai objek ini.
+    // Varian ukuran (property-photos/<640|1280>/<nama>) ikut dihapus — kalau
+    // tidak, foto yang dihapus admin tetap tersaji publik lewat variannya.
     const key = photo.url_webp ?? '';
     if (R2_PREFIXES.some(p => key.startsWith(p))) {
-      await env.MEDIA.delete(key).catch(err =>
+      await env.MEDIA.delete([key, ...semuaKunciUkuran(key)]).catch(err =>
         console.warn('[admin photo DELETE] R2 delete gagal:', err.message)
       );
     }

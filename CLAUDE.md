@@ -79,6 +79,20 @@ Meja kerja storyboard/prompt beserta mesin AI-nya (`stasiun*`, `variasi`, `flowC
     - Mengubah opsi URL = transformasi unik baru.
   - Diagnosa: header `cf-resized` + GraphQL `httpRequestsAdaptiveGroups` filter `clientRequestPath_like:"/cdn-cgi/image/%"`.
     - ⚠️ `billableEventCount` di `imagesTransformationsAdaptiveGroups` selalu 0 sejak mesin v2 (3 Nov), jadi jumlah unik hanya terlihat di Dashboard.
+  - 🔥 **Sejak 2026-11-25 foto properti TIDAK lagi lewat `/cdn-cgi/image`.**
+    - Tiap foto punya varian TETAP di R2: `property-photos/640/<nama>` & `property-photos/1280/<nama>`, dibuat SEKALI. Aturan tunggal: `functions/_lib/ukuranFoto.js`.
+    - Render WAJIB lewat `fotoUkuran()`/`srcSetFoto()` (`src/lib/img.ts`), JANGAN `cfImg` untuk foto properti.
+    - og:image tetap `cfImgOg` (crop 1,91:1, jumlah uniknya kecil).
+  - **Pembuat varian:**
+    - browser admin (`PropertyPhotosCard`): saat unggah, plus melengkapi foto tanpa varian saat kartu dibuka. Foto Titip Jual & impor CSV lahir tanpa varian.
+    - skrip `scripts/buat-ukuran-foto.mjs` untuk backfill: DRY-RUN bawaan, `--tulis` eksplisit, aman diulang.
+    - Form Titip Jual SENGAJA tidak membuat varian: HP murah crash, dan Safari tak bisa WebP.
+  - **`/api/media` menyajikan foto DASAR bila varian belum ada** (`X-SBP-Ukuran: asli`, cache 1 jam), jadi halaman tak pernah rusak karena varian telat.
+  - ⚠️ **Varian tidak tercatat di D1.** Tiga tempat WAJIB menurunkan kuncinya dari `url_webp`:
+    - `purge-trash.js` menilai yatim lewat `kunciDasar()`. Tanpa itu SELURUH varian terhapus semalam — ada uji kendali negatif di `check:functions`.
+    - `r2Cleanup.js` (hapus properti).
+    - DELETE foto.
+    - Pagar `photo_keys` Titip Jual memakai `POLA_DASAR` (satu segmen), supaya key varian tak bisa didaftarkan sebagai foto.
   - **`onError` <img> WAJIB lewat `pakaiCadangan()` (`src/lib/img.ts`), BUKAN `e.target.src = cadangan`.**
     - Pada `<img srcSet=…w>` browser mengabaikan `src`, jadi cadangan tak pernah tampil, dan setiap error memicu muat ulang URL rusak yang sama tanpa henti. Terukur 7.488 permintaan/5 dtk di satu halaman.
     - Tanpa srcset pun, cadangan yang ikut gagal memicu loop yang sama.

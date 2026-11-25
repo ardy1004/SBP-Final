@@ -3,7 +3,7 @@ import { Link } from 'react-router';
 import { MapPin, Maximize2, BedDouble, Bath, Eye, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { NormalizedProperty } from '../../lib/api';
 import { formatRibuan } from '../../lib/format';
-import { cfImg, cfSrcSet } from '../../lib/img';
+import { fotoUkuran } from '../../lib/img';
 // Kolom mana yang jadi harga tampil — SATU SUMBER dengan backend.
 // Listing `disewa` punya `harga` = 0 (kolom itu harga JUAL); angkanya ada di
 // harga_sewa_tahun. Jangan membaca `property.harga` langsung lagi di sini.
@@ -124,11 +124,11 @@ export default function PropertyCard({ property, className = '' }: Props) {
             }}
           >
             {imgs.map((img, i) => (
+              // Varian tetap 640 di R2 (bukan transformasi per permintaan) —
+              // setara batas atas srcset lama [400, 640]. Lihat lib/img.ts.
               <img
                 key={i}
-                src={cfImg(img!, 640)}
-                srcSet={cfSrcSet(img!, [400, 640])}
-                sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 400px"
+                src={fotoUkuran(img!, 640)}
                 alt={i === 0 ? property.title : `${property.title} foto ${i + 1}`}
                 className="h-full object-cover flex-shrink-0"
                 style={{ width: `${100 / total}%` }}

@@ -2,6 +2,11 @@
 // baris properties. Tanpa ini, CASCADE hanya menghapus baris D1 (property_images,
 // viralframe_videos, agreements) sedangkan objek R2-nya (foto, video, tanda
 // tangan, PDF perjanjian) tertinggal selamanya — kuncinya hilang bersama baris DB.
+//
+// Varian ukuran foto (property-photos/<640|1280>/<nama>, 2026-11-25) tidak
+// tercatat di D1 — kuncinya diturunkan dari url_webp dan WAJIB ikut dihapus,
+// kalau tidak foto properti yang dihapus tetap tersaji publik lewat variannya.
+import { semuaKunciUkuran } from './ukuranFoto.js';
 
 /** Semua kunci R2 yang terkait daftar property id. */
 export async function collectPropertyR2Keys(db, ids) {
@@ -23,6 +28,9 @@ export async function collectPropertyR2Keys(db, ids) {
   ]);
 
   push(photos.results, 'url_webp');
+  for (const row of photos.results ?? []) {
+    if (row.url_webp) keys.push(...semuaKunciUkuran(row.url_webp));
+  }
   push(videos.results, 'r2_key');
   push(agreements.results, 'signature_image_url', 'pdf_url');
   return keys;

@@ -31,6 +31,7 @@ import { logServerError } from '../_lib/logError.js';
 import { sendCapiEvent, extractMetaIdentity } from '../_lib/metaCapi.js';
 import { stmtNormalisasiCover } from '../_lib/fotoUtama.js';
 import { hashIp } from '../_lib/remIp.js';
+import { POLA_DASAR } from '../_lib/ukuranFoto.js';
 
 const TIKET_LANJUT_DETIK = 7 * 24 * 3600; // 7 hari — cukup untuk mengisi Tahap 2 tanpa terburu-buru
 
@@ -241,9 +242,12 @@ export async function onRequestPost(context) {
     } else {
       for (let i = 0; i < photo_keys.length; i++) {
         const k = photo_keys[i];
-        // Key datang dari klien, tidak tepercaya — pagar path traversal & signatures/ (NIK)
+        // Key datang dari klien, tidak tepercaya — pagar path traversal & signatures/ (NIK).
+        // POLA_DASAR = tepat satu segmen: key varian ukuran (property-photos/640/…)
+        // tidak boleh didaftarkan sebagai foto — /api/titip-jual-foto tidak pernah
+        // menerbitkan bentuk itu.
         if (typeof k !== 'string' || k.length > 200 ||
-            !k.startsWith('property-photos/') || k.includes('..') || k.includes('//')) {
+            !POLA_DASAR.test(k) || k.includes('..') || k.includes('//')) {
           errors.photos = `Referensi foto #${i + 1} tidak valid`;
           break;
         }

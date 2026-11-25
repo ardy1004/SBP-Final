@@ -9,7 +9,7 @@ import { parseProgrammaticSlug } from "../../lib/programmaticSeo";
 import { parseLandmarkSlug, peringkatDekatLandmark, LANDMARK_RADIUS_KM } from "../../../functions/_lib/geoLandmarks.js";
 import { isInertParam } from "../../../functions/_lib/queryParams.js";
 import { buildPropertyUrl } from "../../../functions/_lib/propertyUrl.js";
-import { cfImg } from "../../lib/img";
+import { fotoUkuran } from "../../lib/img";
 import { urlHalaman, UKURAN_HALAMAN, type PaginationInfo } from "../../lib/pagination";
 
 // Route module SSR untuk /properties DAN programmatic SEO /:slug
@@ -528,7 +528,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
           addressCountry: 'ID',
         },
         // URL gambar WAJIB absolut — sama alasannya dengan JSON-LD di halaman detail.
-        ...(cover ? { image: `${ORIGIN}${cfImg(cover, 800)}` } : {}),
+        ...(cover ? { image: `${ORIGIN}${fotoUkuran(cover, 1280)}` } : {}),
         ...(p.harga
           ? { offers: { '@type': 'Offer', price: p.harga, priceCurrency: 'IDR',
               availability: p.status_sold ? 'https://schema.org/SoldOut' : 'https://schema.org/InStock' } }

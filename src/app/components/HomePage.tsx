@@ -17,7 +17,7 @@ import {
   type PortfolioPublik,
 } from '../../lib/api';
 import { PROPERTY_TYPES } from '../../lib/propertyTypes';
-import { cfImg, cfSrcSet, pakaiCadangan } from '../../lib/img';
+import { cfImg, cfSrcSet, fotoUkuran, srcSetFoto, pakaiCadangan } from '../../lib/img';
 import PropertyCard from './PropertyCard';
 import PortfolioStrip from './PortfolioStrip';
 import { Skeleton } from './ui/skeleton';
@@ -171,8 +171,8 @@ function FeaturedBanner({ items }: { items: NormalizedProperty[] }) {
             {items.map((prop) => (
               <div key={prop.id} className="flex-none w-full relative" style={{ minHeight: '480px' }}>
                 <img
-                  src={cfImg(prop.images[0] ?? '', 1200)}
-                  srcSet={cfSrcSet(prop.images[0] ?? '', [640, 960, 1200])}
+                  src={fotoUkuran(prop.images[0] ?? '', 1280)}
+                  srcSet={srcSetFoto(prop.images[0] ?? '')}
                   sizes="(max-width: 1280px) 100vw, 1216px"
                   alt={prop.title}
                   className="absolute inset-0 w-full h-full object-cover"
