@@ -12,8 +12,10 @@
 import type { LebarFoto } from '../../lib/img';
 
 export const UKURAN_FOTO: LebarFoto[] = [640, 1280];
-// Sama dengan pola portfolio (foto 1280 @0.82, thumb @0.78).
-const MUTU: Record<LebarFoto, number> = { 640: 0.78, 1280: 0.82 };
+// q0.68 — SAMA dengan scripts/buat-ukuran-foto.mjs. Diukur 2026-11-25: q0.82
+// membuat foto galeri 1,5× AVIF Cloudflare lama dan LCP halaman detail 2× lebih
+// lambat (4G 0,9 → 1,9 dtk); q0.65–0.68 ≈ setara AVIF lama, beda tak terlihat di HP.
+const MUTU: Record<LebarFoto, number> = { 640: 0.68, 1280: 0.68 };
 
 type Sumber = ImageBitmap | HTMLImageElement;
 
@@ -61,6 +63,9 @@ function keDataUrl(blob: Blob): Promise<string> {
  * Buat varian dari satu foto. Lebar dibatasi, TIDAK pernah membesarkan: foto
  * yang lebih kecil dari target tetap dibuatkan varian di lebar aslinya, supaya
  * setiap foto selalu punya kedua kunci (deterministik, tanpa kolom D1).
+ * Bila sumbernya sudah WebP selebar ≤ target dan LEBIH KECIL dari hasil kompres
+ * ulang, sumber dipakai apa adanya — kompres ulang foto yang sudah kecil justru
+ * membesarkannya (17% varian q82 begitu, diukur 2026-11-25).
  */
 export async function buatUkuranFoto(sumber: Blob, lebar: LebarFoto[] = UKURAN_FOTO): Promise<Partial<Record<LebarFoto, string>>> {
   const gambar = await muat(sumber);
@@ -82,7 +87,8 @@ export async function buatUkuranFoto(sumber: Blob, lebar: LebarFoto[] = UKURAN_F
       const blob = await kodekan(c, MUTU[w]);
       // Lepas memori kanvas segera (foto 4608 px pernah ada di produksi).
       c.width = 0; c.height = 0;
-      hasil[w] = await keDataUrl(blob);
+      const pakaiSumber = sumber.type === 'image/webp' && W <= w && sumber.size <= blob.size;
+      hasil[w] = await keDataUrl(pakaiSumber ? sumber : blob);
     }
   } finally {
     if (!(gambar instanceof HTMLImageElement)) gambar.close();

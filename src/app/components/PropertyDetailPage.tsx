@@ -448,6 +448,11 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
 
   const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true });
   const [currentImg, setCurrentImg] = useState(0);
+  // Preload slide tetangga baru aktif SETELAH foto pertama (kandidat LCP) selesai.
+  // Diukur 2026-11-25 (Slow 4G): tetangga yang eager sejak awal berebut bandwidth
+  // dengan foto pertama, LCP +±1 dtk. Awal = false di SSR & klien (aman hydration).
+  const [fotoPertamaSiap, setFotoPertamaSiap] = useState(false);
+  const fotoPertamaRef = useRef<HTMLImageElement>(null);
   const [lightbox, setLightbox] = useState(false);
   // Swipe di dalam lightbox — <img>-nya bukan bagian dari emblaRef (lightbox
   // adalah overlay terpisah), jadi drag bawaan embla tidak berlaku di sana.
@@ -472,6 +477,20 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
 
   // Guard: kode_listing yang sudah di-fire agar tidak double-fire di StrictMode / SPA nav
   const viewContentFiredRef = useRef<string | null>(null);
+
+  // Foto pertama SSR bisa selesai dimuat SEBELUM React hydrate — React 18 tidak
+  // memutar ulang event load itu, jadi cek `complete` saat mount + pasang
+  // listener native (load/error) untuk kasus yang belum selesai.
+  useEffect(() => {
+    setFotoPertamaSiap(false);
+    const el = fotoPertamaRef.current;
+    if (!el) return;
+    if (el.complete) { setFotoPertamaSiap(true); return; }
+    const siap = () => setFotoPertamaSiap(true);
+    el.addEventListener('load', siap, { once: true });
+    el.addEventListener('error', siap, { once: true });
+    return () => { el.removeEventListener('load', siap); el.removeEventListener('error', siap); };
+  }, [property?.slug]);
 
   // Sync carousel index
   useEffect(() => {
@@ -617,10 +636,12 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
   if (notFound || !property) return <PropertyNotFound />;
 
   const images = property.images.length > 0 ? property.images : [''];
-  // Slide yang dimuat segera: pertama (LCP), aktif, dan tetangga melingkar ±1.
+  // Slide yang dimuat segera: pertama (LCP) & yang aktif selalu; tetangga
+  // melingkar ±1 hanya setelah foto pertama selesai (lihat fotoPertamaSiap).
   const dekatSlideAktif = (i: number) => {
     const n = images.length;
-    return i === 0 || i === currentImg || i === (currentImg + 1) % n || i === (currentImg - 1 + n) % n;
+    if (i === 0 || i === currentImg) return true;
+    return fotoPertamaSiap && (i === (currentImg + 1) % n || i === (currentImg - 1 + n) % n);
   };
   // Harga per m² cuma relevan untuk Tanah — jenis lain dijual gelondongan.
   const isTanah = (property.jenisRaw ?? property.jenis).toLowerCase() === 'tanah';
@@ -691,10 +712,12 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                           (srcSetFoto), bukan lagi /cdn-cgi/image — kuota 5.000
                           transformasi unik/bulan habis 22 Nov.
                           Eager hanya slide pertama (kandidat LCP) + slide saat
-                          ini & tetangga melingkar ±1: tanpa itu menggeser mundur
-                          dari foto pertama (loop → foto terakhir) menampilkan
-                          slide kosong ±0,4 dtk. Render awal currentImg=0 di SSR
-                          maupun klien, jadi atribut ini deterministik (aman hydration).
+                          ini, lalu tetangga melingkar ±1 SETELAH foto pertama
+                          selesai: tanpa preload itu menggeser mundur dari foto
+                          pertama (loop → foto terakhir) menampilkan slide kosong
+                          ±0,4 dtk; tanpa penundaan itu LCP +±1 dtk di Slow 4G.
+                          Render awal (currentImg=0, fotoPertamaSiap=false) sama
+                          di SSR & klien, jadi atribut ini deterministik.
                           ⚠️ onError lewat pakaiCadangan, BUKAN `e.target.src = …`:
                           pola lama + srcSet = loop muat-ulang tanpa henti, galeri
                           "berkedip seperti pecah" (2026-11-24). Cadangan pertama =
@@ -707,6 +730,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                         alt={`${property.title} ${i + 1}`}
                         loading={dekatSlideAktif(i) ? 'eager' : 'lazy'}
                         fetchPriority={i === 0 ? 'high' : undefined}
+                        ref={i === 0 ? fotoPertamaRef : undefined}
                         decoding="async"
                         className="absolute inset-0 w-full h-full object-cover"
                         onError={(e) => pakaiCadangan(e, img, 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80')}

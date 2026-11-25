@@ -88,6 +88,13 @@ Meja kerja storyboard/prompt beserta mesin AI-nya (`stasiun*`, `variasi`, `flowC
     - skrip `scripts/buat-ukuran-foto.mjs` untuk backfill: DRY-RUN bawaan, `--tulis` eksplisit, aman diulang.
     - Form Titip Jual SENGAJA tidak membuat varian: HP murah crash, dan Safari tak bisa WebP.
   - **`/api/media` menyajikan foto DASAR bila varian belum ada** (`X-SBP-Ukuran: asli`, cache 1 jam), jadi halaman tak pernah rusak karena varian telat.
+  - ⚠️ **Mutu varian = WebP q68, JANGAN dinaikkan tanpa mengukur LCP.**
+    - Versi pertama q82 membuat foto galeri 1,5× AVIF Cloudflare lama. LCP halaman detail jadi 2× lebih lambat: 4G 0,9 → 1,9 dtk, Slow 4G 5,4 → 10,1 dtk.
+    - Mutu ada di DUA tempat yang wajib sama: `src/app/lib/ukuranFoto.ts` (browser admin) & `scripts/buat-ukuran-foto.mjs`.
+    - Foto asli WebP yang sudah ≤ lebar target dan lebih kecil dipakai apa adanya. Kompres ulang justru membesarkan 17% foto.
+  - **Galeri: tetangga ±1 baru eager SETELAH foto pertama (LCP) selesai** (`fotoPertamaSiap`). Kalau eager sejak awal, ia berebut bandwidth dengan LCP, +±1 dtk di Slow 4G.
+  - Cara mengukur dampak gambar ke LCP tanpa Lighthouse: Playwright + CDP throttling (150 ms / 1,6 Mbps, CPU 4×) + `PerformanceObserver('largest-contentful-paint')`.
+    - Bandingkan skenario lewat `route.continue({url})` (tetap di jalur jaringan browser), BUKAN `route.fulfill`, yang melewati throttling.
   - ⚠️ **Varian tidak tercatat di D1.** Tiga tempat WAJIB menurunkan kuncinya dari `url_webp`:
     - `purge-trash.js` menilai yatim lewat `kunciDasar()`. Tanpa itu SELURUH varian terhapus semalam — ada uji kendali negatif di `check:functions`.
     - `r2Cleanup.js` (hapus properti).
