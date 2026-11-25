@@ -11,7 +11,7 @@ import {
 import { formatRibuan } from '../../lib/format';
 import { trackEvent } from '../../lib/tracking';
 import { TAMPILKAN_PETA_PUBLIK } from '../../lib/fiturPublik';
-import { cfImg, cfSrcSet } from '../../lib/img';
+import { cfImg, cfSrcSet, pakaiCadangan } from '../../lib/img';
 import TombolKontakProperti from './TombolKontakProperti';
 // Kolom mana yang jadi harga tampil — SATU SUMBER dengan backend.
 // Listing `disewa` punya `harga` = 0 (kolom itu harga JUAL). Sampai 2026-09-10
@@ -208,7 +208,7 @@ function LeadForm({ property }: { property: NormalizedPropertyDetail }) {
           loading="lazy"
           decoding="async"
           className="w-14 h-14 rounded-full object-cover border-2 border-[#1565C0]"
-          onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&q=80'; }}
+          onError={(e) => pakaiCadangan(e, 'https://images.salambumi.xyz/monic%20sbp.webp', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&q=80')}
           suppressHydrationWarning
         />
         <div>
@@ -686,7 +686,12 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                           2026-08-11: lewat cfImg turun ke ~1,16 MB (−52%), dan satu
                           foto di lebar mobile 288.880 B → 35.432 B (−88%).
                           Hanya slide pertama yang eager — itu kandidat LCP; sisanya
-                          di luar viewport dan tidak boleh ikut menahan render. */}
+                          di luar viewport dan tidak boleh ikut menahan render.
+                          ⚠️ onError lewat pakaiCadangan, BUKAN `e.target.src = …`:
+                          pola lama + srcSet = loop muat-ulang tanpa henti, galeri
+                          "berkedip seperti pecah" (2026-11-24). Cadangan pertama =
+                          foto asli tanpa transformasi; stok hanya untuk listing
+                          tanpa foto (`img` kosong). */}
                       <img
                         src={cfImg(img, 800)}
                         srcSet={cfSrcSet(img, [400, 640, 800, 1200])}
@@ -696,7 +701,7 @@ export default function PropertyDetailPage({ ssrProperty }: PropertyDetailPagePr
                         fetchPriority={i === 0 ? 'high' : undefined}
                         decoding="async"
                         className="absolute inset-0 w-full h-full object-cover"
-                        onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80'; }}
+                        onError={(e) => pakaiCadangan(e, img, 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80')}
                         suppressHydrationWarning
                       />
                     </div>

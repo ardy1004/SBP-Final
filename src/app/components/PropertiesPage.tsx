@@ -10,7 +10,7 @@ import {
   formatRupiah,
 } from '../../lib/api';
 import { PROPERTY_TYPES, PROPERTY_TYPE_VALUES, getPropertyTypeLabel } from '../../lib/propertyTypes';
-import { cfImg } from '../../lib/img';
+import { cfImg, pakaiCadangan } from '../../lib/img';
 import { urlHalaman, deretHalaman, UKURAN_HALAMAN, basePathFilter, type PaginationInfo } from '../../lib/pagination';
 import { parseSmartQuery, type LocationIndex, type FlatLoc, type SmartFilters } from './smartSearchParser';
 import { trackEvent } from '../../lib/tracking';
@@ -850,7 +850,7 @@ export default function PropertiesPage({ ssrData, heading, subheading, paginatio
                         style={{ minHeight: 160 }}
                         loading="lazy"
                         decoding="async"
-                        onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=400&q=80'; }}
+                        onError={(e) => pakaiCadangan(e, p.images[0], 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=400&q=80')}
                         suppressHydrationWarning
                       />
                     </div>

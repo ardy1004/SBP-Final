@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData, Link } from "react-router";
 import { Calendar, Clock, ChevronRight, ArrowLeft } from "lucide-react";
 import { sanitizeHtml } from "../../lib/sanitize";
+import { pakaiCadangan } from "../../lib/img";
 
 interface BlogDetail {
   id: number;
@@ -145,7 +146,7 @@ export default function BlogDetailRoute() {
             src={post.cover}
             alt={post.judul}
             className="w-full h-full object-cover"
-            onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80'; }}
+            onError={(e) => pakaiCadangan(e, 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80')}
             suppressHydrationWarning
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />

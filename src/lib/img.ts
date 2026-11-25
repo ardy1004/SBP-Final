@@ -1,6 +1,22 @@
 // Helper Cloudflare Image Transformations (/cdn-cgi/image/) — resize on-the-fly.
 // Terverifikasi aktif di zone salambumi.xyz (testimoni 297KB → 4.8KB @width=96).
 // Di dev (vite/wrangler dev) /cdn-cgi/image tidak tersedia → kembalikan src asli.
+//
+// 🔥 `onerror=redirect` WAJIB ada di setiap URL transformasi — JANGAN dibuang.
+// Paket Free = 5.000 transformasi UNIK per bulan kalender, sedangkan 2.675 foto
+// × 5–7 ukuran jauh di atas itu. Begitu kuota habis, setiap transformasi yang
+// belum terhitung bulan itu dibalas `429 cf-resized: err=9422`. Terjadi 22 Nov
+// 2026: foto galeri 88,8% gagal, og:image 546/579 properti. Selain itu ada
+// galat internal CF `500 err=9532` yang menetap untuk 43 foto tertentu.
+// Dengan `onerror=redirect`, CF membalas 307 ke foto ASLI (/api/media) untuk
+// kedua galat itu, jadi situs turun mulus ke foto asli alih-alih ikon rusak.
+// Ini juga menolong yang tak bisa ditolong `onError` di browser: Googlebot,
+// scraper og:image WhatsApp/Facebook, dan gambar SSR yang gagal sebelum React
+// hydrate (React 18 tidak memutar ulang event error itu). Diuji live 2026-11-24.
+// Catatan: menambah/mengubah opsi = transformasi unik BARU (diukur: URL yang
+// tadinya 200 jadi 307 saat kuota habis) — semuanya dihitung ulang tiap bulan
+// kalender, jadi tidak ada biaya tambahan, hanya cache edge yang dingin sekali.
+// Solusi permanen: ukuran dibuat saat unggah, bukan transformasi per permintaan.
 
 const ENABLED = import.meta.env.PROD;
 
@@ -14,7 +30,7 @@ export function cfImg(src: string, width: number): string {
   if (!src || !ENABLED) return src;
   // quality=65: sweet spot AVIF/WebP — visual tetap bagus, ukuran ±50% lebih kecil
   // dari quality=80 (temuan Lighthouse "Improve image delivery").
-  const opts = `width=${width},format=auto,quality=65`;
+  const opts = `width=${width},format=auto,quality=65,onerror=redirect`;
   if (src.startsWith('/')) {
     if (src.startsWith('/cdn-cgi/')) return src; // sudah ditransform
     return `/cdn-cgi/image/${opts}${src}`;
@@ -33,6 +49,43 @@ export function cfImg(src: string, width: number): string {
     } catch { return src; }
   }
   return src;
+}
+
+/**
+ * Handler `onError` <img> yang AMAN: coba kandidat cadangan berurutan, masing-
+ * masing SEKALI, lalu berhenti.
+ *
+ * ⚠️ JANGAN kembali ke pola `onError={e => (e.target).src = cadangan}`:
+ * - Pada <img srcSet="… 1200w">, browser MENGABAIKAN `src` selama srcset ada,
+ *   jadi cadangan tidak pernah tampil. Menyetel `src` justru memicu muat ulang
+ *   URL rusak yang sama → error lagi → loop tanpa henti. Terukur 2026-11-24:
+ *   7.488 permintaan dalam 5 detik di satu halaman; galeri tampil "berkedip
+ *   seperti pecah" (kosong ↔ ikon rusak).
+ * - Tanpa srcset pun, menyetel `src` ke nilai yang SAMA tetap memuat ulang
+ *   (aturan HTML) — bila cadangannya sendiri gagal, loop yang sama terjadi.
+ * Karena itu: srcset dibuang dulu, tiap kandidat dicoba satu kali (penghitung
+ * di data-attribute), kandidat yang identik dengan URL yang baru gagal dilewati.
+ * Kandidat habis → biarkan ikon rusak; itu jauh lebih baik daripada loop.
+ */
+export function pakaiCadangan(
+  e: { currentTarget: HTMLImageElement },
+  ...kandidat: Array<string | null | undefined>
+): void {
+  const img = e.currentTarget;
+  const daftar = kandidat.filter((k): k is string => !!k);
+  let ke = Number(img.dataset.cadanganKe ?? 0);
+  const gagal = img.currentSrc || img.src;
+  while (ke < daftar.length) {
+    const url = daftar[ke++];
+    let mutlak = url;
+    try { mutlak = new URL(url, window.location.href).href; } catch { /* biarkan apa adanya */ }
+    if (mutlak === gagal) continue;
+    img.dataset.cadanganKe = String(ke);
+    img.removeAttribute('srcset');
+    img.src = url;
+    return;
+  }
+  img.dataset.cadanganKe = String(ke);
 }
 
 /** srcset beberapa lebar — dipakai bersama atribut sizes. */
@@ -59,10 +112,14 @@ export const OG_IMAGE_HEIGHT = 630;
  *
  * quality=70 (bukan 65 seperti cfImg): kartu share hanya dimuat sekali oleh
  * scraper, jadi tidak ada biaya bandwidth berulang seperti gambar di halaman.
+ *
+ * onerror=redirect: saat kuota transformasi habis, scraper menerima foto asli
+ * (rasionya tak lagi 1200×630, tapi kartu share tetap bergambar) — lebih baik
+ * daripada 429 yang membuat link WhatsApp tampil tanpa gambar sama sekali.
  */
 export function cfImgOg(src: string): string {
   if (!src || !ENABLED) return src;
-  const opts = `width=${OG_IMAGE_WIDTH},height=${OG_IMAGE_HEIGHT},fit=cover,format=auto,quality=70`;
+  const opts = `width=${OG_IMAGE_WIDTH},height=${OG_IMAGE_HEIGHT},fit=cover,format=auto,quality=70,onerror=redirect`;
   if (src.startsWith('/')) {
     if (src.startsWith('/cdn-cgi/')) return src;
     return `/cdn-cgi/image/${opts}${src}`;

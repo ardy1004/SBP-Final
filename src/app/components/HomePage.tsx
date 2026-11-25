@@ -17,7 +17,7 @@ import {
   type PortfolioPublik,
 } from '../../lib/api';
 import { PROPERTY_TYPES } from '../../lib/propertyTypes';
-import { cfImg, cfSrcSet } from '../../lib/img';
+import { cfImg, cfSrcSet, pakaiCadangan } from '../../lib/img';
 import PropertyCard from './PropertyCard';
 import PortfolioStrip from './PortfolioStrip';
 import { Skeleton } from './ui/skeleton';
@@ -178,7 +178,7 @@ function FeaturedBanner({ items }: { items: NormalizedProperty[] }) {
                   className="absolute inset-0 w-full h-full object-cover"
                   loading="lazy"
                   decoding="async"
-                  onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80'; }}
+                  onError={(e) => pakaiCadangan(e, prop.images[0], 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=1200&q=80')}
                   suppressHydrationWarning
                 />
                 <div className="absolute inset-0 flex items-end p-8 lg:p-12">
@@ -317,7 +317,7 @@ function TestimonialsSection({ items }: { items: ApiTestimonial[] }) {
                       loading="lazy"
                       decoding="async"
                       className="w-12 h-12 rounded-full object-cover border-2 border-[#1565C0]"
-                      onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&q=80'; }}
+                      onError={(e) => pakaiCadangan(e, testimoniFotoSrc(t.foto_url), 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&q=80')}
                       suppressHydrationWarning
                     />
                     <div>
@@ -631,9 +631,7 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
             className="hero-bg-img absolute inset-0 w-full h-full object-cover"
             // @ts-expect-error fetchpriority belum ada di tipe React lama
             fetchpriority="high"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1675657144518-025804f1812c?w=1600&q=80';
-            }}
+            onError={(e) => pakaiCadangan(e, 'https://images.salambumi.xyz/kost%20dijual%20jogja.webp', 'https://images.unsplash.com/photo-1675657144518-025804f1812c?w=1600&q=80')}
             suppressHydrationWarning
           />
           {/* Layer 2: Overlay */}
@@ -904,7 +902,7 @@ export default function HomePage({ ssrProperties, ssrTestimonials, ssrBlogPosts,
                       className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       loading="lazy"
                       decoding="async"
-                      onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=600&q=80'; }}
+                      onError={(e) => pakaiCadangan(e, post.cover, 'https://images.unsplash.com/photo-1624204386084-dd8c05e32226?w=600&q=80')}
                       suppressHydrationWarning
                     />
                   </div>

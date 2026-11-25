@@ -6,7 +6,7 @@ import { bukaWaProperti } from '../../lib/waProperty';
 import { hargaTampil } from '../../../functions/_lib/hargaTampil.js';
 import { laporKendalaForm } from '../../lib/laporKendala';
 import Turnstile, { type TurnstileHandle, type TurnstileStatus } from './Turnstile';
-import { cfImg } from '../../lib/img';
+import { cfImg, pakaiCadangan } from '../../lib/img';
 
 const RENCANA_MAP: Record<string, 'hard_cash' | 'soft_cash' | 'kpr'> = {
   'Hard Cash': 'hard_cash',
@@ -207,7 +207,7 @@ export default function ContactAdminSheet({ property, isOpen, onClose }: Props) 
               loading="lazy"
               decoding="async"
               className="w-12 h-12 rounded-full object-cover border-2 border-[#1565C0]"
-              onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&q=80'; }}
+              onError={(e) => pakaiCadangan(e, 'https://images.salambumi.xyz/monic%20sbp.webp', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&q=80')}
               suppressHydrationWarning
             />
             <div>

@@ -1,4 +1,5 @@
 import { bacaJson } from '../../../lib/api';
+import { pakaiCadangan } from '../../../lib/img';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Star, Plus, Pencil, Trash2, Loader2, AlertCircle, Eye, EyeOff, Upload, User } from 'lucide-react';
 
@@ -299,7 +300,7 @@ function Modal({
                   src={mediaSrc(form.foto_url)}
                   alt="Foto klien"
                   className="w-14 h-14 rounded-full object-cover border border-[#E2E8F0] flex-shrink-0 bg-[#F1F5F9]"
-                  onError={(e) => { (e.target as HTMLImageElement).src = FALLBACK_AVATAR; }}
+                  onError={(e) => pakaiCadangan(e, FALLBACK_AVATAR)}
                 />
               ) : (
                 <div className="w-14 h-14 rounded-full border border-dashed border-[#CBD5E1] flex items-center justify-center text-[#94A3B8] flex-shrink-0">
@@ -496,9 +497,7 @@ export default function AdminTestimoniPage() {
                           src={mediaSrc(t.foto_url)}
                           alt={t.nama_klien}
                           className="w-9 h-9 rounded-full object-cover bg-[#E2E8F0] flex-shrink-0"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = FALLBACK_AVATAR;
-                          }}
+                          onError={(e) => pakaiCadangan(e, FALLBACK_AVATAR)}
                         />
                         <div>
                           <div className="font-medium text-[#0F172A]">{t.nama_klien}</div>

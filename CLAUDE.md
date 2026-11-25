@@ -70,6 +70,18 @@ Meja kerja storyboard/prompt beserta mesin AI-nya (`stasiun*`, `variasi`, `flowC
   - `React.lazy` + `MODUL_KOSONG` aman karena resolve ke komponen kosong (bukan promise menggantung), tapi komponennya tetap WAJIB dirender di balik kondisi yang tak pernah benar saat SSR (lihat `sheetPernahDibuka` di `HomePage`/`PropertyDetailPage`).
   - `/sign/:token` juga client-only (`src/app/routes/sign.tsx`) — SSR-nya memang hanya pernah merender "Memuat dokumen…".
   - ⚠️ **Minify SSR sudah diukur dan SENGAJA tidak dipakai**: chunk [B] turun ke ±300 KB, tapi CPU startup tidak berubah (103 vs 105 ms) — hanya mengganti penggaris, sementara stack trace SSR jadi teracak. Byte adalah proksi; ukur CPU (`wrangler check startup`) sebelum mengklaim penghematan.
+- 🔥 **Kuota Cloudflare Image Transformations (Free = 5.000 transformasi UNIK/bulan kalender) BISA HABIS — dan habis 22 Nov 2026.**
+  - 2.675 foto × 5–7 ukuran jauh melampaui 5.000. Transformasi yang belum terhitung bulan itu dibalas `429 cf-resized: err=9422`.
+  - Dampaknya: galeri detail 88,8% foto gagal, og:image WhatsApp 546/579 properti, dan galeri "berkedip seperti pecah".
+  - Foto asli di R2 tetap 100% utuh.
+  - Ada juga galat internal CF `500 err=9532` yang menetap untuk 43 foto tertentu.
+  - **`onerror=redirect` di `cfImg`/`cfImgOg` (`src/lib/img.ts`) adalah penangkalnya — JANGAN dibuang.** CF membalas 307 ke foto asli untuk kedua galat; diuji live.
+    - Mengubah opsi URL = transformasi unik baru.
+  - Diagnosa: header `cf-resized` + GraphQL `httpRequestsAdaptiveGroups` filter `clientRequestPath_like:"/cdn-cgi/image/%"`.
+    - ⚠️ `billableEventCount` di `imagesTransformationsAdaptiveGroups` selalu 0 sejak mesin v2 (3 Nov), jadi jumlah unik hanya terlihat di Dashboard.
+  - **`onError` <img> WAJIB lewat `pakaiCadangan()` (`src/lib/img.ts`), BUKAN `e.target.src = cadangan`.**
+    - Pada `<img srcSet=…w>` browser mengabaikan `src`, jadi cadangan tak pernah tampil, dan setiap error memicu muat ulang URL rusak yang sama tanpa henti. Terukur 7.488 permintaan/5 dtk di satu halaman.
+    - Tanpa srcset pun, cadangan yang ikut gagal memicu loop yang sama.
 - **⚠️ `.gitignore` ikut dibaca pemindai `@source` Tailwind v4.** `src/styles/tailwind.css` memakai `@import 'tailwindcss' source(none)` + `@source '../**/*.{js,ts,jsx,tsx}'`, dan Tailwind menerapkan aturan `.gitignore` pada pemindaian itu. Pola **brace tak berpasangan** (`*{`, `*}`) membuat scanner tidak menemukan satu pun kelas → CSS runtuh dan situs tampil **tanpa gaya**. Terjadi 2026-07-27: CSS produksi 128.021 B → 13.018 B.
   - **Yang paling berbahaya: semua gate hijau.** `npm run build` exit 0 (Tailwind sukses, hasilnya saja kosong), `check:bundle` LULUS (dulu hanya mengukur JS), `smoke` 0/320 (halaman tetap 200, cuma tak bergaya). Rusaknya hanya terlihat oleh mata.
   - Terbukti lewat bisect: **brace merusak, kurung biasa `*(`/`*)` tidak** — makanya pola lama `(a` dan `[0-9])` selama ini aman.
