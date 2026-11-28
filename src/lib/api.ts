@@ -661,6 +661,30 @@ export async function saveModeAkun(body: { mode?: ModeAkun; utama?: number; auto
   });
 }
 
+export interface AgentBaruInput {
+  nama: string;
+  /** data:image/webp;base64,… — dibuat di browser (lihat TambahAgentForm). */
+  foto: string;
+  gender?: string;
+  usia?: number | null;
+  etnik?: string;
+  style?: string;
+  ciri_fisik?: string;
+}
+
+/**
+ * POST /api/admin/viralframe/characters — tambah agent Konten Agent baru.
+ * Form-nya dulu ada di meja kerja Viral Frame (dihapus 2026-11-21); sejak
+ * 2026-11-28 di kartu Akun Agent. Akun & scheduler diisi sesudahnya lewat
+ * saveAgentAccount — agent baru otomatis muncul di daftar (LEFT JOIN).
+ */
+export async function tambahAgent(body: AgentBaruInput) {
+  return apiFetch<{ pesan: string; karakter: { id: number; nama: string } }>('/admin/viralframe/characters', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 /** PUT /api/admin/viralframe/agent-accounts/:id */
 export async function saveAgentAccount(characterId: number, body: AgentAccountInput) {
   return apiFetch<{ updated: string[] }>(`/admin/viralframe/agent-accounts/${characterId}`, {

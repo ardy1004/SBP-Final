@@ -86,7 +86,7 @@ export default function AgentGrid({ agents, stats, onPilih, loading }: {
     return (
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 text-center">
         <p className="text-sm text-[#64748B]">
-          Belum ada agent. Tambahkan lewat workspace ViralFrame → Pilih Karakter.
+          Belum ada agent. Tambahkan lewat kartu Akun Agent → Tambah agent.
         </p>
       </div>
     );

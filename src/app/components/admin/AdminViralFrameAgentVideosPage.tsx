@@ -710,7 +710,7 @@ export default function AdminViralFrameAgentVideosPage() {
       <div className="space-y-2">
         {/* onTersimpan: jadwal berubah → strip "SLOT HARI INI" dimuat ulang,
             supaya jam rencana yang tampil langsung sesuai pengaturan baru. */}
-        <AkunAgentCard onTersimpan={jadwalBerubah} muatUlang={jadwalTick} />
+        <AkunAgentCard onTersimpan={jadwalBerubah} muatUlang={jadwalTick} onAgentBaru={loadCharacters} />
         <JamPrimetimeCard />
         <PresetUtamaCard onTersimpan={jadwalBerubah} muatUlang={jadwalTick} />
       </div>

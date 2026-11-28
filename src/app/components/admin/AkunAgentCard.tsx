@@ -11,7 +11,7 @@
 // ter-mask, jadi tidak ada cara tidak sengaja mengosongkan key yang sudah ada.
 
 import { useState, useEffect, useCallback } from 'react';
-import { Users, CheckCircle, XCircle, RefreshCw, Save, Play, Pause, ChevronDown, ChevronRight } from 'lucide-react';
+import { Users, CheckCircle, XCircle, RefreshCw, Save, Play, Pause, ChevronDown, ChevronRight, UserPlus } from 'lucide-react';
 import {
   getAgentAccounts, saveAgentAccount, saveModeAkun, getSchedulerAccounts,
   type AgentAccount, type AgentAccountInput, type AgentChannels, type ModeAkun,
@@ -20,6 +20,7 @@ import {
 import { PROPERTY_TYPES } from '../../../lib/propertyTypes';
 import EditorJamPosting, { jamAwalManual } from './viralframe/EditorJamPosting';
 import SusunJamPanel from './viralframe/SusunJamPanel';
+import TambahAgentForm from './viralframe/TambahAgentForm';
 
 interface Msg { type: 'success' | 'error'; text: string }
 
@@ -65,12 +66,15 @@ function Lencana({ ok, teks }: { ok: boolean; teks: string }) {
   );
 }
 
-export default function AkunAgentCard({ onTersimpan, muatUlang = 0 }: {
+export default function AkunAgentCard({ onTersimpan, muatUlang = 0, onAgentBaru }: {
   onTersimpan?: () => void;
   /** Naik setiap kali jadwal diubah dari kartu LAIN (mis. Jam Posting Agent Utama). */
   muatUlang?: number;
+  /** Agent baru dibuat — halaman induk memuat ulang daftar agent (tab & pilihan unggah). */
+  onAgentBaru?: () => void;
 } = {}) {
   const [items, setItems] = useState<AgentAccount[] | null>(null);
+  const [tambah, setTambah] = useState(false);
   const [buka, setBuka] = useState<number | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [menyimpan, setMenyimpan] = useState(false);
@@ -92,13 +96,26 @@ export default function AkunAgentCard({ onTersimpan, muatUlang = 0 }: {
     return next;
   });
 
-  const muat = useCallback(async () => {
+  const muat = useCallback(async (): Promise<AgentAccount[] | null> => {
     const r = await getAgentAccounts();
     if (r.success && r.data) {
       setItems(r.data.items); setMode(r.data.mode); setUtama(r.data.utama); setAutoAktif(r.data.auto_aktif);
+      return r.data.items;
     }
-    else setMsg({ type: 'error', text: r.error ?? 'Gagal memuat akun agent' });
+    setMsg({ type: 'error', text: r.error ?? 'Gagal memuat akun agent' });
+    return null;
   }, []);
+
+  // Agent baru (langkah 1) → langsung buka form akunnya (langkah 2) supaya
+  // API key & channel scheduler diisi di tempat, bukan dicari di daftar.
+  const agentDibuat = async (k: { id: number; nama: string }) => {
+    setTambah(false);
+    const daftar = await muat();
+    const a = daftar?.find(x => x.character_id === k.id);
+    if (a) { setBuka(a.character_id); setForm(formDari(a)); setAkunTertaut(null); }
+    setMsg({ type: 'success', text: `Agent "${k.nama}" ditambahkan. Lanjutkan di bawah: isi Gmail & spesialis, tempel API key Zernio/Buffer, tarik channel, lalu Simpan.` });
+    onAgentBaru?.();
+  };
 
   const gantiAuto = async (nyala: boolean) => {
     setUbahMode(true); setMsg(null);
@@ -513,6 +530,20 @@ export default function AkunAgentCard({ onTersimpan, muatUlang = 0 }: {
             </div>
           );
         })}
+      </div>
+
+      {/* Tambah agent (2026-11-28) — form-nya dulu di meja kerja Viral Frame
+          yang dihapus 2026-11-21. Lihat viralframe/TambahAgentForm.tsx. */}
+      <div className="mt-3">
+        {tambah ? (
+          <TambahAgentForm onDibuat={agentDibuat} onBatal={() => setTambah(false)} />
+        ) : (
+          <button type="button" onClick={() => { setTambah(true); setMsg(null); }}
+            className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border-2 border-dashed border-gray-200 text-sm font-semibold text-[#1565C0] hover:bg-[#F8FAFF]"
+            data-uji="tombol-tambah-agent">
+            <UserPlus size={15} /> Tambah agent
+          </button>
+        )}
       </div>
       </div>
       )}
